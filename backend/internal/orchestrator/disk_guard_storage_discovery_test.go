@@ -1,9 +1,10 @@
 package orchestrator
 
-// Coverage for the DISCOVERY half of gastrolog-9akebz: refreshVaultDiskGuards
-// converging storageDiskGuard entries from system.FileStorage (the storage
-// entity's own DiskFreeWarn/DiskFreeFloor, not a vault-level field) and
-// linking each vault's guard entry to its LOCAL placements' storage IDs.
+// Coverage for the DISCOVERY half of the per-storage disk guard:
+// refreshVaultDiskGuards converging storageDiskGuard entries from
+// system.FileStorage (the storage entity's own DiskFreeWarn/DiskFreeFloor,
+// not a vault-level field) and linking each vault's guard entry to its
+// LOCAL placements' storage IDs.
 // disk_guard_test.go exercises the guard's own API directly (SetStorageGuard
 // / SetVaultGuard); this file drives the same path through a real
 // system.Config + Runtime, the shape refreshVaultDiskGuards actually reads on
@@ -80,10 +81,10 @@ func TestRefreshVaultDiskGuardsRegistersStorageFromConfig(t *testing.T) {
 }
 
 // TestRefreshVaultDiskGuardsPublishesPlacementsAndClass pins the
-// placements-on-storage discovery wiring for gastrolog-3cobq4: a vault's
-// config placement on a storage surfaces in that storage's snapshot
-// (config-derived, per the storage inspector brief), and the storage's
-// configured class passes through too.
+// placements-on-storage discovery wiring: a vault's config placement on a
+// storage surfaces in that storage's snapshot (config-derived, per the
+// storage inspector brief), and the storage's configured class passes
+// through too.
 func TestRefreshVaultDiskGuardsPublishesPlacementsAndClass(t *testing.T) {
 	t.Parallel()
 
@@ -310,10 +311,10 @@ func (l testSystemLoaderWithRuntime) Load(_ context.Context) (*system.System, er
 	return &system.System{Config: *l.cfg, Runtime: l.rt}, nil
 }
 
-// TestRefreshVaultDiskGuardsResolvesNodeDisplayName pins a review finding on
-// gastrolog-9akebz: operator-facing text (alarms, the local admission
-// detail) must name the node, not its raw GLID — the same fallback
-// contract as placementManager.nameOrID. refreshVaultDiskGuards resolves
+// TestRefreshVaultDiskGuardsResolvesNodeDisplayName pins that
+// operator-facing text (alarms, the local admission detail) names the node,
+// not its raw GLID — the same fallback contract as
+// placementManager.nameOrID. refreshVaultDiskGuards resolves
 // the local node's display name from Runtime.Nodes ONCE per refresh (config
 // already loaded, off the admission hot path) and threads it into
 // SetStorageGuard, so both the alarm text and vaultStorageProtectDetail

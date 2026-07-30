@@ -51,7 +51,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// The cases where a backlog goes on to threaten something are carried by
 	// the pipeline-backlog and disk-space alarms, which do have an operator
 	// action. The level ships in NodeStats as ingest_pressure_level for the
-	// health surfaces (gastrolog-3phtqv).
+	// health surfaces.
 	//
 	// It is deliberately not logged either: the self-ingester captures slog
 	// records, so logging throttle transitions would feed the very pressure
@@ -64,8 +64,8 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 
 	// Prime the disk guard BEFORE admission opens: a node restarting into an
 	// already-full volume must reject from the first record, not after the
-	// first 15s scheduler tick (gastrolog-67gvjo — the boot blind window that
-	// killed the second wave of nodes).
+	// first 15s scheduler tick — the boot blind window that killed the second
+	// wave of nodes.
 	o.primeDiskGuard()
 
 	// Push the bootstrap-registered ingester set into the supervisor, then start
@@ -90,69 +90,59 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	o.auxWg.Go(func() { gate.Run(ctx, 200*time.Millisecond) })
 
 	// Periodic retention-rate + cloud-health evaluation on the shared
-	// scheduler (gastrolog-47qyw, gastrolog-576bm). Replaces the raw 5s
-	// time.Ticker (runRateAlertEvaluator) that was invisible to the scheduler
-	// and inspector. Rate-threshold evaluation and cloud-store reachability
-	// polling are legitimate periodic policy work; the cloud-upload backfill
-	// this loop used to drive every tick is now edge-triggered (seal effect,
-	// leadership gain, snapshot restore) — see evaluateVaultCloudHealth.
-	// Registered here rather than in New() so it runs only while the
-	// orchestrator is started, matching the retired ticker's lifecycle. A
-	// registration failure degrades alerting but must not abort startup.
+	// scheduler, so the work is visible to the scheduler and the operator
+	// inspector. Rate-threshold evaluation and cloud-store reachability
+	// polling are legitimate periodic policy work; cloud-upload backfill is
+	// edge-triggered instead (seal effect, leadership gain, snapshot restore)
+	// — see evaluateVaultCloudHealth. Registered here rather than in New() so
+	// it runs only while the orchestrator is started. A registration failure
+	// degrades alerting but must not abort startup.
 	if err := o.startCloudHealthAndRateAlerts(); err != nil {
 		o.logger.Error("register cloud-health/rate-alert job", "error", err)
 	}
 
-	// Active-chunk progress throttle (gastrolog-4y03v). Append paths
-	// signal progressTrigger per record; this goroutine fans out to
-	// chunkSignal at most once per window with leading-edge fire on
-	// the first signal after quiet, plus a trailing-edge fire if the
-	// burst continued through the window. Idle cluster: zero work.
+	// Active-chunk progress throttle. Append paths signal progressTrigger
+	// per record; this goroutine fans out to chunkSignal at most once per
+	// window with leading-edge fire on the first signal after quiet, plus a
+	// trailing-edge fire if the burst continued through the window. Idle
+	// cluster: zero work.
 	o.auxWg.Go(func() { o.runProgressNotifier(ctx, time.Second) })
 
-	// Active-chunk progress emitter (gastrolog-3pf9w). Polls every
-	// leader vault's active chunk record count once per second; emits a
-	// typed PROGRESS event on the chunk bus when the count has
-	// advanced since the last tick. Bounded to one event per active
-	// chunk per second regardless of append rate. WatchChunks
-	// subscribers patch their cache directly from this event instead
-	// of refetching the world.
+	// Active-chunk progress emitter. Polls every leader vault's active
+	// chunk record count once per second; emits a typed PROGRESS event on
+	// the chunk bus when the count has advanced since the last tick.
+	// Bounded to one event per active chunk per second regardless of append
+	// rate. WatchChunks subscribers patch their cache directly from this
+	// event instead of refetching the world.
 	o.auxWg.Go(func() { o.runChunkProgressEmitter(ctx, time.Second) })
 
-	// Job-event slog bridge (gastrolog-5mcqm follow-up). Subscribes to
-	// the scheduler's event broker and emits a structured slog entry
-	// per transition. Captured by the self ingester so job lifecycle
-	// is searchable like any other log.
+	// Job-event slog bridge. Subscribes to the scheduler's event broker and
+	// emits a structured slog entry per transition. Captured by the self
+	// ingester so job lifecycle is searchable like any other log.
 	o.auxWg.Go(func() { o.runJobEventLogBridge(ctx) })
 
-	// Readiness refresher (gastrolog-5n6xz). Publishes the cached
-	// LocalVaultsReplicationReady value the /readyz handler reads, so
-	// kubelet's probe stays responsive when o.mu is contended by a
-	// vault-ctl AddVoter burst on K8s scale-out.
+	// Readiness refresher. Publishes the cached LocalVaultsReplicationReady
+	// value the /readyz handler reads, so kubelet's probe stays responsive
+	// when o.mu is contended by a vault-ctl AddVoter burst on K8s scale-out.
 	o.auxWg.Go(func() { o.runReadinessRefresher(ctx, readinessRefreshInterval) })
 
-	// Lock-leak reporter (gastrolog-1ug3rq): names orphaned o.mu holds and
-	// stuck write waiters with their acquisition stacks. Reads only tracker
-	// state — survives an o.mu wedge by construction.
+	// Lock-leak reporter: names orphaned o.mu holds and stuck write waiters
+	// with their acquisition stacks. Reads only tracker state — survives an
+	// o.mu wedge by construction.
 	o.auxWg.Go(func() { o.runLockLeakReporter(ctx) })
 
 	// Seed the cache synchronously while o.mu is held so /readyz is correct
 	// immediately after Start() — the async refresher's first tick can lag
 	// by up to readinessRefreshInterval and would otherwise leave the
-	// constructor's optimistic true seed visible (gastrolog-5n6xz).
+	// constructor's optimistic true seed visible.
 	o.cachedReplicationReady.Store(o.liveReplicationReadyLocked())
 
 	return nil
 }
 
 // rateAlertAndCloudHealthTick is the periodic scheduler job body that evaluates
-// the retention rate alerter (gastrolog-47qyw) and cloud health (raise/clear the
-// cloud-store alert, plus edge-triggered upload catch-up — see
-// evaluateVaultCloudHealth). It replaces the raw 5s time.Ticker that was
-// invisible to the scheduler/inspector and doubled as the cloud-upload
-// compensator (gastrolog-576bm); the rate-alert evaluation is legitimate
-// periodic policy work, so it stays periodic — only the backfill mechanism was
-// demoted off the tick.
+// the retention rate alerter and cloud health (raise/clear the cloud-store
+// alert, plus edge-triggered upload catch-up — see evaluateVaultCloudHealth).
 func (o *Orchestrator) rateAlertAndCloudHealthTick() {
 	o.retentionRates.Evaluate(o.now())
 	o.evaluateCloudHealth()
@@ -181,7 +171,7 @@ func (o *Orchestrator) Stop() error {
 	// Stage 0: flip the shutdown phase BEFORE any drain work so that
 	// sealed-chunk replication skips its remote calls while we drain.
 	// Idempotent if the top-level shutdown already flipped it; safe to call
-	// with a nil phase (single-node tests). See gastrolog-1e5ke.
+	// with a nil phase (single-node tests).
 	if o.phase != nil {
 		o.phase.BeginShutdown("orchestrator: stopping pipeline")
 	}
@@ -287,9 +277,9 @@ func (o *Orchestrator) rebuildVaultIndexes(ctx context.Context, vaultID glid.GLI
 	}
 
 	for _, meta := range metas {
-		// Phase 3 (gastrolog-1huz5): rebuild indexes only for chunks
-		// the FSM considers Sealed — Sealing chunks have no GLCB yet,
-		// so the index builder would fail to read records.
+		// Rebuild indexes only for chunks the FSM considers Sealed —
+		// Sealing chunks have no GLCB yet, so the index builder would
+		// fail to read records.
 		meta = o.groundChunkMeta(vaultID, meta)
 		if !meta.Sealed {
 			continue
@@ -317,7 +307,7 @@ func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID
 		"vault", vaultID, "chunk", meta.ID.String())
 	// Describe BEFORE scheduling — see scheduleReplication for why (missing
 	// label on the Scheduled event, leaked descriptions entry when the job
-	// finishes first). gastrolog-69sjlj.
+	// finishes first).
 	name := fmt.Sprintf("index-rebuild:%s:%s:%s", vaultID, vaultInst.VaultID, meta.ID)
 	o.scheduler.Describe(name, fmt.Sprintf("Rebuild missing indexes for chunk %s", meta.ID))
 	runBuild := func(runCtx context.Context, chunkID chunk.ChunkID) error {

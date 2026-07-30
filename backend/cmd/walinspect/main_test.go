@@ -25,7 +25,7 @@ func wrap(vaultID glid.GLID, inner []byte) []byte {
 }
 
 // TestDecodeFSMCmd_AllCommandTypes verifies walinspect decodes every command
-// type produced by the protobuf encoders (gastrolog-5lrg7 / gastrolog-62ywk).
+// type produced by the protobuf encoders.
 func TestDecodeFSMCmd_AllCommandTypes(t *testing.T) {
 	vaultID := glid.New()
 	cid := chunkID(0x7A)

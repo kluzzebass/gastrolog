@@ -181,10 +181,9 @@ func TestDiskGuardDefaultsAreTypeable(t *testing.T) {
 	}
 }
 
-// TestDiskGuardIgnoresEnv pins the removal of the env-var channel
-// (gastrolog-2mrfdw): node thresholds come from the typeable defaults and
-// the config store only — a stray GLOG_DISK_FREE_* in the environment must
-// have no effect.
+// TestDiskGuardIgnoresEnv pins that there is no env-var channel: node
+// thresholds come from the typeable defaults and the config store only — a
+// stray GLOG_DISK_FREE_* in the environment must have no effect.
 func TestDiskGuardIgnoresEnv(t *testing.T) { //nolint:paralleltest // t.Setenv
 	t.Setenv("GLOG_DISK_FREE_WARN", "20%")
 	t.Setenv("GLOG_DISK_FREE_FLOOR", "5GiB")
@@ -323,9 +322,9 @@ func TestDiskDeferWritesGate(t *testing.T) {
 	}
 }
 
-// TestStorageDiskGuardLifecycle pins the per-storage arc (gastrolog-9akebz):
-// a starved storage trips protect/alarm ONCE for that storage, and every
-// vault placed there inherits the derived STORAGE_DISK_PROTECT signal via
+// TestStorageDiskGuardLifecycle pins the per-storage arc: a starved storage
+// trips protect/alarm ONCE for that storage, and every vault placed there
+// inherits the derived STORAGE_DISK_PROTECT signal via
 // vaultStorageProtected, while a vault on a healthy sibling storage stays
 // open. Exits are hysteretic like the node guard.
 func TestStorageDiskGuardLifecycle(t *testing.T) {
@@ -382,10 +381,9 @@ func TestStorageDiskGuardLifecycle(t *testing.T) {
 }
 
 // TestStorageDiskGuardSharedStorage pins the ONE-EVALUATION-PER-STORAGE
-// requirement (gastrolog-9akebz core shape): several vaults placed on the
-// SAME storage share exactly ONE statfs sample and ONE alarm, and ALL of
-// them refuse once that storage is below floor — not one duplicated
-// statfs/alarm per vault, the old per-vault model's modeling error.
+// requirement: several vaults placed on the SAME storage share exactly ONE
+// statfs sample and ONE alarm, and ALL of them refuse once that storage is
+// below floor — not one duplicated statfs/alarm per vault.
 func TestStorageDiskGuardSharedStorage(t *testing.T) {
 	t.Parallel()
 	total := 400 * gib
@@ -422,7 +420,7 @@ func TestStorageDiskGuardSharedStorage(t *testing.T) {
 // FileStorage, same as an operator who never touched those fields)
 // resolves against the node-level defaults (10%/3%), exactly like the node
 // guard itself — a storage is never left with a silent 0 threshold just
-// because the operator didn't configure it (gastrolog-9akebz).
+// because the operator didn't configure it.
 func TestStorageDiskGuardInheritsNodeDefaults(t *testing.T) {
 	t.Parallel()
 	total := 400 * gib // node defaults resolve to warn=40GiB, floor=12GiB
@@ -454,8 +452,8 @@ func TestStorageDiskGuardInheritsNodeDefaults(t *testing.T) {
 // state, no alarmRaised history) that discovers a storage ALREADY below its
 // floor must protect on the very first evaluation, deriving purely from the
 // current sample and config — never from state that only existed in the
-// pre-restart process (gastrolog-9akebz; mirrors TestPrimeDiskGuardClosesBootWindow's
-// node-level boot-window contract for the storage/vault dimension).
+// pre-restart process. Mirrors TestPrimeDiskGuardClosesBootWindow's
+// node-level boot-window contract for the storage/vault dimension.
 func TestStorageDiskGuardRestartReDerives(t *testing.T) {
 	t.Parallel()
 	total := 400 * gib
@@ -525,10 +523,10 @@ func TestStorageDiskGuardConfigOverridesThresholds(t *testing.T) {
 }
 
 // TestStorageDiskGuardRetain pins the discovery-refresh no-strand contract
-// for a REMOVED storage (gastrolog-9akebz retainVaultGuards precedent): a
-// storage entry dropped from the keep set falls out, releasing every
-// vault's derived protect flag with it — a vault sharing the pruned storage
-// with a still-tracked storage/vault must not stay stranded in protect.
+// for a REMOVED storage (the retainVaultGuards precedent): a storage entry
+// dropped from the keep set falls out, releasing every vault's derived
+// protect flag with it — a vault sharing the pruned storage with a
+// still-tracked storage/vault must not stay stranded in protect.
 func TestStorageDiskGuardRetain(t *testing.T) {
 	t.Parallel()
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib, "volB": gib})
@@ -603,12 +601,11 @@ func TestVaultDiskGuardRetainDropsStorageLinkage(t *testing.T) {
 	}
 }
 
-// TestStorageSnapshotsReportsEffectiveThresholdsAndInheritance pins the
-// snapshot contract for gastrolog-3cobq4: an unset expression reports
-// *_inherited-equivalent (empty WarnExpr/FloorExpr the caller renders as
-// "inherited") alongside the RESOLVED bytes value — never leaving the
-// caller to resolve the expression itself (operator directive, 9akebz: no
-// client-side derivation of thresholds).
+// TestStorageSnapshotsReportsEffectiveThresholdsAndDefaultProvenance pins
+// the snapshot contract: an unset expression publishes the EFFECTIVE
+// (built-in default) expression plus IsDefault=true, alongside the RESOLVED
+// bytes value — never leaving the caller to resolve the expression itself
+// (operator directive: no client-side derivation of thresholds).
 func TestStorageSnapshotsReportsEffectiveThresholdsAndDefaultProvenance(t *testing.T) {
 	t.Parallel()
 	total := 400 * gib // node defaults: warn=40GiB (10%), floor=12GiB (3%)
@@ -621,11 +618,10 @@ func TestStorageSnapshotsReportsEffectiveThresholdsAndDefaultProvenance(t *testi
 		t.Fatalf("want 1 snapshot, got %d", len(snaps))
 	}
 	s := snaps[0]
-	// gastrolog-3cobq4 review: an unset expression must publish the
-	// EFFECTIVE (built-in default) expression, never empty — there is no
-	// configurable node-level override to leave the caller inferring
-	// "inherited" from an empty string (gastrolog-2mrfdw removed the env
-	// channel).
+	// An unset expression must publish the EFFECTIVE (built-in default)
+	// expression, never empty — there is no configurable node-level
+	// override, so leaving the caller to infer "inherited" from an empty
+	// string would name a parent that does not exist.
 	if s.WarnExpr != DefaultDiskFreeWarn || s.FloorExpr != DefaultDiskFreeFloor {
 		t.Fatalf("unset expressions must publish the effective default expression, got warn=%q floor=%q", s.WarnExpr, s.FloorExpr)
 	}
@@ -652,8 +648,7 @@ func TestStorageSnapshotsReportsEffectiveThresholdsAndDefaultProvenance(t *testi
 // TestEffectiveThresholdExpr pins the pure resolution rule storageSnapshots
 // and the ListStorages fallback both rely on: an explicit expression wins
 // outright; an unset one resolves straight to the built-in default literal
-// (gastrolog-2mrfdw removed the only other source, the env override), with
-// IsDefault naming which case applied.
+// (the only other source), with IsDefault naming which case applied.
 func TestEffectiveThresholdExpr(t *testing.T) {
 	t.Parallel()
 	if expr, isDefault := EffectiveThresholdExpr("20%", DefaultDiskFreeWarn); expr != "20%" || isDefault {
@@ -687,10 +682,10 @@ func TestStorageSnapshotsReportsExplicitThresholds(t *testing.T) {
 }
 
 // TestStorageSnapshotsReportsWarnAndProtectVerdicts pins the three-state
-// badge grammar (gastrolog-3cobq4): ok when healthy, warn-only inside the
-// warn band, protect once below the floor — WarnVerdict and ProtectVerdict
-// are never both true (protect supersedes the warn badge, same as the
-// alarm pair's low/exhausted split).
+// badge grammar: ok when healthy, warn-only inside the warn band, protect
+// once below the floor — WarnVerdict and ProtectVerdict are never both true
+// (protect supersedes the warn badge, same as the alarm pair's
+// low/exhausted split).
 func TestStorageSnapshotsReportsWarnAndProtectVerdicts(t *testing.T) {
 	t.Parallel()
 	total := 400 * gib // warn=40GiB, floor=12GiB
@@ -719,14 +714,13 @@ func TestStorageSnapshotsReportsWarnAndProtectVerdicts(t *testing.T) {
 	}
 }
 
-// TestStorageSnapshotsWarnVerdictIndependentOfAlertSink pins the
-// gastrolog-3cobq4 review fix: WarnVerdict must come from the free-vs-warn
-// comparison directly, never from s.alarmRaised — reconcileStorageAlarm
-// only sets alarmRaised when an alert.Sink is wired (alerts == nil is a
-// legitimate no-op path, e.g. some test/tooling call sites), so deriving
-// WarnVerdict from it would silently report false for a genuinely
-// below-warn storage whenever no alert sink exists. Passing a nil Sink
-// here is exactly that path.
+// TestStorageSnapshotsWarnVerdictIndependentOfAlertSink pins that
+// WarnVerdict comes from the free-vs-warn comparison directly, never from
+// s.alarmRaised — reconcileStorageAlarm only sets alarmRaised when an
+// alert.Sink is wired (alerts == nil is a legitimate no-op path, e.g. some
+// test/tooling call sites), so deriving WarnVerdict from it would silently
+// report false for a genuinely below-warn storage whenever no alert sink
+// exists. Passing a nil Sink here is exactly that path.
 func TestStorageSnapshotsWarnVerdictIndependentOfAlertSink(t *testing.T) {
 	t.Parallel()
 	total := 400 * gib                                                        // warn=40GiB, floor=12GiB
@@ -1130,7 +1124,7 @@ func TestVaultAdmissionCausesEachGate(t *testing.T) {
 			t.Fatalf("VaultAdmissionCauses = %v, want [StorageDiskProtect]", got)
 		}
 		// Detail names the storage and its free-vs-floor numbers when
-		// locally sampled — facts before speculation (gastrolog-9akebz).
+		// locally sampled — facts before speculation.
 		details := o.VaultAdmissionCauseDetails(vaultA)
 		if len(details) != 1 || !strings.Contains(details[0].Detail, "my-storage") {
 			t.Fatalf("detail must name the protecting storage, got %+v", details)
@@ -1192,7 +1186,7 @@ func TestVaultAdmissionCausesRemote(t *testing.T) {
 			t.Fatalf("VaultAdmissionCauses = %v, want [StorageDiskProtect]", got)
 		}
 		// No local sample to attach numbers to: the detail names WHO
-		// reported it instead (gastrolog-9akebz).
+		// reported it instead.
 		details := o.VaultAdmissionCauseDetails(vaultA)
 		if len(details) != 1 || !strings.Contains(details[0].Detail, "node-b") {
 			t.Fatalf("remote detail must name the reporting node, got %+v", details)

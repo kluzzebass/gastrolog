@@ -1,9 +1,9 @@
 package blobstore
 
-// Factory config-time validation (gastrolog-3nfvo1): endpoint scheme
-// enforcement, provider dispatch, and the sealed_backing provider alias.
-// Everything here runs against config parsing or the in-memory provider —
-// no network, no credentials.
+// Factory config-time validation: endpoint scheme enforcement, provider
+// dispatch, and the sealed_backing provider alias. Everything here runs
+// against config parsing or the in-memory provider — no network, no
+// credentials.
 
 import (
 	"context"
@@ -144,7 +144,7 @@ func TestConnectionTesterMemoryProvider(t *testing.T) {
 	})
 }
 
-// --- Config-accept validation (gastrolog-7au6u9) ---------------------------
+// --- Config-accept validation ----------------------------------------------
 //
 // ValidateConfig is the shared shape validator: createStore runs it before
 // building a store, and PutCloudService runs it before accepting a config.

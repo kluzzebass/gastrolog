@@ -121,7 +121,7 @@ type ChunkReplicator interface {
 	// after detecting sealed chunks in its FSM that are missing on its
 	// local disk; the placement leader fans pushes out asynchronously via
 	// existing replicateToFollower machinery. Returns the count of
-	// pushes scheduled (after leader-side filtering). See gastrolog-2dgvj.
+	// pushes scheduled (after leader-side filtering).
 	RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error)
 }
 
@@ -178,7 +178,7 @@ type Orchestrator struct {
 	// disables), records acquisition stacks so an orphaned hold or a stuck
 	// write waiter is reported with its exact acquisition site — a node-wide
 	// deadlock from a leaked read lock was undiagnosable from goroutine
-	// dumps alone (gastrolog-1ug3rq).
+	// dumps alone.
 	mu locktrack.RWMutex
 
 	// backfillLogThrottle spaces cloud-backfill failure logging per vault;
@@ -188,13 +188,12 @@ type Orchestrator struct {
 	// registerSkipLog spaces skipped-GLCB-registration warnings per vault.
 	registerSkipLog logging.Throttle
 	// retentionLeaderlessLog spaces "vault-ctl raft group has no leader"
-	// warnings per vault (gastrolog-1xl29s case 1). Distinct from the
-	// vault-leaderless ALARM (leaderless_alarm.go), which tracks config
-	// PLACEMENT leader resolution: this is the vault-ctl Raft group's own
-	// election state (hasLeader callback == r.Leader() != "", see
-	// buildVaultRaftCallbacks in reconfig_vaults.go), which can be
-	// momentarily unelected even when placement resolves cleanly. See
-	// retentionTargetForInstance.
+	// warnings per vault. Distinct from the vault-leaderless ALARM
+	// (leaderless_alarm.go), which tracks config PLACEMENT leader
+	// resolution: this is the vault-ctl Raft group's own election state
+	// (hasLeader callback == r.Leader() != "", see buildVaultRaftCallbacks
+	// in reconfig_vaults.go), which can be momentarily unelected even when
+	// placement resolves cleanly. See retentionTargetForInstance.
 	retentionLeaderlessLog logging.Throttle
 
 	// backfillMu guards backfillFailures — a dedicated lock (not o.mu) since
@@ -202,11 +201,11 @@ type Orchestrator struct {
 	// that populates this map runs later, off that lock, asynchronously.
 	backfillMu sync.Mutex
 	// backfillFailures tracks per-chunk retry backoff for cloud-backfill
-	// uploads that failed and were not resolved by registration repair
-	// (gastrolog-4ryguo). In-memory only, mirroring retention's
-	// unreadableEntry: a restart clears it and the first sweep re-establishes
-	// state from scratch, which is fine — the point is to stop hammering a
-	// chunk that keeps failing, not to remember why forever.
+	// uploads that failed and were not resolved by registration repair.
+	// In-memory only, mirroring retention's unreadableEntry: a restart clears
+	// it and the first sweep re-establishes state from scratch, which is fine
+	// — the point is to stop hammering a chunk that keeps failing, not to
+	// remember why forever.
 	backfillFailures map[chunk.ChunkID]*backfillFailureEntry
 
 	// cloudDegradedSeen remembers the last observed cloud-degraded state per
@@ -218,7 +217,7 @@ type Orchestrator struct {
 	// Guarded by backfillMu — the same lock as backfillFailures, since both are
 	// touched only from cloud-backfill code and never under o.mu. An entry is
 	// dropped when this node stops being the vault's uploader so a later
-	// re-gain is treated as a first observation again. See gastrolog-576bm.
+	// re-gain is treated as a first observation again.
 	cloudDegradedSeen map[glid.GLID]bool
 
 	// Vault registry. Each vault bundles Chunks, Indexes, and Query.
@@ -249,9 +248,9 @@ type Orchestrator struct {
 	// --vaults is not set). Cached here so periodic guard/discovery passes
 	// that don't receive Factories per call (refreshStorageGuards) can
 	// resolve system.FileStorage.Path the same way vault dirs resolve,
-	// instead of reaching the filesystem with a raw relative path
-	// (gastrolog-3cobq4 regression: statfs against a relative path resolves
-	// against the process CWD, not the node's home, and fails silently).
+	// instead of reaching the filesystem with a raw relative path: statfs
+	// against a relative path resolves against the process CWD, not the
+	// node's home, and fails silently.
 	vaultsDir string
 	// pipelineVaults tracks which vaults are currently registered in the pipeline
 	// supervisor and whether each is registered as a Home (collection) on this
@@ -264,9 +263,9 @@ type Orchestrator struct {
 	// stops every apply for that group — and a caller holding o.mu while
 	// awaiting a Raft apply then waits forever, since the entry it waits for
 	// can only be applied by the goroutine its own lock is blocking. That cycle
-	// wedged a node permanently (gastrolog-1abzem). RLock is not a fix either:
-	// Go blocks a new RLock behind a queued writer, which is how the same class
-	// bit gastrolog-38snf4. See the apply-pump rule in
+	// wedged a node permanently. RLock is not a fix either: Go blocks a new
+	// RLock behind a queued writer, which is how the same class froze a node
+	// through a recursive RLock. See the apply-pump rule in
 	// vault_lifecycle_reconciler.go.
 	//
 	// Writers hold o.mu (to serialize read-modify-write) and go through
@@ -301,8 +300,7 @@ type Orchestrator struct {
 	// remoteVaultStorageProtected consults peer NodeStats broadcasts for
 	// vaults with a storage under disk protect on OTHER nodes, so this
 	// node's per-vault admission gate is cluster-consistent. Installed via
-	// SetRemoteVaultStorageProtected. Renamed from remoteVaultDiskProtected
-	// (gastrolog-9akebz).
+	// SetRemoteVaultStorageProtected.
 	remoteVaultStorageProtected atomic.Pointer[func(glid.GLID) bool]
 
 	// remoteVaultStorageProtectedNodes is remoteVaultStorageProtected's
@@ -316,13 +314,12 @@ type Orchestrator struct {
 	// max-size bound elsewhere. Installed via SetRemoteVaultSizeCapped.
 	remoteVaultSizeCapped atomic.Pointer[func(glid.GLID) bool]
 
-	// remoteVaultAgeBoundCapped/remoteVaultChunkCountBoundCapped
-	// (gastrolog-5yfaqj) are the same peer-lookup pattern for the two
-	// generalized retention-bound refusal causes: only the retention
-	// leader for a vault instance derives these, so a peer that only
-	// fronts ingest for the vault must consult the broadcast too.
-	// Installed via SetRemoteVaultAgeBoundCapped /
-	// SetRemoteVaultChunkCountBoundCapped.
+	// remoteVaultAgeBoundCapped/remoteVaultChunkCountBoundCapped are the
+	// same peer-lookup pattern for the two generalized retention-bound
+	// refusal causes: only the retention leader for a vault instance
+	// derives these, so a peer that only fronts ingest for the vault must
+	// consult the broadcast too. Installed via SetRemoteVaultAgeBoundCapped
+	// / SetRemoteVaultChunkCountBoundCapped.
 	remoteVaultAgeBoundCapped        atomic.Pointer[func(glid.GLID) bool]
 	remoteVaultChunkCountBoundCapped atomic.Pointer[func(glid.GLID) bool]
 
@@ -353,12 +350,12 @@ type Orchestrator struct {
 	// (o.pipeline); cancel stops the orchestrator's aux goroutines.
 	cancel context.CancelFunc
 	// running is an atomic so IsRunning() — read by the /readyz HTTP
-	// handler on every probe — never blocks on o.mu. Holding it as a
-	// plain bool guarded by o.mu reintroduced the original gastrolog-5n6xz
-	// freeze through the back door: kubelet's probe took o.mu.RLock,
-	// which starved behind any long-held o.mu.Lock writer regardless of
-	// the cached replication-ready flag. Start/Stop use CompareAndSwap
-	// to preserve the prior check-then-set mutual exclusion.
+	// handler on every probe — never blocks on o.mu. Holding it as a plain
+	// bool guarded by o.mu reintroduced the scale-out readiness freeze
+	// through the back door: kubelet's probe took o.mu.RLock, which starved
+	// behind any long-held o.mu.Lock writer regardless of the cached
+	// replication-ready flag. Start/Stop use CompareAndSwap to preserve the
+	// prior check-then-set mutual exclusion.
 	running atomic.Bool
 	auxWg   sync.WaitGroup // tracks auxiliary goroutines (rate alerts, progress emitters, etc.)
 
@@ -378,13 +375,12 @@ type Orchestrator struct {
 	scheduler *Scheduler
 
 	// Per-instance retention rate alerter that surfaces pathological retention
-	// configurations as operator-visible alerts. See gastrolog-47qyw.
-	// Initialized in New() and evaluated by a periodic goroutine in Start().
+	// configurations as operator-visible alerts. Initialized in New() and
+	// evaluated by a periodic goroutine in Start().
 	retentionRates *RateAlerter
 
 	// Orchestrator-owned per-vault pipeline stage counters (GLCB catch-up
-	// pulls, retention deletes) surfaced as first-class throughput metrics
-	// (gastrolog-4r784a).
+	// pulls, retention deletes) surfaced as first-class throughput metrics.
 	stageEvents *stageEventCounters
 
 	// Clock for testing.
@@ -395,7 +391,7 @@ type Orchestrator struct {
 	// test harnesses assign it after the scheduler is already running. Production
 	// sets it once at construction, but the safety of that was an unwritten
 	// convention the type now enforces — reaching it through setSystemLoader /
-	// systemLoader means no caller can reintroduce the race (gastrolog-19wmgn).
+	// systemLoader means no caller can reintroduce the race.
 	sysLoader atomic.Pointer[SystemLoader]
 
 	// Local node identity for multi-node filtering.
@@ -410,7 +406,7 @@ type Orchestrator struct {
 	alerts alert.Sink
 
 	// chunkSignal is the legacy bare-wake-up notifier used by the
-	// pre-gastrolog-3pf9w WatchChunks shape. New code should emit typed
+	// signal-then-refetch WatchChunks shape. New code should emit typed
 	// ChunkChangeEvent via chunkBus instead; chunkSignal stays wired so
 	// any caller that hasn't been migrated still produces a wake-up tick
 	// during the transition.
@@ -421,22 +417,20 @@ type Orchestrator struct {
 	// local instance, or is removed). Replaces the source-side 100ms
 	// ForwardListChunks poll DrainVault used to detect that a target node
 	// had created the vault: the target now blocks on this broadcast and
-	// returns the instant registration completes. See gastrolog-3sdnn.
+	// returns the instant registration completes.
 	vaultReadySignal *notify.Signal
 
 	// chunkBus broadcasts typed ChunkChangeEvent values to subscribers.
 	// Replaces the chunkSignal-then-fan-out-refetch pattern: WatchChunks
 	// streams these events directly to clients so they can patch their
-	// cache via setQueryData instead of refetching the world. See
-	// gastrolog-3pf9w.
+	// cache via setQueryData instead of refetching the world.
 	chunkBus *notify.Bus[ChunkChangeEvent]
 
 	// progressTrigger coalesces high-rate active-chunk-progress signals
 	// (every record append) into bounded chunkSignal notifications. Hot-
 	// path callers do progressTrigger.Signal(); a single throttle
 	// goroutine fan-outs to chunkSignal at most once per window with
-	// leading-edge fire on the first signal after quiet. See
-	// gastrolog-4y03v.
+	// leading-edge fire on the first signal after quiet.
 	progressTrigger *progressNotifier
 
 	// Suspect tracker for cloud-backed chunks that returned 404.
@@ -459,16 +453,16 @@ type Orchestrator struct {
 	// catchupPushInFlight tracks async replica-catchup push batches keyed by
 	// (vault, requester). Prevents SweepMissingReplicas from stacking
 	// hundreds of overlapping CatchupSelectedChunks goroutines on the same
-	// sender→requester stream (gastrolog-2o9e9).
+	// sender→requester stream.
 	catchupPushInFlight sync.Map // catchupPushKey → struct{}
 
 	// cachedReplicationReady mirrors liveReplicationReady, updated by the
 	// readiness refresher goroutine (~500 ms cadence). LocalVaultsReplicationReady
 	// reads this atomic so the /readyz HTTP handler stays responsive even
 	// when o.mu is contended by a vault-ctl AddVoter burst or other
-	// long-held write lock. See gastrolog-5n6xz. Seeded true in New so
-	// orchestrators that have not yet started still report ready when their
-	// vault map is empty (matches legacy semantics).
+	// long-held write lock. Seeded true in New so orchestrators that have
+	// not yet started still report ready when their vault map is empty
+	// (matches legacy semantics).
 	cachedReplicationReady atomic.Bool
 
 	// Shutdown phase (nil in tests / single-node setups without a
@@ -477,7 +471,7 @@ type Orchestrator struct {
 	// phase.ShuttingDown() and skip the remote call during drain, so
 	// the orchestrator's pipeline flush does not spam the log with
 	// "connection refused" warnings for peers that are going down
-	// alongside this node. See gastrolog-1e5ke.
+	// alongside this node.
 	phase *lifecycle.Phase
 
 	// onIngesterAlive is called when an ingester's alive state changes.
@@ -496,10 +490,10 @@ type Orchestrator struct {
 	// re-Applied on the orchestrator-scoped logger.
 	baseLogger *slog.Logger
 
-	// Per-subsystem scoped loggers (gastrolog-3flfp 3.5). Derived once
-	// at construction so log calls don't pay the per-call .With cost,
-	// and so each subsystem's emissions carry component=orchestrator.<sub>
-	// for fine-grained filter targeting.
+	// Per-subsystem scoped loggers. Derived once at construction so log
+	// calls don't pay the per-call .With cost, and so each subsystem's
+	// emissions carry component=orchestrator.<sub> for fine-grained filter
+	// targeting.
 	replicationLogger   *slog.Logger
 	drainLogger         *slog.Logger
 	retentionLogger     *slog.Logger
@@ -512,7 +506,7 @@ type Orchestrator struct {
 
 // shuttingDown reports whether the orchestrator has been told to drain.
 // Returns false when the phase is nil (tests / harnesses without a
-// wired phase), preserving the pre-gastrolog-1e5ke behaviour.
+// wired phase).
 func (o *Orchestrator) shuttingDown() bool {
 	return o.phase != nil && o.phase.ShuttingDown()
 }
@@ -541,16 +535,15 @@ func (o *Orchestrator) ChunkSignal() *notify.Signal {
 
 // ChunkBus returns the typed chunk-event bus. The WatchChunks streaming
 // handler subscribes here and translates each ChunkChangeEvent into a
-// proto WatchChunksResponse for connected clients. See gastrolog-3pf9w.
+// proto WatchChunksResponse for connected clients.
 func (o *Orchestrator) ChunkBus() *notify.Bus[ChunkChangeEvent] {
 	return o.chunkBus
 }
 
 // EmitChunkChange broadcasts a typed chunk-state event on the chunk bus
-// AND triggers the legacy bare-signal pathway for any pre-3pf9w
-// subscribers. Call sites should use the typed Emit* helpers below
-// rather than constructing events directly so the Op semantics stay
-// consistent.
+// AND triggers the legacy bare-signal pathway for subscribers still on
+// it. Call sites should use the typed Emit* helpers below rather than
+// constructing events directly so the Op semantics stay consistent.
 func (o *Orchestrator) EmitChunkChange(ev ChunkChangeEvent) {
 	if o.chunkBus != nil {
 		o.chunkBus.Emit(ev)
@@ -633,7 +626,7 @@ func (o *Orchestrator) EmitChunkUploaded(vault glid.GLID, meta chunk.ChunkMeta) 
 // Prefer EmitChunk{Created,Progress,Sealed,Deleted,Uploaded} for any
 // new code — the typed events carry enough information for subscribers
 // to patch local state directly without an expensive ListChunks
-// refetch. See gastrolog-3pf9w.
+// refetch.
 func (o *Orchestrator) NotifyChunkChange() {
 	o.progressTrigger.Signal()
 }
@@ -642,14 +635,13 @@ func (o *Orchestrator) NotifyChunkChange() {
 // a chunk's bytes, computed authoritatively from the vault's vault-ctl
 // FSM. Works for any vault this node participates in as a vault-ctl
 // voter, regardless of whether the local node has a storage placement
-// for that vault (per gastrolog-292yi every cluster node is a voter in
-// every vault-ctl Raft group).
+// for that vault (every cluster node is a voter in every vault-ctl Raft
+// group).
 //
 // Used by the WatchChunks event-relay path and the ListChunks overlay
 // to stamp authoritative replica info on outbound chunk metas so clients
 // see correct counts without reconstructing them from per-node event
-// evidence. See gastrolog-66vmg; single-semantic (holder receipts only)
-// per gastrolog-68wsli.
+// evidence. Single-semantic: holder receipts only.
 //
 // Returns nil if the local node has no FSM for the vault (single-node /
 // memory mode), or if the chunk is unknown to the FSM. Callers in that
@@ -796,7 +788,7 @@ type Config struct {
 	// consults phase.ShuttingDown() in hot-path replication helpers so that
 	// during the drain window (after BeginShutdown) remote forwards no-op
 	// instead of spamming "connection refused" against peers that are
-	// shutting down alongside this node. See gastrolog-1e5ke.
+	// shutting down alongside this node.
 	Phase *lifecycle.Phase
 
 	// SegmentCompletePolicy controls when a vault's working segment is completed —
@@ -804,7 +796,7 @@ type Config struct {
 	// value selects the production defaults (defaultSegmentCompleteMaxBytes /
 	// defaultSegmentCompleteMaxAge). Without a complete policy the pipeline never
 	// completes a segment, so records would stay in working/ forever and
-	// never reach a sealed GLCB (gastrolog-18f9r, Rubicon E3).
+	// never reach a sealed GLCB.
 	SegmentCompletePolicy segmentation.CompletePolicy
 
 	// SegmentDisableFsync skips fsync on segmentation group-commit flushes
@@ -929,21 +921,21 @@ func New(cfg Config) (*Orchestrator, error) {
 	// refresher starts in Start() and overwrites this on its first pass.
 	o.cachedReplicationReady.Store(true)
 
-	// gastrolog-51gme step 10: when the vault-ctl Raft leader removes a
-	// node from the voter set, propose CmdPruneNode on every instance
-	// sub-FSM in that vault so pendingDeletes ExpectedFrom obligations
-	// from the decommissioned node don't block finalization. The
-	// reconciler's onPruneNode handler will then propose
-	// CmdFinalizeDelete for any chunk whose ExpectedFrom became empty.
+	// When the vault-ctl Raft leader removes a node from the voter set,
+	// propose CmdPruneNode on every instance sub-FSM in that vault so
+	// pendingDeletes ExpectedFrom obligations from the decommissioned node
+	// don't block finalization. The reconciler's onPruneNode handler will
+	// then propose CmdFinalizeDelete for any chunk whose ExpectedFrom
+	// became empty.
 	o.vaultCtlLeaders.SetOnMemberRemoved(o.proposePruneNodeForVault)
 	o.vaultCtlLeaders.AddOnLeadGained(o.onVaultCtlLeadGained)
 
-	// Per-instance retention rate alerter (gastrolog-47qyw): the condition
-	// is >10 deletes/sec sustained over a 30s window. These constants ARE
-	// the retention-rate catalog row's documented threshold — the row's
-	// Cause text quotes them, so a change here changes both. Priority comes
-	// from the catalog like every other alarm. The vaultName closure looks
-	// up the human label from the current vault registry; "" if unknown.
+	// Per-instance retention rate alerter: the condition is >10 deletes/sec
+	// sustained over a 30s window. These constants ARE the retention-rate
+	// catalog row's documented threshold — the row's Cause text quotes them,
+	// so a change here changes both. Priority comes from the catalog like
+	// every other alarm. The vaultName closure looks up the human label from
+	// the current vault registry; "" if unknown.
 	o.retentionRates = newRateAlerter(rateAlerterConfig{
 		Window:    30 * time.Second,
 		Kind:      "retention",
@@ -971,8 +963,7 @@ func New(cfg Config) (*Orchestrator, error) {
 	// Vault catchup sweep: every node consults its OWN replicated FSM
 	// every 20s and runs three independent reconciliation passes per
 	// instance (pending obligations, local orphans, missing replicas).
-	// Phase-offset from retention's :00 tick to avoid spikiness. See
-	// gastrolog-51gme (delete-side) and gastrolog-2dgvj (create-side).
+	// Phase-offset from retention's :00 tick to avoid spikiness.
 	if err := o.startDiskGuard(); err != nil {
 		return nil, err
 	}
@@ -983,25 +974,24 @@ func New(cfg Config) (*Orchestrator, error) {
 	// Warm-cache eviction sweep: every minute (second 23, phase-offset
 	// from the other sweeps) walk every leader instance and apply whatever
 	// LRU + TTL policies its chunk manager was configured with. No-op for
-	// managers without an eviction policy. See gastrolog-2idw8.
+	// managers without an eviction policy.
 	if err := o.startCacheEvictionSweep(); err != nil {
 		return nil, fmt.Errorf("cache eviction sweep: %w", err)
 	}
 
-	// Vault-ctl membership reconcile residual (gastrolog-11bla,
-	// gastrolog-3oram): membership convergence is event-driven and the
-	// desiredChanged wake is captured before each pass so it is never lost.
-	// This 30 s re-drive is NOT a missed-signal fallback; it only retries a
-	// pass that bailed on a transient in-flight Raft-config error and supplies
-	// the confirming second observation for the damped leadership-transfer
-	// aligner in an otherwise-idle group.
+	// Vault-ctl membership reconcile residual: membership convergence is
+	// event-driven and the desiredChanged wake is captured before each pass
+	// so it is never lost. This 30 s re-drive is NOT a missed-signal
+	// fallback; it only retries a pass that bailed on a transient in-flight
+	// Raft-config error and supplies the confirming second observation for
+	// the damped leadership-transfer aligner in an otherwise-idle group.
 	if err := o.startVaultCtlMembershipReconcile(); err != nil {
 		return nil, fmt.Errorf("vault-ctl membership reconcile: %w", err)
 	}
 
-	// Lock diagnostics default ON (gastrolog-1ug3rq): per-acquisition cost
-	// is a few microseconds on per-batch/per-RPC paths, and the payoff is a
-	// leak report naming the exact acquisition site instead of a node-wide
+	// Lock diagnostics default ON: per-acquisition cost is a few
+	// microseconds on per-batch/per-RPC paths, and the payoff is a leak
+	// report naming the exact acquisition site instead of a node-wide
 	// silent wedge. GLOG_LOCK_TRACKING=off|false|0 disables.
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("GLOG_LOCK_TRACKING"))) {
 	case "off", "false", "0":
@@ -1038,8 +1028,8 @@ func (o *Orchestrator) Scheduler() *Scheduler {
 // start of each vault-ctl leader epoch (after Barrier), for the vault whose
 // leadership was gained. Additive — does not displace the orchestrator's own
 // pipeline-chunking wake. The app layer uses it to trigger event-driven
-// learner promotion on the new leader (gastrolog-4vg17). No-op before the
-// vault-ctl leader manager exists.
+// learner promotion on the new leader. No-op before the vault-ctl leader
+// manager exists.
 func (o *Orchestrator) AddOnVaultCtlLeadGained(fn func(glid.GLID)) {
 	if o.vaultCtlLeaders == nil {
 		return
@@ -1065,7 +1055,7 @@ func (o *Orchestrator) IngesterName(id glid.GLID) string {
 // IsIngesterRunning reports whether the given ingester's run is currently
 // executing, backed by the Alive flag the pipeline adapter toggles around each
 // run. A crashed or retry-waiting ingester reports false — this is the signal
-// the ingester convergence sweep alerts on (gastrolog-3mnjlo).
+// the ingester convergence sweep alerts on.
 func (o *Orchestrator) IsIngesterRunning(id glid.GLID) bool {
 	o.mu.RLock()
 	stats := o.ingesterStats[id]
@@ -1156,14 +1146,14 @@ type VaultSnapshot struct {
 	// RaftAppliedIndex is the local node's vault-ctl Raft applied
 	// index for this vault. Zero if this node has no vault-ctl group
 	// (or its Raft instance hasn't initialized). Broadcast in
-	// NodeStats so the per-vault-ctl learner promoter
-	// (gastrolog-gcbx7) can observe each follower's catchup progress.
+	// NodeStats so the per-vault-ctl learner promoter can observe
+	// each follower's catchup progress.
 	RaftAppliedIndex uint64
 }
 
 // VaultAppendStats returns per-vault cumulative segmentation throughput
 // counters from the pipeline supervisor. Empty when the pipeline is not
-// running (gastrolog-4eh5ns).
+// running.
 func (o *Orchestrator) VaultAppendStats() []segmentation.AppendStats {
 	if o.pipeline == nil {
 		return nil
@@ -1172,7 +1162,7 @@ func (o *Orchestrator) VaultAppendStats() []segmentation.AppendStats {
 }
 
 // VaultCollectStats returns per-vault home-side collection counters from the
-// pipeline supervisor (gastrolog-10n6k8).
+// pipeline supervisor.
 func (o *Orchestrator) VaultCollectStats() []collection.VaultCollectStats {
 	if o.pipeline == nil {
 		return nil
@@ -1181,7 +1171,7 @@ func (o *Orchestrator) VaultCollectStats() []collection.VaultCollectStats {
 }
 
 // VaultSealStats returns per-vault GLCB seal counters from the pipeline
-// supervisor (gastrolog-10n6k8).
+// supervisor.
 func (o *Orchestrator) VaultSealStats() []chunking.VaultSealStats {
 	if o.pipeline == nil {
 		return nil
@@ -1190,7 +1180,7 @@ func (o *Orchestrator) VaultSealStats() []chunking.VaultSealStats {
 }
 
 // VaultPublishStats returns per-vault segment-publish counters from the
-// pipeline supervisor's distribution manager (gastrolog-4r784a).
+// pipeline supervisor's distribution manager.
 func (o *Orchestrator) VaultPublishStats() []distribution.VaultPublishStats {
 	if o.pipeline == nil {
 		return nil
@@ -1200,7 +1190,7 @@ func (o *Orchestrator) VaultPublishStats() []distribution.VaultPublishStats {
 
 // VaultChunkStageStats returns per-vault chunk-lifecycle stage counters
 // (planned/built/sealed/released/head-purges) from the pipeline supervisor's
-// chunking manager (gastrolog-4r784a).
+// chunking manager.
 func (o *Orchestrator) VaultChunkStageStats() []chunking.VaultStageStats {
 	if o.pipeline == nil {
 		return nil
@@ -1209,7 +1199,7 @@ func (o *Orchestrator) VaultChunkStageStats() []chunking.VaultStageStats {
 }
 
 // VaultStageEventStats returns per-vault orchestrator-owned stage-event
-// counters (GLCB catch-up pulls, retention deletes) — gastrolog-4r784a.
+// counters (GLCB catch-up pulls, retention deletes).
 func (o *Orchestrator) VaultStageEventStats() []VaultStageEventSnapshot {
 	if o.stageEvents == nil {
 		return nil
@@ -1250,7 +1240,7 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 				snap.RecordCount += m.RecordCount
 				// Same currency as the disk guard's footprint and the
 				// size-drain trigger: an evicted cloud-backed chunk must
-				// not fall back to logical Bytes. See gastrolog-33ul6h.
+				// not fall back to logical Bytes.
 				snap.DataBytes += chunk.DiskClaim(m, func(cid chunk.ChunkID) (map[string]int64, error) {
 					return o.IndexSizes(vaultID, cid)
 				})

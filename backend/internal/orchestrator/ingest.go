@@ -47,14 +47,14 @@ func (o *Orchestrator) postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, ch
 // RLock for the vault-map read, while isPipelineIngestVault re-RLocked
 // internally) deadlocked the node whenever a writer (DrainVault, retention
 // sweep, config reload) queued between the two acquisitions — RWMutex blocks
-// recursive RLock behind a waiting writer. Found via the gastrolog-38snf4
-// gate forensics (TestDrainConcurrentWithIngestion 10-minute hang).
+// recursive RLock behind a waiting writer. Found via a 10-minute hang in
+// TestDrainConcurrentWithIngestion.
 func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
 	// The pipeline check reads the lock-free snapshot, so a pipeline vault
 	// reaches the scheduling below without touching o.mu at all — the same
-	// hazard as gastrolog-38snf4 above, one layer out: a Raft apply pump that
-	// blocks here stalls every apply for the group, and a caller holding o.mu
-	// while awaiting one of those applies then never returns (gastrolog-1abzem).
+	// hazard as above, one layer out: a Raft apply pump that blocks here
+	// stalls every apply for the group, and a caller holding o.mu while
+	// awaiting one of those applies then never returns.
 	// Only the legacy follower-replication branch still needs the lock.
 	_, pipeline := o.lookupPipelineVault(vaultID)
 	var followerTargets []system.ReplicationTarget
@@ -69,10 +69,7 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 		return
 	}
 
-	// No post-processing — schedule replication directly. The legacy
-	// ChunkCompressor fallback is gone (gastrolog-24m1t step 7e); only
-	// chunkfile.Manager implemented it, and it now goes through the
-	// PostSealProcess branch above.
+	// No post-processing — schedule replication directly.
 	o.scheduleReplication(vaultID, chunkID, followerTargets)
 }
 
@@ -104,7 +101,7 @@ func (o *Orchestrator) schedulePostSealProcessing(
 ) {
 	// Describe BEFORE scheduling — see scheduleReplication for why (missing
 	// label on the Scheduled event, leaked descriptions entry when the job
-	// finishes first). gastrolog-69sjlj.
+	// finishes first).
 	name := postSealJobName(vaultID, chunkID)
 	o.scheduler.Describe(name, fmt.Sprintf("Post-seal pipeline for chunk %s", chunkID))
 	wrappedFn := func(ctx context.Context, id chunk.ChunkID) error {
@@ -132,9 +129,9 @@ func (o *Orchestrator) schedulePostSealProcessing(
 	// registry entry without stopping the job already running, so the work would
 	// run twice. It is not idempotent: sealToGLCB rebuilds the GLCB from the
 	// record cursor with no already-built short-circuit, then re-announces and
-	// re-enters the upload path. That is the shape gastrolog-3hwngy postmortemed
-	// as duplicate S3 PUTs and duplicate Raft commands, and it fixed the
-	// cloud-upload claim the same way (gastrolog-3xr5dk).
+	// re-enters the upload path — the shape that produces duplicate S3 PUTs and
+	// duplicate Raft commands. The cloud-upload path claims its name the same
+	// way.
 	//
 	// A claim on IN-FLIGHT work only: once the job completes the name frees, so
 	// a later post-seal of the same chunk still runs.

@@ -2,7 +2,7 @@
 // FSMs. The FSM advances the tracker as it applies committed log entries;
 // forward paths block on Wait until the local FSM has caught up to the
 // index the leader reported — the read-after-write barrier for forwarded
-// mutations (gastrolog-2nxij, gastrolog-3klg1).
+// mutations.
 //
 // The tracker is fed from the FSM Apply path rather than from
 // raft.AppliedIndex(): hashicorp/raft advances AppliedIndex when it

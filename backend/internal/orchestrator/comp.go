@@ -3,7 +3,6 @@ package orchestrator
 import "gastrolog/internal/logging/comp"
 
 // Component paths for the orchestrator package and its sub-systems.
-// See gastrolog-3flfp.
 var (
 	compOrchestrator = comp.Root("orchestrator").Desc(
 		"Top-level orchestrator — vault lifecycle, scheduling, drain, replication, retention. Most operator filters target one of the subsystem sub-paths below rather than this root.")

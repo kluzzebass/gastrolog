@@ -17,7 +17,7 @@ var (
 	// this node (typically because placement reconfiguration evicted it),
 	// even though the vault still exists cluster-wide. Distinct from
 	// ErrVaultNotFound so log lines don't suggest the vault was deleted
-	// during legitimate placement churn. See gastrolog-2t48z.
+	// during legitimate placement churn.
 	ErrInstanceNotLocal = errors.New("vault instance not registered on this node")
 	// ErrVaultDisabled is returned when attempting to append to a disabled vault.
 	ErrVaultDisabled = errors.New("vault disabled")
@@ -32,7 +32,7 @@ var (
 // of the vault, has the vault but the vault instance was evicted, or the
 // caller's cached placement view is stale. None of these are real failures
 // — they are expected during placement reconfiguration and should not
-// drive WARN-level log spam. See gastrolog-5z607.
+// drive WARN-level log spam.
 //
 // Handles both local and cross-RPC error origins. Local sentinels round-
 // trip via errors.Is. Cross-RPC errors are flattened to strings at the
@@ -62,7 +62,7 @@ func (o *Orchestrator) loadSystem(ctx context.Context) (*system.System, error) {
 
 // systemLoader returns the configured SystemLoader, or nil. Safe to call from
 // any goroutine — scheduled sweeps read it off the job executor while tests
-// install one after Start (gastrolog-19wmgn).
+// install one after Start.
 func (o *Orchestrator) systemLoader() SystemLoader {
 	if p := o.sysLoader.Load(); p != nil {
 		return *p
