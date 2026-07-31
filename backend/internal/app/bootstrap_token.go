@@ -15,16 +15,13 @@ import (
 	"gastrolog/internal/system"
 )
 
-// Non-interactive cluster bootstrap (gastrolog-o9z6o).
+// Non-interactive cluster bootstrap.
 //
-// The cluster's bootstrap node generates a join token at startup and
-// historically printed it to stderr; an operator scraped the logs and
-// pasted it into joiners. That works for an attended terminal but not
-// for orchestrators (Docker Compose, Kubernetes StatefulSets) where
-// no human is reading logs.
-//
-// This file provides two operator-driven token-delivery paths so a
-// joiner can pick up the token without log-scraping:
+// The cluster's bootstrap node generates a join token at startup. An
+// attended terminal can read it off stderr, but orchestrators (Docker
+// Compose, Kubernetes StatefulSets) have no human reading logs, so this
+// file provides two operator-driven token-delivery paths a joiner can
+// use without log-scraping:
 //
 //   1. File-based (default, lowest-friction): the bootstrap node writes
 //      the token atomically to a known path; joiners read from the

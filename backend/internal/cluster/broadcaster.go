@@ -60,8 +60,7 @@ func newBroadcaster(peers broadcastPeerSource, logger *slog.Logger, perPeerTimeo
 //
 // This is why a SIGSTOP on one peer does NOT stall the caller: the
 // paused peer's goroutine runs to its per-peer timeout asynchronously;
-// meanwhile, the caller and other peers are unaffected. See
-// gastrolog-5oofa.
+// meanwhile, the caller and other peers are unaffected.
 func (b *Broadcaster) Send(ctx context.Context, msg *gastrologv1.BroadcastMessage) {
 	peers, err := b.peers.Peers()
 	if err != nil {

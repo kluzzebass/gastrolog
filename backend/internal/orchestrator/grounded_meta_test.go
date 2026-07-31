@@ -53,7 +53,7 @@ func TestGroundMetaFromEntryGroundsClusterFields(t *testing.T) {
 
 // TestGroundMetaFromEntrySealingReadsNotSealed pins that a Sealing FSM state
 // grounds meta.Sealed to false — producer-side iteration must not treat a chunk
-// mid-seal as done (gastrolog-1huz5).
+// mid-seal as done.
 func TestGroundMetaFromEntrySealingReadsNotSealed(t *testing.T) {
 	t.Parallel()
 
@@ -85,9 +85,8 @@ func TestGroundMetaFromEntryPreservesZeroSealedAt(t *testing.T) {
 	}
 }
 
-// TestGroundMetaFromEntryDoesNotClobberLocalDiskBytes carries forward the
-// gastrolog-33ul6h invariant from the retired OverlayFromFSM path into the
-// grounded seam: the merge only ever overrides the documented cluster-wide
+// TestGroundMetaFromEntryDoesNotClobberLocalDiskBytes pins the merge
+// invariant: the merge only ever overrides the documented cluster-wide
 // fields. DiskBytes is per-node live warm-cache state that only the local chunk
 // Manager can know; the FSM's ManifestEntry has no equivalent fact (it carries
 // CloudBytes, the cloud object size, not a local disk claim). If a future change

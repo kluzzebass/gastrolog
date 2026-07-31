@@ -9,9 +9,8 @@ import (
 
 // Vault is the node-local materialization of a VaultConfig: identity plus
 // the single VaultInstance that owns this node's chunk + index + query
-// state. Phase 2 (gastrolog-3iy5l) collapsed the per-vault instance slice —
-// every vault now owns exactly one instance — so callers reach through
-// Instance directly rather than iterating a slice.
+// state. Every vault owns exactly one instance, so callers reach through
+// Instance directly.
 type Vault struct {
 	ID          glid.GLID
 	Name        string

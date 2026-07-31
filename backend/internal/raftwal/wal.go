@@ -167,10 +167,10 @@ type WAL struct {
 	segSize int64
 	segSeq  int
 
-	// Space reserve (gastrolog-67gvjo): every segment is preallocated to its
-	// full target size (physical blocks only — logical size still marks end
-	// of data for replay), and the NEXT segment is created fully reserved
-	// before it is needed, so rotation at crisis time allocates nothing. A
+	// Space reserve: every segment is preallocated to its full target size
+	// (physical blocks only — logical size still marks end of data for
+	// replay), and the NEXT segment is created fully reserved before it is
+	// needed, so rotation at crisis time allocates nothing. A
 	// Raft term bump is ~30 bytes; one reserved segment is effectively
 	// unlimited election-storm runway on a full volume. sparePath is the
 	// already-reserved next segment ("" when the reserve is lost) — consumed
@@ -179,7 +179,7 @@ type WAL struct {
 	reserveLost atomic.Bool
 
 	// Segment read handles for serving log payloads beyond the recent
-	// window (gastrolog-53lk2). readersMu guards the map itself; handles
+	// window. readersMu guards the map itself; handles
 	// for compacted segments are closed only under stateMu.Lock, which is
 	// mutually exclusive with GetLog readers (they hold stateMu.RLock
 	// across location lookup + pread), so a handle is never closed while a
@@ -192,9 +192,9 @@ type WAL struct {
 	syncCh  chan chan error // request a sync, get back the result
 	done    chan struct{}
 
-	// Append-latency instrumentation (gastrolog-1io54g): caller-observed
-	// submit latency — queue wait + write + batch fsync — which is exactly
-	// what a Raft StoreLogs call experiences. The shared batch writer
+	// Append-latency instrumentation: caller-observed submit latency —
+	// queue wait + write + batch fsync — which is exactly what a Raft
+	// StoreLogs call experiences. The shared batch writer
 	// serializes ALL groups, so one slow fsync inflates every group's
 	// latency; these counters make that visible in NodeStats instead of
 	// discoverable only by pprof during an incident.
@@ -222,8 +222,8 @@ type groupState struct {
 	firstIndex uint64
 	lastIndex  uint64
 
-	// Recent window (gastrolog-53lk2): encoded payloads of recently
-	// appended entries, bounded by Config.LogCacheBudgetBytes. GetLog
+	// Recent window: encoded payloads of recently appended entries,
+	// bounded by Config.LogCacheBudgetBytes. GetLog
 	// beyond the window reads the payload back from the segment file.
 	cache      map[uint64][]byte
 	cacheBytes int64
@@ -433,7 +433,7 @@ func (w *WAL) observeAppendLatency(d time.Duration) {
 }
 
 // AppendTotals returns the cumulative submit count and total latency. Pure
-// read — safe for snapshot paths between stats ticks (gastrolog-1io54g).
+// read — safe for snapshot paths between stats ticks.
 func (w *WAL) AppendTotals() (count, totalNanos uint64) {
 	return w.appendCount.Load(), w.appendNanos.Load()
 }
@@ -441,7 +441,7 @@ func (w *WAL) AppendTotals() (count, totalNanos uint64) {
 // TakeMaxAppendLatency returns the maximum single-submit latency observed
 // since the previous call and resets it ("max since last stats tick"). Call
 // only from the ticking stats path, never from snapshot reads, or the tick's
-// max gets consumed early (gastrolog-1io54g).
+// max gets consumed early.
 func (w *WAL) TakeMaxAppendLatency() (maxNanos uint64) {
 	return w.appendMaxNanos.Swap(0)
 }

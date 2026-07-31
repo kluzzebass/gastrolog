@@ -36,7 +36,7 @@ type Ingester struct {
 
 	// pressureGate throttles burst emission when the ingest pipeline is
 	// backed up. Injected by the orchestrator via SetPressureGate before
-	// Run. Nil means no throttling. See gastrolog-4fguu.
+	// Run. Nil means no throttling.
 	pressureGate *chanwatch.PressureGate
 }
 

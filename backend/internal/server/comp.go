@@ -2,7 +2,7 @@ package server
 
 import "gastrolog/internal/logging/comp"
 
-// Component paths for the server package. See gastrolog-3flfp.
+// Component paths for the server package.
 var (
 	compServer = comp.Root("server").Desc(
 		"HTTP/Connect RPC server — listener lifecycle, request routing, middleware, TLS reconfiguration.")

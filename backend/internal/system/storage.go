@@ -133,10 +133,10 @@ type FileStorage struct {
 	// (floor). Warn raises the disk-space alarm naming this storage;
 	// floor puts every vault placed here into admission refuse (cause
 	// STORAGE_DISK_PROTECT) while vaults on healthy storages keep
-	// ingesting. Moved off VaultConfig (gastrolog-9akebz): the thresholds
-	// guard the volume, not the vaults sharing it — N vaults on one
-	// storage evaluating the same statfs against potentially different
-	// per-vault thresholds was the modeling error.
+	// ingesting. They live on the storage, not on VaultConfig: the
+	// thresholds guard the volume, not the vaults sharing it — N vaults on
+	// one storage evaluating the same statfs against potentially different
+	// per-vault thresholds is a modeling error.
 	DiskFreeWarn  string `json:"diskFreeWarn,omitempty"`
 	DiskFreeFloor string `json:"diskFreeFloor,omitempty"`
 }
@@ -151,9 +151,9 @@ type NodeStorageConfig struct {
 // CloudStorageTransition defines a single step in an archival lifecycle chain.
 type CloudStorageTransition struct {
 	After string `json:"after"` // duration string (e.g. "30s", "7d", "2w", "360d")
-	// CloudStorageClass is the archival TIER ("GLACIER", "cold"); empty means
-	// delete at this age. Not the uint32 storage_class elsewhere in this file,
-	// which selects a local disk (gastrolog-108bcg).
+	// CloudStorageClass is the archival storage class ("GLACIER", "cold");
+	// empty means delete at this age. Not the uint32 storage_class elsewhere in
+	// this file, which selects a local disk.
 	CloudStorageClass string `json:"cloudStorageClass"`
 }
 
@@ -212,11 +212,9 @@ func (cs CloudService) StoreParams() map[string]string {
 
 // VaultType identifies the storage medium for a vault.
 //
-// "cloud" is no longer a distinct type: a cloud-backed vault is a file vault
-// with CloudServiceID set, exposed via VaultConfig.IsCloud(). Step 8 of the
-// chunk redesign collapsed the parallel cloud/file dispatch into a single
-// file path that flips behavior based on whether a cloud store is wired.
-// See gastrolog-4k5mg.
+// There is no distinct "cloud" type: a cloud-backed vault is a file vault
+// with CloudServiceID set, exposed via VaultConfig.IsCloud(). One file path
+// serves both, flipping behavior on whether a cloud store is wired.
 type VaultType string
 
 const (
@@ -292,11 +290,11 @@ func NodeIDForStorage(storageID string, nscs []NodeStorageConfig) string {
 
 // StorageIDForNode returns the best storage ID on a given node for a vault.
 // For file vaults it requires an exact storage-class match and returns ""
-// when the node has none — the caller must fail placement loudly. The old
-// silent FileStorages[0] fallback placed leaders on the wrong disk class
-// while follower placement (eligibleStorages/storageEligible) stayed strict
-// (gastrolog-2bv1x). Memory/JSONL vaults have no class requirement and fall
-// back to a synthetic storage ID.
+// when the node has none — the caller must fail placement loudly. A silent
+// FileStorages[0] fallback here placed leaders on the wrong disk class while
+// follower placement (eligibleStorages/storageEligible) stayed strict.
+// Memory/JSONL vaults have no class requirement and fall back to a synthetic
+// storage ID.
 func StorageIDForNode(nodeID string, v VaultConfig, nscs []NodeStorageConfig) string {
 	idx := slices.IndexFunc(nscs, func(n NodeStorageConfig) bool { return n.NodeID == nodeID })
 
@@ -312,10 +310,9 @@ func StorageIDForNode(nodeID string, v VaultConfig, nscs []NodeStorageConfig) st
 			return ""
 		}
 		// Single storage class for all file vaults (local-only and
-		// cloud-backed alike). After step 7k, the active chunk and
-		// the warm cache live at the same path under chunkDir, so
-		// distinguishing "active" and "cache" classes serves no
-		// purpose. See gastrolog-4k5mg.
+		// cloud-backed alike). The active chunk and the warm cache
+		// live at the same path under chunkDir, so distinguishing
+		// "active" and "cache" classes serves no purpose.
 		for _, fs := range nscs[idx].FileStorages {
 			if fs.StorageClass == v.StorageClass {
 				return fs.ID.String()

@@ -17,10 +17,8 @@ func ptr[T any](v T) *T { return &v }
 // Command round-trip tests
 // ---------------------------------------------------------------------------
 
-// gastrolog-4kkoo (Phase 5): TestPutFilter / TestDeleteFilter removed.
-// FilterConfig is gone — match expressions live inline on RouteConfig.Stages.
-// The route-stages round-trip is covered indirectly by TestPutRoute below
-// once the Phase 5 route command tests land.
+// There is no FilterConfig entity — match expressions live inline on
+// RouteConfig.Stages. The route commands have no round-trip test here yet.
 
 func TestPutRotationPolicy(t *testing.T) {
 	t.Parallel()
@@ -71,10 +69,10 @@ func TestPutRetentionPolicy(t *testing.T) {
 	}
 }
 
-// gastrolog-33ul6h: a policy that carries only MaxSize (no MaxAge/MaxChunks)
-// must round-trip through the FSM command exactly like any other field —
-// max_size is the combined drain-trigger-and-refuse-bound quantity, so a
-// size-only policy is simply a drain policy.
+// A policy that carries only MaxSize (no MaxAge/MaxChunks) must round-trip
+// through the FSM command exactly like any other field — max_size is the
+// combined drain-trigger-and-refuse-bound quantity, so a size-only policy is
+// simply a drain policy.
 func TestPutRetentionPolicyMaxSizeOnly(t *testing.T) {
 	t.Parallel()
 	want := system.RetentionPolicyConfig{

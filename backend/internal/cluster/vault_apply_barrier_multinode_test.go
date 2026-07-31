@@ -155,12 +155,14 @@ func readChunkNow(t *testing.T, g *vaultCtlTestGroup, vaultID glid.GLID, cid chu
 }
 
 // TestFourNodeVaultCtlFollowerReadAfterForwardedApply is the multi-node
-// regression test for gastrolog-4l24u: on a 4-node vault-ctl Raft group, a
-// chunk-FSM command forwarded from ANY non-leader node via ForwardVaultApply
-// must be visible to an immediate read of that node's LOCAL group FSM —
-// the leader returns its applied index and the forwarder blocks on the
-// event-driven apply wait (gastrolog-3klg1 mechanism) until the local FSM
-// catches up. Covers both forward paths (VaultCtlChunkApplyForwarder and
+// regression test for the forwarded-apply read-after-write barrier: on a
+// 4-node vault-ctl Raft group, a chunk-FSM command forwarded from ANY
+// non-leader node via ForwardVaultApply must be visible to an immediate read
+// of that node's LOCAL group FSM — the leader returns its applied index and
+// the forwarder blocks on the event-driven apply wait until the local FSM
+// catches up. That wait is the raftstore forward path's applywait.Tracker,
+// deliberately not an AppliedIndex poll: raft advances AppliedIndex before
+// FSM.Apply runs. Covers both forward paths (VaultCtlChunkApplyForwarder and
 // VaultApplyForwarder) and a group leadership change.
 func TestFourNodeVaultCtlFollowerReadAfterForwardedApply(t *testing.T) {
 	t.Parallel()

@@ -84,7 +84,7 @@ func TestRepublishWithNewPublishedAtIsIdempotent(t *testing.T) {
 
 	// Distribution catch-up after restart re-publishes with a FRESH attempt
 	// timestamp. Same content = same publish: must no-op, not conflict
-	// (gastrolog-2usqfx: the old check retried this forever, hammering the
+	// (a content-plus-timestamp check retried this forever, hammering the
 	// vault-ctl leader queue during restart-under-load).
 	republish := first
 	republish.PublishedAt = now.Add(45 * time.Minute)

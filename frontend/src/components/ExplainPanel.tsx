@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { ChunkPlan, BranchPlan, PipelineStep, QueryPipelineStage } from "../api/client";
-// eslint-disable-next-line no-restricted-imports -- no ContributionReport model yet (gastrolog-2e2qs follow-up)
+// eslint-disable-next-line no-restricted-imports -- no ContributionReport model yet
 import type { ContributionReport } from "../api/gen/gastrolog/v1/vault_pb";
 import { formatChunkId } from "../utils";
 import { encode } from "../api/glid";

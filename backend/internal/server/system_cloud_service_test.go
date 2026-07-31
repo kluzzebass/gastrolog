@@ -1,14 +1,14 @@
 package server_test
 
-// Config-accept validation for cloud services (gastrolog-7au6u9).
+// Config-accept validation for cloud services.
 //
 // PutCloudService must reject provider configs that would fail blobstore
 // store creation at vault init — bare endpoints, missing bucket/region/
 // container/connection_string — with a field-specific InvalidArgument
-// error, before anything is persisted or replicated. Previously a bad
-// config (e.g. --endpoint localhost:19000) was accepted, replicated, and
-// then killed vault init on every node with the cause visible only in
-// server logs.
+// error, before anything is persisted or replicated. Without the
+// config-time gate a bad endpoint (e.g. localhost:19000) is accepted and
+// replicated, then kills vault init on every node with the cause visible
+// only in server logs.
 
 import (
 	"context"
@@ -114,9 +114,9 @@ func TestPutCloudServiceRejectsInvalidConfig(t *testing.T) {
 }
 
 // TestPutCloudServiceBareEndpointErrorIsActionable pins the exact error
-// shape for the incident that motivated gastrolog-7au6u9: the message must
-// name the offending value and both accepted forms so the operator can fix
-// the flag without reading server logs.
+// shape for a bare endpoint: the message must name the offending value
+// and both accepted forms so the operator can fix the flag without
+// reading server logs.
 func TestPutCloudServiceBareEndpointErrorIsActionable(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
 

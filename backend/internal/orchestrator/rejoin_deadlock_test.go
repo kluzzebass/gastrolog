@@ -1,13 +1,12 @@
 package orchestrator
 
-// gastrolog-3wpfet: finishPendingPipelineCtlRestore is invoked from
-// reloadPipelineFromConfig while the caller (reconcileFilters/ReloadFilters)
-// holds o.mu WRITE-locked, and its reconcile chain takes o.mu.RLock
-// (isPipelineIngestVault). Inline execution self-deadlocked the entire
-// orchestrator the first time a node rejoined via vault-ctl snapshot restore
-// — every o.mu user in the process queued behind the poisoned writer. This
-// test pins the contract: the finish must be safe to call under the write
-// lock.
+// finishPendingPipelineCtlRestore is invoked from reloadPipelineFromConfig
+// while the caller (reconcileFilters/ReloadFilters) holds o.mu WRITE-locked,
+// and its reconcile chain takes o.mu.RLock (isPipelineIngestVault). Inline
+// execution self-deadlocked the entire orchestrator the first time a node
+// rejoined via vault-ctl snapshot restore — every o.mu user in the process
+// queued behind the poisoned writer. This test pins the contract: the finish
+// must be safe to call under the write lock.
 
 import (
 	"testing"
@@ -45,7 +44,7 @@ func TestFinishPendingCtlRestoreSafeUnderWriteLock(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
-		t.Fatal("finishPendingPipelineCtlRestore deadlocked under o.mu write lock (gastrolog-3wpfet regression)")
+		t.Fatal("finishPendingPipelineCtlRestore deadlocked under o.mu write lock (rejoin self-deadlock regression)")
 	}
 
 	// Exactly-once: the pending entry must be consumed.

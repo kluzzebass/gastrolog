@@ -23,7 +23,7 @@ import (
 // Run this command against the node that holds the orphan on disk —
 // usually that's also the vault owner, but if the orphan is on a
 // non-owner node (e.g. post-shuffle leftover), connect directly to
-// that node via --addr or --home. See gastrolog-32bf2.
+// that node via --addr or --home.
 func NewRepatriateCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "repatriate <chunk-id>",

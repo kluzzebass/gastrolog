@@ -12,9 +12,9 @@ import (
 )
 
 // formatRefuse renders the tri-state refuse flag for table/kv output.
-// Unset (nil) reads as false — the default (gastrolog-5yfaqj operator
-// decision: bounds are drain-first; refusal is the explicit hard mode) —
-// same as system.RetentionPolicyConfig.RefuseEnabled().
+// Unset (nil) reads as false — the default (bounds are drain-first; refusal
+// is the explicit hard mode) — same as
+// system.RetentionPolicyConfig.RefuseEnabled().
 func formatRefuse(v *bool) string {
 	if v != nil && *v {
 		return "true"

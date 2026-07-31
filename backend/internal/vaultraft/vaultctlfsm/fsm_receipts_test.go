@@ -12,7 +12,7 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
-// gastrolog-51gme step 2 — receipt-based deletion protocol tests.
+// Receipt-based deletion protocol tests.
 
 func TestRequestDeleteAddsPending(t *testing.T) {
 	t.Parallel()
@@ -211,7 +211,7 @@ func TestFinalizeDeleteIdempotent(t *testing.T) {
 	}
 }
 
-// gastrolog-51gme step 10 — CmdPruneNode tests.
+// CmdPruneNode tests.
 
 func TestPruneNodeRemovesFromExpectedFrom(t *testing.T) {
 	t.Parallel()
@@ -313,8 +313,8 @@ func TestPruneNodeIdempotent(t *testing.T) {
 	}
 }
 
-// gastrolog-66vmg: ChunkResidency is the authoritative cluster-wide
-// residency view used by WatchChunks event enrichment so clients
+// ChunkResidency is the authoritative cluster-wide residency view used
+// by WatchChunks event enrichment so clients
 // never have to reconstruct replica counts from per-node event
 // evidence. The three branches under test pin the three states the
 // FSM can be in for a given chunk.
@@ -336,7 +336,7 @@ func TestChunkResidencyForUnknownChunkReturnsNil(t *testing.T) {
 // catch-up; an optimistic placement default here made residency
 // non-monotonic — full set first, collapsing to the true holders when
 // the first AckChunkHolder landed — which the inspector rendered as
-// sealed pips regressing to amber (gastrolog-68wsli).
+// sealed pips regressing to amber.
 func TestChunkResidencyBeforeReceiptsIsEmptyNotPlacement(t *testing.T) {
 	t.Parallel()
 
@@ -449,8 +449,8 @@ func TestIsExpectedToAck(t *testing.T) {
 	}
 }
 
-// gastrolog-15fm8: applyAckDelete atomically finalizes when its
-// mutation drains ExpectedFrom to empty. The pendingDeletes entry,
+// applyAckDelete atomically finalizes when its mutation drains
+// ExpectedFrom to empty. The pendingDeletes entry,
 // the manifest entry, and the tombstone all update inside the same
 // apply that recorded the last ack — no leader-only callback in the
 // loop, so a leader transfer between the ack apply and a follow-up
@@ -514,8 +514,8 @@ func TestAckDeleteAutoFinalizesOnEmptyExpectedFrom(t *testing.T) {
 	}
 }
 
-// gastrolog-15fm8: applyPruneNode atomically finalizes every chunk
-// whose ExpectedFrom became empty as a result of the prune. The
+// applyPruneNode atomically finalizes every chunk whose ExpectedFrom
+// became empty as a result of the prune. The
 // per-chunk fire dispatch surfaces an onFinalizeDelete callback for
 // each finalized chunk.
 func TestPruneNodeAutoFinalizesDrainedChunks(t *testing.T) {
@@ -576,8 +576,8 @@ func TestPendingDeletesSurviveSnapshotRoundtrip(t *testing.T) {
 
 	// Three pending deletes in different stages of progress. Each entry
 	// keeps at least one node in ExpectedFrom after any acks, so the
-	// gastrolog-15fm8 auto-finalize-on-drain path doesn't reduce the
-	// fixture to fewer than 3 entries.
+	// auto-finalize-on-drain path doesn't reduce the fixture to fewer
+	// than 3 entries.
 	for i, cfg := range []struct {
 		reason string
 		expect []string

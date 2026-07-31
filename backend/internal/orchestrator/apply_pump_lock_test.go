@@ -14,8 +14,7 @@ import (
 // stops every apply for that group. A caller that holds o.mu while waiting for
 // one of those applies then waits forever: the entry it is waiting for can only
 // be applied by the goroutine its own lock is blocking. That cycle wedged a
-// node permanently, taking every other o.mu consumer down with it —
-// gastrolog-1abzem.
+// node permanently, taking every other o.mu consumer down with it.
 //
 // These tests hold o.mu in the mode that closes the cycle and require the
 // pump-path readers to answer anyway. The deadline is a deadlock detector, not
@@ -34,7 +33,7 @@ func mustAnswerWhileLocked(t *testing.T, name string, read func()) {
 	case <-done:
 	case <-time.After(applyPumpLockDeadline):
 		t.Fatalf("%s blocked while o.mu was held: the Raft apply pump calls this, "+
-			"so taking o.mu here deadlocks the node (gastrolog-1abzem)", name)
+			"so taking o.mu here deadlocks the node", name)
 	}
 }
 
@@ -70,7 +69,8 @@ func TestPipelineReadersDoNotBlockOnOrchestratorWriteLock(t *testing.T) {
 // TestPipelineReadersDoNotBlockBehindQueuedWriter is the case that makes RLock
 // an insufficient fix. Go's RWMutex blocks a new RLock behind a WAITING writer,
 // so a reader-holding appender plus one queued writer is enough to wedge a
-// pump-path RLock — which is how the same class bit gastrolog-38snf4.
+// pump-path RLock — the same mechanism as the schedulePostSeal recursive-RLock
+// node freeze.
 func TestPipelineReadersDoNotBlockBehindQueuedWriter(t *testing.T) {
 	t.Parallel()
 	o := newTestOrch(t, Config{LocalNodeID: "node-1", SegmentsDir: t.TempDir()})

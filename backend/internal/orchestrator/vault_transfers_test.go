@@ -381,7 +381,7 @@ func drainSetup(t *testing.T, recordCount int) (*orchestrator.Orchestrator, glid
 		Vaults: []system.VaultConfig{
 			{ID: vaultID},
 		},
-		// gastrolog-4kkoo (Phase 5): expression inlined on route via Stages.
+		// Expression inlined on route via Stages.
 		Routes: []system.RouteConfig{
 			{ID: routeID,
 				Stages:       []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}},
@@ -482,7 +482,7 @@ func TestDrainVault_CancelDrain(t *testing.T) {
 		Vaults: []system.VaultConfig{
 			{ID: vaultID},
 		},
-		// gastrolog-4kkoo (Phase 5): expression inlined on route via Stages.
+		// Expression inlined on route via Stages.
 		Routes: []system.RouteConfig{
 			{ID: routeID,
 				Stages:       []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}},
@@ -607,7 +607,7 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 		Vaults: []system.VaultConfig{
 			{ID: vaultID},
 		},
-		// gastrolog-4kkoo (Phase 5): expression inlined on route via Stages.
+		// Expression inlined on route via Stages.
 		Routes: []system.RouteConfig{
 			{ID: routeID,
 				Stages:       []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}},

@@ -1,10 +1,10 @@
 package orchestrator
 
-// gastrolog-2l918 review finding 5: ensureDestManifestEntry used to
-// rebuild the announced manifest entry from chunk.ChunkMeta
-// (chunkMetaToManifestEntry), which drops Hash / KeyScheme /
-// IngestTSMonotonic / the GLCB section-offset fields — chunk.ChunkMeta
-// simply doesn't carry them (chunk/meta.go / ToChunkMeta). The fix
+// ensureDestManifestEntry used to rebuild the announced manifest entry
+// from chunk.ChunkMeta (chunkMetaToManifestEntry), which drops Hash /
+// KeyScheme / IngestTSMonotonic / the GLCB section-offset fields —
+// chunk.ChunkMeta simply doesn't carry them (chunk/meta.go /
+// ToChunkMeta). The fix
 // (sourceManifestEntryForTransfer) copies the SOURCE vault-ctl FSM's own
 // entry instead, only overriding the fields transfer legitimately changes
 // (SealedAt, TransferSourceVaultID, Holders, RetentionPending).

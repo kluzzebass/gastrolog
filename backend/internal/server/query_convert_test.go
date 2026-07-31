@@ -9,7 +9,7 @@ import (
 // TestQueryConvertLastAll verifies the "last=all" sentinel is parsed as
 // an explicit unbounded range — both Start and End come back zero,
 // distinct from "no last= directive at all" which keeps whatever the
-// caller already had on the proto. See gastrolog-2zdsc.
+// caller already had on the proto.
 func TestQueryConvertLastAll(t *testing.T) {
 	t.Parallel()
 	q, _, err := protoToQuery(&apiv1.Query{Expression: "last=all reverse=true"})

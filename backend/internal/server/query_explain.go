@@ -100,9 +100,9 @@ func (s *QueryServer) Explain(
 // collectRemoteExplain fans out ForwardExplain RPCs to remote nodes and
 // merges their chunk plans into the response.
 //
-// Parallel fan-out with per-peer timeout via peerFanOut (gastrolog-csspr):
-// a paused or partitioned peer is elided from the merged plan within
-// peerInspectorTimeout instead of blocking the whole handler.
+// Parallel fan-out with per-peer timeout via peerFanOut: a paused or
+// partitioned peer is elided from the merged plan within peerInspectorTimeout
+// instead of blocking the whole handler.
 func (s *QueryServer) collectRemoteExplain(ctx context.Context, q query.Query, resp *apiv1.ExplainResponse) {
 	if s.remoteSearcher == nil || s.cfgStore == nil {
 		return

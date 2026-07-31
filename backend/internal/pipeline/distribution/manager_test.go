@@ -186,8 +186,8 @@ func TestPublishOnCompleted(t *testing.T) {
 	}
 }
 
-// TestPublishStatsCountsPublishes (gastrolog-4r784a): PublishStats reports the
-// per-vault segment-publish stage counter, one per successful publish.
+// TestPublishStatsCountsPublishes: PublishStats reports the per-vault
+// segment-publish stage counter, one per successful publish.
 func TestPublishStatsCountsPublishes(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()

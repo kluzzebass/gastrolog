@@ -38,10 +38,10 @@ type VaultConfig struct {
 
 // collectDeps bundles the rewireable collaborators (log reader, pull client,
 // receipt committer, vault-ctl FSM). Published atomically as ONE immutable
-// snapshot: RewireVaultFSM after a group snapshot Restore used to overwrite
-// the fields one by one while worker goroutines were mid-pass — a data race
-// and a window where a worker saw a fresh FSM with a stale pull client
-// (gastrolog-50m2vi). Workers Load a snapshot per use.
+// snapshot: overwriting the fields one by one (RewireVaultFSM after a group
+// snapshot Restore) while worker goroutines are mid-pass is a data race, and
+// opens a window where a worker sees a fresh FSM with a stale pull client.
+// Workers Load a snapshot per use.
 type collectDeps struct {
 	log      LogReader
 	pull     PullClient
@@ -77,8 +77,8 @@ type vaultCollect struct {
 	// yet, or a holder purged after seal). Those obligations have no future
 	// event of their own — the publish that assigned them already fired, and
 	// for the last segments of a burst no later publish arrives to piggyback
-	// on (gastrolog-38snf4: follower homes stalled forever missing sealed
-	// GLCB segments). One-shot with exponential backoff, armed only while an
+	// on — follower homes stalled forever missing sealed GLCB segments.
+	// One-shot with exponential backoff, armed only while an
 	// obligation is failing; a healthy vault has no timer.
 	retryMu    sync.Mutex
 	retryTimer *time.Timer
@@ -89,7 +89,7 @@ type vaultCollect struct {
 	//
 	// Targeted CollectSegments deliberately does NOT take passMu: under
 	// backlog a full pass runs for a very long time, and the chunking build
-	// blocking behind it stalled the serial seal queue (gastrolog-1b51yf).
+	// blocking behind it stalled the serial seal queue.
 	// Pull exclusivity is per segment via the pulling set instead.
 	passMu    sync.Mutex
 	collectMu sync.Mutex
@@ -110,7 +110,7 @@ type vaultCollect struct {
 	// re-commit. Bounded by the vault's live segment set; released in slice D.
 	receipted map[glid.GLID]struct{}
 
-	// Stage-throughput counters (gastrolog-10n6k8): records/bytes arriving
+	// Stage-throughput counters: records/bytes arriving
 	// in head/ on this node, via remote pull or local-holder promotion.
 	// Rates are derived downstream by the stats collector windows.
 	collectedRecords atomic.Uint64
@@ -151,7 +151,7 @@ func newVaultCollect(vaultID glid.GLID, root string, cfg VaultConfig, logger *sl
 		fsm:      cfg.FSM,
 	})
 	// Sweep pre-head/*.pulling orphans left by a crash mid-pull before this
-	// vault's worker can start (gastrolog-66hmx3 / gastrolog-5do8sh gap 7).
+	// vault's worker can start.
 	// This must happen here, at construction, and not later from a
 	// CollectOnce pass: once the worker is running, a live in-flight pull
 	// may legitimately hold the exact same tmp path open, and this sweep
@@ -182,7 +182,7 @@ func (v *vaultCollect) noteHead(segmentID glid.GLID) {
 // exclusivity via claimPull means no live pull owns it). Verify and promote
 // it in place instead of skipping: skipping wedged the segment forever — the
 // holder receipt never committed and the release gate stalled for its
-// manifest (gastrolog-5zotim). Corrupt orphan bytes are discarded by
+// manifest. Corrupt orphan bytes are discarded by
 // PromoteVerified and re-pulled fresh; pre-head files are never the only
 // copy (the holder keeps completed/ bytes until release).
 func (v *vaultCollect) collectOne(ctx context.Context, ref AssignedSegment) error {
@@ -197,8 +197,7 @@ func (v *vaultCollect) collectOne(ctx context.Context, ref AssignedSegment) erro
 			// Includes ErrPreHeadPurged: a concurrent release purge deleted
 			// the file between the stat above and the promote — return the
 			// deferred error instead of pulling a segment the registry may
-			// have just released; the next pass re-reads registry truth
-			// (gastrolog-2as548).
+			// have just released; the next pass re-reads registry truth.
 			return err
 		}
 		// Corrupt orphan discarded — fall through to a fresh pull.
@@ -226,7 +225,7 @@ func (v *vaultCollect) finishCollect(segmentID glid.GLID, dest string, hdr segme
 }
 
 // noteHeadArrival counts a segment's records/bytes as home-side ingress for
-// the stage throughput gauges (gastrolog-10n6k8).
+// the stage throughput gauges.
 func (v *vaultCollect) noteHeadArrival(path string, hdr segment.Header) {
 	v.collectedRecords.Add(uint64(hdr.RecordCount))
 	if info, err := os.Stat(path); err == nil {
@@ -238,8 +237,8 @@ func (v *vaultCollect) noteHeadArrival(path string, hdr segment.Header) {
 // vault-ctl apply, then marks them locally so later passes skip re-commits.
 // Batching is load-bearing: one Raft round per pass instead of per segment —
 // sequential per-segment applies serialized whole passes (under passMu)
-// behind the publish flood and starved leader-home GLCB builds
-// (gastrolog-38snf4). Idempotent at the FSM layer too (CmdAckSegmentHolder
+// behind the publish flood and starved leader-home GLCB builds.
+// Idempotent at the FSM layer too (CmdAckSegmentHolder
 // de-dups per segment), so a crash between commit and marking is harmless.
 // Returns how many receipts were freshly committed.
 func (v *vaultCollect) commitReceipts(ctx context.Context, ids []glid.GLID) (int, error) {
@@ -297,7 +296,7 @@ func (v *vaultCollect) planCollectAction(ref AssignedSegment) collectAction {
 	// A segment already sitting in pre-head/ is NOT skipped: an un-receipted
 	// pre-head file is a crash orphan and collectOne promotes it in place
 	// (or discards and re-pulls when corrupt). Skipping wedged the segment
-	// forever (gastrolog-5zotim).
+	// forever.
 	return collectPull
 }
 
@@ -334,7 +333,7 @@ func (v *vaultCollect) collectForRef(ctx context.Context, ref AssignedSegment) (
 }
 
 // claimPull marks segmentID as having an in-flight pull. Returns false when
-// another goroutine already owns the pull (gastrolog-1b51yf).
+// another goroutine already owns the pull.
 func (v *vaultCollect) claimPull(id glid.GLID) bool {
 	v.collectMu.Lock()
 	defer v.collectMu.Unlock()
@@ -442,7 +441,7 @@ func (v *vaultCollect) collectSegments(ctx context.Context, segmentIDs []glid.GL
 	}
 	// No passMu: a targeted pull must not wait for the full-pass worker —
 	// under backlog that pass runs for a very long time and the chunking
-	// build (serial seal queue) blocked behind it (gastrolog-1b51yf).
+	// build (serial seal queue) blocked behind it.
 	// Per-segment exclusivity comes from claimPull inside collectForRef;
 	// layout/receipted mutations stay under collectMu.
 	v.collectMu.Lock()
@@ -504,7 +503,7 @@ func (v *vaultCollect) awaitCollectPass(ctx context.Context) error {
 // Notify has already closed the wake channel captured before the pass, so the
 // loop re-fires and the NEXT pass (which observes post-registration state)
 // completes it. Completing mid-pass registrants with the in-flight pass's
-// result returned stale success (gastrolog-38snf4 gate finding).
+// result returned stale success.
 func (v *vaultCollect) takeCollectWaiters() []collectWaiter {
 	v.collectWaitMu.Lock()
 	defer v.collectWaitMu.Unlock()
@@ -552,7 +551,7 @@ type Manager struct {
 	wg      sync.WaitGroup
 
 	// passFailLog throttles collect-pass failure warns to one line per
-	// vault per interval with a suppressed count (gastrolog-4elpu1).
+	// vault per interval with a suppressed count.
 	passFailLog logging.Throttle
 }
 
@@ -567,7 +566,7 @@ func New(cfg Config) *Manager {
 }
 
 // retryLogInterval spaces identical retry-failure warn lines per vault; the
-// retry loop itself is unthrottled (gastrolog-4elpu1).
+// retry loop itself is unthrottled.
 const retryLogInterval = 30 * time.Second
 
 func (m *Manager) logger() *slog.Logger {
@@ -599,7 +598,7 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, root string, cfg VaultConfig)
 // pointers captured at register time. The whole bundle is published as one
 // atomic snapshot; Manager.mu is held across the body so concurrent rewires
 // (placement sweep vs route reload both reach this path) serialize and the
-// unsub/wire callback bookkeeping cannot interleave (gastrolog-50m2vi).
+// unsub/wire callback bookkeeping cannot interleave.
 func (m *Manager) RewireVaultFSM(vaultID glid.GLID, cfg VaultConfig) error {
 	if cfg.FSM == nil {
 		return errors.New("vault-ctl FSM required")
@@ -653,8 +652,8 @@ func (m *Manager) unwireVaultFSMCallbacks(v *vaultCollect) {
 // inside the SAME m.mu critical section as the map lookup/delete rather than
 // read again afterward: it is written exactly once (nil -> non-nil, never
 // back) by startWorkerLocked under m.mu, so reading the field itself outside
-// the lock is a data race against that write in general (gastrolog-54kqlj;
-// see CollectOnce below for the exploitable instance of this pattern).
+// the lock is a data race against that write in general (see CollectOnce
+// below for the exploitable instance of this pattern).
 func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
@@ -684,7 +683,7 @@ func (m *Manager) Notify(vaultID glid.GLID) {
 // CollectOnce rolls the log and collects missing segments for one vault (for tests
 // and ChunkingManager materialization).
 // VaultCollectStats is one vault's cumulative home-side ingress counters
-// (records/bytes arrived in head/ on this node) — gastrolog-10n6k8.
+// (records/bytes arrived in head/ on this node).
 type VaultCollectStats struct {
 	VaultID          glid.GLID
 	CollectedRecords uint64
@@ -711,7 +710,7 @@ func (m *Manager) CollectStats() []VaultCollectStats {
 
 // NoteLocalHeadArrival counts a locally-promoted segment (origin == home:
 // distribution renames completed/ into head/ without a pull) as home-side
-// ingress, reading only the fixed header (gastrolog-10n6k8).
+// ingress, reading only the fixed header.
 func (m *Manager) NoteLocalHeadArrival(vaultID, segmentID glid.GLID) {
 	m.mu.Lock()
 	v := m.vaults[vaultID]
@@ -731,10 +730,10 @@ func (m *Manager) NoteLocalHeadArrival(vaultID, segmentID glid.GLID) {
 // lookup, whether a per-vault worker is running: v.stopWorker is written
 // exactly once (nil -> non-nil, never back to nil) by startWorkerLocked
 // under m.mu, so reading it here while still holding m.mu — rather than
-// after a separate Lock/Unlock, as before — removes the data race against
-// that write, and with it the stale-nil window where CollectOnce would run
-// its own collectMissing pass concurrently with the worker's freshly
-// started initial catch-up pass (gastrolog-54kqlj).
+// after a separate Lock/Unlock — removes the data race against that write,
+// and with it the stale-nil window where CollectOnce would run its own
+// collectMissing pass concurrently with the worker's freshly started
+// initial catch-up pass.
 //
 // Residual note on the stop path: workerRunning can still go stale between
 // this locked read and the awaitCollectPass call below if the worker exits
@@ -811,14 +810,14 @@ func (m *Manager) triggerCollect(vaultID glid.GLID) {
 func (m *Manager) logCollectPassErr(v *vaultCollect, log *slog.Logger, err error) {
 	// Checksum failures retry like any deferred pull, but a holder serving
 	// corrupt or divergent bytes is a data-integrity signal — never bury it
-	// at Debug (gastrolog-5zotim).
+	// at Debug.
 	if retryableCollectErr(err) && !errors.Is(err, ErrCorruptSegment) {
 		log.Debug("collect pass deferred", "error", err)
 		return
 	}
 	// One warn per vault per interval; pulls against an unavailable holder
 	// retry for as long as the holder is gone — 62k identical lines during
-	// one node outage (gastrolog-4elpu1).
+	// one node outage.
 	if n, ok := m.passFailLog.Allow(v.vaultID.String()); ok {
 		log.Warn("collect pass failed", "error", err, "suppressed", n)
 	}
@@ -895,7 +894,7 @@ func (v *vaultCollect) stopRetryWake() {
 // callers — RegisterVault and Run — hold it), and it transitions nil ->
 // non-nil exactly once per vault. Every other reader (CollectOnce,
 // UnregisterVault) must take the same read under m.mu rather than after
-// releasing it, or the read races this write (gastrolog-54kqlj).
+// releasing it, or the read races this write.
 func (m *Manager) startWorkerLocked(v *vaultCollect) {
 	if v.stopWorker != nil {
 		return // already running

@@ -441,12 +441,10 @@ func TestGetFieldsClampsMaxSamples(t *testing.T) {
 	_ = resp.Msg
 }
 
-// TestGetFields_InvalidUTF8InRaw_Marshals is the regression for
-// gastrolog-1uh5h. Before the fix, any record whose raw body yielded an
-// extractable KV with invalid-UTF-8 bytes caused GetFields to fail with
+// TestGetFields_InvalidUTF8InRaw_Marshals pins that a record whose raw body
+// yields an extractable KV with invalid-UTF-8 bytes still marshals: the
+// value is sanitized (replacement char substituted) instead of failing with
 // "proto: field gastrolog.v1.FieldValue.value contains invalid UTF-8".
-// After the fix, the value is sanitized (replacement char substituted)
-// and the response marshals cleanly.
 func TestGetFields_InvalidUTF8InRaw_Marshals(t *testing.T) {
 	t.Parallel()
 
@@ -463,8 +461,8 @@ func TestGetFields_InvalidUTF8InRaw_Marshals(t *testing.T) {
 
 	// Raw body with an invalid UTF-8 byte (0xff is never a valid start
 	// byte) embedded in the logfmt-extractable value. CombinedExtract
-	// will surface `host=\xff\xfe...` as a KV pair, which used to blow
-	// up proto marshal.
+	// surfaces `host=\xff\xfe...` as a KV pair, which proto marshal
+	// rejects unless the value is sanitized.
 	rawInvalid := append([]byte(`level=error host=`), 0xff, 0xfe, 0xfd)
 	rawInvalid = append(rawInvalid, []byte(` port=5432`)...)
 	s.CM.Append(chunk.Record{

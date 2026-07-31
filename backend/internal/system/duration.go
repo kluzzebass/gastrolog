@@ -27,7 +27,7 @@ import (
 //	"360d"     → 360 days
 func ParseDuration(s string) (time.Duration, error) {
 	// Collapse whitespace like ParseSize: "1h 30m" and "1 h" mean what they
-	// look like. time.ParseDuration itself rejects any spaces (gastrolog-etcjdx).
+	// look like. time.ParseDuration itself rejects any spaces.
 	s = strings.Join(strings.Fields(s), "")
 	if s == "" {
 		return 0, errors.New("empty duration")

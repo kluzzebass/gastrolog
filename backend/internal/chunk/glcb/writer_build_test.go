@@ -88,7 +88,7 @@ func TestWriterDirectAndStagingProduceIdenticalBlob(t *testing.T) {
 // (Add via appendRecordFrame, AddView via appendRecordFrameView) and the
 // two emit paths (direct, staging) all produce byte-identical GLCBs for
 // the same logical records. GLCB is durable on-disk format: divergence
-// between any of these build paths is a format bug (gastrolog-3ieb26).
+// between any of these build paths is a format bug.
 func TestWriterAddViewMatchesAddByteForByte(t *testing.T) {
 	t.Parallel()
 	chunkID, vaultID, records := testRecords()

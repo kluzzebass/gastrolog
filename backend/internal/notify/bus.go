@@ -14,7 +14,7 @@ import "sync"
 // changed" (cheap wake-up), use Bus when consumers need the event content
 // (chunk diffs, config diffs, etc.). The bare-signal pattern forced clients
 // into expensive pull-after-push refetches under high event rates — Bus
-// avoids that by carrying the change directly. See gastrolog-3pf9w.
+// avoids that by carrying the change directly.
 //
 // Bus is intentionally minimal: no replay buffer, no per-subscriber pull
 // semantics, no built-in resync. Resync is the subscriber's responsibility

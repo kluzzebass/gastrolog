@@ -9,7 +9,7 @@ import (
 // min/max WriteTS, IngestTS, and SourceTS across its records. The scan reads
 // views, not records: bounds need three timestamps per record, and the
 // planner runs this constantly — full materialization here was the loaded
-// home's single largest allocation source (gastrolog-11y2iv).
+// home's single largest allocation source.
 func SliceRecordBounds(idx *OrderedIndex, first, last uint32) (vaultctlfsm.ManifestTimeBounds, error) {
 	var out vaultctlfsm.ManifestTimeBounds
 	if idx == nil {

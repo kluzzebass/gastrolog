@@ -10,8 +10,8 @@ import (
 )
 
 // buildRichFSM populates an FSM with state in all snapshot sections plus
-// tombstones, including a chunk carrying the Hash / CloudServiceID / KeyScheme
-// fields that the legacy 123-byte entry codec dropped (gastrolog-5lrg7).
+// tombstones, including a chunk carrying the Hash / CloudServiceID /
+// KeyScheme fields.
 func buildRichFSM(t *testing.T) *FSM {
 	t.Helper()
 	f := New()
@@ -71,7 +71,7 @@ func buildRichFSM(t *testing.T) *FSM {
 
 // TestSnapshotProtoRoundTripAllSections verifies every snapshot section
 // round-trips through SnapshotProto/RestoreProto with identical proto state,
-// and that the manifest extra fields survive (gastrolog-5lrg7 Phase C).
+// and that the manifest extra fields survive.
 func TestSnapshotProtoRoundTripAllSections(t *testing.T) {
 	t.Parallel()
 	src := buildRichFSM(t)
@@ -109,7 +109,7 @@ func TestSnapshotProtoRoundTripAllSections(t *testing.T) {
 // state marshal to byte-identical payloads, despite the map-backed sections
 // (tombstones, pending deletes) having nondeterministic Go iteration order.
 // InstallSnapshot does not require this, but determinism keeps snapshot
-// diffing and debugging sane (gastrolog-5lrg7 Phase C).
+// diffing and debugging sane.
 func TestSnapshotProtoDeterministic(t *testing.T) {
 	t.Parallel()
 	f := buildRichFSM(t)
@@ -130,7 +130,7 @@ func TestSnapshotProtoDeterministic(t *testing.T) {
 }
 
 // TestSnapshotPersistRestoreFullRoundTrip exercises the hraft FSMSnapshot
-// Persist path and the marshaled Restore path end-to-end (gastrolog-5lrg7).
+// Persist path and the marshaled Restore path end-to-end.
 func TestSnapshotPersistRestoreFullRoundTrip(t *testing.T) {
 	t.Parallel()
 	src := buildRichFSM(t)
@@ -154,7 +154,7 @@ func TestSnapshotPersistRestoreFullRoundTrip(t *testing.T) {
 }
 
 // TestRestoreRejectsMalformedSnapshot verifies Restore returns an error (not a
-// panic) for undecodable snapshot bytes (gastrolog-5lrg7 unhappy path).
+// panic) for undecodable snapshot bytes (unhappy path).
 func TestRestoreRejectsMalformedSnapshot(t *testing.T) {
 	t.Parallel()
 	f := New()
@@ -166,7 +166,7 @@ func TestRestoreRejectsMalformedSnapshot(t *testing.T) {
 }
 
 // TestRestoreEmptySnapshotIsZeroState verifies an empty (zero-entry) snapshot
-// restores to a clean, ready FSM (gastrolog-5lrg7 edge case).
+// restores to a clean, ready FSM (edge case).
 func TestRestoreEmptySnapshotIsZeroState(t *testing.T) {
 	t.Parallel()
 	src := New()

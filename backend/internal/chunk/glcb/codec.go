@@ -19,9 +19,8 @@ import (
 //
 // The encoder (EncodeObjectMetadata) and decoder (DecodeObjectMetadata) MUST
 // agree on the exact spellings, so they are declared once here rather than
-// as independent string literals in each function. Previously each side spelled
-// all ten keys by hand and any drift silently produced wrong metadata
-// (gastrolog-5opw43).
+// as independent string literals in each function: any drift between two
+// hand-spelled copies silently produces wrong metadata.
 const (
 	metaKeyChunkID     = "chunk_id"
 	metaKeyVaultID     = "vault_id"
@@ -97,7 +96,7 @@ func DecodeObjectMetadata(id chunk.ChunkID, info blobstore.BlobInfo) (chunk.Chun
 	// This ChunkMeta is built straight from the cloud store's blob listing;
 	// the caller (loadCloudBackedChunksFromStore) fills in the LOCAL
 	// DiskBytes separately, from whatever this node actually has cached on
-	// disk (0 if nothing). See gastrolog-33ul6h.
+	// disk (0 if nothing).
 	meta := chunk.ChunkMeta{
 		ID:         id,
 		Sealed:     true,
@@ -163,7 +162,7 @@ func DecodeObjectMetadata(id chunk.ChunkID, info blobstore.BlobInfo) (chunk.Chun
 // carry it — the only caller is the cloud-blob-footer fallback, so this is
 // always the compressed blob's size, never a local on-disk fact). Bytes
 // falls back to it only when the footer's RawBytes is unknown. The caller
-// fills in the LOCAL DiskBytes separately. See gastrolog-33ul6h.
+// fills in the LOCAL DiskBytes separately.
 func BlobMetaToChunkMeta(bm BlobMeta, cloudBytes int64) chunk.ChunkMeta {
 	bytes := bm.RawBytes
 	if bytes <= 0 {

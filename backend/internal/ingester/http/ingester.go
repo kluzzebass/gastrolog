@@ -49,7 +49,6 @@ type Ingester struct {
 	// pressureGate is consulted non-blockingly by handlePush to decide
 	// whether to reject push requests with 429. Hysteresis in the gate
 	// prevents accept/reject flapping. Injected by the orchestrator.
-	// See gastrolog-4fguu.
 	pressureGate *chanwatch.PressureGate
 }
 

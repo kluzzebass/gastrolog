@@ -30,10 +30,10 @@ type IngesterMessage struct {
 
 	// IngestTS is when the ingester received this message, and IngesterID is
 	// the identity of the ingester that produced it. Ingesters stamp both on
-	// every message (the gastrolog-44b9r identity contract; see
-	// ingester/identitytest). Minting owns the EventID, so IngestionManager
-	// does not forward these onto the digestion queue — they are the
-	// ingester-side identity assertion, not digestion-queue payload.
+	// every message (the identity contract; see ingester/identitytest).
+	// Minting owns the EventID, so IngestionManager does not forward these
+	// onto the digestion queue — they are the ingester-side identity
+	// assertion, not digestion-queue payload.
 	IngestTS   time.Time
 	IngesterID string
 }
@@ -65,8 +65,7 @@ type Checkpointable interface {
 // when the ingest pipeline is backed up. SetPressureGate is called before the
 // ingester starts; the ingester then consults gate.Wait(ctx) before emitting
 // (each record or batch) to block while pressure is elevated or critical.
-// Ingesters that don't implement this interface run at full rate. See
-// gastrolog-4fguu.
+// Ingesters that don't implement this interface run at full rate.
 type PressureAware interface {
 	SetPressureGate(gate *chanwatch.PressureGate)
 }

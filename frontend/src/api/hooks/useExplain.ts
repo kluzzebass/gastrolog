@@ -9,7 +9,7 @@ interface ExplainState {
   expression: string;
   pipelineStages: QueryPipelineStage[];
   // Present only when the cross-node plan fan-out could not reach every
-  // peer, so the plan omits some node's chunks (gastrolog-1ic07).
+  // peer, so the plan omits some node's chunks.
   contributionReport: ContributionReport | null;
   isLoading: boolean;
   error: Error | null;

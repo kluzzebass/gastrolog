@@ -6,13 +6,13 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// A chunk's CURRENT cloud storage class used to live only in a node-local map
-// on whichever node called the cloud API. The archival sweep compares that
-// class against the transition chain's target, and on the FSM iteration path it
-// read the manifest entry — where the field did not exist — so the comparison
-// always saw "" and a multi-step chain (cold -> deep-freeze) could never advance
-// past its first step. CmdArchiveChunk makes the class replicated state, so any
-// voter can answer "what class is this chunk in?" (gastrolog-35ygqv).
+// Only the node that calls the cloud API knows a chunk's CURRENT cloud
+// storage class. The archival sweep compares that class against the
+// transition chain's target on the FSM iteration path, so unless the class
+// is replicated the comparison sees "" and a multi-step chain (cold ->
+// deep-freeze) never advances past its first step. CmdArchiveChunk makes
+// the class replicated state, so any voter can answer "what class is this
+// chunk in?".
 
 func seedChunk(t *testing.T, f *FSM, id [16]byte) {
 	t.Helper()

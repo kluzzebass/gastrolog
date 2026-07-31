@@ -11,8 +11,7 @@ import (
 // through system.ParseSize: a value shown in `inspect` and copied back into a
 // create command must re-parse to the same bytes. FormatBytesDisplay
 // (.toFixed) drifts (1500 → "1.5 KiB" → 1536); FormatBytesCompact does not.
-// Guards the drift gastrolog-1qd5wz fixed. 1001 and 1500 are the probe values
-// from the review that surfaced this.
+// 1001 and 1500 are the probe values that expose the drift.
 func TestFormatBytesCompactRoundTripsThroughParseSize(t *testing.T) {
 	for _, n := range []uint64{
 		0, 1, 999, 1000, 1001, 1024, 1500,

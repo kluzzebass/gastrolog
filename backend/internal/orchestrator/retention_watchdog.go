@@ -10,12 +10,12 @@ import (
 // single record accepted before it is aborted and the chunk retained for a
 // later sweep. Generous on purpose: it exists to stop a sweep from parking
 // forever on a jammed pipeline (a destination that passes its admission
-// gate but stops draining), not to police throughput (gastrolog-5ct2av).
+// gate but stops draining), not to police throughput.
 const retentionFanOutStallWindow = 2 * time.Minute
 
 // errRetentionFanOutStalled is the abort cause when the watchdog fires. The
 // abort does not consume the one-shot route flag, so the next sweep retries
-// the chunk from scratch (gastrolog-5034va ordering).
+// the chunk from scratch.
 var errRetentionFanOutStalled = errors.New(
 	"route fan-out made no progress for a full stall window; chunk retained for a later sweep")
 

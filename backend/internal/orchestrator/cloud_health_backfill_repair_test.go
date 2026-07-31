@@ -1,13 +1,12 @@
 package orchestrator
 
-// Coverage for gastrolog-4ryguo's failure-tracking machinery. The original
-// registration gap — a sealed chunk with its GLCB on disk and an FSM manifest
-// entry but no chunk-manager registration, permanently unresolvable, cloud
-// backfill retrying every 5s forever — is now closed at the source:
-// Manager.uploadToCloud resolves the chunk through the lazy on-miss GLCB
-// resolver (lookupMeta) instead of a raw m.metas read, so a freshly-sealed
-// on-disk external chunk uploads with no register-first step and no repair
-// (gastrolog-34kmv retired the eager repairAndRetryBackfill). The multi-node
+// Coverage for cloud-backfill failure tracking. The original registration gap
+// — a sealed chunk with its GLCB on disk and an FSM manifest entry but no
+// chunk-manager registration, permanently unresolvable, cloud backfill
+// retrying every 5s forever — is closed at the source: Manager.uploadToCloud
+// resolves the chunk through the lazy on-miss GLCB resolver (lookupMeta)
+// instead of a raw m.metas read, so a freshly-sealed on-disk external chunk
+// uploads with no register-first step and no repair. The multi-node
 // self-resolving upload is pinned in pipeline_cloud_upload_test.go.
 //
 // These tests pin the backoff/alarm accounting that remains: (1) EVERY failure
@@ -109,7 +108,7 @@ func (m *registrarUploaderMock) registerCallCount() int {
 // registerPipelineGLCB), and — when writeGLCB is true — puts a data.glcb
 // file on disk under the vault's pipeline chunk root. The chunk manager
 // (registrarUploaderMock) starts with no registration for the chunk,
-// reproducing the exact post-restart gap gastrolog-4ryguo describes.
+// reproducing the exact post-restart gap.
 func backfillRepairFixture(t *testing.T, writeGLCB bool) (*Orchestrator, *VaultInstance, chunk.ChunkID, *registrarUploaderMock) {
 	t.Helper()
 	vaultID := glid.New()
@@ -187,9 +186,8 @@ func waitBackfillJobDone(t *testing.T, orch *Orchestrator, jobName string, m *re
 	}
 }
 
-// The former TestBackfillCloudUploads_RepairsRegistrationMissingChunk is
-// retired with the eager repair (gastrolog-34kmv): a freshly-sealed on-disk
-// external chunk now uploads with no register-first step because
+// There is no registration-repair coverage here: a freshly-sealed on-disk
+// external chunk uploads with no register-first step because
 // Manager.uploadToCloud self-resolves it via the lazy on-miss GLCB resolver.
 // That self-resolving upload is pinned end-to-end against a real chunk
 // manager in pipeline_cloud_upload_test.go

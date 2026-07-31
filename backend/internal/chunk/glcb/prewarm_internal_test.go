@@ -10,8 +10,7 @@ import (
 // its path + size; reused here for the prewarm wiring tests.
 
 // TestPrewarmSequentialReachesMadvise proves the chunk.SequentialPrewarmer
-// method actually reaches the warm call on a live mapping — the whole point of
-// gastrolog-5gmb99, since the prior implementation was an unreachable no-op.
+// method actually reaches the warm call on a live mapping.
 func TestPrewarmSequentialReachesMadvise(t *testing.T) {
 	path, size := buildBlobFile(t)
 	blob, err := OpenMappedBlob(path)

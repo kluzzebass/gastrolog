@@ -12,9 +12,9 @@ import (
 // SubmitIngest pushes a single record through the pipeline's routing path the
 // same way live ingest does after digestion: an IngestSource SourceContext and
 // an optional ack-after-fsync channel. Test-only seam for cluster-acceptance
-// tests (gastrolog-18f9r, Rubicon E3) that need deterministic records flowing
-// through the real route → segmentation → distribution → collection →
-// chunking path without running a synthetic ingester.
+// tests that need deterministic records flowing through the real route →
+// segmentation → distribution → collection → chunking path without running a
+// synthetic ingester.
 //
 // When ack is non-nil it resolves only after every matched vault has durably
 // committed the record to its local segment (first error wins). The ack

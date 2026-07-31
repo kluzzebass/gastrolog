@@ -157,9 +157,9 @@ func EncodeWithDict(attrs Attributes, dict *StringDict) (encoded []byte, newEntr
 // AppendWithDictWire dict-encodes attributes directly from their segment
 // wire form ([count][klen k vlen v]..., key-sorted at encode) and appends
 // the result to dst — no intermediate map. The GLCB merge transcodes every
-// record segment-wire -> dict-wire; the map it used to build in between
-// was pure garbage (gastrolog-11y2iv). newEntries lists dict strings this
-// call inserted, in insertion order, exactly as EncodeWithDict reports.
+// record segment-wire -> dict-wire; an intermediate map there is pure
+// garbage. newEntries lists dict strings this call inserted, in insertion
+// order, exactly as EncodeWithDict reports.
 // Determinism: input pair order is the segment encoder's sorted order and
 // segments are byte-identical on every home, so dict ID assignment matches
 // across homes.

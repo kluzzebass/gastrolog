@@ -19,7 +19,7 @@ type HolderSearchScope struct {
 
 // HolderQueryEngineForVault returns a query engine scoped to the local vault
 // instance (leader or follower) with chunk subset filtering for distributed
-// sealed search (gastrolog-2qj7m).
+// sealed search.
 func (o *Orchestrator) HolderQueryEngineForVault(vaultID glid.GLID, scope HolderSearchScope) (*query.Engine, error) {
 	o.mu.RLock()
 	v := o.vaults[vaultID]

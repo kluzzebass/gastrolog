@@ -1,6 +1,6 @@
 package alert
 
-// Chattering-suppression tests (gastrolog-4wvxqh, EEMUA 191 principle 3).
+// Chattering-suppression tests (EEMUA 191 principle 3).
 // Every test drives the collector's injected clock — suppression state is a
 // pure function of Raise/Clear calls and that clock, so there is not a
 // single sleep here and never should be.

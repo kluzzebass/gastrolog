@@ -203,7 +203,7 @@ func (c *counterMap) snapshot() map[glid.GLID]uint64 {
 
 // Run consumes inputs until in is closed.
 //
-// Shutdown is close-driven, not ctx-driven (gastrolog-5kcq5q): the supervisor
+// Shutdown is close-driven, not ctx-driven: the supervisor
 // pump closes in after the digest stage's output drains, so workers receive
 // with a plain range instead of per-record 2-case selects (the sellock hot
 // spot). ctx still bounds the per-delivery sink sends inside route() — that

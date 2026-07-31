@@ -7,8 +7,8 @@ import (
 )
 
 // NewPutLogLevels builds a SystemCommand carrying a LogLevelConfig
-// replacement (gastrolog-3flfp). One Raft commit atomically replaces the
-// whole rule set across every node.
+// replacement. One Raft commit atomically replaces the whole rule set
+// across every node.
 func NewPutLogLevels(cfg system.LogLevelConfig) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_PutLogLevels{

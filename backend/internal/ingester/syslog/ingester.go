@@ -37,7 +37,7 @@ type Ingester struct {
 	// pressureGate throttles socket reads when the ingest pipeline is backed up.
 	// Pausing reads lets the kernel apply backpressure upstream: TCP senders
 	// block on a closed window, UDP senders see packet loss. Injected by the
-	// orchestrator before Run; nil means no throttling. See gastrolog-4fguu.
+	// orchestrator before Run; nil means no throttling.
 	pressureGate *chanwatch.PressureGate
 }
 

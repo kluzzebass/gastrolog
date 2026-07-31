@@ -394,11 +394,10 @@ func FuzzExportToRecord(f *testing.F) {
 }
 
 // BenchmarkChunkToRecordConversion compares the two chunk.Record →
-// record.Record converters on the retention record-move path
-// (gastrolog-33eabj / gastrolog-11y2iv). ChunkToRecord was the converter
-// SubmitRetentionRecord used before the owned-transfer fix: it re-allocates
-// the attrs map per record. ChunkToRecordOwned transfers the freshly
-// materialized map by reference — zero attr allocations per moved record.
+// record.Record converters on the retention record-move path. ChunkToRecord
+// re-allocates the attrs map per record; ChunkToRecordOwned transfers the
+// freshly materialized map by reference — zero attr allocations per moved
+// record.
 func BenchmarkChunkToRecordConversion(b *testing.B) {
 	rec := fullyPopulatedRecord()
 	b.Run("copied", func(b *testing.B) {

@@ -4,7 +4,7 @@ package orchestrator
 // that name, so both bodies run. That is the caller's bug. What the scheduler
 // must not do is misreport its own state when it happens — which it did, because
 // the completion listener discarded the job id gocron gave it and re-derived one
-// by looking the NAME up. See gastrolog-1scomn.
+// by looking the NAME up.
 
 import (
 	"context"

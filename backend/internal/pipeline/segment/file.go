@@ -27,19 +27,19 @@ type File struct {
 	// non-linear digest, NOT a CRC: each frame carries its own trailing
 	// CRC32, and rolling a CRC over lenPrefix ++ body ++ bodyCRC cancels the
 	// content contribution by CRC linearity, leaving the segment checksum
-	// blind to same-length substitution (gastrolog-1vepg0).
+	// blind to same-length substitution.
 	recordDigest *xxhash.Digest
 	dataEnd      uint32 // exclusive end of committed record bytes (hot-path append anchor)
-	batchBuf     []byte // reused AppendFrames scratch (gastrolog-1ojsm6)
+	batchBuf     []byte // reused AppendFrames scratch
 	// memEntries captures (EventID, filePos, sourceTS) per appended frame so
 	// Finalize can build both index tails from memory instead of re-reading
-	// the whole file (gastrolog-oin19g). Only writer-created segments have a
-	// complete capture; Open-path (recovered) segments fall back to the disk
-	// scan. Freed after BuildIndex, and HARD-CAPPED at memIndexEntryCap:
-	// past the cap the capture is dropped (memCaptureOff) and Finalize uses
-	// the disk scan — the capture is an optimization, never a correctness
-	// requirement or a memory liability. The bound holds regardless of the
-	// caller's complete policy.
+	// the whole file. Only writer-created segments have a complete capture;
+	// Open-path (recovered) segments fall back to the disk scan. Freed after
+	// BuildIndex, and HARD-CAPPED at memIndexEntryCap: past the cap the
+	// capture is dropped (memCaptureOff) and Finalize uses the disk scan —
+	// the capture is an optimization, never a correctness requirement or a
+	// memory liability. The bound holds regardless of the caller's complete
+	// policy.
 	memEntries    []memIndexEntry
 	memCaptureOff bool
 }
@@ -48,11 +48,11 @@ type File struct {
 // worst case). The production complete policy (8 MiB segments) yields ~30K
 // entries, ~8x under the cap; a missing or misconfigured complete policy hits
 // the cap and degrades to the disk-scan finalize instead of growing RAM with
-// the file (gastrolog-oin19g). Var, not const, so tests can exercise the
-// overflow path without 262K appends.
+// the file. Var, not const, so tests can exercise the overflow path without
+// 262K appends.
 var memIndexEntryCap = 1 << 18
 
-// memIndexEntry is the in-memory per-frame index capture (gastrolog-oin19g).
+// memIndexEntry is the in-memory per-frame index capture.
 type memIndexEntry struct {
 	entry    IndexEntry
 	sourceNS uint64 // tsNanos(rec.SourceTS); 0 = unset, excluded from source index
@@ -83,9 +83,8 @@ func Create(path string, meta Meta) (*File, error) {
 
 // ReadHeader decodes just the fixed header of a segment file without opening,
 // reconciling, or checksum-verifying it. For cheap metadata reads (record
-// counts for stage throughput counters — gastrolog-10n6k8; distribution
-// publish staging and stranded rescans — gastrolog-faj2yv); NOT a validity
-// check.
+// counts for stage throughput counters; distribution publish staging and
+// stranded rescans); NOT a validity check.
 func ReadHeader(path string) (Header, error) {
 	headerReads.Add(1)
 	f, err := os.Open(filepath.Clean(path))
@@ -149,8 +148,8 @@ func (sf *File) Append(rec *record.Record, writeTS time.Time) error {
 // TakeScratch surrenders the file's batch buffer for reuse by a successor
 // file. Segment rotation under load created a fresh multi-megabyte batch
 // buffer per segment (top allocation site under pour load); the writer
-// hands the buffer across rotations instead (gastrolog-11y2iv). Call only
-// after appends to this file have stopped.
+// hands the buffer across rotations instead. Call only after appends to this
+// file have stopped.
 func (sf *File) TakeScratch() []byte {
 	b := sf.batchBuf
 	sf.batchBuf = nil
@@ -177,11 +176,11 @@ type Frame struct {
 }
 
 // AppendFrames appends a batch of pre-encoded frames with ONE data write and
-// ONE header rewrite. The previous per-record shape (length-prefix pwrite +
-// body pwrite + header-rewrite pwrite) put 3 serialized syscalls on the hot
-// path and capped a vault writer at ~25K rec/s while the node sat mostly idle
-// (gastrolog-1ojsm6). Crash safety is unchanged: recovery reconciles frames
-// beyond (or torn around) the last header rewrite from the fsynced prefix
+// ONE header rewrite. Writing per record instead (length-prefix pwrite +
+// body pwrite + header-rewrite pwrite) puts 3 serialized syscalls on the hot
+// path, which measured out at ~25K rec/s per vault writer with the node
+// mostly idle. Crash safety is unaffected: recovery reconciles frames beyond
+// (or torn around) the last header rewrite from the fsynced prefix
 // (reconcileOnOpen/scanForward), and acks only release after the group-commit
 // fsync.
 func (sf *File) AppendFrames(frames []Frame) error {
@@ -209,7 +208,7 @@ func (sf *File) AppendFrames(frames []Frame) error {
 	// Build the batch buffer — [lenPrefix|body]... — feeding the running
 	// digest in frame order, exactly as sequential single appends would have.
 	// Size it exactly up front: append-doubling growth across batches was
-	// ~10GB of garbage per soak run (gastrolog-11y2iv).
+	// ~10GB of garbage per soak run.
 	need := 0
 	for i := range frames {
 		need += frameLenPrefixSize + len(frames[i].Body)
@@ -264,8 +263,7 @@ func (sf *File) AppendFrames(frames []Frame) error {
 
 // DataSize returns the current end-of-data offset (header plus every appended
 // frame) from the in-memory append anchor — no Stat syscall. Valid for the
-// writer's rotation checks until Finalize writes the index tail
-// (gastrolog-1ojsm6).
+// writer's rotation checks until Finalize writes the index tail.
 func (sf *File) DataSize() int64 {
 	return int64(sf.dataEnd)
 }
@@ -530,9 +528,9 @@ func (sf *File) verifyChecksum() error {
 // readFrameAt decodes one frame. Allocates a fresh body buffer per call;
 // loop callers use readFrameAtBuf to reuse a scratch buffer across
 // records — the per-record body alloc was 18GB flat / 51GB cumulative of
-// garbage per soak run in merge reads (gastrolog-11y2iv). Safe because
-// decodeFrameBody copies everything out of the body (Raw via make+copy,
-// attrs via string conversion); nothing aliases the buffer after return.
+// garbage per soak run in merge reads. Safe because decodeFrameBody copies
+// everything out of the body (Raw via make+copy, attrs via string
+// conversion); nothing aliases the buffer after return.
 func readFrameAt(r io.ReaderAt, offset int64, limit uint32) (record.Record, uint32, error) {
 	rec, n, _, err := readFrameAtBuf(r, offset, limit, nil)
 	return rec, n, err

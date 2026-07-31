@@ -21,7 +21,7 @@ const GROUP_LABELS: Record<StageMilestone["group"], string> = {
 // planned/built/sealed, head purges, GLCB catch-up pulls, retention deletes).
 // Cluster totals are shown by default; the per-node breakdown is on hover.
 // Quiet until an event happens: milestones with a zero cluster total and no
-// rate are omitted (gastrolog-4r784a).
+// rate are omitted.
 export function VaultStageCountersSection({
   vaultId,
   dark,

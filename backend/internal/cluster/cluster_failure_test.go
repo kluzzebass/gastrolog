@@ -14,8 +14,8 @@ import (
 
 // dummyMaxAge backs the RotationPolicyConfig.MaxAgeNanos pointer used by
 // putReplProbe — avoids per-callsite local string vars in cluster tests.
-// gastrolog-4kkoo (Phase 5): rotation policy replaces FilterConfig as the
-// generic Raft replication probe.
+// Rotation policy replaces FilterConfig as the generic Raft replication
+// probe.
 var dummyMaxAge = "1h"
 
 // putReplProbe writes a rotation policy through a node's store as a
@@ -50,9 +50,9 @@ func waitStableLeader(t *testing.T, nodes []*testNode, timeout time.Duration) *t
 }
 
 // waitReplication waits for a rotation policy to appear on a node's FSM.
-// gastrolog-4kkoo (Phase 5): switched from filter to rotation policy as
-// the replication probe — FilterConfig is gone, but the same Raft-replicate
-// smoke test is what matters.
+// Switched from filter to rotation policy as the replication probe —
+// FilterConfig is gone, but the same Raft-replicate smoke test is what
+// matters.
 func waitReplication(t *testing.T, node *testNode, id glid.GLID, timeout time.Duration) *system.RotationPolicyConfig {
 	t.Helper()
 	ctx := context.Background()

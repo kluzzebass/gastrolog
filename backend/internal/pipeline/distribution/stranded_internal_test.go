@@ -60,7 +60,7 @@ func writeCompletedFile(t *testing.T, root string, vaultID glid.GLID) glid.GLID 
 
 // TestStrandedReadsHeadersOnly proves the rescan cost is proportional to the
 // header, not the file: one fixed-header read per unknown segment, zero
-// full-verify Opens (gastrolog-faj2yv).
+// full-verify Opens.
 func TestStrandedReadsHeadersOnly(t *testing.T) {
 	// Not parallel: asserts on the segment package's process-wide counters.
 	root := t.TempDir()
@@ -96,7 +96,7 @@ func TestStrandedReadsHeadersOnly(t *testing.T) {
 
 // TestStrandedCorruptHeaderReadAndWarnedOnce proves a completed/ file whose
 // fixed header fails to decode is read and warned about exactly once; later
-// rescans skip it by segment ID without touching the file (gastrolog-faj2yv).
+// rescans skip it by segment ID without touching the file.
 func TestStrandedCorruptHeaderReadAndWarnedOnce(t *testing.T) {
 	// Not parallel: asserts on the segment package's process-wide counters.
 	root := t.TempDir()

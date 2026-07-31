@@ -296,7 +296,7 @@ func assertNoRetentionFanOut(t *testing.T, orch *Orchestrator, what string) {
 }
 
 // TestTryRetainChunkSkipsDispositionWhenAlreadyPending pins the regression fix
-// from the gastrolog-2eclw-follow-up live incident: when retention sweeps
+// from a live incident: when retention sweeps
 // re-evaluate a chunk that's already retention-pending (because the source
 // delete is stuck), the disposition action MUST NOT fire again. Otherwise every
 // sweep re-streams the same records to the route destination, multiplying

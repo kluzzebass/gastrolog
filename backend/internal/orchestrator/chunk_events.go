@@ -40,8 +40,7 @@ func (o *Orchestrator) logChunkSealed(vaultID glid.GLID, chunkID chunk.ChunkID) 
 // the same cluster-wide state on every node — every cluster node's FSM
 // applies the same Cmd payload, so events derived from the entry are
 // node-independent. Using local Manager.Meta instead would surface
-// per-node variance (replication lag) as inspector flicker. See
-// gastrolog-3pf9w.
+// per-node variance (replication lag) as inspector flicker.
 //
 // sealed controls the Sealed bool on the result (the FSM tracks State
 // separately from the ChunkMeta-side flag). Callers pass true for
@@ -119,7 +118,7 @@ const (
 
 // ChunkChangeEvent is the typed event broadcast on the orchestrator's chunk
 // event bus. The WatchChunks RPC handler subscribes and translates each event
-// into a proto WatchChunksResponse. See gastrolog-3pf9w.
+// into a proto WatchChunksResponse.
 //
 // Field presence by Op:
 //

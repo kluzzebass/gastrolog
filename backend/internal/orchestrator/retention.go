@@ -32,30 +32,24 @@ const (
 	// retentionFanOutBuffer decouples the cursor readers from the submit
 	// workers: reads are bursty (mmap page decode) while submits pace at
 	// the pipeline's group-commit cadence. A shallow channel (== worker
-	// count) made each side stall on the other's jitter (gastrolog-4c72hr).
+	// count) made each side stall on the other's jitter.
 	retentionFanOutBuffer = 1024
 
 	// retentionChunkWorkers limits how many chunks a sweep may process
 	// concurrently. Each chunk still routes at most once (!alreadyPending).
 	//
-	// ONE, deliberately (gastrolog-4c72hr): a route-disposition drain reads
-	// the chunk's whole GLCB (hundreds of MB) and re-ingests every record.
-	// Four concurrent drains interleaved four large sequential I/O streams
-	// with live ingest on the shared volume — the page cache thrashed and the
-	// disk-latency bursts stacked into Raft heartbeat gaps (election churn
-	// synchronized with expiry). One stream at a time keeps the burst flat;
-	// total drain time is unchanged because the disk was the constraint
-	// anyway.
+	// ONE, deliberately: a route-disposition drain reads the chunk's whole
+	// GLCB (hundreds of MB) and re-ingests every record. Four concurrent
+	// drains interleaved four large sequential I/O streams with live ingest
+	// on the shared volume — the page cache thrashed and the disk-latency
+	// bursts stacked into Raft heartbeat gaps (election churn synchronized
+	// with expiry). One stream at a time keeps the burst flat; total drain
+	// time is unchanged because the disk was the constraint anyway.
 	//
-	// NOTE (gastrolog-5gmb99): the original 4c72hr note credited the single
-	// worker with keeping a "sequential prewarm" effective — but that prewarm
-	// was an unreachable no-op until 5gmb99 made it real (madvise readahead).
-	// The one-worker decision never actually rested on prewarm behavior; the
-	// standalone reason (concurrent large scans thrash cache and stack disk
-	// latency regardless of warming) holds on its own, so the count is kept
-	// at ONE. With a real prewarm, single-stream also keeps each drain's
-	// readahead from being evicted by a competing drain — a bonus, not the
-	// basis for the count.
+	// The count does not rest on the fan-out's sequential prewarm: the
+	// reason above holds with or without warming. Single-stream does keep
+	// one drain's madvise readahead from being evicted by a competing
+	// drain — a bonus, not the basis for the count.
 	retentionChunkWorkers = 1
 
 	// Vault catchup sweep — runs every 20 seconds (cron: 13/33/53s of
@@ -66,12 +60,10 @@ const (
 	// catchup mechanisms per vault instance:
 	//
 	//   - SweepPendingObligations    receipt-protocol delete acks
-	//                                (gastrolog-51gme)
 	//   - SweepLocalOrphans          tombstone-aware orphan cleanup
-	//                                (gastrolog-51gme)
 	//   - SweepMissingReplicas       create-side catchup for sealed
 	//                                chunks pushed during a follower's
-	//                                pause/partition (gastrolog-2dgvj)
+	//                                pause/partition
 	//
 	// 20s is fast enough that operator-visible divergence symptoms
 	// resolve within a sweep cycle, slow enough that a cluster of N
@@ -83,21 +75,16 @@ const (
 
 // alarmRetentionDeferred names the deadlock in one alarm: the vault's
 // configured non-delete disposition (route fan-out or transfer) deferred
-// for consecutive sweeps, so the vault's only drain is stopped
-// (gastrolog-5ct2av; generalized from route-only to cover transfer by
-// gastrolog-2l918).
+// for consecutive sweeps, so the vault's only drain is stopped.
 const alarmRetentionDeferred = "retention-deferred"
 
 // alarmRetentionUnenforceable names the case a vault's retention_rules ALL
 // resolve to no usable trigger (every referenced policy has none of
 // maxAge/maxSize/maxChunks set) — the vault's only drain never runs and
 // nothing bounds it, but nothing about that state looks different from a
-// healthy idle vault without this alarm. gastrolog-33ul6h correction: a
-// prior design carved out a "bound-only" policy (a size-only field that
-// bounded without draining) from this alarm; that field no longer exists —
-// max_size now always drains when set, so a policy with only max_size has a
-// trigger and simply doesn't reach this branch. See
-// retentionTargetForInstance. (gastrolog-1xl29s)
+// healthy idle vault without this alarm. max_size always drains when set,
+// so a policy stating only max_size has a trigger and simply doesn't reach
+// this branch. See retentionTargetForInstance.
 const alarmRetentionUnenforceable = "retention-unenforceable"
 
 // retentionDeferralAlarmAfter is how many CONSECUTIVE deferred sweeps raise
@@ -113,20 +100,18 @@ func retentionKey(vaultID glid.GLID, storageID string) string {
 }
 
 // retentionRule is a resolved retention trigger: a compiled policy that
-// decides WHEN a chunk fires a retention event. Phase 4 (gastrolog-42f9z)
-// removed the action enum and route-target list — the routing engine now
-// owns the WHAT, with the chunk's records streamed through it under
-// `source = retention-trigger(vault_id)` and the original chunk
-// unconditionally destroyed.
+// decides WHEN a chunk fires a retention event. The rule carries no action:
+// the routing engine owns the WHAT, with the chunk's records streamed
+// through it under `source = retention-trigger(vault_id)` and the original
+// chunk unconditionally destroyed.
 type retentionRule struct {
 	policy chunk.RetentionPolicy
 
-	// refuse, agePolicy, countPolicy (gastrolog-5yfaqj) support the
-	// post-sweep age/count refusal predicate — see
-	// retentionRunner.checkBoundViolations. refuse is the originating
-	// RetentionPolicyConfig.RefuseEnabled(): a violation only counts
-	// toward refusal when the STATING policy has refuse=true (a vault
-	// mixing a hard and a soft policy refuses only on the hard one's
+	// refuse, agePolicy, countPolicy support the post-sweep age/count
+	// refusal predicate — see retentionRunner.checkBoundViolations. refuse
+	// is the originating RetentionPolicyConfig.RefuseEnabled(): a violation
+	// only counts toward refusal when the STATING policy has refuse=true (a
+	// vault mixing a hard and a soft policy refuses only on the hard one's
 	// bounds). agePolicy/countPolicy are the SAME MaxAge/MaxChunks values
 	// `policy` was built from, isolated to one dimension apiece so
 	// checkBoundViolations can ask "is THIS specific bound still
@@ -157,12 +142,11 @@ type retentionRunner struct {
 	// reason) so a silently-idle vault names its gate without flooding.
 	idleLog logging.Throttle
 
-	// Deferral streak (gastrolog-5ct2av), guarded by mu: consecutive sweeps
-	// whose configured disposition (route fan-out or transfer,
-	// gastrolog-2l918) could not run. Pure count, in memory only — a
-	// restart starts a fresh streak. sweepDeferred/sweepProgressed are the
-	// current sweep's scratch flags, folded into the streak by
-	// finishSweepDeferralState at sweep end.
+	// Deferral streak, guarded by mu: consecutive sweeps whose configured
+	// disposition (route fan-out or transfer) could not run. Pure count, in
+	// memory only — a restart starts a fresh streak.
+	// sweepDeferred/sweepProgressed are the current sweep's scratch flags,
+	// folded into the streak by finishSweepDeferralState at sweep end.
 	deferralStreak    int
 	lastDeferralCause string
 	sweepDeferred     bool
@@ -178,8 +162,8 @@ type retentionRunner struct {
 
 	// reconciler is the instance lifecycle reconciler that owns chunk-lifecycle
 	// execution. All deletes route through reconciler.deleteChunk →
-	// CmdRequestDelete (gastrolog-51gme steps 4-7); it is the only delete
-	// path. Test harnesses that exercise expiry must wire a reconciler.
+	// CmdRequestDelete; it is the only delete path. Test harnesses that
+	// exercise expiry must wire a reconciler.
 	reconciler *VaultLifecycleReconciler
 
 	// isLeader returns true if this node is the config leader for this instance.
@@ -200,7 +184,7 @@ type retentionRunner struct {
 	// edits take effect on the next tick. Branches the per-chunk path:
 	// "delete" skips the routing engine entirely, "route" fans records
 	// out for operator-configured routes to forward, "transfer" re-homes
-	// the sealed chunk to another vault unchanged (gastrolog-2l918).
+	// the sealed chunk to another vault unchanged.
 	disposition string
 	// transferTarget is VaultConfig.RetentionTransferTargetVaultID,
 	// refreshed alongside disposition on every sweep. Only meaningful
@@ -215,14 +199,13 @@ type retentionRunner struct {
 	// stall/success paths are exercised without wall-clock sleeps; nil
 	// means production behavior (a real time.Ticker).
 	transferReceiptTick <-chan time.Time
-	// sweepStalledTransferTargets is the per-sweep circuit breaker
-	// (gastrolog-2l918 review finding 2): once a chunk's receipts wait
-	// stalls against a given target vault, every OTHER chunk targeting
-	// that SAME vault for the rest of THIS sweep defers immediately
-	// instead of also burning the full stall window — one stalled
-	// destination must not freeze retention on this vault for hours by
-	// serially re-waiting per chunk. Reset to nil at the start of every
-	// sweep(). Guarded by mu.
+	// sweepStalledTransferTargets is the per-sweep circuit breaker: once a
+	// chunk's receipts wait stalls against a given target vault, every
+	// OTHER chunk targeting that SAME vault for the rest of THIS sweep
+	// defers immediately instead of also burning the full stall window —
+	// one stalled destination must not freeze retention on this vault for
+	// hours by serially re-waiting per chunk. Reset to nil at the start of
+	// every sweep(). Guarded by mu.
 	sweepStalledTransferTargets map[glid.GLID]bool
 
 	now    func() time.Time
@@ -247,13 +230,12 @@ type sweepTarget struct {
 // See vault_readiness.go for the canonical vault readiness definition used
 // by ingest/query entry points.
 //
-// Catchup mechanisms (post gastrolog-51gme): pendingDeletes covers
-// nodes that observed CmdRequestDelete (steady-state apply or post-
-// snapshot ReconcileFromSnapshot). SweepLocalOrphans, on the
-// pending-delete sweep cron, covers the snapshot-restore gap where a
-// delete cycle finalized while this node was offline — the rejoining
-// node receives a snapshot whose FSM has only the tombstone, with no
-// pendingDeletes entry to drive cleanup.
+// Catchup mechanisms: pendingDeletes covers nodes that observed
+// CmdRequestDelete (steady-state apply or post-snapshot
+// ReconcileFromSnapshot). SweepLocalOrphans, on the pending-delete sweep
+// cron, covers the snapshot-restore gap where a delete cycle finalized while
+// this node was offline — the rejoining node receives a snapshot whose FSM
+// has only the tombstone, with no pendingDeletes entry to drive cleanup.
 func (o *Orchestrator) retentionSweepAll() {
 	sys, err := o.loadSystem(context.Background())
 	if err != nil {
@@ -288,16 +270,16 @@ func (o *Orchestrator) retentionSweepAll() {
 			// (vault removed from config, placement moved off this node,
 			// leadership lost, or its vault-ctl Raft group lost its leader).
 			// Mirrors disk_guard.go retainVaultGuards. Covers both the
-			// deferral streak alarm and the unenforceable-rules alarm
-			// (gastrolog-1xl29s) — either may be standing when a runner
-			// falls out of this node's active set.
+			// deferral streak alarm and the unenforceable-rules alarm —
+			// either may be standing when a runner falls out of this
+			// node's active set.
 			if o.alerts != nil {
 				o.alerts.Clear(alarmRetentionDeferred, runner.vaultID.String())
 				o.alerts.Clear(alarmRetentionUnenforceable, runner.vaultID.String())
 			}
-			// gastrolog-5yfaqj fix: the age/count bound-capped flags are
-			// THIS runner's verdict — nothing else on this node will ever
-			// call checkBoundViolations for this vault again once the
+			// The age/count bound-capped flags are THIS runner's verdict —
+			// nothing else on this node will ever call
+			// checkBoundViolations for this vault again once the
 			// runner is pruned (leadership moved, placement moved off,
 			// vault-ctl Raft lost its leader). Without releasing them
 			// here, a deposed leader keeps broadcasting
@@ -317,12 +299,6 @@ func (o *Orchestrator) retentionSweepAll() {
 		t.runner.sweep(t.rules)
 	}
 
-	// Phase 4 (gastrolog-42f9z): confirmStreamedTransitions / the
-	// transition-receipt protocol is gone. Retention firing routes
-	// records through the routing engine which delivers them
-	// immediately; there is no asynchronous "wait for destination
-	// receipt" stage anymore.
-	//
 	// (Disk-vs-manifest orphan cleanup and missing-replica catchup are
 	// done out-of-band on the instance-catchup sweep tick — see
 	// vaultCatchupSweepAll. The retention sweep stays focused on rule
@@ -331,18 +307,10 @@ func (o *Orchestrator) retentionSweepAll() {
 	// Memory budget enforcement: transition oldest chunks when over budget.
 	o.enforceMemoryBudgets(cfg)
 
-	// Cache eviction does NOT run here (gastrolog-1a18r): it is its own
-	// scheduled job (see cache_eviction.go, cron "23 * * * * *"),
-	// operator-visible in the Jobs inspector as its own unit. This
-	// retention sweep used to also call EvictCache via the now-removed
-	// chunk.ChunkCacheEvictor interface, but that interface's zero-return
-	// EvictCache() signature predates the chunk-redesign's warm-cache
-	// eviction (gastrolog-2idw8): file.Manager.EvictCache() returns
-	// (evicted int, freedBytes int64), so no chunk manager has satisfied
-	// chunk.ChunkCacheEvictor since 2idw8 landed — this branch never fired
-	// in production. Cache eviction is a node-local warm-cache concern,
-	// not a retention decision; it doesn't belong on this path even if it
-	// had worked.
+	// Cache eviction does NOT run here: it is its own scheduled job (see
+	// cache_eviction.go, cron "23 * * * * *"), operator-visible in the Jobs
+	// inspector as its own unit. It is a node-local warm-cache concern, not
+	// a retention decision.
 }
 
 // vaultCatchupSweepAll runs every 20 seconds (cron 13/33/53s, phase-
@@ -353,22 +321,21 @@ func (o *Orchestrator) retentionSweepAll() {
 // orphans, staging orphans, missing replicas, stale leader FSM entries,
 // stale pending-delete acks, idle actives). See
 // VaultLifecycleReconciler.ReconcileTick for the category catalogue and
-// per-category ownership docs (gastrolog-4pq56v).
+// per-category ownership docs.
 //
-// BACKSTOP, not the primary driver (gastrolog-3fu9t). Every category now
-// has an upstream event that drives its primary convergence — delete
-// obligations on CmdRequestDelete apply, local/staging orphans on
-// snapshot install (ReconcileFromSnapshot), and the leader-only
-// categories on lead-gained (ReconcileMembershipCatchup), and stale
-// pending-delete acks additionally on a placement move under a stable
-// leader (wakeStalePendingAckReconcile). This tick
-// catches the residual: dropped/raced events, and the two categories that
-// are periodic-by-nature (idle-active wall-clock inactivity, and the
-// grace-period GCs for stale-leader-FSM and abandoned-transfer). It is
-// kept as a defense-in-depth safety net because losing a chunk cleanup or
-// leaking a stranded entry is a durability/correctness concern, not a
-// tunable — the event wakes make it converge fast, the tick guarantees it
-// converges at all.
+// BACKSTOP, not the primary driver. Every category has an upstream event
+// that drives its primary convergence — delete obligations on
+// CmdRequestDelete apply, local/staging orphans on snapshot install
+// (ReconcileFromSnapshot), and the leader-only categories on lead-gained
+// (ReconcileMembershipCatchup), and stale pending-delete acks additionally
+// on a placement move under a stable leader (wakeStalePendingAckReconcile).
+// This tick catches the residual: dropped/raced events, and the two
+// categories that are periodic-by-nature (idle-active wall-clock
+// inactivity, and the grace-period GCs for stale-leader-FSM and
+// abandoned-transfer). It is kept as a defense-in-depth safety net because
+// losing a chunk cleanup or leaking a stranded entry is a
+// durability/correctness concern, not a tunable — the event wakes make it
+// converge fast, the tick guarantees it converges at all.
 //
 // Every category is local-only on the originating side: each node
 // consults its OWN replicated FSM state and decides independently.
@@ -415,7 +382,7 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 		if !ok {
 			continue
 		}
-		// Use the sweep's runner — never mint one here (gastrolog-aop1yc).
+		// Use the sweep's runner — never mint one here.
 		// Its absence is meaningful: the sweep only caches runners for
 		// instances that may destroy chunks, so no runner means this vault
 		// has no Raft leader and budget enforcement must wait rather than
@@ -441,12 +408,10 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 
 // drainExcessChunks retires the oldest sealed chunks of a memory vault
 // until the excess bytes are reclaimed (or no more sealed chunks remain).
-// Phase 4 (gastrolog-42f9z): these used to be "transitioned to the next
-// instance"; now they're just retention events like any other.
-//
-// "Like any other" is meant literally, and was not (gastrolog-aop1yc): this
-// takes the sweep's cached runner and goes through the same disposition gate
-// as a TTL expiry. A vault configured "delete" does not fan out here either.
+// They are retention events like any other, and "like any other" is meant
+// literally: this takes the sweep's cached runner and goes through the same
+// disposition gate as a TTL expiry. A vault configured "delete" does not fan
+// out here either.
 func (o *Orchestrator) drainExcessChunks(runner *retentionRunner, cm chunk.ChunkManager, excess int64) {
 	metas, err := cm.List()
 	if err != nil {
@@ -468,10 +433,9 @@ func (o *Orchestrator) drainExcessChunks(runner *retentionRunner, cm chunk.Chunk
 		}
 		// Honor the disposition verdict, exactly as the TTL path does.
 		// Ignoring it destroyed the chunk even when the fan-out was aborted
-		// by shutdown or disk protect, ejecting every record unrouted — the
-		// bug gastrolog-5034va fixed on the TTL path and gastrolog-65riw5
-		// found still live here. Skip rather than break: the abort is
-		// per-chunk, and a later chunk may still route.
+		// by shutdown or disk protect, ejecting every record unrouted. Skip
+		// rather than break: the abort is per-chunk, and a later chunk may
+		// still route.
 		if !runner.applyRetentionDispositionToChunk(m.ID) {
 			continue
 		}
@@ -511,8 +475,7 @@ func (o *Orchestrator) UnreadableChunks(vaultID glid.GLID) []chunk.ChunkID {
 // across all instance-instance retention runners for the vault, so the
 // next retention sweep retries them all immediately. Returns the total
 // count of entries reset across runners. Operator-driven recovery
-// action exposed via the manual "Retry unreadable" inspector button
-// — see gastrolog-25vur.
+// action exposed via the manual "Retry unreadable" inspector button.
 func (o *Orchestrator) RetryUnreadableChunks(vaultID glid.GLID) int {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
@@ -586,12 +549,10 @@ func (o *Orchestrator) PendingDeleteAcks(vaultID glid.GLID) map[chunk.ChunkID][]
 // it. Marks the key active so the sweep's GC keeps the runner.
 //
 // EVERY leader instance gets a runner, including vaults with no retention
-// rules. That is deliberate (gastrolog-aop1yc): memory-budget enforcement
-// destroys chunks through this same runner, and it used to mint a bare one
-// per chunk instead — which silently bypassed the disposition gate and threw
-// away unreadable-retry backoff on every iteration. There must be exactly
-// one runner per (vault, storage), because it owns per-chunk state that only
-// means anything if it accumulates.
+// rules, because memory-budget enforcement destroys chunks through this same
+// runner. There must be exactly one runner per (vault, storage): it owns
+// per-chunk state — unreadable-retry backoff, deferral streaks, the in-flight
+// set — that only means anything if it accumulates across chunks and sweeps.
 //
 // Caller must hold o.mu for write.
 func (o *Orchestrator) retentionRunnerFor(vaultCfg system.VaultConfig, vaultInst *VaultInstance, active map[string]bool) *retentionRunner {
@@ -614,8 +575,8 @@ func (o *Orchestrator) retentionRunnerFor(vaultCfg system.VaultConfig, vaultInst
 	// (the chunking release worker's give-up bound) reads disposition and rules
 	// under runner.mu, having deliberately released o.mu first — so refreshing
 	// these fields with only o.mu held is an unsynchronised write against that
-	// read, and the give-up bound decides whether unchunkable segments are shed
-	// (gastrolog-3kcr1u). o.mu -> runner.mu is the established order here; see
+	// read, and the give-up bound decides whether unchunkable segments are
+	// shed. o.mu -> runner.mu is the established order here; see
 	// UnreadableChunks, which takes the same pair the same way round.
 	runner.mu.Lock()
 	runner.cm = vaultInst.Chunks
@@ -653,7 +614,7 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 		// quorum blip, a fresh election) even when placement resolves
 		// cleanly. No existing alarm covers it, and unlike a trigger-less
 		// policy it is not necessarily a settled operator mistake — so this
-		// gets a throttled log, not a new alarm type (gastrolog-1xl29s).
+		// gets a throttled log, not a new alarm type.
 		if n, ok := o.retentionLeaderlessLog.Allow(vaultCfg.ID.String()); ok {
 			o.retentionLogger.Warn("retention: vault-ctl raft group has no leader; retention cannot run for this vault",
 				"vault", vaultCfg.Name, "suppressed", n)
@@ -688,12 +649,9 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 		// Every referenced policy resolved with no drain trigger: the vault
 		// HAS retention rules, the operator EXPECTS enforcement, but nothing
 		// about this vault's referenced policies does anything — the exact
-		// live-incident gap (gastrolog-1xl29s). gastrolog-33ul6h correction: a
-		// prior design carved out a "bound-only" policy (size-only, no drain)
-		// from this alarm; that shape no longer exists — max_size now always
-		// drains when set, so this is the simple rule: zero triggers, always
-		// the alarm. Name it: throttled log plus a standing alarm, both
-		// naming which policies are trigger-less.
+		// live-incident gap. max_size always drains when set, so the rule is
+		// simple: zero triggers, always the alarm. Name it — throttled log
+		// plus a standing alarm, both naming which policies are trigger-less.
 		o.raiseRetentionUnenforceable(vaultCfg.ID, vaultCfg.Name, triggerLess)
 		runner.noteUnenforceable(triggerLess)
 		return nil
@@ -742,14 +700,13 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	// Config followers must not independently evaluate and transition chunks —
 	// that causes N× duplication.
 	//
-	// gastrolog-1xl29s audit finding: this guard is structurally
-	// UNREACHABLE via the only production caller. retentionSweepAll builds
-	// `targets` (the sole source of sweep() calls) by gating on
-	// vaultInst.IsLeader() BEFORE a runner is even minted, and a follower
-	// instance never gets a retention runner at all — followers react to
-	// the vault-ctl FSM's OnDelete callback instead (see the
-	// retentionRunner doc comment). So r.isLeader is always true by the
-	// time production code reaches here, and this branch can never log.
+	// Audit finding: this guard is structurally UNREACHABLE via the only
+	// production caller. retentionSweepAll builds `targets` (the sole source
+	// of sweep() calls) by gating on vaultInst.IsLeader() BEFORE a runner is
+	// even minted, and a follower instance never gets a retention runner at
+	// all — followers react to the vault-ctl FSM's OnDelete callback instead
+	// (see the retentionRunner doc comment). So r.isLeader is always true by
+	// the time production code reaches here, and this branch can never log.
 	// That is WHY a real cluster's incident log had zero "retention sweep
 	// idle" / not-placement-leader lines ever, including from followers —
 	// not a bug in the branch, a branch that was never reachable to begin
@@ -773,10 +730,9 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	if r.inflight == nil {
 		r.inflight = make(map[chunk.ChunkID]bool)
 	}
-	// Fresh per-sweep circuit-breaker state (gastrolog-2l918 review
-	// finding 2): a target that stalled LAST sweep gets a clean retry
-	// this sweep — only a stall observed DURING this sweep should defer
-	// its siblings immediately.
+	// Fresh per-sweep circuit-breaker state: a target that stalled LAST
+	// sweep gets a clean retry this sweep — only a stall observed DURING
+	// this sweep should defer its siblings immediately.
 	r.sweepStalledTransferTargets = nil
 	r.mu.Unlock()
 
@@ -801,28 +757,25 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	vaultInst := r.findVaultInstance()
 	r.mu.Unlock()
 
-	// Phase 3 (gastrolog-1huz5): overlay each meta with FSM state so
-	// selectRetentionCandidates' meta.Sealed gate reflects cluster
-	// truth — Sealing chunks (active-form files closed locally but
-	// GLCB not yet committed) must not be eligible.
+	// Overlay each meta with FSM state so selectRetentionCandidates'
+	// meta.Sealed gate reflects cluster truth — Sealing chunks (active-form
+	// files closed locally but GLCB not yet committed) must not be eligible.
 	if vaultInst != nil {
 		for i := range metas {
 			metas[i] = r.orch.groundChunkMeta(r.vaultID, metas[i])
 		}
 	}
 
-	// Registration is a cache, not a prerequisite (gastrolog-2kmgj6):
-	// sealed FSM entries the chunk manager has not lazily resolved yet
-	// (post-restart, pre-first-lookup) still MUST be retention candidates.
-	// Source them from the manifest directly; the drain/expunge lookups
-	// resolve the bytes on demand. Without this, a restart re-creates the
-	// dead-retention incident with an empty manager list.
+	// Registration is a cache, not a prerequisite: sealed FSM entries the
+	// chunk manager has not lazily resolved yet (post-restart,
+	// pre-first-lookup) still MUST be retention candidates. Source them from
+	// the manifest directly; the drain/expunge lookups resolve the bytes on
+	// demand. Without this, a restart re-creates the dead-retention incident
+	// with an empty manager list.
 	metas = appendUnlistedManifestSealed(metas, vaultInst)
 
-	// gastrolog-5sywa: the transition-streamed flag and the
-	// destination-receipt set are gone. Phase 4 removed the receipt
-	// protocol entirely — retention firing is synchronous, no chunks
-	// linger in a "streamed but not yet confirmed" state.
+	// Always empty: no chunk lingers in a "streamed but not yet confirmed"
+	// state, so nothing populates selectRetentionCandidates' streamed filter.
 	streamed := map[chunk.ChunkID]bool{}
 
 	// Build a set of chunks already flagged retention-pending in the FSM.
@@ -830,7 +783,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	// CmdRetentionPending Apply on chunks where the flag is already set,
 	// which is critical when retention actions stall (transition
 	// unreachable destination, receipt-protocol stuck) and the same
-	// chunk gets re-evaluated every minute. See gastrolog-51gme.
+	// chunk gets re-evaluated every minute.
 	pendingFlag := make(map[chunk.ChunkID]bool)
 	if vaultInst != nil && vaultInst.ListRetentionPending != nil {
 		for _, id := range vaultInst.ListRetentionPending() {
@@ -865,14 +818,13 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	for _, b := range rules {
 		matched := b.policy.Apply(state)
 		totalMatched += len(matched)
-		// Bounded worker pool (gastrolog-33eabj): retentionChunkWorkers
-		// goroutines pull chunk IDs off a channel. The previous shape spawned
-		// one goroutine per matched chunk BEFORE acquiring a semaphore, so a
-		// sweep matching N chunks parked N-workers goroutines on the semaphore
-		// for the whole (serialized, disk-bound) drain — 668 were observed
-		// waiting on a live profile. Concurrency was already bounded; now the
-		// goroutine count is too. pendingFlag is read-only after construction,
-		// so workers may read it without locking.
+		// Bounded worker pool: retentionChunkWorkers goroutines pull chunk
+		// IDs off a channel, so the goroutine count is bounded and not just
+		// the concurrency. Spawning one goroutine per matched chunk and
+		// bounding with a semaphore instead parked 668 goroutines on a live
+		// profile, all waiting out the serialized disk-bound drain.
+		// pendingFlag is read-only after construction, so workers may read it
+		// without locking.
 		jobs := make(chan chunk.ChunkID)
 		var chunkWG sync.WaitGroup
 		for range min(retentionChunkWorkers, len(matched)) {
@@ -956,19 +908,18 @@ func appendUnlistedManifestSealed(metas []chunk.ChunkMeta, vaultInst *VaultInsta
 		if listed[e.ID] || e.CloudBacked || !e.IsSealed() {
 			continue
 		}
-		// In-flight transfer landing (gastrolog-2l918 review finding 3c):
-		// an entry introduced by retention transfer disposition
-		// (TransferSourceVaultID set) with ZERO confirmed holders hasn't
-		// actually arrived on any destination home yet — the bytes are
-		// still in flight from the source, and cm.List() correctly has
-		// no local copy to report (which is why this synthetic path
-		// would otherwise be the one making it a candidate). Surfacing
-		// it here would let the DESTINATION vault's OWN retention rules
-		// (a short TTL, size pressure) tombstone the phantom placeholder
-		// out from under the transfer before receipts land — destroying
-		// an in-flight hand-off with no data ever having existed on
-		// this side, and stranding the source's receipts-wait forever.
-		// Once ANY holder acks, Holders is non-empty and the entry
+		// In-flight transfer landing: an entry introduced by retention
+		// transfer disposition (TransferSourceVaultID set) with ZERO
+		// confirmed holders hasn't actually arrived on any destination
+		// home yet — the bytes are still in flight from the source, and
+		// cm.List() correctly has no local copy to report (which is why
+		// this synthetic path would otherwise be the one making it a
+		// candidate). Surfacing it here would let the DESTINATION vault's
+		// OWN retention rules (a short TTL, size pressure) tombstone the
+		// phantom placeholder out from under the transfer before receipts
+		// land — destroying an in-flight hand-off with no data ever having
+		// existed on this side, and stranding the source's receipts-wait
+		// forever. Once ANY holder acks, Holders is non-empty and the entry
 		// rejoins normal candidacy.
 		if !e.TransferSourceVaultID.IsZero() && len(e.Holders) == 0 {
 			continue
@@ -982,12 +933,10 @@ func appendUnlistedManifestSealed(metas []chunk.ChunkMeta, vaultInst *VaultInsta
 			Bytes:       e.Bytes,
 			Sealed:      true,
 			State:       e.State,
-			// No DiskBytes here (was already always zero: this loop
-			// excludes CloudBacked entries above, and ManifestEntry never
-			// carried a per-node local footprint for anything else — see
-			// gastrolog-33ul6h). The size-drain trigger's DiskClaim falls
-			// back to Bytes+indexes for these synthetic candidates, same
-			// as it always has.
+			// No DiskBytes: this loop excludes CloudBacked entries above,
+			// and ManifestEntry carries no per-node local footprint for
+			// anything else. The size-drain trigger's DiskClaim falls back
+			// to Bytes+indexes for these synthetic candidates.
 			IngestStart:       e.IngestStart,
 			IngestEnd:         e.IngestEnd,
 			SourceStart:       e.SourceStart,
@@ -1018,7 +967,7 @@ func (r *retentionRunner) noteIdle(reason string, metas int, f candidateFilterSt
 // to act on): this fires before sweep() is ever invoked for the tick, so
 // none of noteIdle's breadcrumbs get a chance to fire either. Shares the
 // runner's idleLog throttle — same operator-facing cadence, different
-// reason key. See gastrolog-1xl29s.
+// reason key.
 func (r *retentionRunner) noteUnenforceable(triggerLess []string) {
 	if _, ok := r.idleLog.Allow("unenforceable"); !ok {
 		return
@@ -1030,8 +979,7 @@ func (r *retentionRunner) noteUnenforceable(triggerLess []string) {
 // noteRetentionDeferral records that this sweep's configured disposition
 // (route fan-out or transfer) could not run, with an operator-readable
 // cause for the alarm detail. Progress and deferral are disposition-
-// agnostic (gastrolog-2l918): route fan-out and transfer feed the same
-// streak.
+// agnostic: route fan-out and transfer feed the same streak.
 func (r *retentionRunner) noteRetentionDeferral(cause string) {
 	r.mu.Lock()
 	r.sweepDeferred = true
@@ -1042,8 +990,7 @@ func (r *retentionRunner) noteRetentionDeferral(cause string) {
 // noteRetentionProgress records that a chunk completed its configured
 // disposition (route fan-out or transfer) this sweep — the deadlock, if
 // one was forming, is not standing. A successful transfer is progress
-// exactly like a successful route fan-out, per the 33ul6h
-// progress-is-progress fix.
+// exactly like a successful route fan-out.
 func (r *retentionRunner) noteRetentionProgress() {
 	r.mu.Lock()
 	r.sweepProgressed = true
@@ -1052,8 +999,8 @@ func (r *retentionRunner) noteRetentionProgress() {
 
 // finishSweepDeferralState folds the sweep's scratch flags into the streak
 // and drives the retention-deferred alarm (covers both route fan-out and
-// transfer disposition, gastrolog-2l918): raise at the threshold, clear on
-// progress. Called at the end of every sweep on the runner.
+// transfer disposition): raise at the threshold, clear on progress. Called
+// at the end of every sweep on the runner.
 func (r *retentionRunner) finishSweepDeferralState() {
 	// Resolved BEFORE taking r.mu: currentDisposition takes it on its fallback
 	// path, and a sync.Mutex is not reentrant — calling it under the lock
@@ -1092,14 +1039,14 @@ func (r *retentionRunner) finishSweepDeferralState() {
 	}
 }
 
-// checkBoundViolations is the age/count VIOLATION PREDICATE (gastrolog-5yfaqj):
-// a violation is refusal-worthy only once retention has SWEPT AND FAILED
-// TO CLEAR it — never on the transient between a chunk's seal and the next
-// sweep. Called at every sweep exit (the early no-rules/no-eligible-chunks
-// returns and the normal end) against a FRESH chunk listing, so it reflects
-// what retention actually left behind after THIS sweep's deletes ran, not
-// what existed before them. No streak, no clock, no slack duration: the
-// sweep's own outcome, re-observed once per sweep, IS the predicate.
+// checkBoundViolations is the age/count VIOLATION PREDICATE: a violation is
+// refusal-worthy only once retention has SWEPT AND FAILED TO CLEAR it —
+// never on the transient between a chunk's seal and the next sweep. Called
+// at every sweep exit (the early no-rules/no-eligible-chunks returns and
+// the normal end) against a FRESH chunk listing, so it reflects what
+// retention actually left behind after THIS sweep's deletes ran, not what
+// existed before them. No streak, no clock, no slack duration: the sweep's
+// own outcome, re-observed once per sweep, IS the predicate.
 //
 // Only rules whose originating policy has refuse=true count toward a
 // violation — a vault mixing a hard and a soft policy refuses only on the
@@ -1159,17 +1106,17 @@ func (r *retentionRunner) checkBoundViolations(rules []retentionRule) {
 // Returns ok=false only on a transient list error, distinct from a
 // legitimately empty result.
 //
-// Ghost filter (gastrolog-5yfaqj review fix I1): a sealed chunk on disk
-// with no FSM manifest entry is the orphan reaper's problem, not
-// retention's — its FSM entry was finalize-deleted but the disk file was
-// never reaped, exactly the case selectRetentionCandidates already
-// excludes (see buildManifestSet). A sweep may never clear it (retention
-// doesn't touch ghosts at all), so it must not count toward the violation
-// either, or a vault could refuse admission forever over a chunk
-// retention itself will never act on. Chunks in unreadable-retry backoff
-// are DELIBERATELY NOT filtered here (unlike selectRetentionCandidates):
-// a chunk that keeps failing to read is an honest sweep failure — it
-// belongs in the violation count, not silently excluded.
+// Ghost filter: a sealed chunk on disk with no FSM manifest entry is the
+// orphan reaper's problem, not retention's — its FSM entry was
+// finalize-deleted but the disk file was never reaped, exactly the case
+// selectRetentionCandidates already excludes (see buildManifestSet). A
+// sweep may never clear it (retention doesn't touch ghosts at all), so it
+// must not count toward the violation either, or a vault could refuse
+// admission forever over a chunk retention itself will never act on. Chunks
+// in unreadable-retry backoff are DELIBERATELY NOT filtered here (unlike
+// selectRetentionCandidates): a chunk that keeps failing to read is an
+// honest sweep failure — it belongs in the violation count, not silently
+// excluded.
 func (r *retentionRunner) currentSealedForBoundCheck() ([]chunk.ChunkMeta, bool) {
 	metas, err := r.cm.List()
 	if err != nil {
@@ -1204,7 +1151,7 @@ func (r *retentionRunner) currentSealedForBoundCheck() ([]chunk.ChunkMeta, bool)
 // but the disk file was never reaped. Filtering ghosts out of the retention
 // sweep prevents repeated no-op transitions (the apply silently no-ops when
 // f.chunks[id] is nil, the flag never sticks, and we re-stream the chunk's
-// records to the next instance on every sweep). See gastrolog-66b7x.
+// records to the next instance on every sweep).
 func buildManifestSet(vaultInst *VaultInstance) (map[chunk.ChunkID]bool, bool) {
 	manifest := make(map[chunk.ChunkID]bool)
 	if vaultInst == nil || vaultInst.ListManifest == nil {
@@ -1264,13 +1211,12 @@ func selectRetentionCandidates(
 // Acquires the inflight lock, marks retention-pending via Raft (only if
 // the FSM doesn't already have the flag — repeated applies waste Raft
 // capacity and were a major contributor to leader-queue saturation
-// when retention actions stalled with hundreds of pending chunks; see
-// gastrolog-51gme), and dispatches to the action handler.
+// when retention actions stalled with hundreds of pending chunks), and
+// dispatches to the action handler.
 func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alreadyPending bool) {
 	// During drain nothing downstream can succeed: the pipeline rejects
 	// fan-out submits and Raft applies race teardown. Leave the chunk
-	// untouched — the sweep after restart processes it from scratch
-	// (gastrolog-5034va).
+	// untouched — the sweep after restart processes it from scratch.
 	if r.orch != nil && r.orch.shuttingDown() {
 		return
 	}
@@ -1282,22 +1228,20 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alre
 	r.inflight[id] = true
 	r.mu.Unlock()
 
-	// gastrolog-18du3: the disposition flag controls whether records are
-	// streamed through the routing engine before the chunk is destroyed.
-	// "delete" (the safe default) skips routing entirely — records drop
-	// and storage frees immediately. "route" preserves the prior Phase 5
-	// behavior: records flow through the routing engine with synthetic
-	// `_source = "retention"`, so operator-configured routes can forward
-	// them to archive vaults, cold storage, etc. The original chunk is
-	// always destroyed regardless of disposition.
+	// The disposition flag controls whether records are streamed through the
+	// routing engine before the chunk is destroyed. "delete" (the safe
+	// default) skips routing entirely — records drop and storage frees
+	// immediately. "route" flows records through the routing engine with
+	// synthetic `_source = "retention"`, so operator-configured routes can
+	// forward them to archive vaults, cold storage, etc. The original chunk
+	// is always destroyed regardless of disposition.
 	//
-	// Ordering (gastrolog-5034va): routing runs BEFORE the retention-
-	// pending flag is applied, because the flag is what gates the
-	// one-shot route (!alreadyPending). A fan-out aborted by shutdown
-	// or a stopped pipeline must not consume the shot — with no flag
-	// applied, the next sweep re-routes the chunk from scratch. The
-	// resulting failure mode is duplicate-on-abort at the route target,
-	// never loss of the operator's route disposition.
+	// Ordering: routing runs BEFORE the retention-pending flag is applied,
+	// because the flag is what gates the one-shot route (!alreadyPending). A
+	// fan-out aborted by shutdown or a stopped pipeline must not consume the
+	// shot — with no flag applied, the next sweep re-routes the chunk from
+	// scratch. The resulting failure mode is duplicate-on-abort at the route
+	// target, never loss of the operator's route disposition.
 	//
 	// Gate routing on !alreadyPending: routing is a one-shot fire-and-
 	// forget per chunk. When the source delete fails (receipt protocol
@@ -1305,12 +1249,12 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alre
 	// path and must NOT re-route the records — without this guard, every
 	// retention tick re-streams the same chunk's records to the
 	// destination, multiplying storage at the route target each cycle.
-	// Operator footgun from gastrolog-2eclw-fix: first-vault with route
+	// Operator footgun, observed live: first-vault with the route
 	// `_source="retention" AND _vault="<first>"` → second-vault grew 50-100
-	// MB/s with no active ingesters because every sweep re-routed the
-	// 11 stuck retention-pending chunks. Routing once + retrying only
-	// the delete is the correct shape: fully-routed chunks carry the
-	// pending flag and are never re-routed.
+	// MB/s with no active ingesters because every sweep re-routed the 11
+	// stuck retention-pending chunks. Routing once + retrying only the
+	// delete is the correct shape: fully-routed chunks carry the pending
+	// flag and are never re-routed.
 	defer r.clearInflight(id)
 	if !alreadyPending {
 		if !r.applyRetentionDispositionToChunk(id) {
@@ -1339,8 +1283,7 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alre
 // markRetentionPending applies CmdRetentionPending via Raft and emits a
 // SEALED event so subscribers see the flag flip without a ListChunks
 // refetch. Returns true on success, false if the Raft apply failed.
-// Inflight release is owned by tryRetainChunk's deferred clearInflight
-// (gastrolog-5034va reordered marking after routing, behind that defer).
+// Inflight release is owned by tryRetainChunk's deferred clearInflight.
 // Extracted from tryRetainChunk to keep the parent function's nesting
 // shallow.
 func (r *retentionRunner) markRetentionPending(id chunk.ChunkID) bool {
@@ -1365,12 +1308,12 @@ func (r *retentionRunner) markRetentionPending(id chunk.ChunkID) bool {
 // target from the CONFIG STORE, at the moment a chunk is about to be acted on.
 //
 // It deliberately does not read the runner's captured fields as the primary
-// source (gastrolog-6ckv0y). Those are set once per sweep by retentionRunnerFor,
-// and a sweep processes its entire matched chunk set without returning — while
-// the retention cron is registered WithSingletonMode(LimitModeReschedule), so
+// source. Those are set once per sweep by retentionRunnerFor, and a sweep
+// processes its entire matched chunk set without returning — while the
+// retention cron is registered WithSingletonMode(LimitModeReschedule), so
 // every tick that lands during a running sweep is DROPPED and never refreshes
 // them. The effective refresh interval is therefore one whole sweep, not one
-// minute, and a slow sweep (gastrolog-17s8rn: ~1 chunk per 24s) can outlive a
+// minute, and a slow sweep (an observed ~1 chunk per 24s) can outlive a
 // config change by tens of minutes. Observed on the dev cluster: a vault whose
 // stored disposition was "delete" kept fanning records out to its route target
 // at ~2600 records/sec because the in-flight sweep still held "route".
@@ -1399,15 +1342,14 @@ func (r *retentionRunner) currentDisposition() (string, *glid.GLID) {
 // applyRetentionDispositionToChunk runs the chunk through the vault's
 // configured non-delete disposition — "route" fans its records through the
 // routing engine, "transfer" re-homes the sealed chunk to another vault
-// unchanged (gastrolog-2l918) — or is a no-op for "delete". Returns false
-// when the action was aborted before completing (shutdown, stopped
-// pipeline, stalled destination receipts) — the caller must then leave the
-// chunk untouched so a later sweep retries from scratch (gastrolog-5034va).
-// On true the caller destroys the LOCAL chunk via expireChunk regardless of
-// disposition — for transfer this is a pure local-copy delete, since the
-// data now lives on at the destination. Extracted so tests can verify the
-// disposition gate without standing up the full expire-chunk machinery
-// (which needs a reconciler, Raft, etc.). See gastrolog-18du3.
+// unchanged — or is a no-op for "delete". Returns false when the action was
+// aborted before completing (shutdown, stopped pipeline, stalled
+// destination receipts) — the caller must then leave the chunk untouched so
+// a later sweep retries from scratch. On true the caller destroys the LOCAL
+// chunk via expireChunk regardless of disposition — for transfer this is a
+// pure local-copy delete, since the data now lives on at the destination.
+// Extracted so tests can verify the disposition gate without standing up
+// the full expire-chunk machinery (which needs a reconciler, Raft, etc.).
 func (r *retentionRunner) applyRetentionDispositionToChunk(id chunk.ChunkID) bool {
 	disposition, target := r.currentDisposition()
 	switch disposition {
@@ -1435,14 +1377,11 @@ func dispositionActionName(disposition string) string {
 // engine with synthetic `_source = "retention"` and `_vault = vaultID`.
 // Each matched route writes the records to its destinations. The
 // original chunk is destroyed in the caller regardless of routing
-// outcome — records with no matching route drop silently, the same
-// observable behavior as the legacy expire action.
+// outcome — records with no matching route drop silently.
 //
-// gastrolog-4kkoo (Phase 5): replaces the Phase-4 stub that consulted
-// nothing. The `_reason` synthetic attribute is left empty for now —
-// distinguishing age vs. size vs. count requires splitting composite
-// retention policies into per-trigger rules, which lands in a
-// follow-up. Routes targeting retention today match on
+// The `_reason` synthetic attribute is left empty: distinguishing age vs.
+// size vs. count would require splitting composite retention policies into
+// per-trigger rules, which is not built. Routes targeting retention match on
 // `_source = "retention"` and `_vault = "<id>"`.
 //
 // SubmitRetentionRecord routes each record through the pipeline: route
@@ -1461,11 +1400,11 @@ func dispositionActionName(disposition string) string {
 //
 // False means "no record of this chunk reached a route, and that might
 // change later": the pipeline is stopped or shutting down, disk protect is
-// rejecting everything (gastrolog-5034va), the vault instance is missing, or
-// the chunk could not be opened (gastrolog-65riw5). The chunk survives and
-// the route is retried from scratch. The invariant this protects is stated
-// in applyRetentionDispositionToChunk: duplicate-on-abort at the route
-// target is acceptable, loss of the operator's route disposition is not.
+// rejecting everything, the vault instance is missing, or the chunk could
+// not be opened. The chunk survives and the route is retried from scratch.
+// The invariant this protects is stated in applyRetentionDispositionToChunk:
+// duplicate-on-abort at the route target is acceptable, loss of the
+// operator's route disposition is not.
 //
 // True still tolerates a PARTIAL fan-out — records whose own submit failed
 // for a non-terminal reason are dropped and the chunk is destroyed, because
@@ -1484,11 +1423,9 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 		// the floor band the gate releases and this fan-out runs even while
 		// the ADMISSION gate still suspends ingest: retention is the only
 		// mechanism that frees space on a route-disposition vault, so gating
-		// it on admission's resume bar deadlocked the vault permanently
-		// (gastrolog-5ct2av; previously this checked diskProtectActive).
-		// Fanning out below the floor would still be wrong for the
-		// gastrolog-5034va reason: every routed record would be refused and
-		// the chunk destroyed unrouted.
+		// it on admission's resume bar deadlocked the vault permanently.
+		// Fanning out below the floor would still be wrong: every routed
+		// record would be refused and the chunk destroyed unrouted.
 		if n, ok := r.idleLog.Allow("disk-protect"); ok {
 			r.logger.Warn("retention: route fan-out deferred — drain gate engaged below the disk floor; chunk retained for a later sweep",
 				"vault", r.vaultID, "suppressed", n)
@@ -1501,7 +1438,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 	// with zero records delivered — loss of the operator's route
 	// disposition, which this path promises never to do. Retain and let a
 	// later sweep try; if the vault is genuinely gone for good, the chunk
-	// surfaces as an unknown-orphan rather than vanishing (gastrolog-65riw5).
+	// surfaces as an unknown-orphan rather than vanishing.
 	vaultInst := r.findVaultInstance()
 	if vaultInst == nil || vaultInst.Chunks == nil {
 		r.logger.Warn("retention: no vault instance for fan-out; chunk retained for a later sweep",
@@ -1519,7 +1456,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 		// operator's "Retry unreadable" action. Retention sweeps skip a
 		// chunk while it is inside its backoff window, so a permanently
 		// unreadable chunk does not wedge the sweep — which is what made
-		// destroy-on-unreadable look necessary (gastrolog-65riw5).
+		// destroy-on-unreadable look necessary.
 		r.markUnreadable(id, fmt.Errorf("open cursor for retention fan-out: %w", err))
 		return false
 	}
@@ -1533,8 +1470,8 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 	// fanCtx aborts the whole fan-out on the first terminal submit error:
 	// producers stop reading records, blocked Submits unblock, and workers
 	// drain the jobs channel without submitting. Exactly ONE warn is
-	// emitted for the abort — the previous per-record warn flooded tens of
-	// thousands of identical lines on every shutdown (gastrolog-5034va).
+	// emitted for the abort — warning per record instead flooded tens of
+	// thousands of identical lines on every shutdown.
 	fanCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var aborted atomic.Bool
@@ -1542,16 +1479,15 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 	abort := func(cause error) {
 		abortOnce.Do(func() {
 			aborted.Store(true)
-			// Throttled per cause, not per chunk. abortOnce already reduced a
-			// per-RECORD warn to one per chunk (gastrolog-5034va), but a
-			// standing condition — a destination parked at its max-size bound,
-			// say — still hits every chunk of every sweep, and the operator
-			// gets the same line at tens per second forever. The transfer
-			// disposition throttles the identical event this way already
-			// (retention_transfer.go). The condition itself is carried by the
-			// retention-deferred alarm, which noteRetentionDeferral below feeds
-			// unthrottled, so the log only has to name it periodically
-			// (gastrolog-4dr79b).
+			// Throttled per cause, not per chunk. abortOnce alone reduces a
+			// per-RECORD warn to one per chunk, but a standing condition — a
+			// destination parked at its max-size bound, say — still hits
+			// every chunk of every sweep, and the operator gets the same line
+			// at tens per second forever. The transfer disposition throttles
+			// the identical event this way (retention_transfer.go). The
+			// condition itself is carried by the retention-deferred alarm,
+			// which noteRetentionDeferral below feeds unthrottled, so the log
+			// only has to name it periodically.
 			if n, ok := r.idleLog.Allow("route-fanout-abort:" + cause.Error()); ok {
 				r.logger.Warn("retention: fan-out aborted; chunk will re-route on a later sweep",
 					"vault", r.vaultID, "chunk", id, "error", cause, "suppressed", n)
@@ -1563,18 +1499,17 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 
 	// Watchdog: a fan-out that stops making progress — a destination that
 	// passes its admission gate but stops draining, a jammed routing input —
-	// must abort and retain the chunk instead of parking the sweep forever
-	// (gastrolog-5ct2av). Progress is a completed submit: accepted-and-
-	// committed, per-record-dropped, or unmatched all count; only a BLOCKED
-	// submit does not.
+	// must abort and retain the chunk instead of parking the sweep forever.
+	// Progress is a completed submit: accepted-and-committed,
+	// per-record-dropped, or unmatched all count; only a BLOCKED submit does
+	// not.
 	// Bump-before-Wait invariant: every submit worker below calls watch.bump()
 	// for its last record before returning, and submitWG.Wait() (below) does
 	// not return until every worker has returned — so the last bump always
 	// happens-before Wait's return. A "spurious" abort firing after the
 	// fan-out has already completed would need the monitor to observe TWO
 	// consecutive stall windows with no bump after that last one, and even
-	// then it is a benign retained-chunk retry (gastrolog-5034va ordering),
-	// never a correctness problem.
+	// then it is a benign retained-chunk retry, never a correctness problem.
 	watch := &progressWatch{}
 	watchDone := make(chan struct{})
 	defer close(watchDone)
@@ -1615,7 +1550,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 					// Counted rather than logged per record: a chunk holds
 					// millions, and one line each is how the pour incident
 					// buried the console. One line with the count after the
-					// fan-out says the same thing (gastrolog-65riw5).
+					// fan-out says the same thing.
 					dropped.Add(1)
 					firstDropErr.CompareAndSwap(nil, subErr)
 				}
@@ -1649,8 +1584,7 @@ func (r *retentionRunner) fanOutChunkRecords(ctx context.Context, cur chunk.Reco
 	// so the scan's mmap accesses are minor faults. Cold-faulting a whole GLCB
 	// through the mapping pins scheduler Ps and stalls the runtime under
 	// disk saturation — measured as Raft election storms during retention
-	// expiry (gastrolog-1io54g). Real warm since gastrolog-5gmb99 (was an
-	// unreachable no-op before). Skipped when the fan-out already aborted.
+	// expiry. Skipped when the fan-out already aborted.
 	if ctx.Err() == nil {
 		if warm, ok := cur.(chunk.SequentialPrewarmer); ok {
 			warm.PrewarmSequential()
@@ -1786,8 +1720,7 @@ func (r *retentionRunner) clearInflight(id chunk.ChunkID) {
 // skipped while now is before nextRetry. After the deadline, the next
 // sweep retries via transitionChunk; success clears the entry, failure
 // schedules the next retry further out via exponential backoff (capped
-// at 24h). Replaces the prior boolean "unreadable forever" semantics.
-// See gastrolog-25vur.
+// at 24h).
 type unreadableEntry struct {
 	failCount int
 	nextRetry time.Time
@@ -1820,7 +1753,7 @@ func unreadableBackoff(failCount int) time.Duration {
 // read again), not alarm suppression: the raw chunk-unreadable condition
 // is raised here per failure and cleared by clearUnreadable, and the
 // catalog's DelayOn keeps a blip that resolves on the first retry from
-// ever annunciating (gastrolog-4wvxqh).
+// ever annunciating.
 func (r *retentionRunner) markUnreadable(id chunk.ChunkID, reason error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1858,7 +1791,7 @@ func (r *retentionRunner) clearUnreadable(id chunk.ChunkID) {
 // retryUnreadableChunks resets every unreadable entry's nextRetry to
 // now so the next retention sweep retries them all immediately.
 // Returns the count of entries reset. Used by the manual-recovery
-// action operators trigger from the inspector. See gastrolog-25vur.
+// action operators trigger from the inspector.
 func (r *retentionRunner) retryUnreadableChunks() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1877,7 +1810,7 @@ func (r *retentionRunner) retryUnreadableChunks() int {
 // entry and in audit logs — see deleteChunk for the canonical reason
 // catalog.
 //
-// Cluster path (gastrolog-51gme step 4):
+// Cluster path:
 //
 //	reconciler.deleteChunk → CmdRequestDelete → onRequestDelete fires on
 //	every node in expectedFrom (including this leader) and each one
@@ -1899,15 +1832,15 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 			return
 		}
 		if r.orch != nil && r.orch.retentionRates != nil {
-			// Per-instance rate alert (see gastrolog-47qyw). Only counted on
-			// the leader path (this function only runs on instance leaders)
-			// so the rate reflects active expiration decisions, not
-			// follower delete-cascade applications.
+			// Per-instance rate alert. Only counted on the leader path (this
+			// function only runs on instance leaders) so the rate reflects
+			// active expiration decisions, not follower delete-cascade
+			// applications.
 			r.orch.retentionRates.Record(r.vaultID, r.orch.now())
 		}
 		if r.orch != nil && r.orch.stageEvents != nil {
-			// First-class retention-delete stage counter (gastrolog-4r784a),
-			// leader-only for the same reason as the rate alert above.
+			// First-class retention-delete stage counter, leader-only for
+			// the same reason as the rate alert above.
 			r.orch.stageEvents.recordRetentionDelete(r.vaultID)
 		}
 		r.logger.Debug("retention: requested chunk delete via reconciler",

@@ -13,7 +13,6 @@ import (
 )
 
 // resolver maps names to UUIDs for all entity types by calling GetConfig once.
-// gastrolog-4kkoo (Phase 5): no filters map; the entity is gone.
 type resolver struct {
 	rotationPolicies  map[string]string
 	retentionPolicies map[string]string

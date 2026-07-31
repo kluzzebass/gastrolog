@@ -18,9 +18,9 @@ const base: PipInputs = {
 };
 
 describe("chunkLifecycleState", () => {
-  // gastrolog-5wh571: the enum is the sole authority — the legacy Sealed
-  // bool used to paint SEALING chunks as active in the CLI, and the UI
-  // shares this derivation for parity. Same states, same words.
+  // The enum is the sole authority — the legacy Sealed bool used to paint
+  // SEALING chunks as active in the CLI, and the UI shares this derivation
+  // for parity. Same states, same words.
   test("maps each lifecycle state to its word", () => {
     expect(chunkLifecycleState(new ChunkMeta({ state: ChunkState.ACTIVE }))).toBe("active");
     expect(chunkLifecycleState(new ChunkMeta({ state: ChunkState.SEALING }))).toBe("sealing");
@@ -177,13 +177,13 @@ const rowNodes = (input: PipInputs): string[] => {
   return [...pips, ...ghosts].map((p) => p.node);
 };
 
-// gastrolog-68wsli: placement rides the config snapshot while residency /
-// pending-ack ride the chunk stream — two data paths with different
-// staleness. The row's node universe is the union of all three sets, so a
-// node referenced by ANY source renders (in the grammar-correct state)
-// instead of vanishing, and the pip count cannot flap while sources
-// converge during a placement transition.
-describe("computePips — union row universe (gastrolog-68wsli)", () => {
+// Placement rides the config snapshot while residency / pending-ack ride
+// the chunk stream — two data paths with different staleness. The row's
+// node universe is the union of all three sets, so a node referenced by ANY
+// source renders (in the grammar-correct state) instead of vanishing, and
+// the pip count cannot flap while sources converge during a placement
+// transition.
+describe("computePips — union row universe", () => {
 
   test("row is exactly the union of placement, residency, and pending-ack sets", () => {
     const input: PipInputs = {

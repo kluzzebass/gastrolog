@@ -141,7 +141,7 @@ func (g *GCSStore) Head(ctx context.Context, key string) (BlobInfo, error) {
 }
 
 // --- Archiver implementation ---
-// GCS has no offline access tiers — all storage classes are immediately readable.
+// GCS has no offline storage classes — all are immediately readable.
 // Archive just changes the storage class (for cost optimization).
 // Restore is a no-op (already readable). IsRestoring always false.
 

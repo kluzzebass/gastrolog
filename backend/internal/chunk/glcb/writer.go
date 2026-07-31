@@ -30,7 +30,7 @@ const (
 	// such caller — pipeline/chunking always binds an output file and
 	// stays in direct mode). Exported so orphan-sweep code that shares a
 	// directory with a Writer's staging file can match its exact naming
-	// contract instead of guessing a pattern. See gastrolog-66hmx3.
+	// contract instead of guessing a pattern.
 	RecordsStagingPrefix = "glcb-records-"
 )
 
@@ -231,8 +231,7 @@ func (w *Writer) Add(rec chunk.Record) error {
 	}
 
 	// Encode directly into the reused scratch after a frameLenSize length
-	// placeholder — the old flow allocated a fresh frame per record and
-	// immediately copied it here (gastrolog-11y2iv).
+	// placeholder, so no per-record frame is allocated and copied.
 	if cap(w.frameScratch) < frameLenSize {
 		w.frameScratch = make([]byte, frameLenSize, 512)
 	}
@@ -248,8 +247,7 @@ func (w *Writer) Add(rec chunk.Record) error {
 // AddView is Add for a record.View: attributes transcode straight from
 // segment wire form to dict form with no intermediate map, and Raw copies
 // exactly once (view -> frame scratch). The bulk GLCB merge feeds this;
-// the map-per-record path cost ~24GB of garbage per soak run
-// (gastrolog-11y2iv).
+// the map-per-record path cost ~24GB of garbage per soak run.
 func (w *Writer) AddView(v record.View) error {
 	if w.output != nil && !w.direct {
 		if err := w.beginDirect(w.output); err != nil {

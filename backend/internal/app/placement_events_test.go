@@ -13,7 +13,7 @@ import (
 // the one input that has no FSM event — peer-heartbeat liveness expiry (TTL
 // poll). Every OTHER placement input arrives as an FSM notification, and the
 // dispatcher must wake the placement manager / orchestrator reconcile on it
-// rather than leaving it to the periodic pass (gastrolog-29xpy). Each subtest
+// rather than leaving it to the periodic pass. Each subtest
 // drives one notification with NO scheduler wired — the tick neutered — and
 // asserts the event-driven delegation fired.
 func TestPlacementEventDelegation(t *testing.T) {

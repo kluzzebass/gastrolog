@@ -199,9 +199,8 @@ func TestEnsureConfig_ConfigWithoutSecret(t *testing.T) {
 	t.Parallel()
 	store := memory.NewStore()
 	ctx := context.Background()
-	// gastrolog-4kkoo (Phase 5): no FilterConfig — use a rotation policy
-	// to push Load() over the empty-store threshold while keeping server
-	// settings unset.
+	// There is no FilterConfig — use a rotation policy to push Load() over
+	// the empty-store threshold while keeping server settings unset.
 	dummyMaxAge := "1h"
 	if err := store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
 		ID: glid.New(), Name: "dummy", MaxAge: &dummyMaxAge,
@@ -307,9 +306,9 @@ func TestLoadLocalConfig_JoinAddrFreshJoinReturnsNil(t *testing.T) {
 	}
 }
 
-// TestLoadLocalConfig_JoinAddrRestartUsesLocalFSM covers gastrolog-1gh5s.
-// A pod restart (K8s rolling upgrade, reschedule, etc.) is indistinguishable
-// from a fresh join at the pod level — JoinAddr is set in both cases — but
+// TestLoadLocalConfig_JoinAddrRestartUsesLocalFSM: a pod restart (K8s
+// rolling upgrade, reschedule, etc.) is indistinguishable from a fresh
+// join at the pod level — JoinAddr is set in both cases — but
 // the restart case has an already-populated local FSM that was just restored
 // from snapshot. Returning nil here would leave the orchestrator with
 // vaults=0 forever (snapshot restore does not fire NotifyVaultConfigPut),

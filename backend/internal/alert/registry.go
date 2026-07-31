@@ -74,8 +74,8 @@ var catalog = []AlarmType{
 		// a chunk. In a HEALTHY vault an occasional island-origin give-up is
 		// cleared by the next seal inside this window, so it never annunciates;
 		// a STARVED vault seals nothing, so the raise stands past DelayOn and
-		// annunciates — the condition that hid inside 40/min retention-noise
-		// WARNs on the 18h cluster run (gastrolog-68sfsl).
+		// annunciates instead of hiding inside the vault's routine
+		// retention-noise WARNs.
 		DelayOn:  2 * time.Minute,
 		Cause:    "A vault is repeatedly releasing never-chunked segments at its retention give-up TTL: records are aging out of the completed-segment registry before chunking ever references them, so they are dropped without reaching a chunk — even though the planner is actively running. On a cloud-backed vault the dropped records never reach cloud.",
 		Response: "The pipeline is not chunking this vault's segments within the retention TTL. The planner needs min(2, placement) holders before it can chunk a segment; check that segment collection is delivering copies to the vault's homes and that replication is progressing. Clears once the vault seals a chunk again.",
@@ -165,8 +165,8 @@ var catalog = []AlarmType{
 		Source:   "retention",
 		// The consecutive-sweep count at the call site is the condition
 		// definition (like chunking-underreplicated's window), so no DelayOn.
-		// Covers both non-delete dispositions that can stall (gastrolog-2l918
-		// generalized this from route-only): route fan-out and transfer.
+		// Covers both non-delete dispositions that can stall: route fan-out
+		// and transfer.
 		Cause:    "Retention on this vault has been unable to complete its configured disposition (route fan-out or transfer) for consecutive sweeps — the only mechanism that drains the vault is deferred, so expired chunks accumulate and any size caps stay engaged.",
 		Response: "Read the alarm detail for the deferral cause and disposition: free space on the starved volume (the drain resumes once free clears the floor band), drain or grow the destination/target vault, or — last resort, discards the records — set the vault's retention disposition to delete.",
 	},
@@ -177,7 +177,7 @@ var catalog = []AlarmType{
 		// The condition is config-derived and static (not a transient
 		// mid-election or mid-flap state), so no DelayOn -- unlike
 		// vault-leaderless, a trigger-less policy doesn't resolve itself.
-		Cause:    "The vault has retention_rules configured, but every referenced retention policy resolves with no trigger set (no maxAge, maxSize, or maxChunks) -- the vault's only drain never runs, so it grows until the volume's free-space thresholds (the storage's diskFreeWarn / diskFreeFloor) engage. There is no per-vault size default to catch this (gastrolog-vl2p98): a vault with no stated bound is bounded only by its volume.",
+		Cause:    "The vault has retention_rules configured, but every referenced retention policy resolves with no trigger set (no maxAge, maxSize, or maxChunks) -- the vault's only drain never runs, so it grows until the volume's free-space thresholds (the storage's diskFreeWarn / diskFreeFloor) engage. There is no per-vault size default to catch this: a vault with no stated bound is bounded only by its volume.",
 		Response: "Read the alarm detail for which policies resolved with no trigger. Add a maxAge, maxSize, or maxChunks to at least one referenced policy -- maxSize alone is enough to both bound the vault and enable draining (it drains oldest chunks past the bound regardless of the refuse flag); add refuse=true to also refuse admission while over it, since refuse defaults off. Do NOT remove the vault's retention_rules to silence this -- detaching every policy leaves the vault with no drain at all, growing until the volume's free-space thresholds engage.",
 	},
 	{
@@ -252,8 +252,8 @@ var catalog = []AlarmType{
 		Response: "Fix the named configuration error.",
 	},
 	{
-		// gastrolog-1ovdy: the config dispatcher applies each committed
-		// config mutation to this node's orchestrator inside FSM.Apply. When
+		// The config dispatcher applies each committed config mutation to
+		// this node's orchestrator inside FSM.Apply. When
 		// a side effect fails (AddVault, reconcile, policy reload, TLS reload,
 		// membership refresh, …) the mutation is already durable in Raft but
 		// this node's running state diverges from it. The failure becomes a
@@ -284,9 +284,8 @@ var catalog = []AlarmType{
 		Response: "Raise the bound (set a larger max size on an attached retention policy) or shorten retention. This vault is refusing records now; others are unaffected.",
 	},
 	{
-		// gastrolog-5yfaqj: generalizes refusal from max-size (above, its
-		// own already-shipped alarm pair, unchanged) to max-age and
-		// max-chunks. One type, cause named in the detail text and
+		// Refusal on max-age and max-chunks bounds; max-size has its own
+		// alarm pair above. One type, cause named in the detail text and
 		// disambiguated in the entity key (<vault>/age, <vault>/count) so
 		// both can stand on one vault at once. No "approaching" variant —
 		// unlike max-size this isn't an instantaneous measurement to lead
@@ -300,10 +299,9 @@ var catalog = []AlarmType{
 		Response: "Read the alarm detail for which bound and vault. If retention-deferred is also standing for this vault, that names why the sweep isn't clearing it; otherwise raise the bound, shorten it enough that draining can keep up, or turn the policy's refuse flag off (or simply leave it unset) to accept drain-only.",
 	},
 	{
-		// gastrolog-9akebz: the free-space thresholds moved from VaultConfig
-		// to the storage entity a vault's placements reference, and the
-		// guard evaluates each storage ONCE — the instance key is the
-		// storage ID (was the vault ID), and the detail text names the
+		// The free-space thresholds live on the storage entity a vault's
+		// placements reference, and the guard evaluates each storage ONCE:
+		// the instance key is the storage ID, and the detail text names the
 		// storage and its node, since every vault placed there refuses
 		// together for the same physical condition.
 		IDPrefix: "disk-space-exhausted",
@@ -343,8 +341,8 @@ var catalog = []AlarmType{
 		Response: "Raise the bound (set a larger max size on an attached retention policy) or shorten retention — before records start being refused.",
 	},
 	{
-		// gastrolog-9akebz: instance key is the storage ID (was the vault
-		// ID) — see disk-space-exhausted's comment.
+		// Instance key is the storage ID — see disk-space-exhausted's
+		// comment.
 		IDPrefix: "disk-space-low",
 		Priority: Low,
 		Source:   "storage",

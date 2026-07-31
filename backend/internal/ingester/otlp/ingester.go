@@ -43,7 +43,7 @@ type Ingester struct {
 	// pressureGate is consulted non-blockingly by processExportRequest to
 	// decide whether to reject incoming exports with 429 / ResourceExhausted.
 	// Hysteresis in the gate prevents flapping between accept/reject at the
-	// threshold. Injected by the orchestrator. See gastrolog-4fguu.
+	// threshold. Injected by the orchestrator.
 	pressureGate *chanwatch.PressureGate
 }
 
@@ -80,10 +80,10 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 	// Bind BOTH listeners before serving anything. The HTTP /ready endpoint
 	// is the ingester's readiness signal, so it must not answer until every
 	// listener has a bound socket — serving HTTP before the gRPC bind let a
-	// client pass /ready and then get connection-refused on the gRPC port
-	// (gastrolog-2y7wd2). A bound listener accepts TCP connections at the
-	// kernel level even before Serve starts draining them, so bind-then-serve
-	// makes readiness honest without extra signaling.
+	// client pass /ready and then get connection-refused on the gRPC port.
+	// A bound listener accepts TCP connections at the kernel level even
+	// before Serve starts draining them, so bind-then-serve makes readiness
+	// honest without extra signaling.
 	httpLn, err := net.Listen("tcp", ing.httpAddr)
 	if err != nil {
 		return fmt.Errorf("otlp http listen: %w", err)

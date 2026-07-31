@@ -89,9 +89,8 @@ function vaultToEntry(v: VaultConfig): StorageEntry {
 // supplies name and enabled).
 //
 // Placements are deliberately NOT sent. They are owned by the placement manager
-// and PutVault ignores them, re-deriving from the owner — this used to echo them
-// back purely so a config edit would not wipe the copy the orchestrator reads
-// (gastrolog-kl8c3s). Sending them now would be a no-op that reads like intent.
+// and PutVault ignores them, re-deriving from the owner, so echoing them back
+// would be a no-op that reads like intent.
 function entryToVault(
   vault: VaultConfig,
   entry: StorageEntry,
@@ -109,11 +108,11 @@ function entryToVault(
     cacheEviction: cloudBacked ? (entry.cacheEviction || "lru") : "",
     // Empty field = unset (server defaults it for cloud vaults), not explicit
     // 0 (rejected) — same size-expression convention as the storage's
-    // disk-free thresholds (gastrolog-338j51).
+    // disk-free thresholds.
     cacheBudget: cloudBacked ? entry.cacheBudget : "",
     cacheTtl: cloudBacked ? entry.cacheTTL : "",
     // Empty field = unset (server defaults it for memory vaults), not
-    // explicit 0 (rejected) (gastrolog-1qd5wz).
+    // explicit 0 (rejected).
     memoryBudget: entry.type === "memory" ? entry.memoryBudget : "",
     rotationPolicyId: entry.rotationPolicyId ? decode(entry.rotationPolicyId) : new Uint8Array(0),
     retentionRules: entry.retentionPolicyId
@@ -426,8 +425,8 @@ export function VaultSettingsCard({
 
         {/* Storage shape edit — same form the Add flow uses, with type
             and cloud binding locked because the backend rejects those
-            mutations on existing vaults (gastrolog-3ul0s). The Storage
-            Type selector is hidden entirely (no onTypeChange passed);
+            mutations on existing vaults. The Storage Type selector is
+            hidden entirely (no onTypeChange passed);
             the Cloud Storage selector is disabled via cloudLocked. To
             change type or cloud binding, create a new vault and migrate
             via retention routing. */}

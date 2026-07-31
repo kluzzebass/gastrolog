@@ -1,6 +1,6 @@
 package orchestrator_test
 
-// gastrolog-5do8sh: pipeline flow-tail and failure-injection acceptance.
+// Pipeline flow-tail and failure-injection acceptance.
 //
 // The Rubicon E3 tests (reliability_pipeline_test.go) prove ingest → publish →
 // collection → sealed GLCB → query. These tests pin the two remaining legs of
@@ -24,7 +24,7 @@ import (
 // stageCounterTotals is the cluster-wide sum of the per-vault discrete
 // pipeline stage counters, gathered by reading each node's orchestrator (each
 // node counts only its own events) — the same sum NodeStats/GetClusterStatus
-// produces for the inspector (gastrolog-4r784a).
+// produces for the inspector.
 type stageCounterTotals struct {
 	segmentsCompleted uint64
 	segmentsPublished uint64
@@ -193,9 +193,9 @@ func TestOrchPipeline_ReleaseDrainsRegistryAndHead(t *testing.T) {
 	// record exactly once from the sealed GLCBs.
 	h.assertSearchBodiesExactly(v, h.nodeIDs[1], bodies)
 
-	// Stage counters end to end (gastrolog-4r784a): the discrete pipeline
-	// milestones populated on their owning nodes. Each node counts only its
-	// own events, so the cluster picture is the sum across nodes — exactly the
+	// Stage counters end to end: the discrete pipeline milestones populated
+	// on their owning nodes. Each node counts only its own events, so the
+	// cluster picture is the sum across nodes — exactly the
 	// aggregation NodeStats/GetClusterStatus performs for the UI. Assert the
 	// cluster totals reflect the flow: segments completed+published on the
 	// origin, chunks planned/built/sealed and segments released across the

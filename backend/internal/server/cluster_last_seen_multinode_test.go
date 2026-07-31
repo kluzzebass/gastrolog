@@ -1,9 +1,9 @@
 package server_test
 
 // ClusterNode.last_seen is what the inspector's "offline Xs" badge counts
-// from. It exists because that duration used to be measured in the browser,
-// from the moment a tab first noticed a node's stats were missing — which made
-// it a property of the tab, not of the cluster (gastrolog-231eli).
+// from. It has to come from the cluster: a duration measured in the browser,
+// from the moment a tab first noticed a node's stats were missing, is a
+// property of the tab, not of the node.
 //
 // The value is the cluster's own last positive evidence of life
 // (cluster.PeerState.LastSeen: max of last Raft contact and last stats

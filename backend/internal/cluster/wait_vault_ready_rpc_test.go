@@ -19,7 +19,7 @@ import (
 // WaitVaultReady executor set to exec, and returns a ChunkTransferrer wired to
 // it over a real connection plus a teardown. Exercises the full
 // ForwardWaitVaultReady round-trip: client InvokeService, the server handler,
-// and its context/error classification. See gastrolog-3sdnn.
+// and its context/error classification.
 func startWaitVaultReadyServer(t *testing.T, exec WaitVaultReadyExecutor) (*ChunkTransferrer, func()) {
 	t.Helper()
 	lis, err := net.Listen("tcp", "127.0.0.1:0")

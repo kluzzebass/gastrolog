@@ -15,9 +15,9 @@ import (
 // the chunking release worker uses to decide whether unchunkable segments are
 // SHED — reads disposition and rules under runner.mu, having deliberately
 // released o.mu first. retentionRunnerFor used to refresh those same fields
-// holding only o.mu, so the two ran unsynchronised against each other
-// (gastrolog-3kcr1u): the sweep's write and the release worker's read, with
-// shedding as the consequence of the read.
+// holding only o.mu, so the two ran unsynchronised against each other: the
+// sweep's write and the release worker's read, with shedding as the
+// consequence of the read.
 //
 // This test drives both sides concurrently. It is a race-detector test: it
 // asserts nothing about interleaving (there is nothing deterministic to assert)

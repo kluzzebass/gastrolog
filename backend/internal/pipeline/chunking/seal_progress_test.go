@@ -113,7 +113,7 @@ func TestSealProgressClaimPostSealRequiresBuild(t *testing.T) {
 	}
 }
 
-// TestSealProgressClaimPostSealWaitsForCompletion pins the gastrolog-4cxvdi
+// TestSealProgressClaimPostSealWaitsForCompletion pins the post-seal claim
 // contract: a refused claim hands back the claimant's done channel, which
 // stays open until finishPostSeal — a loser that returns on refusal alone
 // races the claimant's in-flight purge.

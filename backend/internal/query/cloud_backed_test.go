@@ -216,7 +216,7 @@ func TestCloudBackedTimestampOrdering(t *testing.T) {
 }
 
 // orderedRegistry pins ListVaults order. The multi-vault merge must not
-// depend on registry enumeration order (gastrolog-33bkl7).
+// depend on registry enumeration order.
 type orderedRegistry struct {
 	*testRegistry
 	order []glid.GLID
@@ -226,12 +226,12 @@ func (r *orderedRegistry) ListVaults() []glid.GLID {
 	return append([]glid.GLID(nil), r.order...)
 }
 
-// TestMultiVaultLimitOrderingIndependentOfRegistryOrder pins gastrolog-33bkl7
-// deterministically: with the LATER-timestamped vault enumerating first, the
-// lazy-prime merge treated the concatenated per-vault chunk lists as
-// non-overlapping planner order, opened the later vault, satisfied Limit,
-// and never opened the earlier cloud-backed vault — silently dropping the
-// earliest records from search results.
+// TestMultiVaultLimitOrderingIndependentOfRegistryOrder pins registry-order
+// independence deterministically: with the LATER-timestamped vault
+// enumerating first, the lazy-prime merge treated the concatenated per-vault
+// chunk lists as non-overlapping planner order, opened the later vault,
+// satisfied Limit, and never opened the earlier cloud-backed vault —
+// silently dropping the earliest records from search results.
 func TestMultiVaultLimitOrderingIndependentOfRegistryOrder(t *testing.T) {
 	base := &testRegistry{
 		vaults: make(map[glid.GLID]struct {

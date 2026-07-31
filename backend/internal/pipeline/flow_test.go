@@ -48,8 +48,8 @@ func (e *emitIngester) Run(ctx context.Context, out chan<- ingestion.IngesterMes
 }
 
 // harness wires ingestion → digestion → routing → segmentation → distribution
-// (→ collection when opts.withCollection), the way the orchestrator will
-// (gastrolog-214bz), without control-plane or ack semantics yet.
+// (→ collection when opts.withCollection), the way the orchestrator will,
+// without control-plane or ack semantics yet.
 type harness struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -830,9 +830,8 @@ func TestPipelineFullPath(t *testing.T) {
 		withChunking:   true,
 		// MaxRecords stays above the published record count so the event-driven
 		// worker cannot auto-seal while the test still reads head/ copies —
-		// post-seal purge legitimately deletes them (gastrolog-2qj3pw). The
-		// seal is triggered explicitly via RotateCron once every ref is in the
-		// open manifest.
+		// post-seal purge legitimately deletes them. The seal is triggered
+		// explicitly via RotateCron once every ref is in the open manifest.
 		chunkPolicy: chunking.ManifestRotationPolicy{MaxRecords: 100},
 	})
 	msgs := make([]ingestion.IngesterMessage, 8)
@@ -1378,8 +1377,8 @@ func TestPipelineUnmatchedNotWritten(t *testing.T) {
 // TestPipelineRecoversOrphanedWorkingSegmentAcrossNodes: an orphaned working/
 // segment left by a crashed origin process is recovered at vault
 // registration, published, pulled by the remote home, and receipted — the
-// acked records survive the crash end to end (gastrolog-1sylj7). No fresh
-// ingest happens: recovery alone must drive the whole flow.
+// acked records survive the crash end to end. No fresh ingest happens:
+// recovery alone must drive the whole flow.
 func TestPipelineRecoversOrphanedWorkingSegmentAcrossNodes(t *testing.T) {
 	nodeID := glid.New()
 	ingesterID := glid.New()

@@ -71,7 +71,7 @@ func (o *Orchestrator) scheduleCatchupForNode(vaultID glid.GLID, nodeID string, 
 	}
 	// Describe BEFORE scheduling — see scheduleReplication for why (missing
 	// label on the Scheduled event, leaked descriptions entry when the job
-	// finishes first). gastrolog-69sjlj.
+	// finishes first).
 	o.scheduler.Describe(name, "Replicate sealed chunks to follower "+nodeID[:8])
 	if err := o.scheduler.RunOnce(name, func() {
 		// On retries, wait for the recovering node to finish building
@@ -126,8 +126,8 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, n
 	// applying a delete and the leader's local file actually being unlinked,
 	// during which instance.Chunks.List() will still return the chunk. Sending
 	// such a chunk would be wasted work: the receiver would write it to disk
-	// and immediately apply the matching CmdRequestDelete (see gastrolog-5grpa
-	// and the gastrolog-51gme receipt protocol).
+	// and immediately apply the matching CmdRequestDelete via the receipt
+	// protocol.
 	var manifestSet map[chunk.ChunkID]bool
 	if vaultInst.ListManifest != nil {
 		ids := vaultInst.ListManifest()
@@ -137,8 +137,8 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, n
 		}
 	}
 
-	// Phase 3 (gastrolog-1huz5): overlay through FSM so catchupCandidates'
-	// .Sealed gate excludes Sealing chunks (GLCB not yet committed).
+	// Overlay through the FSM so catchupCandidates' .Sealed gate excludes
+	// Sealing chunks (GLCB not yet committed).
 	for i := range metas {
 		metas[i] = o.groundChunkMeta(vaultID, metas[i])
 	}
@@ -160,9 +160,8 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, n
 			// (recovering node still in startup), return a retryable error.
 			// The scheduler will re-run the job. Sentinel errors don't
 			// survive the cluster RPC boundary (the handler concatenates
-			// strings) so we substring-match both error wordings — the
-			// legacy "vault not found" and the new "instance not registered
-			// on this node" (gastrolog-2t48z).
+			// strings) so we substring-match both error wordings:
+			// "vault not found" and "instance not registered on this node".
 			msg := err.Error()
 			if strings.Contains(msg, "vault not found") || strings.Contains(msg, "instance not registered on this node") {
 				return fmt.Errorf("follower %s not ready for vault %s (still building): %w", nodeID, vaultID, err)
@@ -199,13 +198,12 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, n
 // run on a single goroutine sequentially per (vault, requester) to
 // avoid storming the bandwidth path.
 //
-// Symmetric peer-to-peer (gastrolog-19241): both followers and leaders
-// can be requesters AND responders. The receiver doesn't need to be the
-// placement leader — it just needs to have the chunks locally. This
-// enables a newly-elected leader to backfill historical chunks from
-// followers that still have them, instead of waiting for the stale-fsm
-// sweep to declare the chunks unrecoverable. See gastrolog-2dgvj for
-// the original (follower→leader) design.
+// Symmetric peer-to-peer: both followers and leaders can be requesters
+// AND responders. The receiver doesn't need to be the placement leader —
+// it just needs to have the chunks locally. This enables a newly-elected
+// leader to backfill historical chunks from followers that still have
+// them, instead of waiting for the stale-fsm sweep to declare the chunks
+// unrecoverable.
 func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.GLID, requesterNodeID string, chunkIDs []chunk.ChunkID) (uint32, error) {
 	if o.isPipelineIngestVault(vaultID) {
 		return 0, nil
@@ -249,10 +247,9 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 		if !ok {
 			continue // leader doesn't have it locally either
 		}
-		// Phase 3 (gastrolog-1huz5): catchup ships sealed-form GLCBs
-		// only. Sealing chunks have no GLCB yet — overlay through the
-		// FSM so we don't queue a push for a chunk that's still in
-		// assembly.
+		// Catchup ships sealed-form GLCBs only. Sealing chunks have no
+		// GLCB yet — overlay through the FSM so we don't queue a push
+		// for a chunk that's still in assembly.
 		m = o.groundChunkMeta(vaultID, m)
 		if !m.Sealed {
 			continue

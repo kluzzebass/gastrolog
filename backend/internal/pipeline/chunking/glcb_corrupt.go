@@ -9,11 +9,7 @@ import (
 )
 
 // This file is the single corrupt-GLCB recovery story shared by the build
-// pass (adoptExistingGLCBIfPresent) and restart recovery (recoverBuiltGLCB)
-// — gastrolog-687m11. Before it, the two paths diverged: the build pass
-// silently rebuilt over a corrupt data.glcb (self-healing, but the
-// corruption signal was eaten), while recovery propagated the read error
-// and never rebuilt (the chunk starved until operator action).
+// pass (adoptExistingGLCBIfPresent) and restart recovery (recoverBuiltGLCB).
 //
 // The unified story: detect → quarantine → alert → heal.
 //

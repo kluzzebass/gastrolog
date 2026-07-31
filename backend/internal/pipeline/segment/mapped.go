@@ -12,13 +12,13 @@ import (
 )
 
 // MappedSegment is a read-only mmap view of a finalized, immutable segment,
-// built for bulk merge reads (gastrolog-1rca2d). The GLCB build previously
-// issued ~3 preads per merged record (index entry + length prefix + body)
-// plus a full-file CRC re-verification per segment open — the third full
-// read of data already verified at collection and finalize time. Mapping
-// the file makes index-entry and frame reads plain memory access; record
-// bodies are still copied out of the mapping by the shared frame decoder,
-// so no Record ever aliases the mapping's lifetime.
+// built for bulk merge reads. Mapping the file makes index-entry and frame
+// reads plain memory access, instead of the ~3 preads per merged record
+// (index entry + length prefix + body) plus a full-file CRC re-verification
+// per open that the GLCB build would otherwise pay — a third full read of
+// data already verified at collection and finalize time. Record bodies are
+// still copied out of the mapping by the shared frame decoder, so no Record
+// ever aliases the mapping's lifetime.
 //
 // Trust model: OpenMapped validates the header and the on-disk layout
 // arithmetic but does NOT recompute file checksums. Use it only for
@@ -41,12 +41,12 @@ var ErrNotFinalized = errors.New("segment is not finalized")
 // inside a non-preemptible kernel fault handler; when the GC needs a
 // stop-the-world point behind such a fault, EVERY P waits — one slow disk
 // fault becomes a whole-process stall, delaying Raft heartbeat senders,
-// receivers, and election timers alike (gastrolog-1io54g: 1.03s stalls
-// measured, elections firing 8ms after the stall ends). Blocking syscalls
-// release the P within microseconds, so the cold bulk read happens HERE;
-// the merge's mmap accesses then hit warm pages as minor faults. On an
-// already-cached file this pass runs at memory speed. Best-effort: read
-// errors are ignored — mmap surfaces real I/O problems on access.
+// receivers, and election timers alike (1.03s stalls measured, with
+// elections firing 8ms after the stall ends). Blocking syscalls release the
+// P within microseconds, so the cold bulk read happens HERE; the merge's
+// mmap accesses then hit warm pages as minor faults. On an already-cached
+// file this pass runs at memory speed. Best-effort: read errors are ignored
+// — mmap surfaces real I/O problems on access.
 func warmPageCache(f *os.File, size int64) {
 	buf := make([]byte, 1<<20)
 	for off := int64(0); off < size; off += int64(len(buf)) {
@@ -130,7 +130,7 @@ func (m *MappedSegment) IndexEntryAt(pos uint32) (IndexEntry, error) {
 // from the mapping — no intermediate body buffer. decodeFrameBody copies
 // every field out (Raw via make+copy, attrs via string conversion), so
 // handing it the mmap slice is safe and removes a per-record allocation
-// that was ~50GB cumulative per soak run on merge reads (gastrolog-11y2iv).
+// that was ~50GB cumulative per soak run on merge reads.
 func (m *MappedSegment) RecordAtFilePos(filePos uint32) (record.Record, error) {
 	if filePos < HeaderSize || filePos >= m.hdr.IndexOffset {
 		return record.Record{}, ErrFrameLength
@@ -150,9 +150,9 @@ func (m *MappedSegment) RecordAtFilePos(filePos uint32) (record.Record, error) {
 // RecordViewAtFilePos parses the frame at filePos into a record.View whose
 // AttrsWire and Raw alias the mapping — zero copies, no attrs map. The
 // GLCB merge transcodes straight from these views; the full Record path
-// materialized a map per record (~24GB/run, gastrolog-11y2iv). CRC is
-// verified exactly as the copying decoder does. The View is valid only
-// while the mapping is open.
+// materializes a map per record (~24GB/run on the merge). CRC is verified
+// exactly as the copying decoder does. The View is valid only while the
+// mapping is open.
 func (m *MappedSegment) RecordViewAtFilePos(filePos uint32) (record.View, error) {
 	if filePos < HeaderSize || filePos >= m.hdr.IndexOffset {
 		return record.View{}, ErrFrameLength

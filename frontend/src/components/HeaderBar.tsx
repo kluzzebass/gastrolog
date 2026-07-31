@@ -8,7 +8,7 @@ import { useClusterStatus } from "../api/hooks/useClusterStatus";
 import { useAlerts } from "../api/hooks/useAlerts";
 import { formatBytes } from "../utils/units";
 import { middleTruncate } from "../utils/middleTruncate";
-// eslint-disable-next-line no-restricted-imports -- HeaderBar still iterates raw ClusterNode for sum/sort; deferred migration (gastrolog-2e2qs follow-up)
+// eslint-disable-next-line no-restricted-imports -- HeaderBar still iterates raw ClusterNode for sum/sort; deferred migration
 import type { ClusterNode } from "../api/gen/gastrolog/v1/lifecycle_pb";
 import { encode } from "../api/glid";
 

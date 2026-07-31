@@ -126,10 +126,10 @@ func TestRaisePreservesFirstSeen(t *testing.T) {
 	}
 }
 
-// TestRetentionRateIsCataloged pins the gastrolog-1cruar fold: retention-rate
-// is an ordinary catalog row (a Low process condition), raised through the
-// one Raise path like every other type — there is no operator-defined
-// category and no priority chosen at a call site.
+// TestRetentionRateIsCataloged pins retention-rate as an ordinary catalog
+// row (a Low process condition), raised through the one Raise path like
+// every other type — there is no operator-defined category and no priority
+// chosen at a call site.
 func TestRetentionRateIsCataloged(t *testing.T) {
 	typ, ok := TypeByID("retention-rate")
 	if !ok {

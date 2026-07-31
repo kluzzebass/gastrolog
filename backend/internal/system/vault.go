@@ -63,57 +63,54 @@ type VaultConfig struct {
 	// _source = "retention" so operator-configured routes can forward
 	// them to archive vaults, cold storage, etc. "transfer" re-homes the
 	// sealed chunk to RetentionTransferTargetVaultID UNCHANGED — no
-	// record decode, no re-route, no re-ingest (gastrolog-2l918).
+	// record decode, no re-route, no re-ingest.
 	//
 	// Default is "delete" because the routing path is fail-open: an
 	// accidental match on a retention-source route can create a cascade
 	// (re-ingested records produce new chunks that themselves expire on
 	// the next sweep). Operators who want forwarding must opt in
-	// explicitly. See gastrolog-18du3.
+	// explicitly.
 	RetentionDisposition string `json:"retentionDisposition,omitempty"`
 
 	// RetentionTransferTargetVaultID is the destination vault for
 	// RetentionDisposition == "transfer". Required when, and only valid
 	// when, disposition is "transfer" — PutVault rejects self-transfer
 	// and non-file source/target. See
-	// docs/retention-transfer-disposition-design.md (gastrolog-2l918).
+	// docs/retention-transfer-disposition-design.md.
 	RetentionTransferTargetVaultID *glid.GLID `json:"retentionTransferTargetVaultId,omitempty"`
 
-	// gastrolog-9akebz: DiskFreeWarn/DiskFreeFloor removed from here — the
-	// disk-guard free-space thresholds are a property of the storage a
-	// vault is placed on (system.FileStorage.DiskFreeWarn/DiskFreeFloor),
-	// not the vault: N vaults sharing one storage evaluating the same
-	// statfs against potentially different per-vault thresholds was the
-	// modeling error. A vault's refuse signal is now DERIVED — refused
-	// whenever any of its placements' storages is below its floor. See
-	// orchestrator.vaultAdmissionCauses (disk_guard.go).
+	// The disk-guard free-space thresholds are deliberately not vault
+	// fields: they are a property of the storage a vault is placed on
+	// (system.FileStorage.DiskFreeWarn/DiskFreeFloor), because N vaults
+	// sharing one storage would evaluate the same statfs against
+	// different per-vault thresholds. A vault's refuse signal is DERIVED —
+	// refused whenever any of its placements' storages is below its
+	// floor. See orchestrator.vaultAdmissionCauses (disk_guard.go).
 
-	// gastrolog-33ul6h: MaxSize removed. The vault's disk-claim bound is no
-	// longer a vault-level field — it lives on the retention policy
-	// (RetentionPolicyConfig.MaxSize, which drains AND refuses at the same
-	// bound) attached via RetentionRules, min-wins across attached policies,
-	// and NO bound at all when no attached policy carries one — there is no
-	// per-vault default (gastrolog-vl2p98); the volume-level storage
-	// thresholds are the backstop. See orchestrator.resolveVaultSizeBound
-	// (disk_guard.go).
+	// The vault's disk-claim bound is likewise not a vault field — it
+	// lives on the retention policy (RetentionPolicyConfig.MaxSize, which
+	// drains AND refuses at the same bound) attached via RetentionRules,
+	// min-wins across attached policies, and NO bound at all when no
+	// attached policy carries one: there is no per-vault default, and the
+	// volume-level storage thresholds are the backstop. See
+	// orchestrator.resolveVaultSizeBound (disk_guard.go).
 }
 
 // Defaults are expressions, like the fields they fill: what the operator would
 // have typed. Stored verbatim at creation, so a defaulted vault reads exactly
-// like a configured one (gastrolog-etcjdx).
+// like a configured one.
 
 // DefaultVaultCacheBudget is the warm-cache soft cap applied when a
-// cloud-backed vault is created without one (the value the field long
-// documented but never applied; see gastrolog-338j51). The cache is a soft LRU
-// cap over cloud-backed chunk copies, so a too-small budget costs re-reads
-// from the blob store, not refused records; but unbounded is still a defect.
+// cloud-backed vault is created without one. The cache is a soft LRU cap over
+// cloud-backed chunk copies, so a too-small budget costs re-reads from the
+// blob store, not refused records; but unbounded is still a defect.
 const DefaultVaultCacheBudget = "1GiB"
 
 // DefaultVaultMemoryBudget is the in-memory cap applied when a memory-typed
 // vault is created without one. An unbounded memory vault grows until the
 // process OOMs, so unset must be a bounded default. Matches the disk budgets
 // for consistency; RAM is scarcer than disk, so operators on small nodes
-// should lower it explicitly (gastrolog-1qd5wz).
+// should lower it explicitly.
 const DefaultVaultMemoryBudget = "1GiB"
 
 // Canonical values for VaultConfig.RetentionDisposition.
@@ -127,7 +124,7 @@ const (
 	RetentionDispositionRoute = "route"
 	// RetentionDispositionTransfer re-homes the sealed chunk to
 	// RetentionTransferTargetVaultID unchanged — no record decode, no
-	// re-route, no re-ingest. See gastrolog-2l918.
+	// re-route, no re-ingest.
 	RetentionDispositionTransfer = "transfer"
 )
 
@@ -164,11 +161,9 @@ const (
 	DistributionFailover DistributionMode = "failover"
 )
 
-// RouteStage is one step in a route's pipeline. Phase 5 (gastrolog-4kkoo)
-// introduces the stages model; today's only variant is Match. Future
-// stages (enrich, redact, sample, fork, route_by_field) per
-// gastrolog-5e85x (Programmable Ingestion) plug in here as additional
-// kinds.
+// RouteStage is one step in a route's pipeline; today's only variant is
+// Match. The planned programmable-ingestion stages (enrich, redact,
+// sample, fork, route_by_field) plug in here as additional kinds.
 type RouteStage struct {
 	// Match is the boolean filter expression that gates the route.
 	// Exactly one stage variant must be set per stage; today only
@@ -184,11 +179,10 @@ type MatchStage struct {
 	Expression string `json:"expression"`
 }
 
-// RouteConfig is a row in the cluster-wide routing table. Phase 5
-// (gastrolog-4kkoo) collapsed source predicates and content filters
-// into one expression-language model and dropped FilterConfig as a
-// separate entity. Routes are evaluated in priority order; first
-// match wins; no-match drops silently.
+// RouteConfig is a row in the cluster-wide routing table. Source
+// predicates and content filters are one expression-language model;
+// there is no separate filter entity. Routes are evaluated in priority
+// order; first match wins; no-match drops silently.
 type RouteConfig struct {
 	// ID is the unique identifier (UUIDv7).
 	ID glid.GLID `json:"id"`
@@ -203,7 +197,7 @@ type RouteConfig struct {
 	Priority int32 `json:"priority,omitempty"`
 
 	// Stages is the route's pipeline. Today: a single MatchStage.
-	// Future phases (gastrolog-5e85x) add transform stages.
+	// Planned programmable-ingestion work adds transform stages.
 	Stages []RouteStage `json:"stages,omitempty"`
 
 	// Destinations lists the vault IDs that this route sends matched
@@ -286,10 +280,8 @@ type CertPEM struct {
 // references cloud services and storage, and the point of the line is that a
 // change happened and to what — the values are already in the config store.
 //
-// Exists because vault config changes were entirely unlogged (gastrolog-1jnfco)
-// while ingester changes carried a field-level diff. During the gastrolog-6ckv0y
-// investigation there was no way to establish WHEN a vault's retention
-// disposition had been flipped, which is the difference between "the change
+// The diff is what lets an operator establish WHEN a field such as the
+// retention disposition was flipped — the difference between "the change
 // never landed" and "the change landed and something ignored it".
 func (v VaultConfig) DiffFields(other VaultConfig) []string {
 	var changed []string

@@ -12,7 +12,7 @@ import (
 // probes each of its followers roughly every HeartbeatTimeout/10, and any
 // inbound Raft RPC is proof the sender's process is up and serving. This file
 // exposes that evidence so the cluster layer can derive peer liveness from it
-// instead of running a second, dedicated liveness broadcast (gastrolog-1lbifx).
+// instead of running a second, dedicated liveness broadcast.
 //
 // Two distinct facts are reported, and the distinction is the whole point:
 //

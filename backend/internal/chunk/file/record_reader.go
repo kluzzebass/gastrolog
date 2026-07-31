@@ -83,8 +83,8 @@ type mmapCursor struct {
 	// to release the per-chunk RWMutex's read lock at the cursor's
 	// actual end-of-life — the indexer Build path holds the cursor
 	// across many Next() calls and per-record work, and the lock must
-	// stay held for that whole duration to prevent gastrolog-26zu1's
-	// SIGBUS-on-rename mid-read.
+	// stay held for that whole duration: a rename or unlink of the
+	// mapped file mid-read SIGBUSes the reader.
 	onClose func()
 
 	recordCount uint64 // Total records in chunk
@@ -595,7 +595,7 @@ func scanAttrsSealed(idxPath, attrPath, dictPath string, startPos uint64, fn fun
 // invoking fn with each record's IngestTS and Attributes. Reads the entire
 // idx.log in one syscall (small: 12 bytes/record), then a contiguous attr
 // region per record range. Used by the histogram path on non-monotonic
-// active chunks. See gastrolog-66b7x.
+// active chunks.
 func scanIngestAttrsActive(idxPath, attrPath, dictPath string, fn func(ingestTS time.Time, attrs chunk.Attributes) bool) error {
 	dict, dictMmap, err := loadDict(dictPath)
 	if err != nil {
@@ -701,9 +701,9 @@ func scanAttrsActive(idxPath, attrPath, dictPath string, startPos uint64, fn fun
 }
 
 func openDataFile(path string) (data []byte, mmapRegion []byte, file *os.File, err error) {
-	// Multi-file path is now exclusively the unsealed-active fallback
-	// (sealed chunks live as data.glcb — gastrolog-24m1t). Active raw.log
-	// is always uncompressed: open, header-read for validation, then mmap.
+	// Multi-file path is exclusively the unsealed-active fallback
+	// (sealed chunks live as data.glcb). Active raw.log is always
+	// uncompressed: open, header-read for validation, then mmap.
 	file, err = os.Open(filepath.Clean(path))
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("open %s: %w", path, err)

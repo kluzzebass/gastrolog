@@ -9,9 +9,9 @@ import (
 )
 
 // LivenessCounters accumulates node-level Raft liveness events across every
-// group observed on this node (gastrolog-1io54g). Broadcast in NodeStats so
-// election storms and heartbeat failures announce themselves instead of
-// requiring log archaeology.
+// group observed on this node. Broadcast in NodeStats so election storms and
+// heartbeat failures announce themselves instead of requiring log
+// archaeology.
 type LivenessCounters struct {
 	// ElectionsStarted counts candidate-state transitions (a node started or
 	// restarted an election for some group).

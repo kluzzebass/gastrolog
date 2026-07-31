@@ -316,7 +316,6 @@ type loadResult struct {
 // strings via `string(data[a:b])` and primitive values via
 // binary.LittleEndian.*, so the mmap region is safe to release immediately
 // on return — no heap allocation for the raw file bytes.
-// See gastrolog-3rvws.
 func LoadIndex(dir string, chunkID chunk.ChunkID) ([]index.JSONPathIndexEntry, []index.JSONPVIndexEntry, index.JSONIndexStatus, error) {
 	res, err := idxmmap.Load(IndexPath(dir, chunkID), func(data []byte) (loadResult, error) {
 		p, pv, s, derr := decodeIndex(data)

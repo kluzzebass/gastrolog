@@ -12,11 +12,10 @@ beforeEach(() => {
 });
 
 describe("useSetNodeStorageConfig", () => {
-  // gastrolog-3cobq4 review: deleting the LAST storage on a node left its
-  // card stranded because this mutation never invalidated the storage
-  // entity list (["storages"], ListStorages) — only the push stream did,
-  // and (separately fixed) the push stream used to skip empty payloads
-  // too. Both must invalidate/write on removal.
+  // Deleting the LAST storage on a node left its card stranded because
+  // this mutation never invalidated the storage entity list
+  // (["storages"], ListStorages) — only the push stream did. Both must
+  // invalidate/write on removal.
   test("invalidates the storage list", async () => {
     m(mocks.systemClient, "setNodeStorageConfig").mockResolvedValueOnce({});
     const qc = createTestQueryClient();

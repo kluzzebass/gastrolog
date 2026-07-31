@@ -30,7 +30,7 @@ type vaultQuantity struct {
 }
 
 // resolveVaultQuantities settles every config quantity on a vault from one set
-// of rules, rather than a near-identical function per field (gastrolog-etcjdx):
+// of rules, rather than a near-identical function per field:
 //
 //   - set          → stored verbatim, as the operator typed it, after a
 //     parse-check so an unparseable expression fails at write rather than
@@ -98,11 +98,11 @@ func resolveVaultQuantity(q vaultQuantity, vaultCfg *system.VaultConfig, existin
 
 // validateVaultExpressions parse-checks the quantities that carry no default —
 // an empty value is legitimately "inherit" or "off" — so a malformed one is
-// caught at write instead of at use (gastrolog-etcjdx).
+// caught at write instead of at use.
 //
-// gastrolog-9akebz: the disk-free thresholds moved off VaultConfig onto the
-// storage entity a vault's placements reference (see validateFileStorageExpressions
-// in system_storage.go) — this function no longer touches them.
+// The disk-free thresholds live on the storage entity a vault's placements
+// reference (see validateFileStorageExpressions in system_storage.go), not
+// on VaultConfig, so this function does not touch them.
 func validateVaultExpressions(vaultCfg *system.VaultConfig) *connect.Error {
 	if !system.IsQuantityUnset(vaultCfg.CacheTTL) {
 		if _, err := system.ParseDuration(vaultCfg.CacheTTL); err != nil {
@@ -112,17 +112,17 @@ func validateVaultExpressions(vaultCfg *system.VaultConfig) *connect.Error {
 	return nil
 }
 
-// validateRetentionTransferDisposition enforces the gastrolog-2l918
-// transfer-disposition config rules at write time, not at retention-sweep
-// time: disposition "transfer" requires a target vault ID; the target must
-// not be the source vault (self-transfer is the cascade footgun — a
-// transferred chunk would immediately re-qualify for the same rule); and
-// per spec decision #4, transfer is file → file only (cloud-backed and
-// memory vaults have different at-rest forms and lifecycle machinery, so
-// their pairing with transfer is an explicit config error rather than a
-// runtime surprise on the first retention sweep). vaults is the
-// already-loaded vault list (existing vaults, for the target lookup);
-// vaultCfg is the (already resolved) incoming config.
+// validateRetentionTransferDisposition enforces the transfer-disposition
+// config rules at write time, not at retention-sweep time: disposition
+// "transfer" requires a target vault ID; the target must not be the source
+// vault (self-transfer is the cascade footgun — a transferred chunk would
+// immediately re-qualify for the same rule); and transfer is file → file
+// only (cloud-backed and memory vaults have
+// different at-rest forms and lifecycle machinery, so their pairing with
+// transfer is an explicit config error rather than a runtime surprise on
+// the first retention sweep). vaults is the already-loaded vault list
+// (existing vaults, for the target lookup); vaultCfg is the (already
+// resolved) incoming config.
 func validateRetentionTransferDisposition(vaultCfg system.VaultConfig, vaults []system.VaultConfig) *connect.Error {
 	if vaultCfg.ResolveRetentionDisposition() != system.RetentionDispositionTransfer {
 		return nil
@@ -161,12 +161,12 @@ func validateRetentionTransferDisposition(vaultCfg system.VaultConfig, vaults []
 }
 
 // detectTransferCycle rejects a transfer-target graph that would cycle
-// back to the writing vault — A→B→A, or any longer chain A→B→C→A
-// (gastrolog-2l918 review finding 3a). Self-transfer (the 1-hop cycle) is
-// already rejected above; this generalizes to the multi-hop case, which
-// self-transfer's simple equality check cannot catch. The graph is tiny
-// (one edge per vault, at most len(vaults) hops), so a plain walk with a
-// seen-set is the whole algorithm — no need for anything fancier.
+// back to the writing vault — A→B→A, or any longer chain A→B→C→A.
+// Self-transfer (the 1-hop cycle) is already rejected above; this
+// generalizes to the multi-hop case, which self-transfer's simple equality
+// check cannot catch. The graph is tiny (one edge per vault, at most
+// len(vaults) hops), so a plain walk with a seen-set is the whole
+// algorithm — no need for anything fancier.
 //
 // vaults is the existing vault list; vaultCfg is the incoming (not yet
 // persisted) config for its own ID, so the walk uses vaultCfg — not
@@ -203,7 +203,10 @@ func detectTransferCycle(vaultCfg system.VaultConfig, vaults []system.VaultConfi
 // checkVaultShapeImmutable rejects PutVault when an existing vault's shape
 // fields (type, cloud_service_id) would change. New vaults pass through —
 // the existing-vault lookup returns nil and we have nothing to compare.
-// See gastrolog-3ul0s for the failure mode this guards against.
+// A running orchestrator keeps its original manager, so a shape change looks
+// like a no-op until restart, when initVault builds a manager from the new
+// shape: file-layout chunks handed to a memory manager, or a cloud config
+// pointed at a bucket that does not hold the vault's blobs.
 func checkVaultShapeImmutable(ctx context.Context, store system.Store, incoming system.VaultConfig) *connect.Error {
 	existing, err := store.GetVault(ctx, incoming.ID)
 	if err != nil {
@@ -268,10 +271,9 @@ func (s *SystemServer) PutVault(
 
 	// Resolve the vault's cache/memory budgets: the wire distinguishes
 	// "unset" (absent) from "explicitly 0" (present, zero), and they mean
-	// opposite things (gastrolog-1epfgb). This is the single ingress for
-	// every surface — CLI create, UI, and config import all call PutVault —
-	// so resolving here makes an unbounded vault unrepresentable regardless
-	// of who asked.
+	// opposite things. This is the single ingress for every surface — CLI
+	// create, UI, and config import all call PutVault — so resolving here
+	// makes an unbounded vault unrepresentable regardless of who asked.
 	if connErr := resolveVaultQuantities(req.Msg.Config, &vaultCfg, vaults); connErr != nil {
 		return nil, connErr
 	}
@@ -290,7 +292,7 @@ func (s *SystemServer) PutVault(
 	// swap). The running orchestrator's applyExistingVaultChanges only
 	// reloads filters / rotation / retention, so the change looks like a
 	// no-op in dev — until the next restart rebuilds the manager from the
-	// updated config. See gastrolog-3ul0s.
+	// updated config.
 	if connErr := checkVaultShapeImmutable(ctx, s.sysStore, vaultCfg); connErr != nil {
 		return nil, connErr
 	}
@@ -306,11 +308,10 @@ func (s *SystemServer) PutVault(
 	// Persist to config store. For raft stores, the FSM notification callback
 	// handles orchestrator side effects. For non-raft stores, notify() does.
 	// Record the mutation before applying it, while the prior value is still
-	// readable. Vault config changes were entirely unlogged (gastrolog-1jnfco)
-	// while ingester changes carried a field diff — and a disposition flip
-	// decides whether records are destroyed or forwarded, which is exactly the
-	// kind of change that needs a timestamp when the result surprises someone.
-	// Field NAMES only; values stay in the config store.
+	// readable. A disposition flip decides whether records are destroyed or
+	// forwarded, which is exactly the kind of change that needs a timestamp
+	// when the result surprises someone. Field NAMES only; values stay in
+	// the config store.
 	s.logVaultConfigChange(ctx, vaultCfg)
 
 	if err := s.sysStore.PutVault(ctx, vaultCfg); err != nil {

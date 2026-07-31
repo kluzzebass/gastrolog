@@ -70,12 +70,12 @@ func (sp *SegmentPuller) Pull(ctx context.Context, nodeID string, vaultID, segme
 				break
 			}
 			h.Invalidate(err)
-			// Boundary translation (gastrolog-466kq5): the serving side
-			// encodes "segment unknown or not held here" as a NotFound
-			// status; re-attach the collection-owned sentinel so retry
-			// classification runs on errors.Is, never on status types or
-			// message prose. Mirrors chunk/glcb's blob-store-to-chunk
-			// sentinel translation.
+			// Boundary translation: the serving side encodes "segment
+			// unknown or not held here" as a NotFound status; re-attach
+			// the collection-owned sentinel so retry classification runs
+			// on errors.Is, never on status types or message prose.
+			// Mirrors chunk/glcb's blob-store-to-chunk sentinel
+			// translation.
 			if status.Code(err) == codes.NotFound {
 				return fmt.Errorf("receive segment chunk from %s: %w: %w", nodeID, collection.ErrSegmentUnavailable, err)
 			}

@@ -18,13 +18,6 @@ import { encode } from "../glid";
  * per-vault chunk cache via setQueryData — no ListChunks refetch on the
  * happy path.
  *
- * Replaces the pre-gastrolog-3pf9w shape, where the stream carried only a
- * bare wake-up counter that forced the client to invalidate all
- * `["chunks"]` entries and refetch via ListChunks fan-out on every
- * notification. Under steady-state ingest that produced O(visible vaults
- * × notifications/sec) RPCs; the typed-event shape eliminates the fan-out
- * entirely.
- *
  * Resync semantics: each event carries a monotonic per-node version. The
  * subscriber tracks the last version seen and detects dropped events
  * (subscriber-channel-full on the backend bus) by checking for gaps.
@@ -95,20 +88,19 @@ export type ChunksCache = ChunkMeta[] | undefined;
 
 /**
  * mergeChunksSnapshot reconciles a fresh ListChunks snapshot with the
- * cached, watch-stamped chunk list (gastrolog-68wsli). The snapshot is
- * authoritative for WHICH chunks exist — cache-only entries drop — and
- * mergeMeta's monotone rules protect lifecycle/time/size fields from a
- * stale reporter, but the snapshot's replica set may only GROW the cached
- * one. ListChunks and WatchChunks now stamp the SAME residency semantics
- * (FSM holder receipts — bytes truth), so grow-only is a backstop, not a
- * referee between disagreeing sources: it still matters for vaults with
- * no FSM (memory mode / single-node), where replica_node_ids falls back
- * to which nodes ANSWERED the fan-out round and a slow peer would
- * otherwise flap the seal-pip row, and for the wire's zero-count =
- * "no authoritative value" convention. Real residency shrink (delete
- * acks, holder revokes) flows through the vault-ctl FSM and arrives via
- * WatchChunks stamps, which still replace the set wholesale (see
- * mergeMeta).
+ * cached, watch-stamped chunk list. The snapshot is authoritative for
+ * WHICH chunks exist — cache-only entries drop — and mergeMeta's monotone
+ * rules protect lifecycle/time/size fields from a stale reporter, but the
+ * snapshot's replica set may only GROW the cached one. ListChunks and
+ * WatchChunks stamp the SAME residency semantics (FSM holder receipts —
+ * bytes truth), so grow-only is a backstop, not a referee between
+ * disagreeing sources: it still matters for vaults with no FSM (memory
+ * mode / single-node), where replica_node_ids falls back to which nodes
+ * ANSWERED the fan-out round and a slow peer would otherwise flap the
+ * seal-pip row, and for the wire's zero-count = "no authoritative value"
+ * convention. Real residency shrink (delete acks, holder revokes) flows
+ * through the vault-ctl FSM and arrives via WatchChunks stamps, which
+ * still replace the set wholesale (see mergeMeta).
  */
 export function mergeChunksSnapshot(
   cached: ChunksCache,
@@ -208,7 +200,7 @@ function handleEvent(
   // missing" snapshot; without explicit invalidation the SEALED event
   // refreshes the chunk meta but leaves that stale snapshot in place
   // forever. Invalidate on every seal/upload transition so the detail
-  // pane refetches once the indexes actually exist. See gastrolog-4zy8a.
+  // pane refetches once the indexes actually exist.
   if (msg.op === ChunkChangeOp.SEALED || msg.op === ChunkChangeOp.UPLOADED) {
     const chunkIdStr = encode(msg.chunkId);
     qc.invalidateQueries({ queryKey: ["indexes", vaultId, chunkIdStr] });
@@ -228,13 +220,11 @@ function nodeKey(nodeId: Uint8Array): string {
  * Pure function (no side effects on prev — returns a new array when the
  * shape changes, or prev when the event is a no-op).
  *
- * Replica tracking model (gastrolog-66vmg): the server stamps
- * authoritative `replica_count` + `replica_node_ids` on every event,
- * computed from the vault-ctl FSM (placement set minus in-flight
- * delete-acks). The client trusts that overlay verbatim. The previous
- * per-node-attribution accumulator drifted on leadership transfer and
- * during active-chunk catchup because it only grew — that whole
- * approach is replaced by server-authoritative push.
+ * Replica tracking model: the server stamps authoritative
+ * `replica_count` + `replica_node_ids` on every event, computed from the
+ * vault-ctl FSM (placement set minus in-flight delete-acks). The client
+ * trusts that overlay verbatim and accumulates no per-node attribution
+ * of its own.
  *
  * If the server omits replica fields (zero count) — e.g. memory-mode
  * vault, single-node, or the chunk has been finalized — mergeMeta
@@ -311,8 +301,8 @@ function bytesToHex(bytes: Uint8Array): string {
  * mergeMeta returns a ChunkMeta with the event's authoritative fields
  * (Sealed, RecordCount, Bytes, DiskBytes, CloudBacked, etc. — every
  * field ChunkMetaToProto knows about on the backend) overlaid on top
- * of the existing cache entry. Replica info uses the gastrolog-66vmg
- * trust model (incoming replicaCount > 0 is authoritative). Retention_
+ * of the existing cache entry. Replica info follows the trust model
+ * below: an incoming replicaCount > 0 is authoritative. Retention_
  * pending and pending_ack_node_ids are merged when stamped on WatchChunks
  * events; ListChunks still seeds them on cold start.
  *
@@ -361,7 +351,7 @@ export function mergeMeta(existing: ChunkMeta | undefined, incoming: ChunkMeta):
   // the chunk's life — same monotone-max shape as bytes/recordCount so a
   // stale pre-upload zero can't clobber it once set. Without this, a live
   // UPLOADED event left cloudBacked=true with cloudBytes=0 in the cache
-  // until the next ListChunks refetch. See gastrolog-33ul6h.
+  // until the next ListChunks refetch.
   if (incoming.cloudBytes > merged.cloudBytes) merged.cloudBytes = incoming.cloudBytes;
   // diskBytes is DIFFERENT: it's per-node LIVE local cache state, not
   // monotone. Eviction legitimately drops it to 0; re-warm brings it back
@@ -372,7 +362,7 @@ export function mergeMeta(existing: ChunkMeta | undefined, incoming: ChunkMeta):
   // here would keep a stale positive claim forever past eviction — trust
   // whichever source produced `incoming`, the same way every other
   // event-sourced field on this stream is trusted once the version-gap
-  // resync (see connect() above) guarantees ordering. gastrolog-33ul6h.
+  // resync (see connect() above) guarantees ordering.
   merged.diskBytes = incoming.diskBytes;
   // Replica info is authoritative when present on the event: the
   // backend stamps cluster-wide residency from the vault-ctl FSM
@@ -381,7 +371,7 @@ export function mergeMeta(existing: ChunkMeta | undefined, incoming: ChunkMeta):
   // server didn't stamp anything (memory-mode vault, chunk finalized,
   // or a transient FSM gap) — preserve the existing cached value so
   // we don't flicker to zero between an authoritative snapshot and
-  // the next one. See gastrolog-66vmg.
+  // the next one.
   if (incoming.replicaCount > 0) {
     merged.replicaCount = incoming.replicaCount;
     merged.replicaNodeIds = incoming.replicaNodeIds;

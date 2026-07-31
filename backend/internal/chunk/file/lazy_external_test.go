@@ -39,8 +39,7 @@ func lazyInfo(records int64) chunk.ExternalGLCBInfo {
 
 // TestLazyExternalResolveOnMiss pins the on-miss contract: an unregistered
 // chunk resolves through the installed resolver exactly once (memoized),
-// and appears in Meta and List afterwards — registration as a cache
-// (gastrolog-2kmgj6).
+// and appears in Meta and List afterwards — registration as a cache.
 func TestLazyExternalResolveOnMiss(t *testing.T) {
 	t.Parallel()
 	m := newLazyTestManager(t)
@@ -85,14 +84,14 @@ func TestLazyExternalResolveOnMiss(t *testing.T) {
 	}
 }
 
-// TestLazyExternalListerSurfacesUnregistered pins the enumeration contract
-// (gastrolog-3s26vr): List must surface an external chunk that has NEVER been
-// looked up by ID — no prior Meta/OpenCursor to memoize it. A match-all search
-// and the holder-scope gate enumerate the manager rather than naming a chunk,
-// so lazy on-miss-by-ID resolution alone left a restarted home answering
-// match-all with zero records until some other path registered the chunk. The
-// lister closes that gap: List resolves each enumerated ID it does not already
-// hold, then memoizes it.
+// TestLazyExternalListerSurfacesUnregistered pins the enumeration contract:
+// List must surface an external chunk that has NEVER been looked up by ID —
+// no prior Meta/OpenCursor to memoize it. A match-all search and the
+// holder-scope gate enumerate the manager rather than naming a chunk, so lazy
+// on-miss-by-ID resolution alone left a restarted home answering match-all
+// with zero records until some other path registered the chunk. The lister
+// closes that gap: List resolves each enumerated ID it does not already hold,
+// then memoizes it.
 func TestLazyExternalListerSurfacesUnregistered(t *testing.T) {
 	t.Parallel()
 	m := newLazyTestManager(t)

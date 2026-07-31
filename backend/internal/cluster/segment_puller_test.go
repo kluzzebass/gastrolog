@@ -78,11 +78,11 @@ func TestSegmentPullerRoundTrip(t *testing.T) {
 // TestSegmentPullerMultiFrameFromFile exercises the production serve shape:
 // distribution.StreamSegment io.Copies from an *os.File, which routes through
 // segmentChunkWriter.ReadFrom — pullFrameSize frames through ONE buffer
-// reused across SendMsg calls (gastrolog-47jm3m). The payload spans more than
-// two frames and every byte is position-dependent, so any stale-buffer
-// retention by the transport, frame reordering, or aliasing corrupts the
-// reassembled bytes and fails the comparison. Run under -race this also
-// guards the no-copy SendMsg contract.
+// reused across SendMsg calls. The payload spans more than two frames and
+// every byte is position-dependent, so any stale-buffer retention by the
+// transport, frame reordering, or aliasing corrupts the reassembled bytes
+// and fails the comparison. Run under -race this also guards the no-copy
+// SendMsg contract.
 func TestSegmentPullerMultiFrameFromFile(t *testing.T) {
 	t.Parallel()
 	const size = 2*pullFrameSize + 12345
@@ -123,9 +123,9 @@ func TestSegmentPullerMultiFrameFromFile(t *testing.T) {
 }
 
 // TestSegmentPullerTranslatesUnavailableAcrossWire pins the boundary
-// translation end to end (gastrolog-466kq5): a serving side that cannot
-// serve the segment signals collection.ErrSegmentUnavailable, the PullSegment
-// handler encodes it as a NotFound status, and the pulling side's
+// translation end to end: a serving side that cannot serve the segment
+// signals collection.ErrSegmentUnavailable, the PullSegment handler
+// encodes it as a NotFound status, and the pulling side's
 // SegmentPuller re-attaches the same sentinel — so retry classification runs
 // on errors.Is regardless of how any message along the way is worded.
 func TestSegmentPullerTranslatesUnavailableAcrossWire(t *testing.T) {

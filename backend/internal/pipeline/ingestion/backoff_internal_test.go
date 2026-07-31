@@ -1,7 +1,7 @@
 package ingestion
 
-// Pure-function coverage for the ingester retry backoff (gastrolog-3nfvo1):
-// the curve is exercised directly, with no sleeps and no manager lifecycle.
+// Pure-function coverage for the ingester retry backoff: the curve is
+// exercised directly, with no sleeps and no manager lifecycle.
 
 import (
 	"testing"

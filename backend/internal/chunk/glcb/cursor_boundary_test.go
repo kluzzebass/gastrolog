@@ -1,8 +1,8 @@
 package glcb
 
-// glcbCursor boundary tests (gastrolog-5do8sh): Seek past the end and a
-// zero-record GLCB. Complements TestGLCBCursor (glcb_test.go), which
-// pins Seek within range + Prev and Prev-past-start.
+// glcbCursor boundary tests: Seek past the end and a zero-record GLCB.
+// Complements TestGLCBCursor (glcb_test.go), which pins Seek within
+// range + Prev and Prev-past-start.
 
 import (
 	"errors"

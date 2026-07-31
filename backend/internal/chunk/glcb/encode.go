@@ -11,7 +11,7 @@ import (
 
 // encodeRecordFrame allocates a fresh frame. Hot writers use
 // appendRecordFrame with a reused scratch buffer instead — per-record
-// frame slices were 14GB of garbage per soak run (gastrolog-11y2iv).
+// frame slices were 14GB of garbage per soak run.
 func encodeRecordFrame(rec chunk.Record, dict *chunk.StringDict) ([]byte, error) {
 	return appendRecordFrame(nil, rec, dict)
 }

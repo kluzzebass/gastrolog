@@ -38,8 +38,8 @@ type CompletedSegmentEntry struct {
 // publisher stamps wall clock per ATTEMPT, so distribution's post-restart
 // catch-up re-publish of an already-registered segment carried a fresh
 // timestamp and could never compare equal — a permanent conflict/retry
-// storm into the vault-ctl leader queue, gastrolog-2usqfx). Content defines
-// identity; first write wins on PublishedAt.
+// storm into the vault-ctl leader queue). Content defines identity; first
+// write wins on PublishedAt.
 func completedSegmentEqual(a, b CompletedSegmentEntry) bool {
 	return a.SegmentID == b.SegmentID &&
 		a.RecordCount == b.RecordCount &&
@@ -133,7 +133,7 @@ func (f *FSM) listCompletedSegmentsLocked() []CompletedSegmentEntry {
 
 // CompletedListScans returns the cumulative number of ListCompletedSegments
 // calls — one full O(N) registry walk each. Used to observe/guard scan
-// frequency (gastrolog-36ba70).
+// frequency.
 func (f *FSM) CompletedListScans() uint64 {
 	return f.completedListScans.Load()
 }
@@ -258,8 +258,7 @@ func MarshalPublishCompletedSegments(entries []CompletedSegmentEntry) []byte {
 // Idempotent per segment: a repeated ack for a node already in the set is a
 // no-op. Acks for unknown segments are tolerated as no-ops (the publish may
 // not have replicated to this node yet, or the entry was already released).
-// Batched: a collect pass commits every receipt in one Raft apply
-// (gastrolog-38snf4).
+// Batched: a collect pass commits every receipt in one Raft apply.
 func (f *FSM) applyAckSegmentHolder(c *gastrologv1.AckSegmentHolderCommand) ([]glid.GLID, error) {
 	nodeID := c.GetNodeId()
 	if nodeID == "" {

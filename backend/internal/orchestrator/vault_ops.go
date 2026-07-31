@@ -189,9 +189,8 @@ type VaultChunkMeta struct {
 // vault according to the FSM"), use ListClusterChunkMetas — disk
 // is only one node's slice of cluster reality.
 //
-// Renamed from ListChunkMetas per audit finding F5
-// (docs/disk-authority-audit.md, gastrolog-3alnf). Old name removed
-// so every caller is forced to choose local-vs-cluster explicitly.
+// There is deliberately no neutral-named variant: every caller must
+// choose local-vs-cluster explicitly.
 func (o *Orchestrator) ListLocalChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMeta, error) {
 	cm, err := o.activeChunkManager(vaultID)
 	if err != nil {
@@ -217,9 +216,6 @@ func (o *Orchestrator) ListLocalChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMeta
 // GroupManager). Callers that need cluster-coverage in that case
 // must fan out via the server's directRemoteSearcher / forwarder
 // surfaces.
-//
-// Added per audit finding F5 (docs/disk-authority-audit.md,
-// gastrolog-3alnf).
 func (o *Orchestrator) ListClusterChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMeta, error) {
 	if o.groupMgr == nil {
 		return nil, nil
@@ -319,7 +315,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]VaultChunkMeta, e
 // GetChunkMeta returns metadata for a specific chunk. The result is overlaid
 // from the vault-ctl FSM if the chunk belongs to an instance with a Raft group, so
 // CloudBacked / Archived reflect the cluster-wide truth rather than this
-// node's local chunk-manager view. See gastrolog-asg4l.
+// node's local chunk-manager view.
 func (o *Orchestrator) GetChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.ChunkMeta, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
@@ -490,14 +486,13 @@ func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActiv
 // in the vault after the vault-ctl Raft leader removed a node from the
 // voter set. Each instance's applier transparently routes the propose to
 // the leader, so this callback can fire from the leader's reconcile
-// pass without needing per-vault leadership checks. See gastrolog-51gme
-// step 10.
+// pass without needing per-vault leadership checks.
 //
 // afterVaultCtlRestore is wired from vaultraft.FSM.SetOnAfterRestore and
 // must return immediately — GroupManager.CreateGroup holds groupMgr.mu
 // across NewRaft→fsm.Restore, and the deferred worker calls
 // groupMgr.GetGroup. scheduleAfterVaultCtlRestore runs rewire +
-// ReconcileFromSnapshot asynchronously (gastrolog-4tadr).
+// ReconcileFromSnapshot asynchronously.
 func (o *Orchestrator) afterVaultCtlRestore(vaultID glid.GLID) {
 	o.scheduleAfterVaultCtlRestore(vaultID)
 }
@@ -535,8 +530,8 @@ func (o *Orchestrator) runAfterVaultCtlRestore(vaultID glid.GLID) {
 	// wholesale with no per-entry seal effects, so a chunk that became sealed-
 	// but-not-cloud-backed in the installed snapshot never scheduled an upload
 	// on this node. This replaces the retired 5s backfill tick's discovery role
-	// for the snapshot-restore gap (gastrolog-576bm). No-op unless this node is
-	// the vault's uploader.
+	// for the snapshot-restore gap. No-op unless this node is the vault's
+	// uploader.
 	o.cloudUploadCatchupForVault(vaultID)
 	o.vaultOpsLogger.Info("vault-ctl after-restore reconcile complete",
 		"vault", vaultID, "has_instance", t != nil)
@@ -546,7 +541,7 @@ func (o *Orchestrator) runAfterVaultCtlRestore(vaultID glid.GLID) {
 // vault-ctl leader. Planning and build passes run in the worker loop.
 //
 // Gaining vault-ctl leadership is also the upstream edge for the
-// reconciler's leader-only categories (gastrolog-3fu9t): fire
+// reconciler's leader-only categories: fire
 // ReconcileMembershipCatchup so a late-joining leader pulls missing
 // replicas, retires unrecoverable FSM entries, prunes stale ExpectedFrom
 // nodes, and retracts abandoned transfer announces immediately instead of
@@ -560,7 +555,7 @@ func (o *Orchestrator) onVaultCtlLeadGained(vaultID glid.GLID) {
 	// Cloud-upload catch-up on leadership change: a chunk that sealed while
 	// this node was not the vault's uploader never saw the live onSeal upload
 	// effect here. This replaces the retired 5s backfill tick's discovery role
-	// for the leadership-change case (gastrolog-576bm). Applies to both
+	// for the leadership-change case. Applies to both
 	// type=cloud vaults (gated on vault-ctl leadership) and cloud-backed
 	// pipeline vaults (gated on CloudStore/placement leadership); the catch-up
 	// is a no-op unless this node is actually the uploader.
@@ -610,8 +605,8 @@ func (o *Orchestrator) reconcilePipelineAfterCtlRestore(vaultID glid.GLID) error
 // ReloadFilters both lock around the reload — and the reconcile chain takes
 // o.mu.RLock (isPipelineIngestVault). Go's RWMutex is non-reentrant, so
 // running it inline self-deadlocked the whole orchestrator the first time a
-// node rejoined via snapshot restore (gastrolog-3wpfet: node bricked seconds
-// after rejoin, every o.mu user queued forever). The goroutine simply blocks
+// node rejoined via snapshot restore — the node bricked seconds after rejoin,
+// every o.mu user queued forever. The goroutine simply blocks
 // until the caller releases the write lock — the exact ordering we want.
 // LoadAndDelete keeps it exactly-once per restore, and the FSM restore hook
 // already runs this reconcile concurrently, so the contract permits async.
@@ -707,7 +702,6 @@ func (o *Orchestrator) proposePruneNodeForVault(vaultID glid.GLID, removedNodeID
 // Returned in deterministic order (local first, then follower targets in
 // their declared order) so that audit-log output is reproducible across
 // runs even though the FSM-side encoding stores expectedFrom as a map.
-// See gastrolog-51gme.
 func (o *Orchestrator) placementMembership(vaultInst *VaultInstance) []string {
 	expected := make([]string, 0, 1+len(vaultInst.FollowerTargets))
 	seen := map[string]bool{}
@@ -799,14 +793,13 @@ func (o *Orchestrator) ImportToInstanceStorage(ctx context.Context, vaultID glid
 		// "instance not registered on this node" rather than "vault not found":
 		// the vault almost always still exists cluster-wide; only the local
 		// instance was evicted from this node by placement churn (or never
-		// landed here in the first place). See gastrolog-2t48z.
+		// landed here in the first place).
 		return fmt.Errorf("%w: vault %s", ErrInstanceNotLocal, vaultID)
 	}
 	// Reject stale ImportSealed RPCs for chunks the cluster already deleted.
 	// The race is: leader schedules replication, retention fires, delete is
 	// committed via Raft (populates tombstone), then the late replication
 	// RPC arrives. Without this check the receiver would recreate the chunk.
-	// See gastrolog-11rzz.
 	if ref.isTombstoned != nil && ref.isTombstoned(chunkID) {
 		return fmt.Errorf("%w: import sealed chunk %s into vault %s", chunk.ErrChunkTombstoned, chunkID, vaultID)
 	}
@@ -862,7 +855,7 @@ func (o *Orchestrator) ImportToInstanceStorage(ctx context.Context, vaultID glid
 
 // finalizeImportedChunk handles the post-import steps: vault-ctl Raft
 // announcement, tombstone re-check, and (if not tombstoned) post-seal
-// work scheduling. See gastrolog-11rzz for the ordering rationale.
+// work scheduling.
 //
 // Ordering matters: announce first, then re-check tombstone. This covers
 // the race where a delete finalizes between ImportRecords and our check
@@ -879,16 +872,14 @@ func (o *Orchestrator) finalizeImportedChunk(vaultID glid.GLID, cm chunk.ChunkMa
 	if ann, ok := cm.(chunk.AnnouncerGetter); ok {
 		if a := ann.GetAnnouncer(); a != nil {
 			a.AnnounceCreate(meta.ID, meta.WriteStart, meta.IngestStart, meta.SourceStart)
-			// Phase 3 (gastrolog-1huz5): Active → Sealing → Sealed in
-			// quick succession. The imported chunk is already sealed on
-			// the source; we're projecting that final state onto the
-			// destination's FSM.
+			// Active → Sealing → Sealed in quick succession. The
+			// imported chunk is already sealed on the source; we're
+			// projecting that final state onto the destination's FSM.
 			a.AnnounceBeginSeal(meta.ID)
 			a.AnnounceSeal(meta.ID, meta.WriteEnd, meta.RecordCount, meta.Bytes, meta.IngestStart, meta.IngestEnd, meta.SourceEnd, meta.IngestTSMonotonic)
 			// Section offsets (CmdAttachOffsets) already replicated from
 			// the original sealing leader via Raft; followers inherit
-			// them through the FSM and don't need to re-announce. See
-			// gastrolog-1dg3i.
+			// them through the FSM and don't need to re-announce.
 		}
 	}
 

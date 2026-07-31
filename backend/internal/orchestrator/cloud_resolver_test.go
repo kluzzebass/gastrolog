@@ -18,9 +18,8 @@ import (
 )
 
 // These tests pin the production wiring of the lazy cloud-backed resolver
-// (gastrolog-5bnxc) across the two cluster edges the retired eager mirrors
-// used to cover, using real chunk Managers on both sides of a shared cloud
-// store:
+// across the two cluster edges the retired eager mirrors used to cover, using
+// real chunk Managers on both sides of a shared cloud store:
 //
 //   - snapshot install: the follower's FSM is Restore'd wholesale (no
 //     per-apply effects fire) and NO projection pass runs — reads must

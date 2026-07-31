@@ -157,7 +157,7 @@ func ExtractDeleteRetentionPolicy(cmd *gastrologv1.DeleteRetentionPolicyCommand)
 
 func putVaultCmd(cfg system.VaultConfig) *gastrologv1.PutVaultCommand {
 	return &gastrologv1.PutVaultCommand{
-		Vault: convert.VaultConfigToProto(cfg, nil), // a write never carries placements (gastrolog-617qns)
+		Vault: convert.VaultConfigToProto(cfg, nil), // a write never carries placements
 	}
 }
 
@@ -836,7 +836,7 @@ func ExtractPutClusterTLS(cmd *gastrologv1.PutClusterTLSCommand) system.ClusterT
 // catch-up barrier. Committing it (or forwarding it to the leader) yields a
 // Raft log index that flows through FSM.Apply; a node then blocks on the FSM
 // apply-wait tracker until its local FSM has applied up to that index. The
-// command mutates no state — the FSM handles it as a no-op (gastrolog-1go57).
+// command mutates no state — the FSM handles it as a no-op.
 func NewCatchupBarrier() *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_CatchupBarrier{
@@ -872,7 +872,6 @@ func BuildSnapshot(sys *system.System, users []system.User, tokens []system.Refr
 	}
 
 	// Config entities.
-	// gastrolog-4kkoo (Phase 5): no Filters; expressions live inline on routes.
 	for _, rp := range cfg.RotationPolicies {
 		snap.RotationPolicies = append(snap.RotationPolicies, putRotationPolicyCmd(rp))
 	}
@@ -942,7 +941,7 @@ func BuildSnapshot(sys *system.System, users []system.User, tokens []system.Refr
 
 	snap.SetupWizardDismissed = rt.SetupWizardDismissed
 
-	// Config: log levels (gastrolog-3flfp).
+	// Config: log levels.
 	if cfg.LogLevels.Default != 0 || len(cfg.LogLevels.Rules) > 0 {
 		snap.LogLevels = convert.LogLevelConfigToProto(cfg.LogLevels)
 	}
@@ -976,9 +975,8 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 		}
 	}
 
-	// gastrolog-4kkoo (Phase 5): snapshot Filters block dropped. The proto
-	// no longer carries snap.Filters; expressions live on snap.Routes via
-	// PutRouteCommand.Stages.
+	// Match expressions ride on snap.Routes via PutRouteCommand.Stages;
+	// the snapshot carries no separate filter block.
 	for _, rp := range snap.GetRotationPolicies() {
 		rc, err := ExtractPutRotationPolicy(rp)
 		if err != nil {
@@ -1074,7 +1072,7 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 		rt.ClusterTLS = &tls
 	}
 
-	// Restore log levels (gastrolog-3flfp).
+	// Restore log levels.
 	if snap.GetLogLevels() != nil {
 		cfg.LogLevels = convert.LogLevelConfigFromProto(snap.GetLogLevels())
 	}

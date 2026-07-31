@@ -9,7 +9,7 @@ import "golang.org/x/sys/unix"
 // the read I/O onto a P-releasing syscall so the subsequent sequential mmap
 // accesses fault in as minor faults instead of cold major faults that pin
 // scheduler Ps inside non-preemptible kernel fault handlers under disk
-// saturation (gastrolog-1io54g).
+// saturation.
 //
 // Best-effort and idempotent: advice is a hint, and failures (e.g. a range
 // that has already been unmapped) are ignored — the scan still reads

@@ -788,9 +788,9 @@ func normalizedRange(start, end time.Time) (time.Time, time.Time, bool) {
 //
 // Reads from VaultManifestEntriesIncludingOpen, which goes directly through the
 // vault-ctl Raft group's FSM rather than per-vault-instance state. Every node
-// is a voter of every vault-ctl group (gastrolog-292yi), so the FSM is
-// authoritative cluster-wide regardless of which node hosts the vault — a
-// coordinator that runs no vault replicas still sees the full sealed manifest.
+// is a voter of every vault-ctl group, so the FSM is authoritative
+// cluster-wide regardless of which node hosts the vault — a coordinator
+// that runs no vault replicas still sees the full sealed manifest.
 // Falls back to ListLocalChunkMetas for the legacy memory-mode path (no
 // GroupManager, no FSM); that path also picks up the active chunk for vaults
 // that have not yet sealed any data.
@@ -885,8 +885,7 @@ func (s *QueryServer) aggregateVaultBounds(vaults []glid.GLID) (time.Time, time.
 // in the active chunk and produces an empty right edge on the histogram
 // (last bars cut off at the last-sealed-chunk boundary instead of running
 // up to "now"). Falls back conservatively to false on any config store
-// error or when this node holds no leader vaults. See gastrolog-2g334
-// (regression of the gastrolog-66b7x optimization).
+// error or when this node holds no leader vaults.
 func (s *QueryServer) histogramFullyLocal(ctx context.Context, q query.Query) bool {
 	if s.cfgStore == nil {
 		return false

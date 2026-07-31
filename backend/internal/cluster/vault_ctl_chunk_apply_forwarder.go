@@ -22,8 +22,8 @@ var ErrNoRaftLeader = errors.New("no raft leader")
 // OpVaultChunkFSM entry keyed by vault-instance ID. If this node is the
 // vault-ctl Raft leader, Apply runs locally; otherwise it forwards via
 // ForwardVaultApply RPC to the current leader and blocks until the local
-// group FSM has applied the leader's index — the read-after-write barrier
-// (gastrolog-4l24u). Constructed via NewVaultCtlChunkApplyForwarder.
+// group FSM has applied the leader's index — the read-after-write barrier.
+// Constructed via NewVaultCtlChunkApplyForwarder.
 type VaultCtlChunkApplyForwarder struct {
 	raft            *hraft.Raft
 	vaultCtlGroupID string
@@ -55,8 +55,8 @@ func NewVaultCtlChunkApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, vault
 // vault-ctl Raft leader on ErrNotLeader, and retries while a leadership
 // transfer is in progress.
 //
-// The retry is what stops a seal announce being dropped mid-transfer
-// (gastrolog-4jh4mb): the observed failure was op=seal and op=attach-offsets
+// The retry is what stops a seal announce being dropped mid-transfer: the
+// observed failure was op=seal and op=attach-offsets
 // returning "leadership transfer in progress", which is not ErrNotLeader and so
 // was never forwarded, leaving the chunk sealed on disk with its manifest entry
 // behind. See applyRetryingLeadershipTransfer for why ErrLeadershipLost is

@@ -109,7 +109,7 @@ func decodeKVIndex(data []byte) ([]index.AttrKVIndexEntry, error) {
 // into a heap-allocated []byte. The decoders create strings via
 // `string(data[a:b])` (which copies) and primitive values via
 // binary.LittleEndian.* (which copies), so the mmap region is safe to
-// release immediately on return. See gastrolog-3rvws.
+// release immediately on return.
 
 func LoadKeyIndex(dir string, chunkID chunk.ChunkID) ([]index.AttrKeyIndexEntry, error) {
 	return idxmmap.Load(KeyIndexPath(dir, chunkID), decodeKeyIndex)

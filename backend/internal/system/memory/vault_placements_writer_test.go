@@ -8,23 +8,13 @@ import (
 	"gastrolog/internal/system"
 )
 
-// Vault placements have exactly one writer and, since gastrolog-617qns, exactly
-// one representation: s.vaultPlacements, written through SetVaultPlacements.
+// Vault placements have exactly one writer and exactly one representation:
+// s.vaultPlacements, written through SetVaultPlacements. VaultConfig carries no
+// placement field, so a config write has no placements to carry and "the mirror
+// disagrees with the owner" is not a state the type system permits.
 //
-// This file used to pin something weaker. VaultConfig carried a MIRRORED copy
-// that SetVaultPlacements kept in sync for the orchestrator's reads, and
-// PutVault — which stores the whole struct — was a second writer to it: a UI edit
-// omitting the field, a config import, or a plain read-modify-write overwrote the
-// mirror while the owner kept the real value, and the two disagreed until the
-// next placement event, on every node. gastrolog-kl8c3s closed that by having
-// PutVault re-derive the field from the owner, and these tests checked the two
-// agreed afterwards.
-//
-// The field is now gone, so most of that cannot be expressed: a config write has
-// no placements to carry, and "the mirror disagrees with the owner" is not a
-// state the type system permits. What remains worth pinning is the OUTCOME those
-// tests protected — a config write does not disturb placements — plus the round
-// trip every client performs.
+// These tests pin the outcome that matters — a config write does not disturb
+// placements — plus the round trip every client performs.
 
 func placementFor(nodeID string, leader bool) system.VaultPlacement {
 	return system.VaultPlacement{StorageID: system.SyntheticStorageID(nodeID), Leader: leader}

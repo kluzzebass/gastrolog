@@ -1,10 +1,10 @@
 package chunking_test
 
-// Blocked-build operator alert (gastrolog-67c9b0 follow-up): a sealed
-// manifest whose referenced segment files are missing on this node pins the
-// vault's serial seal queue. That condition was previously silent on
-// follower homes (ErrAwaitingLocalSegments → nil) and a generic warn on the
-// leader — ~60 chunks sat in Sealing for a day with no operator signal.
+// Blocked-build operator alert: a sealed manifest whose referenced segment
+// files are missing on this node pins the vault's serial seal queue. That
+// condition was previously silent on follower homes
+// (ErrAwaitingLocalSegments → nil) and a generic warn on the leader — ~60
+// chunks sat in Sealing for a day with no operator signal.
 
 import (
 	"path/filepath"
@@ -61,9 +61,9 @@ func (s *recordingAlertSink) snapshot() (map[string]string, int) {
 
 // TestBlockedBuildRaisesAndClearsAlert drives the blocked-build condition
 // against a REAL alert.Collector sharing the vault's deterministic clock:
-// the grace window is the catalog's DelayOn (gastrolog-4wvxqh), enforced by
-// the collector, so this is the black-box behavior an operator sees — no
-// alarm for a transient block, an alarm once it sustains, clear on heal.
+// the grace window is the catalog's DelayOn, enforced by the collector, so
+// this is the black-box behavior an operator sees — no alarm for a transient
+// block, an alarm once it sustains, clear on heal.
 func TestBlockedBuildRaisesAndClearsAlert(t *testing.T) {
 	t.Parallel()
 	blockedType, ok := alert.TypeByID("chunking-build-blocked")

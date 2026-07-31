@@ -1,6 +1,6 @@
 package orchestrator
 
-// gastrolog-51gme — VaultLifecycleReconciler.
+// VaultLifecycleReconciler.
 //
 // One reconciler per VaultInstance. Owns chunk-lifecycle execution
 // uniformly: every FSM apply event goes through here, and every
@@ -8,57 +8,35 @@ package orchestrator
 // single home for "what just happened in the FSM, and what should the
 // local chunk manager do about it?"
 //
-// Migration roadmap status:
-//   step 4 (retention-ttl via deleteChunk): done.
-//   step 5 (disk-vs-manifest sweep removed):
-//     done. The receipt protocol's pendingDeletes (preserved across
-//     snapshot install + processed by ReconcileFromSnapshot) is the
-//     primary catchup path. SweepLocalOrphans (added after the initial
-//     step-5 landing) covers the snapshot-restore gap that pendingDeletes
+// Invariants the rest of the package relies on:
+//
+//   - The receipt protocol (CmdRequestDelete + acks + CmdFinalizeDelete)
+//     is the sole chunk-delete path. Retention, archival expiry, missing
+//     cloud blobs, vault drain and transfer/migration source-expire all
+//     route through deleteChunk. A forbidigo lint rule rejects direct
+//     chunk.DeleteNoAnnounce / DeleteSilent callers outside a small
+//     allow-list (this file, vault teardown, replaceForwardedChunk,
+//     chunk-package internals), so the receipt protocol stays the single
+//     execution API.
+//   - pendingDeletes — preserved across snapshot install and processed by
+//     ReconcileFromSnapshot — is the primary catch-up path for deletes
+//     this node owes. SweepLocalOrphans covers the gap pendingDeletes
 //     alone misses: a delete that finalized while this node was offline
-//     leaves the FSM with only a tombstone, and the local file is
-//     orphaned with no obligation to drive cleanup. The orphan sweep
-//     uses tombstone presence as positive proof that a finalize was
-//     applied — a freshly-created chunk with announce in flight has no
-//     tombstone and is left alone.
-//   step 6 (archival sweep + drop maxTransitionStreamedStaleness):
-//     done. Archival expiry, archival suspect expiry, and transition
-//     source-expire all route through deleteChunk; the staleness
-//     watchdog was deleted because the receipt protocol does not benefit
-//     from a fallback "delete the source anyway" decision.
-//   step 7 (manual-delete RPC): the manual-delete plumbing
-//     (Orchestrator.DeleteChunk / deleteChunkFromInstance, reached only
-//     through the ChunkReplicationDelete executor) was removed in
-//     gastrolog-lh0rp — it had no live user-facing entry point. A future
-//     operator delete should call reconciler.deleteChunk directly with
-//     reason "manual-delete-rpc".
-//   step 8 (FSM-sealed projection + drop the manager.go heuristic):
-//     done. onSeal and ReconcileFromSnapshot project FSM-sealed state
-//     onto the local chunk Manager via chunk.SealEnsurer.EnsureSealed.
-//     The "multiple unsealed → seal all but newest" startup heuristic
-//     in file.Manager was deleted; sealed-state divergence (e.g.
-//     gastrolog-uccg6) is now resolved by replaying the FSM truth.
-//   step 9 (lint ban on direct DeleteNoAnnounce / DeleteSilent):
-//     done. The forbidigo linter rejects new direct callers outside a
-//     small allow-list (this file + vault teardown + replaceForwardedChunk
-//     + chunk-package internals). New paths must funnel through
-//     deleteChunk so the receipt protocol stays the single execution API.
-//   step 10 (membership-change cleanup): done. CmdPruneNode (FSM cmd 12)
-//     drops a decommissioned node from every pendingDeletes entry's
-//     ExpectedFrom; the apply returns the chunkIDs whose ExpectedFrom
-//     became empty. The vault-ctl leader manager's onMemberRemoved hook
-//     fans CmdPruneNode out across the vault's instance sub-FSMs after a
-//     successful RemoveServer call; the reconciler's onPruneNode handler
-//     (leader-only) proposes CmdFinalizeDelete for each finalizable
-//     chunk so deletes don't pin pendingDeletes forever.
-//   step 11 (remove CmdDeleteChunk): done. The entire legacy delete chain
-//     was removed in gastrolog-lh0rp: the CmdDeleteChunk FSM command +
-//     applyDelete + MarshalDeleteChunk, the AnnounceDelete announcer path,
-//     the wireVaultFSMOnDelete OnDelete cascade, and the
-//     forwardDeletionToFollowers / ChunkReplicationDelete RPC chain. The
-//     receipt protocol (CmdRequestDelete + acks + finalize) is now the
-//     sole chunk-delete path; every retention/test harness routes through
-//     a wired VaultLifecycleReconciler.
+//     leaves the FSM with only a tombstone, so the local file is orphaned
+//     with no obligation to drive cleanup. The sweep treats tombstone
+//     presence as positive proof that a finalize applied — a
+//     freshly-created chunk with its announce in flight has no tombstone
+//     and is left alone.
+//   - onSeal and ReconcileFromSnapshot project FSM-sealed state onto the
+//     local chunk Manager via chunk.SealEnsurer.EnsureSealed, so
+//     sealed-state divergence (local manager still appending to a chunk
+//     the FSM has sealed) is resolved by replaying the FSM truth.
+//   - CmdPruneNode drops a decommissioned node from every pendingDeletes
+//     entry's ExpectedFrom and returns the chunkIDs whose ExpectedFrom
+//     became empty, finalizing them inside the same apply. The vault-ctl
+//     leader manager's onMemberRemoved hook fans it out across the
+//     vault's instance sub-FSMs after a successful RemoveServer call, so
+//     deletes don't pin pendingDeletes forever.
 
 import (
 	"context"
@@ -119,9 +97,9 @@ type reconcilerHost interface {
 // to the vault's FSM via Wire(), and torn down with the vault instance.
 //
 // The reconciler is the canonical caller of `chunk.DeleteNoAnnounce`
-// and the SilentDeleter shortcut. A forbidigo lint rule (step 9)
-// blocks direct calls from anywhere else in the orchestrator package
-// outside a small allow-list (vault teardown, replaceForwardedChunk).
+// and the SilentDeleter shortcut. A forbidigo lint rule blocks direct
+// calls from anywhere else in the orchestrator package outside a small
+// allow-list (vault teardown, replaceForwardedChunk).
 type VaultLifecycleReconciler struct {
 	vaultID     glid.GLID
 	vaultInst   *VaultInstance
@@ -151,7 +129,7 @@ type VaultLifecycleReconciler struct {
 	// postSealHook overrides the production schedule path used by
 	// resumeSealingFromFSM. Defaults nil; tests inject a recorder to
 	// observe what would have been scheduled without spinning up the
-	// full orchestrator scheduler. Phase 3 (gastrolog-1huz5).
+	// full orchestrator scheduler.
 	postSealHook func(vaultID glid.GLID, cm chunk.ChunkManager, id chunk.ChunkID)
 
 	// sealResumeAttempts counts how many times the STEADY-STATE pass has
@@ -217,7 +195,7 @@ func (o *Orchestrator) chunkReplicatorForReconcile() ChunkReplicator { return o.
 // Each callback fires outside the FSM lock, so handlers can call back
 // into the chunk manager / Raft applier without risking the
 // FSM-mutex / orchestrator-mutex inversion that's been a recurring
-// problem (see gastrolog-5oofa, gastrolog-1s3mf).
+// problem.
 func (r *VaultLifecycleReconciler) Wire(fsm *vaultctlfsm.FSM) {
 	if fsm == nil {
 		return
@@ -237,14 +215,13 @@ func (r *VaultLifecycleReconciler) Wire(fsm *vaultctlfsm.FSM) {
 // a snapshot. Walks the FSM's pendingDeletes and processes any
 // obligations this node owes — same code path as the steady-state
 // onRequestDelete handler. Also projects the FSM's sealed state onto
-// the local chunk Manager (gastrolog-51gme step 8): when an entry is
-// flagged sealed in the FSM but the local chunk Manager has it as
-// unsealed, EnsureSealed seals it on disk. This replaces the legacy
-// "multiple unsealed → seal all but newest" startup heuristic.
+// the local chunk Manager: when an entry is flagged sealed in the FSM
+// but the local chunk Manager has it as unsealed, EnsureSealed seals it
+// on disk.
 //
 // Both passes are idempotent. The pending-deletes pass owns the
 // receipt-protocol catchup; the sealed-projection pass owns
-// gastrolog-uccg6 (FSM-sealed but local-still-active divergence).
+// FSM-sealed-but-local-still-active divergence.
 //
 // IMPORTANT: this is fired from the vault-ctl FSM's after-restore
 // hook, which runs on the Raft apply-pump goroutine (Restore and
@@ -270,19 +247,18 @@ func (r *VaultLifecycleReconciler) ReconcileFromSnapshot(fsm *vaultctlfsm.FSM) {
 	// does not propose Raft applies, so it is safe to run inline.
 	// Cloud-backed entries need no projection pass: the chunk manager's
 	// lazy cloud-backed resolver serves them from this restored FSM at
-	// first lookup (gastrolog-5bnxc).
+	// first lookup.
 	r.projectAllSealedFromFSM(fsm)
-	// Phase 3 (gastrolog-1huz5): chunks left in Sealing state on the
-	// FSM after a leader crash mid-PostSealProcess need their assembly
-	// resumed. Re-runs the post-seal pipeline so sealToGLCB completes
-	// and AnnounceSeal fires.
+	// Chunks left in Sealing state on the FSM after a leader crash
+	// mid-PostSealProcess need their assembly resumed. Re-runs the
+	// post-seal pipeline so sealToGLCB completes and AnnounceSeal fires.
 	r.resumeSealingFromFSM(fsm)
 
-	// Event-driven orphan cleanup (gastrolog-3fu9t). Snapshot install is
-	// the exact upstream edge that strands local- and staging-orphans: a
-	// delete cycle (CmdRequestDelete → acks → CmdFinalizeDelete) that ran
-	// to completion while this node was offline is NOT replayed
-	// command-by-command on rejoin — the snapshot jumps the FSM straight
+	// Event-driven orphan cleanup. Snapshot install is the exact upstream
+	// edge that strands local- and staging-orphans: a delete cycle
+	// (CmdRequestDelete → acks → CmdFinalizeDelete) that ran to completion
+	// while this node was offline is NOT replayed command-by-command on
+	// rejoin — the snapshot jumps the FSM straight
 	// to the post-finalize state (tombstone present, no pendingDeletes
 	// entry, no manifest entry), leaving the local bytes with no
 	// obligation to drive cleanup. The log-replay rejoin path is already
@@ -338,7 +314,7 @@ func (r *VaultLifecycleReconciler) projectAllSealedFromFSM(fsm *vaultctlfsm.FSM)
 		// Pipeline-built sealed chunks live at the vault ChunkRoot, not the
 		// chunk manager dir, so EnsureSealed is a no-op for them. Their
 		// registration is lazy: the chunk manager's on-miss resolver serves
-		// them at first lookup (gastrolog-2kmgj6) — no per-entry work here.
+		// them at first lookup — no per-entry work here.
 	}
 }
 
@@ -346,9 +322,9 @@ func (r *VaultLifecycleReconciler) projectAllSealedFromFSM(fsm *vaultctlfsm.FSM)
 // re-runs the post-seal pipeline so sealToGLCB completes and the
 // Sealing → Sealed transition (CmdSealChunk + AnnounceSeal) fires.
 //
-// Phase 3 (gastrolog-1huz5) splits the seal lifecycle: sealActiveLocked
-// fires CmdBeginSeal (Active → Sealing), then PostSealProcess runs
-// sealToGLCB and only on success fires CmdSealChunk (Sealing → Sealed).
+// The seal lifecycle is split in three: sealActiveLocked fires
+// CmdBeginSeal (Active → Sealing), then PostSealProcess runs sealToGLCB
+// and only on success fires CmdSealChunk (Sealing → Sealed).
 // If the leader crashes between CmdBeginSeal applying and PostSealProcess
 // completing, the FSM is left with State=Sealing entries while the local
 // chunk Manager has the active-form files closed and sealed but no
@@ -414,8 +390,7 @@ func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *vaultctlfsm.FSM) {
 //     entry is Sealing for the whole normal duration of PostSealProcess, and a
 //     tick landing inside that window would otherwise warn about healthy work
 //     in flight, every tick, forever. The stale-fsm sweep already owns the
-//     genuinely stranded no-local-chunk case (gastrolog-1huz5) on its own grace
-//     period.
+//     genuinely stranded no-local-chunk case on its own grace period.
 func (r *VaultLifecycleReconciler) resumeSealingEntries(
 	entries []vaultctlfsm.ManifestEntry,
 	localMetas []chunk.ChunkMeta,
@@ -467,17 +442,14 @@ func (r *VaultLifecycleReconciler) resumeSealingEntries(
 	return resumed
 }
 
-// reconcileSealingResume is the steady-state half of seal resumption
-// (gastrolog-v6nf71).
+// reconcileSealingResume is the steady-state half of seal resumption.
 //
-// The Sealing → Sealed transition rides a scheduled one-time job. Before this
-// category existed, resumeSealingFromFSM had exactly one caller —
-// ReconcileFromSnapshot, fired only by the vault-ctl FSM's after-restore hook —
-// so a post-seal that failed, or never got scheduled, stranded its manifest
-// entry until the node restarted or took a snapshot install. The chunk is then
-// neither writable nor durable-complete, and nothing else looks at it: the
-// stale-fsm sweep skips any chunk the leader holds locally, which is precisely
-// the case here.
+// The Sealing → Sealed transition rides a scheduled one-time job. A post-seal
+// that failed, or never got scheduled, strands its manifest entry: the chunk is
+// then neither writable nor durable-complete, and nothing else looks at it —
+// the stale-fsm sweep skips any chunk the leader holds locally, which is
+// precisely the case here. Without this category the only recovery is the
+// snapshot-restore pass, i.e. a node restart.
 //
 // Rescheduling is idempotent by construction — schedulePostSealProcessing
 // claims the job name with RunOnceIfAbsent — so a pass that fires while a
@@ -526,9 +498,8 @@ func (r *VaultLifecycleReconciler) reconcileSealingResume(v *reconcileView) {
 // Three because the retry only pays off for a failure that is not about this
 // chunk — a transient disk or announce error. A post-seal that fails on the
 // chunk's own bytes fails identically every time, and repeating it is a rebuild
-// and re-announce per pass forever: the duplicate-work shape gastrolog-3hwngy
-// postmortemed. Past the budget the condition is degraded and belongs in front
-// of an operator, not in a loop.
+// and re-announce per pass forever. Past the budget the condition is degraded
+// and belongs in front of an operator, not in a loop.
 const maxSealResumeAttempts = 3
 
 // budgetedResume wraps the schedule callback with the retry budget, so the
@@ -627,7 +598,7 @@ func (r *VaultLifecycleReconciler) forgetSettledSealResumes(entries []vaultctlfs
 }
 
 // reconcileSealAnnounceDivergence re-announces a seal the manifest never
-// learned about (gastrolog-3ba5ei).
+// learned about.
 //
 // Announcer.apply discards a failed vault-ctl Apply into a warn line, so an
 // announce that cannot commit is invisible to its caller: Seal() returns nil
@@ -736,8 +707,8 @@ func (r *VaultLifecycleReconciler) SweepSealingResume() {
 // before the bytes exist (e.g. onSeal on a home whose build finishes after
 // CmdSealChunk applies), the receipt is skipped here and the later
 // build-completion event (OnBuilt) fires it once the file is present.
-// Queryability itself no longer depends on this call: the lazy on-miss GLCB
-// resolver serves the chunk on first lookup (gastrolog-34kmv).
+// Queryability itself does not depend on this call: the lazy on-miss GLCB
+// resolver serves the chunk on first lookup.
 func (r *VaultLifecycleReconciler) ackOwnHolderReceipt(e vaultctlfsm.ManifestEntry) {
 	if r.vaultInst == nil || r.vaultInst.ApplyRaftAckChunkHolders == nil || r.orch == nil {
 		return
@@ -785,13 +756,13 @@ func (r *VaultLifecycleReconciler) ackOwnHolderReceipt(e vaultctlfsm.ManifestEnt
 // interface. The Manager's EnsureSealed contract handles the cases
 // where the chunk is already sealed, doesn't exist locally, or is the
 // local active chunk — only the unsealed-on-disk case results in a
-// header rewrite. See gastrolog-51gme step 8 / gastrolog-uccg6.
+// header rewrite.
 //
 // Fires NotifyChunkChange unconditionally: the FSM's authoritative
 // view of this chunk just changed (the seal flag flipped), so the
 // inspector's WatchChunks subscribers on this node need to refresh.
 // Local EnsureSealed failure does not gate the notification — the
-// inspector reflects FSM state, not on-disk state. See gastrolog-2ob86.
+// inspector reflects FSM state, not on-disk state.
 func (r *VaultLifecycleReconciler) onSeal(e vaultctlfsm.ManifestEntry) {
 	r.logger.Debug("onSeal", "chunk", e.ID, "records", e.RecordCount)
 	defer func() {
@@ -804,8 +775,7 @@ func (r *VaultLifecycleReconciler) onSeal(e vaultctlfsm.ManifestEntry) {
 		// Bytes / IngestStart / etc. Using local Manager.Meta instead
 		// would produce per-node variance (followers lag the leader's
 		// record stream), making the inspector flicker through stale
-		// counts as N+1 SEALED events arrive in sequence. See
-		// gastrolog-3pf9w.
+		// counts as N+1 SEALED events arrive in sequence.
 		r.orch.EmitChunkSealed(r.vaultID, manifestEntryToChunkMeta(e, true))
 	}()
 	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
@@ -822,8 +792,8 @@ func (r *VaultLifecycleReconciler) onSeal(e vaultctlfsm.ManifestEntry) {
 	// Pipeline-built sealed chunks live at the vault ChunkRoot, not the chunk
 	// manager dir, so EnsureSealed is a no-op for them. Queryability needs no
 	// action here: the lazy on-miss GLCB resolver serves the freshly-sealed
-	// chunk on first lookup (gastrolog-34kmv). What remains event-driven is the
-	// holder receipt — propose it now that this home's copy is (usually)
+	// chunk on first lookup. What remains event-driven is the holder
+	// receipt — propose it now that this home's copy is (usually)
 	// built and on disk; the gate inside skips it when the build lags the seal,
 	// and OnBuilt fires it once the file lands. No-op for non-home vaults.
 	r.ackOwnHolderReceipt(e)
@@ -849,8 +819,8 @@ func (r *VaultLifecycleReconciler) onRetentionPending(id chunk.ChunkID) {
 // MUST happen in a separate goroutine — proposing CmdAckDelete on the
 // leader posts to the same Raft apply queue we're currently draining,
 // which would deadlock the leader's apply pump waiting for its own
-// queued ack to apply. See gastrolog-51gme follow-up: apply-pump
-// self-cycle stall observed in the 4-node test cluster.
+// queued ack to apply. Observed as an apply-pump self-cycle stall in
+// the 4-node test cluster.
 func (r *VaultLifecycleReconciler) onRequestDelete(p vaultctlfsm.PendingDelete) {
 	if !p.ExpectedFrom[r.localNodeID] {
 		r.logger.Debug("onRequestDelete: not in expectedFrom",
@@ -862,11 +832,11 @@ func (r *VaultLifecycleReconciler) onRequestDelete(p vaultctlfsm.PendingDelete) 
 
 // onAckDelete fires on every node when CmdAckDelete commits.
 //
-// Audit-only post gastrolog-15fm8: applyAckDelete now finalizes the
-// delete atomically inside the same apply when ExpectedFrom drains to
-// empty. The FSM's onFinalizeDelete callback fires from the same
-// apply dispatch, so post-finalize bookkeeping happens through that
-// path. This callback retains only the per-ack observability signal.
+// Audit-only: applyAckDelete finalizes the delete atomically inside
+// the same apply when ExpectedFrom drains to empty. The FSM's
+// onFinalizeDelete callback fires from the same apply dispatch, so
+// post-finalize bookkeeping happens through that path. This callback
+// carries only the per-ack observability signal.
 func (r *VaultLifecycleReconciler) onAckDelete(chunkID chunk.ChunkID, ackingNodeID string) {
 	r.logger.Debug("onAckDelete", "chunk", chunkID, "node", ackingNodeID)
 }
@@ -877,7 +847,7 @@ func (r *VaultLifecycleReconciler) onFinalizeDelete(chunkID chunk.ChunkID) {
 	// when this node never held local bytes and never ran deleteLocalCopy.
 	// Without this, the WatchChunks projection on nodes that only learned
 	// about the chunk via ListChunks fan-out keeps showing retention-pending
-	// rows until a manual reload. See gastrolog-2ob86.
+	// rows until a manual reload.
 	if r.orch != nil {
 		r.orch.logChunkDeleted(r.vaultID, chunkID)
 		r.orch.EmitChunkDeleted(r.vaultID, chunkID)
@@ -886,18 +856,15 @@ func (r *VaultLifecycleReconciler) onFinalizeDelete(chunkID chunk.ChunkID) {
 
 // onPruneNode fires on every node when CmdPruneNode commits.
 //
-// Audit-only post gastrolog-15fm8: applyPruneNode now finalizes
-// chunks whose ExpectedFrom drained as a result of the prune
-// atomically inside the same apply. The FSM's onFinalizeDelete
-// callback fires per chunk from the same apply dispatch. This
-// callback retains only the per-prune observability signal.
+// Audit-only: applyPruneNode finalizes chunks whose ExpectedFrom
+// drained as a result of the prune atomically inside the same apply.
+// The FSM's onFinalizeDelete callback fires per chunk from the same
+// apply dispatch. This callback carries only the per-prune
+// observability signal.
 //
-// Pre-fix (gastrolog-51gme step 10), the leader proposed
-// CmdFinalizeDelete for each chunk in a goroutine; leadership
-// transfer between the prune apply and the goroutine running could
-// strand pendingDeletes entries forever. Folding the finalize into
-// applyPruneNode closes that leak — see gastrolog-3qr8z for the
-// disease pattern.
+// Finalizing inside the apply rather than from a leader-only callback
+// is what keeps a leadership transfer between the prune and the
+// follow-on proposal from stranding pendingDeletes entries forever.
 func (r *VaultLifecycleReconciler) onPruneNode(prunedNodeID string, finalizable []chunk.ChunkID) {
 	r.logger.Debug("onPruneNode",
 		"node", prunedNodeID, "finalizable_count", len(finalizable))
@@ -921,11 +888,10 @@ func (r *VaultLifecycleReconciler) onPruneNode(prunedNodeID string, finalizable 
 // reconcileView is one tick's point-in-time gather of everything the
 // reconcile categories diff against: the FSM's manifest entries and
 // pending deletes (each a snapshot copy), and the local chunk manager's
-// meta list. Before consolidation (gastrolog-4pq56v) the seven Sweep*
-// methods each re-read these independently — fsm.List() three times,
-// Chunks.List() three times, PendingDeletes() twice per 20s tick. One
-// view per tick gives every category the same coherent inputs and one
-// lock-acquisition profile.
+// meta list. One view per tick gives every category the same coherent
+// inputs and one lock-acquisition profile, instead of each Sweep*
+// method re-reading fsm.List() / Chunks.List() / PendingDeletes() for
+// itself.
 //
 // Point queries that are cheap and per-candidate (IsTombstoned,
 // SegmentReleased, SealedManifest, Chunks.Meta) stay live — copying
@@ -984,11 +950,11 @@ func (r *VaultLifecycleReconciler) gatherReconcileView() *reconcileView {
 // own disk and obligations against the replicated FSM, in both
 // directions. The per-category Sweep* methods remain as isolated entry
 // points (tests, targeted recovery) — each gathers its own view — but the
-// periodic cadence goes through here (gastrolog-4pq56v).
+// periodic cadence goes through here.
 //
-// Backstop, not primary (gastrolog-3fu9t). Every category now has an
-// upstream event that drives its PRIMARY convergence; the tick catches
-// the residual (dropped events, races, and the two categories that are
+// Backstop, not primary. Every category has an upstream event that
+// drives its PRIMARY convergence; the tick catches the residual
+// (dropped events, races, and the categories that are
 // periodic-by-nature). Per-category event source and verdict:
 //
 //   - pendingObligations  event: CmdRequestDelete apply (onRequestDelete
@@ -1009,8 +975,8 @@ func (r *VaultLifecycleReconciler) gatherReconcileView() *reconcileView {
 //   - stalePendingAcks    event: leadership change (lead-gained) AND
 //     placement move under a stable leader
 //     (wakeStalePendingAckReconcile on the
-//     FollowerTargets / role reassignment,
-//     gastrolog-235dm7) + CmdPruneNode. Tick = backstop.
+//     FollowerTargets / role reassignment) +
+//     CmdPruneNode. Tick = backstop.
 //   - idleActiveChunks    periodic-by-nature: wall-clock inactivity
 //     detection (WriteEnd frozen past a threshold).
 //     Inactivity is the ABSENCE of append events, so
@@ -1021,11 +987,7 @@ func (r *VaultLifecycleReconciler) gatherReconcileView() *reconcileView {
 //     node that just took the leader-side decision may
 //     hold a chunk stranded mid-seal. Tick = backstop
 //     for the case with no edge at all — a post-seal
-//     job that failed under a stable leader. This
-//     category was missing entirely until
-//     gastrolog-v6nf71: resume ran only from the
-//     FSM's after-restore hook, so recovery meant
-//     restarting the node.
+//     job that failed under a stable leader.
 func (r *VaultLifecycleReconciler) ReconcileTick() {
 	v := r.gatherReconcileView()
 	if v == nil {
@@ -1045,14 +1007,14 @@ func (r *VaultLifecycleReconciler) ReconcileTick() {
 
 // ReconcileMembershipCatchup runs the placement- and leadership-sensitive
 // reconcile categories in response to a membership/leadership edge
-// (gastrolog-3fu9t) rather than waiting for the periodic backstop tick.
+// rather than waiting for the periodic backstop tick.
 // Wired to onVaultCtlLeadGained: a node that just gained vault-ctl
 // leadership for this vault is the exact moment these categories need to
 // run:
 //
 //   - reconcileMissingReplicas: a leader that joined the placement set
 //     late holds the FSM manifest but not the historical bytes, and must
-//     pull them from a peer (gastrolog-19241) instead of waiting a tick.
+//     pull them from a peer instead of waiting a tick.
 //   - reconcileStaleLeaderFSMEntries: retire sealed entries no reachable
 //     node can serve now that this node owns the leader-side decision.
 //   - reconcileStalePendingDeleteAcks: prune ExpectedFrom nodes dropped
@@ -1062,7 +1024,7 @@ func (r *VaultLifecycleReconciler) ReconcileTick() {
 //   - reconcileSealingResume: a chunk stranded mid-seal is invisible to
 //     every other category (the stale-fsm sweep skips chunks the leader
 //     holds locally), so the new leader must re-drive its post-seal
-//     rather than leave it parked in Sealing (gastrolog-v6nf71).
+//     rather than leave it parked in Sealing.
 //
 // Every category is internally role-gated (IsFollower / HasRaftLeader /
 // ApplyRaft* nil checks), so firing on a transient or stale role is a
@@ -1076,8 +1038,8 @@ func (r *VaultLifecycleReconciler) ReconcileTick() {
 // A placement move under a STABLE leader gets its own, narrower wake:
 // wakeStalePendingAckReconcile fires only reconcileStalePendingDeleteAcks,
 // because ExpectedFrom is the one thing a FollowerTargets reassignment
-// directly invalidates (gastrolog-235dm7). The other three categories here
-// stay on lead-gained + the backstop.
+// directly invalidates. The other three categories here stay on
+// lead-gained + the backstop.
 func (r *VaultLifecycleReconciler) ReconcileMembershipCatchup() {
 	v := r.gatherReconcileView()
 	if v == nil {
@@ -1199,13 +1161,12 @@ func (r *VaultLifecycleReconciler) reconcileLocalOrphans(v *reconcileView) {
 		//    RecordCount == 0 (no real data — never finished a record append),
 		//    sealed long enough ago that a pending Create can't still be
 		//    in-flight. The retention sweep otherwise re-transitions these
-		//    ghosts every minute and pollutes downstream vaults. See
-		//    gastrolog-66b7x.
+		//    ghosts every minute and pollutes downstream vaults.
 		//
 		// A third class — data-bearing chunks the FSM doesn't recognize —
 		// is handled separately below: those raise an operator alert and
 		// are preserved on disk per the no-auto-delete-of-unknown-orphans
-		// invariant (docs/disk-authority-audit.md, gastrolog-3y8py).
+		// invariant (docs/disk-authority-audit.md).
 		// Auto-deleting them removes the recovery surface for FSM-glitch
 		// scenarios.
 		tombstoned := r.fsm.IsTombstoned(meta.ID)
@@ -1220,14 +1181,13 @@ func (r *VaultLifecycleReconciler) reconcileLocalOrphans(v *reconcileView) {
 		if !tombstoned && !ghost {
 			continue
 		}
-		// Local-active + FSM-tombstoned (gastrolog-533l9): the
-		// chunk was active on this node at crash time; while
-		// offline, the cluster sealed → retention-deleted →
-		// finalized it; no live obligation remains in the FSM
-		// (only the tombstone). Demote local active first so the
-		// subsequent deleteLocalCopy doesn't bounce off
-		// ErrActiveChunk. Same demote-then-delete sequence as
-		// fulfillObligation (gastrolog-2yeht).
+		// Local-active + FSM-tombstoned: the chunk was active on
+		// this node at crash time; while offline, the cluster
+		// sealed → retention-deleted → finalized it; no live
+		// obligation remains in the FSM (only the tombstone).
+		// Demote local active first so the subsequent
+		// deleteLocalCopy doesn't bounce off ErrActiveChunk. Same
+		// demote-then-delete sequence as fulfillObligation.
 		if !meta.Sealed {
 			if ensurer == nil {
 				r.logger.Warn("local-orphan sweep: chunk is local active but Manager has no SealEnsurer; skipping",
@@ -1285,8 +1245,8 @@ func (r *VaultLifecycleReconciler) alertUnknownOrphan(meta chunk.ChunkMeta) {
 }
 
 // SweepStagingOrphans is the pipeline-staging counterpart of
-// SweepLocalOrphans (gastrolog-27czpq). SweepLocalOrphans covers the
-// chunk Manager's store, but V3 keeps its bytes in the pipeline staging
+// SweepLocalOrphans. SweepLocalOrphans covers the chunk
+// Manager's store, but V3 keeps its bytes in the pipeline staging
 // areas (<segmentsDir>/<vaultID>/{completed,head,pre-head,chunks}) which
 // the Manager only learns about lazily via FSM activity — files whose
 // release/delete effect this node missed while offline are invisible to
@@ -1411,16 +1371,14 @@ func (r *VaultLifecycleReconciler) sweepTombstonedChunkStaging(v *reconcileView)
 //     replicateToFollower's gRPC push failed; no retry queue exists at
 //     the leader. Vault-ctl Raft caught the follower's FSM up via
 //     snapshot install or log replay on rejoin so the manifest entry is
-//     present, but the actual chunk records aren't on disk
-//     (gastrolog-2dgvj).
+//     present, but the actual chunk records aren't on disk.
 //
 //   - Leadership transferred to a node that joined the placement set
 //     after some chunks were written. The new leader's FSM has the
 //     manifest entry (replicated via vault-ctl Raft) but its local
 //     chunk manager never received the bytes. The old chunks live on
 //     the prior replica set; the new leader must pull them from a peer
-//     instead of declaring them lost to the stale-fsm sweep
-//     (gastrolog-19241).
+//     instead of declaring them lost to the stale-fsm sweep.
 //
 // Both roles run this sweep. The peer set is asymmetric by role:
 // followers ask the leader (FollowerTargets is empty on followers,
@@ -1545,16 +1503,16 @@ func (r *VaultLifecycleReconciler) syncPipelineSealedGLCBs(v *reconcileView) {
 		if e.CloudBacked {
 			continue
 		}
-		// Registration is lazy (the chunk manager's on-miss resolver,
-		// gastrolog-2kmgj6); this sweep no longer registers per entry —
-		// its jobs are replica catch-up and holder-receipt truth.
+		// Registration is lazy (the chunk manager's on-miss resolver), so
+		// this sweep does not register per entry — its jobs are replica
+		// catch-up and holder-receipt truth.
 		if !e.IsSealed() {
 			continue
 		}
 		// Skip chunks on their way out (retention-pending or delete protocol
 		// in flight): the sweep tick that lands inside the expunge->finalize
 		// window otherwise schedules a doomed pull on EVERY home, since the
-		// bytes were just deleted everywhere (gastrolog-423tpt).
+		// bytes were just deleted everywhere.
 		if chunkOnItsWayOut(e, v.pendingByID[e.ID]) {
 			continue
 		}
@@ -1652,23 +1610,23 @@ const staleLeaderFSMGracePeriod = 1 * time.Hour
 
 // abandonedTransferAnnounceGCAge bounds how long a transfer-introduced
 // manifest entry (TransferSourceVaultID set) may sit with ZERO confirmed
-// holders before this destination gives up and retracts the announce
-// (gastrolog-2l918 review finding 4). The source retention protocol has
-// no message to signal "I gave up on this transfer" — a source can defer
-// terminally (disposition changed away from transfer, target changed,
-// corruption mismatch) with nothing left pointing the destination at a
-// live, in-progress hand-off. Without retraction, the phantom entry sits
-// forever: zero holders, nothing pulling it, no error anywhere.
+// holders before this destination gives up and retracts the announce.
+// The source retention protocol has no message to signal "I gave up on
+// this transfer" — a source can defer terminally (disposition changed
+// away from transfer, target changed, corruption mismatch) with nothing
+// left pointing the destination at a live, in-progress hand-off. Without
+// retraction, the phantom entry sits forever: zero holders, nothing
+// pulling it, no error anywhere.
 //
 // Deliberately generous and imprecise: an ACTIVELY retried transfer (the
 // destination genuinely unreachable, but the source keeps retrying every
-// sweep) looks identical to an abandoned one from here — this is the
-// "minimal honest version" the review accepted in place of a real
-// retraction protocol. A day is long enough that no plausible transient
-// stall survives it, so false-positive GC is rare; if the source really
-// is still trying, its next sweep's ensureDestManifestEntry re-announces
-// (deferred by the destination's tombstone — see deferCatTombstoned —
-// until PruneTombstones drops it, then the announce succeeds like new).
+// sweep) looks identical to an abandoned one from here — this age-based
+// GC stands in for a real retraction protocol. A day is long enough that
+// no plausible transient stall survives it, so false-positive GC is
+// rare; if the source really is still trying, its next sweep's
+// ensureDestManifestEntry re-announces (deferred by the destination's
+// tombstone — see deferCatTombstoned — until PruneTombstones drops it,
+// then the announce succeeds like new).
 const abandonedTransferAnnounceGCAge = 24 * time.Hour
 
 // reconcileAbandonedTransferAnnounces retracts a transfer announce-import
@@ -1743,8 +1701,6 @@ func (r *VaultLifecycleReconciler) SweepAbandonedTransferAnnounces() {
 // leader is the sole byte authority and fans deletes cluster-wide via
 // the receipt protocol — that races GLCB builds on other homes during
 // vault-ctl leadership churn and backlog catch-up.
-//
-// See gastrolog-5nhwe.
 func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 	if v := r.gatherReconcileView(); v != nil {
 		r.reconcileStaleLeaderFSMEntries(v)
@@ -1779,9 +1735,9 @@ func (r *VaultLifecycleReconciler) reconcileStaleLeaderFSMEntries(v *reconcileVi
 		// Sealed and Sealing chunks are both candidates here. A Sealing
 		// entry whose chunk this leader doesn't have locally is the
 		// classic "leader transferred mid-PostSealProcess and the new
-		// leader never had the active-form files" case (gastrolog-1huz5):
-		// no recovery path in 1:1:1 placement, so the entry must be
-		// retired after grace period or it stays in Sealing forever.
+		// leader never had the active-form files" case: no recovery
+		// path in 1:1:1 placement, so the entry must be retired after
+		// the grace period or it stays in Sealing forever.
 		// Active entries are skipped — they're too transient to confuse
 		// with stranded state, and a missing Active is properly handled
 		// by other paths (vault readiness, ingest reroute).
@@ -1869,10 +1825,9 @@ func (r *VaultLifecycleReconciler) reconcileStaleLeaderFSMEntries(v *reconcileVi
 // node should propose, and the vault-ctl leader is the natural single
 // point because retention itself is leader-only.
 //
-// See gastrolog-2eclw follow-up: the live K8s cluster ended up with
-// 8 stuck chunks whose ExpectedFrom contained only gastrolog-1 — a
-// former placement member with no current vault instance. This sweep
-// is the self-healing path.
+// Observed on the live K8s cluster: 8 stuck chunks whose ExpectedFrom
+// contained only gastrolog-1 — a former placement member with no
+// current vault instance. This sweep is the self-healing path.
 func (r *VaultLifecycleReconciler) SweepStalePendingDeleteAcks() {
 	if v := r.gatherReconcileView(); v != nil {
 		r.reconcileStalePendingDeleteAcks(v)
@@ -1933,11 +1888,11 @@ func (r *VaultLifecycleReconciler) reconcileStalePendingDeleteAcks(v *reconcileV
 // idleActiveThreshold is how long an FSM-Active chunk can sit without
 // receiving record appends (i.e., local WriteEnd hasn't advanced)
 // before SweepIdleActiveChunks seals it. Targets the orphan-active
-// case from gastrolog-2eclw: when leadership for a vault transfers
-// to a new node, the previous leader's active chunk stops receiving
-// appends and becomes permanently stranded — no rotation triggers
-// (record-count / size) ever fire on a chunk that's frozen, retention
-// skips !Sealed chunks, and the FSM keeps the active entry forever.
+// case: when leadership for a vault transfers to a new node, the
+// previous leader's active chunk stops receiving appends and becomes
+// permanently stranded — no rotation triggers (record-count / size)
+// ever fire on a chunk that's frozen, retention skips !Sealed chunks,
+// and the FSM keeps the active entry forever.
 //
 // Setting this threshold higher than the leader's typical
 // rotation-policy MaxAge ensures the leader's own active chunk rotates
@@ -1983,8 +1938,6 @@ const idleActiveThreshold = 10 * time.Minute
 // with the second metadata. Metadata is consistent across replicas
 // because the active was replicated when it was the leader's, so the
 // race is harmless.
-//
-// See gastrolog-2eclw / gastrolog-3qr8z.
 func (r *VaultLifecycleReconciler) SweepIdleActiveChunks() {
 	if v := r.gatherReconcileView(); v != nil {
 		r.reconcileIdleActiveChunks(v)
@@ -2161,9 +2114,9 @@ func (r *VaultLifecycleReconciler) placementMembership() []string {
 // label that distinguishes them for log triage.
 //
 // Force-demotes the chunk first if the local Manager still has it as
-// the active pointer (gastrolog-2yeht). The FSM has authoritatively
-// scheduled this chunk for deletion via the receipt protocol; the
-// local stale active pointer must yield. Without this prelude,
+// the active pointer. The FSM has authoritatively scheduled this chunk
+// for deletion via the receipt protocol; the local stale active pointer
+// must yield. Without this prelude,
 // downstream-instance followers (no continuous record-stream to swap
 // active naturally) would have fulfillObligation bouncing off
 // ErrActiveChunk on every periodic-sweep tick, blocking finalize
@@ -2227,7 +2180,7 @@ func (r *VaultLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID, reason
 	}
 	// Best-effort cleanup of pipeline-built GLCB dirs at the vault ChunkRoot.
 	// Covers deletes that ran before RegisterExternalGLCB or when the chunk
-	// manager had no local registration (gastrolog-358ak, Rubicon E2).
+	// manager had no local registration.
 	r.deletePipelineChunkDir(chunkID)
 	if r.orch != nil {
 		if hadLocal {
@@ -2279,9 +2232,9 @@ func (r *VaultLifecycleReconciler) deletePipelineChunkDir(chunkID chunk.ChunkID)
 // ---------- Single deletion entry point ----------
 
 // deleteChunk is the canonical entry point for "delete this chunk
-// across the cluster". All eight legacy cleanup paths converge here
-// over steps 4-8. reason is a short free-form label that ends up in the
-// FSM's pendingDeletes entry and in audit logs:
+// across the cluster". Every cleanup path converges here. reason is a
+// short free-form label that ends up in the FSM's pendingDeletes entry
+// and in audit logs:
 //
 //	"retention-ttl"             retention rule fired
 //	"transition-source-expire"  source after destination receipt

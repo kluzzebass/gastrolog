@@ -1,14 +1,14 @@
 package orchestrator
 
 // A retention disposition must be evaluated when a chunk is acted on, not when
-// the sweep that will act on it began (gastrolog-6ckv0y).
+// the sweep that will act on it began.
 //
 // retentionRunnerFor captures disposition once per sweep, and a sweep processes
 // its entire matched set without returning. The retention cron is registered
 // WithSingletonMode(LimitModeReschedule), so ticks landing during a running
 // sweep are dropped and never refresh it. The effective refresh interval is one
-// whole SWEEP — which, at the drain rate gastrolog-17s8rn describes, can be tens
-// of minutes.
+// whole SWEEP — which, at an observed drain rate of ~1 chunk per 24s, can be
+// tens of minutes.
 //
 // Observed on the dev cluster: a vault whose stored disposition was "delete"
 // kept fanning records out to its route target at ~2600 records/sec, because

@@ -105,12 +105,12 @@ type openChunkRecordPos struct {
 // EventID-deduplicated order that QueryOpenChunk streams: both derive from
 // mergeSpanEntries over identically resolved span refs, so a position handed
 // out by the forward stream always resolves to the same record here — there
-// is no second record-at-position arithmetic to drift (gastrolog-54mjat).
+// is no second record-at-position arithmetic to drift.
 //
 // Segments are mapped once at construction and stay mapped until Close —
-// intended for one search-cursor lifetime. The previous per-call path
-// re-opened and full-CRC-verified a segment (segment.Open) for EVERY
-// positional read, making a reverse scan O(records × segment bytes).
+// intended for one search-cursor lifetime. Re-opening and full-CRC-verifying
+// a segment (segment.Open) per positional read makes a reverse scan
+// O(records × segment bytes).
 //
 // Lifetime safety: manifest-listed segments are finalized and immutable —
 // they are never rewritten in place. Head purge unlinks them, which leaves

@@ -1,9 +1,10 @@
 package system_test
 
-// Regression coverage for gastrolog-2bv1x: StorageIDForNode must never fall
-// back to a mismatched storage class for file vaults. Follower placement
-// (eligibleStorages/storageEligible) was always strict; the leader path went
-// through this fallback and could land on the wrong disk class.
+// Regression coverage: StorageIDForNode must never fall back to a mismatched
+// storage class for file vaults. Leader placement resolves storage through
+// this selector, so it has to be exactly as strict as follower placement
+// (eligibleStorages/storageEligible) or a vault lands on the wrong disk
+// class.
 
 import (
 	"testing"

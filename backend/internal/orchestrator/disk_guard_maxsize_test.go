@@ -1,21 +1,15 @@
 package orchestrator
 
-// Coverage for gastrolog-33ul6h: resolveVaultSizeBound is the config→runtime
-// resolver that replaces reading VaultConfig.MaxSize directly. It computes
-// the effective per-node disk-claim bound for a file vault from the
-// retention policies attached via the vault's RetentionRules: min-wins
+// Coverage for resolveVaultSizeBound, the config→runtime resolver that
+// computes the effective per-node disk-claim bound for a file vault from
+// the retention policies attached via the vault's RetentionRules: min-wins
 // across every attached policy's parsed MaxSize, and NO bound when none
-// carries one — there is no per-vault default (gastrolog-vl2p98).
-// The guard's own seam (SetVaultGuard / maxSizeBytes) is unchanged — these
-// tests pin only the resolver that feeds it a number.
+// carries one — there is no per-vault default. These tests pin only the
+// resolver, not the guard's own seam (SetVaultGuard / maxSizeBytes).
 //
-// Operator correction (2026-07-19, gastrolog-33ul6h comment c2): the earlier
-// shape of this branch split the vault's size story into a MaxSize drain
-// trigger and a separate refuse-bound field carried on the same policy.
-// That was superseded before merge: MaxSize is now the ONE field and means
-// both things at once — it drains AND refuses at the same bound.
-// "Bound-only" (a refuse bound with no drain trigger) is no longer a
-// concept: a policy that sets only MaxSize is simply a drain policy.
+// MaxSize is the ONE size field on a policy and means both things at once:
+// it drains AND refuses at the same bound. There is no "bound-only" policy
+// shape — a policy that sets only MaxSize is simply a drain policy.
 
 import (
 	"context"
@@ -33,12 +27,9 @@ func retentionRuleFor(policyID glid.GLID) system.RetentionRule {
 
 // policyWithBound builds a refuse-eligible ("hard") size-bound policy —
 // every caller in this file is testing the REFUSE bound resolution itself
-// (min-wins, default floor, parse-failure handling), which only makes
-// sense against a policy that actually contributes to it. Explicit
-// Refuse:true here since refuse now defaults off (gastrolog-5yfaqj
-// operator decision) — the OLD default-true assumption these tests were
-// written under no longer holds, so the fixture states its intent
-// directly rather than relying on an unset flag.
+// (min-wins, parse-failure handling), which only makes sense against a
+// policy that actually contributes to it. Refuse defaults off, so the
+// fixture states Refuse:true directly rather than relying on an unset flag.
 func policyWithBound(id glid.GLID, bound string) system.RetentionPolicyConfig {
 	b := bound
 	return system.RetentionPolicyConfig{ID: id, Name: "p-" + id.String(), MaxSize: &b, Refuse: new(true)}
@@ -46,9 +37,8 @@ func policyWithBound(id glid.GLID, bound string) system.RetentionPolicyConfig {
 
 // No attached retention rules at all: NO refuse bound. The volume-level
 // storage thresholds (FileStorage.DiskFreeWarn / DiskFreeFloor) are what
-// protect the node; a per-vault byte default used to apply here and refused
-// admission, which made an unconfigured vault stricter than any configured one
-// (gastrolog-vl2p98).
+// protect the node; a per-vault byte default here would make an
+// unconfigured vault stricter than any configured one.
 func TestResolveVaultSizeBoundNoRulesIsUnbounded(t *testing.T) {
 	vc := system.VaultConfig{ID: glid.New(), Name: "v"}
 	if got := resolveVaultSizeBound(vc, nil); got != 0 {
@@ -94,22 +84,21 @@ func TestResolveVaultSizeBoundMinWinsAcrossPolicies(t *testing.T) {
 	}
 }
 
-// policyWithBoundRefuse is policyWithBound plus an explicit Refuse value —
-// gastrolog-5yfaqj: the tightest attached MaxSize must not win the
-// instantaneous refuse bound unless its OWN policy has refuse=true.
+// policyWithBoundRefuse is policyWithBound plus an explicit Refuse value:
+// the tightest attached MaxSize must not win the instantaneous refuse bound
+// unless its OWN policy has refuse=true.
 func policyWithBoundRefuse(id glid.GLID, bound string, refuse bool) system.RetentionPolicyConfig {
 	p := policyWithBound(id, bound)
 	p.Refuse = &refuse
 	return p
 }
 
-// TestResolveVaultSizeBoundRefuseFalseExcludedFromRefuseBound pins review
-// fix C3 (refuse=false doesn't gate size): the spec example. A soft
-// (refuse=false) 10GB policy plus a hard (refuse=true) 50GB policy on the
-// same vault refuses at 50GB — the hard policy's OWN bound — even though
-// 10GB is tighter. Drain is unaffected (each rule keeps draining its own
-// bound independently; this resolver only feeds the guard's instantaneous
-// refuse threshold).
+// TestResolveVaultSizeBoundRefuseFalseExcludedFromRefuseBound pins that
+// refuse=false doesn't gate size. A soft (refuse=false) 10GB policy plus a
+// hard (refuse=true) 50GB policy on the same vault refuses at 50GB — the
+// hard policy's OWN bound — even though 10GB is tighter. Drain is
+// unaffected (each rule keeps draining its own bound independently; this
+// resolver only feeds the guard's instantaneous refuse threshold).
 func TestResolveVaultSizeBoundRefuseFalseExcludedFromRefuseBound(t *testing.T) {
 	soft, hard := glid.New(), glid.New()
 	policies := []system.RetentionPolicyConfig{
@@ -153,23 +142,16 @@ func TestResolveVaultSizeBoundAllSoftMeansNoRefuseBoundNoFloor(t *testing.T) {
 	}
 }
 
-// TestUnsetRefusePolicyWithMaxSizeDrainsNotRefusesNoFloor is the operator's
-// default-flip pin (gastrolog-5yfaqj): a policy that states max_size but
-// leaves Refuse UNSET (nil, not explicit false) must:
-//  1. still DRAIN — ToRetentionPolicy builds the same SizeRetentionPolicy
-//     it always has, since drain never reads Refuse at all;
-//  2. NOT contribute to the guard's instantaneous refuse bound — nil now
-//     reads as false (RefuseEnabled()), so this policy is excluded from
+// TestUnsetRefusePolicyWithMaxSizeDrainsNotRefusesNoFloor pins a policy
+// that states max_size but leaves Refuse UNSET (nil, not explicit false):
+//  1. it still DRAINS — ToRetentionPolicy builds the same
+//     SizeRetentionPolicy, since drain never reads Refuse at all;
+//  2. it does NOT contribute to the guard's instantaneous refuse bound —
+//     nil reads as false (RefuseEnabled()), so this policy is excluded from
 //     attachedSizeBound's winner search exactly like an explicit
 //     refuse=false policy;
-//  3. NOT re-engage the refuse-only creation-default floor either — the
-//     floor applies only when NO policy STATES a size at all, and this
-//     one does state one, just without opting into refusal.
-//
-// This is the direct behavior change from the flip: before, an unset
-// Refuse on a max_size policy silently refused (nil read as true); now it
-// silently drains only, and an operator who wants the old behavior must
-// set refuse=true explicitly.
+//  3. no default floor takes its place — an operator who wants refusal
+//     must set refuse=true explicitly.
 func TestUnsetRefusePolicyWithMaxSizeDrainsNotRefusesNoFloor(t *testing.T) {
 	t.Parallel()
 	policyID := glid.New()
@@ -284,8 +266,8 @@ func TestResolveVaultSizeBoundUnknownPolicyIDIsUnbounded(t *testing.T) {
 // resolver wired into the real guard end to end (refreshVaultDiskGuards +
 // evaluateVaults, the same pairing startDiskGuard's scheduler job runs): a
 // policy's max_size caps the vault; raising it on the policy resumes
-// admission; detaching the policy entirely falls back to the
-// creation-default floor, not to unbounded.
+// admission; detaching the policy entirely leaves the vault unbounded on
+// size.
 func TestRefreshVaultDiskGuardsCappedFromPolicyMaxSizeLifecycle(t *testing.T) {
 	t.Parallel()
 
@@ -302,9 +284,9 @@ func TestRefreshVaultDiskGuardsCappedFromPolicyMaxSizeLifecycle(t *testing.T) {
 			},
 		}},
 		RetentionPolicies: []system.RetentionPolicyConfig{
-			// Refuse:true explicit — refuse now defaults off
-			// (gastrolog-5yfaqj); this test is about the size-cap
-			// lifecycle itself, so the fixture states its intent.
+			// Refuse:true explicit — refuse defaults off; this test is
+			// about the size-cap lifecycle itself, so the fixture states
+			// its intent.
 			{ID: policyID, Name: "bound-policy", MaxSize: &bound, Refuse: new(true)},
 		},
 	}
@@ -312,9 +294,8 @@ func TestRefreshVaultDiskGuardsCappedFromPolicyMaxSizeLifecycle(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 	orch.setSystemLoader(testSystemLoader{cfg: cfg})
 
-	// Footprint fixed above the 10GiB policy bound but below the 1GiB
-	// default — the capped/uncapped verdict below can only be explained by
-	// the policy bound, not the default floor.
+	// Footprint fixed above the 10GiB policy bound, so the capped/uncapped
+	// verdict below can only be explained by the policy bound.
 	const footprint = int64(11) << 30 // 11GiB
 	orch.diskGuard.vaultFootprint = func(id glid.GLID) int64 {
 		if id == vaultID {
@@ -344,12 +325,11 @@ func TestRefreshVaultDiskGuardsCappedFromPolicyMaxSizeLifecycle(t *testing.T) {
 		t.Fatal("vault must resume admission once the policy bound is raised above the footprint")
 	}
 
-	// 3. Policy detached entirely → NO size bound (gastrolog-vl2p98). The
-	// 11GiB footprint must NOT cap: with no stated bound the vault is
-	// bounded by its volume's free-space thresholds, not by a per-vault
-	// default. This assertion is the inverse of what it was — the old floor
-	// capped here, which is precisely the behaviour that refused a live
-	// cluster's ingestion on an axis its operator never configured.
+	// 3. Policy detached entirely → NO size bound. The 11GiB footprint must
+	// NOT cap: with no stated bound the vault is bounded by its volume's
+	// free-space thresholds, not by a per-vault default. A default floor
+	// here refused a live cluster's ingestion on an axis its operator never
+	// configured.
 	cfg.Vaults[0].RetentionRules = nil
 	refresh()
 	if orch.diskGuard.vaultSizeCapped(vaultID) {
@@ -357,14 +337,14 @@ func TestRefreshVaultDiskGuardsCappedFromPolicyMaxSizeLifecycle(t *testing.T) {
 	}
 }
 
-// TestRefreshVaultDiskGuardsLogsOnBoundChangeOnly pins gastrolog-33ul6h
-// finding 4: an effective-bound CHANGE (the resolved max-size differs from
-// what was previously registered for this vault) logs exactly once at INFO,
-// naming old, new, and the source ("policy <name/id>" or "default floor").
-// First observation (nothing registered yet) is not a transition and must
-// not log; re-resolving the SAME bound on every subsequent tick (the
-// steady-state case — refreshVaultDiskGuards runs on every 15s guard tick)
-// must never log again either.
+// TestRefreshVaultDiskGuardsLogsOnBoundChangeOnly pins that an
+// effective-bound CHANGE (the resolved max-size differs from what was
+// previously registered for this vault) logs exactly once at INFO, naming
+// old, new, and the source ("policy <name/id>", or which no-bound case
+// applies). First observation (nothing registered yet) is not a transition
+// and must not log; re-resolving the SAME bound on every subsequent tick
+// (the steady-state case — refreshVaultDiskGuards runs on every 15s guard
+// tick) must never log again either.
 func TestRefreshVaultDiskGuardsLogsOnBoundChangeOnly(t *testing.T) {
 	t.Parallel()
 
@@ -381,11 +361,11 @@ func TestRefreshVaultDiskGuardsLogsOnBoundChangeOnly(t *testing.T) {
 			},
 		}},
 		RetentionPolicies: []system.RetentionPolicyConfig{
-			// Refuse:true explicit — refuse now defaults off
-			// (gastrolog-5yfaqj); without it this policy is not a
-			// refuse-eligible "winner" at all and the bound resolves to
-			// the soft-only no-refuse-bound path instead of the
-			// policy-sourced bound this test pins the log text for.
+			// Refuse:true explicit — refuse defaults off; without it this
+			// policy is not a refuse-eligible "winner" at all and the
+			// bound resolves to the soft-only no-refuse-bound path
+			// instead of the policy-sourced bound this test pins the log
+			// text for.
 			{ID: policyID, Name: "bound-policy", MaxSize: &bound, Refuse: new(true)},
 		},
 	}
@@ -434,10 +414,8 @@ func TestRefreshVaultDiskGuardsLogsOnBoundChangeOnly(t *testing.T) {
 	// the entry (clearing any standing cap/alarm with it).
 	//
 	// No additional log line, and that is right rather than a gap — the line
-	// exists to flag a change in ADMISSION behaviour on this node, and a vault
-	// this node neither bounds nor stores has none. Before gastrolog-vl2p98
-	// this branch was unreachable: the floor meant maxSize was never 0, so
-	// every vault always registered.
+	// exists to flag a change in ADMISSION behaviour on this node, and a
+	// vault this node neither bounds nor stores has none.
 	cfg.Vaults[0].RetentionRules = nil
 	orch.refreshVaultDiskGuards(ctx)
 	if got := strings.Count(logSink.String(), changeMsg); got != 1 {
@@ -451,13 +429,13 @@ func TestRefreshVaultDiskGuardsLogsOnBoundChangeOnly(t *testing.T) {
 	}
 }
 
-// The dev-cluster incident, pinned end to end (gastrolog-vl2p98).
+// The dev-cluster incident, pinned end to end.
 //
 // first-vault attached one policy stating only max_age: 3m — a complete,
-// working, age-based retention configuration. Because no attached policy stated
-// a SIZE, a 1GiB creation floor engaged and refused admission at 25.8 GiB used,
-// on all four nodes, on an axis the operator never configured and could not see
-// in their config.
+// working, age-based retention configuration. Because no attached policy
+// stated a SIZE, a 1GiB creation floor engaged and refused admission at
+// 25.8 GiB used, on all four nodes, on an axis the operator never
+// configured and could not see in their config.
 //
 // The guard must register no cap for this vault at all.
 func TestAgeOnlyPolicyNeverProducesASizeRefuseBound(t *testing.T) {

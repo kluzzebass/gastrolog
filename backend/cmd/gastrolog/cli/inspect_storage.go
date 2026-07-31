@@ -16,12 +16,11 @@ import (
 	"gastrolog/internal/units"
 )
 
-// newInspectStorageCmd is the CLI parity surface for the storage inspector
-// (gastrolog-3cobq4): the same published guard state the UI's storage cards
-// render — free/total, effective thresholds with default-vs-explicit
-// indication, warn/protect verdicts, and placed vaults — never re-derived
-// from raw numbers here (operator directive, gastrolog-9akebz: render the
-// wire).
+// newInspectStorageCmd is the CLI parity surface for the storage
+// inspector: the same published guard state the UI's storage cards render —
+// free/total, effective thresholds with default-vs-explicit indication,
+// warn/protect verdicts, and placed vaults — never re-derived from raw
+// numbers here (operator directive: render the wire).
 func newInspectStorageCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "storage [name-or-id]",
@@ -79,13 +78,12 @@ func printOneStorage(cmd *cobra.Command, ctx context.Context, client *server.Cli
 }
 
 // storageVerdict renders the storage's badge grammar as text (consistent
-// with the vault card's badge grammar, gastrolog-3cobq4): "no sample" when
-// the owning node hasn't statfs'd it yet (SampledAt unset — the honest
-// "facts before speculation" fallback, gastrolog-9akebz), else "protected"
-// when the admission gate is engaged, "warn" when below the warn threshold
-// but not yet floor, "ok" otherwise. Both verdict booleans are
-// server-computed hysteresis-aware verdicts, never re-derived from
-// free/warn/floor here.
+// with the vault card's badge grammar): "no sample" when the owning node
+// hasn't statfs'd it yet (SampledAt unset — the honest "facts before
+// speculation" fallback), else "protected" when the admission gate is
+// engaged, "warn" when below the warn threshold but not yet floor, "ok"
+// otherwise. Both verdict booleans are server-computed hysteresis-aware
+// verdicts, never re-derived from free/warn/floor here.
 func storageVerdict(st *v1.StorageState) string {
 	switch {
 	case st.SampledAt == nil:
@@ -101,7 +99,7 @@ func storageVerdict(st *v1.StorageState) string {
 
 // freeTotalLabel renders the free/total pair, or "—" for both when no
 // statfs sample has landed yet — "0 B / 0 B" would read as a full disk,
-// not as "unmeasured" (gastrolog-3cobq4 review).
+// not as "unmeasured".
 func freeTotalLabel(st *v1.StorageState) (free, total string) {
 	if st.SampledAt == nil {
 		return "—", "—"
@@ -126,12 +124,11 @@ func storageRow(st *v1.StorageState) []string {
 // thresholdLabel renders an effective threshold with its provenance — the
 // resolved bytes value always leads (placeholder-style: the effective
 // value is what matters). expr is the EFFECTIVE expression from the wire,
-// verbatim, never re-derived here (gastrolog-9akebz: render the wire).
+// verbatim, never re-derived here: render the wire.
 //
 // isDefault storages get "(expr, default)" — there is no configurable
-// node-level override to inherit from (gastrolog-2mrfdw removed the env
-// channel), so an unset expression is DEFAULTED, never "inherited"
-// (gastrolog-3cobq4 review). An explicit percentage expression ("10%")
+// node-level override to inherit from, so an unset expression is
+// DEFAULTED, never "inherited". An explicit percentage expression ("10%")
 // still gets "(expr)": a percentage carries information the resolved byte
 // count alone can't (it rescales with the volume). An explicit
 // absolute-size expression ("20GiB") resolves to exactly the shown byte

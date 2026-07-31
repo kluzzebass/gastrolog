@@ -58,8 +58,7 @@ func burstFSM(b *testing.B, n int) *vaultctlfsm.FSM {
 }
 
 // BenchmarkReleasePassScan measures one release pass over a burst backlog the
-// way production runs it since gastrolog-2m0f75: one SnapshotReleaseScan, pure
-// gates over it.
+// way production runs it: one SnapshotReleaseScan, pure gates over it.
 func BenchmarkReleasePassScan(b *testing.B) {
 	for _, n := range []int{512, 2048, 8192} {
 		b.Run(fmt.Sprintf("segments=%d", n), func(b *testing.B) {

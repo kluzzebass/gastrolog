@@ -100,16 +100,15 @@ type Reader interface {
 // because index lookup involves file I/O — keeping the interfaces narrow
 // lets test mocks for metadata stay simple.
 //
-// Section-offset authority (decided under gastrolog-jt0l4): for LOCAL
-// reads, the blob's own embedded TOC is authoritative — implementations
-// read sections via the mmap'd GLCB TOC, not via Entry.IngestIdxOffset/
-// Size. The FSM-replicated offsets are a replication/verification copy
-// (snapshot restore, digest checks), not the local read path; there is
-// exactly one authoritative source per access mode, never two synced
-// copies (see CLAUDE.md "Single Source of Truth"). Whether rank/pos reads
-// later collapse onto one FSM-grounded section reader is owned by the
-// GLCB codec abstraction (gastrolog-4jxqz) and will be decided with that
-// interface, not here.
+// Section-offset authority: for LOCAL reads, the blob's own embedded TOC
+// is authoritative — implementations read sections via the mmap'd GLCB
+// TOC, not via Entry.IngestIdxOffset/Size. The FSM-replicated offsets are
+// a replication/verification copy (snapshot restore, digest checks), not
+// the local read path; there is exactly one authoritative source per
+// access mode, never two synced copies (see CLAUDE.md "Single Source of
+// Truth"). Whether rank/pos reads later collapse onto one FSM-grounded
+// section reader is a question for the GLCB codec abstraction, not for
+// this interface.
 //
 // The histogram and other rank-arithmetic consumers route through this
 // instead of reaching into chunk.Manager.FindIngestEntryIndex /

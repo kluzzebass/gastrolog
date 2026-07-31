@@ -1,4 +1,4 @@
-// eslint-disable-next-line no-restricted-imports -- no settings overlay model yet (gastrolog-2e2qs follow-up)
+// eslint-disable-next-line no-restricted-imports -- no settings overlay model yet
 import type { GetSettingsResponse } from "../../api/gen/gastrolog/v1/system_pb";
 
 interface PasswordRulesProps {

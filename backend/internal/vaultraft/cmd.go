@@ -11,7 +11,7 @@ import (
 
 // Vault control-plane FSM commands are encoded as gastrologv1.VaultRaftCommand
 // (a oneof of NoopCommand / VaultScopedCommand). The legacy opcode bytes are
-// retained as named constants for the WAL inspector tooling. gastrolog-5lrg7.
+// retained as named constants for the WAL inspector tooling.
 const (
 	// OpNoop is a no-op replicated command for tests and liveness checks.
 	OpNoop byte = 1

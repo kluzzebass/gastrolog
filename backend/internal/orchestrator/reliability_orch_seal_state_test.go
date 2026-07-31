@@ -103,8 +103,8 @@ func TestOrchRel_SealActive_PromotesEveryNodeToSealed(t *testing.T) {
 // this distinguishes them: the job is absent (it ran and the Sealed announce
 // did not land, or it was never scheduled), pending (scheduled but starved
 // behind the concurrency limit), or running (in-flight and slow). Without this
-// the stall dump shows only the symptom, which is what made this member of
-// gastrolog-231ik unfalsifiable across runs.
+// the stall dump shows only the symptom, which is what made this flake
+// unfalsifiable across runs.
 func (h *orchRelHarness) logPostSealJobs(id string) {
 	n := h.nodes[id]
 	if n == nil || n.orch == nil {

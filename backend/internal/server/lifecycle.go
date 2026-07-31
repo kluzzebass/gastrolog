@@ -42,7 +42,7 @@ type NodeStatsProvider interface {
 	// LastSeen is the most recent instant this cluster had ANY positive
 	// evidence the node was alive. Surfaced on ClusterNode so the UI can show
 	// how long a node has actually been silent instead of inventing the
-	// duration client-side (gastrolog-231eli).
+	// duration client-side.
 	LastSeen(nodeID string) time.Time
 }
 
@@ -97,8 +97,8 @@ func (s *LifecycleServer) SetJoinClusterFunc(fn func(ctx context.Context, leader
 
 // SetRemoveNodeFunc sets the callback for the RemoveNode RPC.
 // opts.Force bypasses the leader-side removal gates (orphan-refusal,
-// gastrolog-2ch9y; RF-preservation, gastrolog-3vyex) and opts.Policy
-// carries the operator vs preStop-self stance.
+// RF-preservation) and opts.Policy carries the operator vs preStop-self
+// stance.
 func (s *LifecycleServer) SetRemoveNodeFunc(fn cluster.RemoveNodeFunc) {
 	s.removeNodeFn = fn
 }
@@ -119,7 +119,7 @@ func (s *LifecycleServer) SetPeerRouteStats(p PeerRouteStatsProvider) {
 }
 
 // SetClusterRouteRates wires the collector's server-side cluster route rate
-// series (gastrolog-4eh5ns).
+// series.
 func (s *LifecycleServer) SetClusterRouteRates(fn func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)) {
 	s.clusterRouteRates = fn
 }
@@ -136,8 +136,7 @@ func (s *LifecycleServer) SetVaultFuncs(listVaults func(ctx context.Context) []*
 }
 
 // SetStorageFunc wires the storage entity-list provider for the
-// WatchSystemStatus stream (gastrolog-3cobq4) — same shape ListStorages
-// returns.
+// WatchSystemStatus stream — same shape ListStorages returns.
 func (s *LifecycleServer) SetStorageFunc(listStorages func(ctx context.Context) []*apiv1.StorageState) {
 	s.listStoragesFn = listStorages
 }
@@ -218,10 +217,10 @@ func (s *LifecycleServer) buildClusterNode(srv cluster.RaftServer, leaderID stri
 
 	// Last positive evidence of life, carried whether or not stats are present —
 	// a node reads as offline exactly when Stats is nil, which is when this value
-	// is the only thing that can say for how long (gastrolog-231eli). The local
-	// node is trivially seen now: it is the one answering. A zero LastSeen is
-	// PeerState's deliberate "never observed" signal and stays unset, so callers
-	// render a bare "offline" rather than an elapsed time.
+	// is the only thing that can say for how long. The local node is trivially
+	// seen now: it is the one answering. A zero LastSeen is PeerState's
+	// deliberate "never observed" signal and stays unset, so callers render a
+	// bare "offline" rather than an elapsed time.
 	switch {
 	case isLocal:
 		node.LastSeen = timestamppb.New(time.Now())
@@ -425,21 +424,20 @@ func (s *LifecycleServer) RemoveNode(
 	if nodeID == "" {
 		return nil, errRequired("node_id")
 	}
-	// gastrolog-24iv4: operator-driven removal must not accidentally
-	// remove the node the operator is connected to (typo, wrong copy-
-	// paste). preStop's `cluster demote-self` sets AllowSelf=true to
-	// opt out of this guard — that path's whole purpose is self-removal.
+	// Operator-driven removal must not accidentally remove the node the
+	// operator is connected to (typo, wrong copy-paste). preStop's
+	// `cluster demote-self` sets AllowSelf=true to opt out of this guard —
+	// that path's whole purpose is self-removal.
 	if nodeID == s.nodeID && !req.Msg.AllowSelf {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("cannot remove self from cluster (set allow_self=true to override)"))
 	}
 
-	// Removal policy (gastrolog-3vyex): self-removal via allow_self is the
-	// preStop `cluster demote-self` path — the node is already
-	// terminating, so the leader's RF-preservation gate is optimistic
-	// there (allow; placement reconcile re-places). Everything else is an
-	// operator-driven topology change and gets the pessimistic stance
-	// (refuse a removal that drops a vault below its replication factor).
-	// The orphan-refusal gate applies to both.
+	// Removal policy: self-removal via allow_self is the preStop `cluster
+	// demote-self` path — the node is already terminating, so the leader's
+	// RF-preservation gate is optimistic there (allow; placement reconcile
+	// re-places). Everything else is an operator-driven topology change and
+	// gets the pessimistic stance (refuse a removal that drops a vault below
+	// its replication factor). The orphan-refusal gate applies to both.
 	opts := cluster.RemoveNodeOptions{Force: req.Msg.Force, Policy: cluster.RemovalPolicyOperator}
 	if req.Msg.AllowSelf && nodeID == s.nodeID {
 		opts.Policy = cluster.RemovalPolicySelf
@@ -467,7 +465,7 @@ func (s *LifecycleServer) RemoveNode(
 // about to terminate hands off leadership cleanly without removing
 // itself from the voter set — the absence is then handled by normal
 // Raft heartbeat timeout and the node rejoins as a known follower when
-// it comes back up. See gastrolog-2yeie.
+// it comes back up.
 func (s *LifecycleServer) YieldLeadership(
 	_ context.Context,
 	_ *connect.Request[apiv1.YieldLeadershipRequest],
@@ -579,15 +577,14 @@ func (s *LifecycleServer) buildSystemStatus(ctx context.Context) *apiv1.WatchSys
 // The inspector uses this to render per-card running/selected badges and
 // per-node ingester filters without polling ListIngesters.
 //
-// gastrolog-2kzb4: the raw FSM alive map records "this node started this
-// ingester" — a bit that stays set after a clean shutdown notification
-// but lingers when a node goes Unreachable / Maintenance / Decommissioning
-// or just crashes. Surfacing the raw map made the inspector report N/N
-// healthy even when a node was clearly offline. The fix is to filter by
-// NodeConfig.EffectiveState() == NodeStateLive at the server boundary,
-// so every UI surface (this proto, downstream caches, defensive
-// frontend filters) sees only nodes whose ingester is actually expected
-// to be running right now.
+// The raw FSM alive map records "this node started this ingester" — a bit
+// that stays set after a clean shutdown notification but lingers when a node
+// goes Unreachable / Maintenance / Decommissioning or just crashes, so
+// surfacing it unfiltered reports N/N healthy with a node clearly offline.
+// Filtering by NodeConfig.EffectiveState() == NodeStateLive at the server
+// boundary means every UI surface (this proto, downstream caches, defensive
+// frontend filters) sees only nodes whose ingester is actually expected to be
+// running right now.
 func (s *LifecycleServer) buildIngesterAlive(ctx context.Context) []*apiv1.IngesterAlive {
 	if s.cfgStore == nil {
 		return nil

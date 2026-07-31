@@ -9,12 +9,11 @@ import (
 	sysmem "gastrolog/internal/system/memory"
 )
 
-// Tests for the fresh-vs-restart-of-voter detection added in
-// gastrolog-41sut. The predicate is what decides whether
-// requestClusterMembership asks the leader for voter or nonvoter
-// admission — fresh joiners enter as learners and get promoted by
-// gastrolog-2czh9 once caught up; restart-of-voter requests use
-// AddVoter for idempotent address refresh.
+// Tests for the fresh-vs-restart-of-voter detection. The predicate is what
+// decides whether requestClusterMembership asks the leader for voter or
+// nonvoter admission — fresh joiners enter as learners and get promoted by
+// the cluster-ctl learner promoter once caught up; restart-of-voter requests
+// use AddVoter for idempotent address refresh.
 
 func TestIsRestartOfVoter_NonRaftConfig(t *testing.T) {
 	t.Parallel()

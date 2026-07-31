@@ -5,8 +5,7 @@ import type { ThroughputRate, VaultStats } from "../../api/gen/gastrolog/v1/vaul
 import type { NodeStats } from "../../api/gen/gastrolog/v1/cluster_pb";
 
 // A minimal shape of a cluster status carrying per-node NodeStats — kept loose
-// so the aggregator is unit-testable without constructing a full RPC response
-// (gastrolog-4r784a).
+// so the aggregator is unit-testable without constructing a full RPC response.
 export interface StageCountersNode {
   id: Uint8Array;
   name: string;
@@ -159,7 +158,7 @@ function accumulateVault(
  * carrying the cluster total and the per-node breakdown. Returns only
  * milestones that reached a non-zero total anywhere (a calm default: quiet
  * until an event happens). Order follows the pipeline: segments → chunks →
- * recovery (gastrolog-4r784a).
+ * recovery.
  */
 export function aggregateStageCounters(
   nodes: readonly StageCountersNode[] | undefined,

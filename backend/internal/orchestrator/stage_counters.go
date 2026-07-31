@@ -9,8 +9,8 @@ import (
 
 // vaultStageEvents holds the orchestrator-owned per-vault pipeline stage
 // counters that don't originate in a pipeline manager: GLCB replica catch-up
-// pulls and retention chunk deletes (gastrolog-4r784a). Managers own their own
-// stage counters (segmentation completed, distribution published, chunking
+// pulls and retention chunk deletes. Managers own their own stage counters
+// (segmentation completed, distribution published, chunking
 // planned/built/sealed/released/purged); these two live here because their
 // event sites are orchestrator methods (runGLCBPull, retentionRunner.expireChunk).
 //
@@ -66,7 +66,7 @@ func (s *stageEventCounters) recordRetentionDelete(vaultID glid.GLID) {
 }
 
 // VaultStageEventSnapshot is one vault's orchestrator-owned stage-event
-// counters for the stats broadcast (gastrolog-4r784a).
+// counters for the stats broadcast.
 type VaultStageEventSnapshot struct {
 	VaultID            glid.GLID
 	GLCBPullsAttempted uint64

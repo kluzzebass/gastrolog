@@ -15,10 +15,9 @@ import (
 )
 
 // PeerStorageStatsProvider looks up a storage's disk-guard state from
-// cluster peer broadcasts (gastrolog-3cobq4). Implemented by
-// cluster.PeerState; nil in single-node mode. Only the node hosting a
-// storage can statfs it, so this is the sole source of live state for
-// storages this node doesn't own.
+// cluster peer broadcasts. Implemented by cluster.PeerState; nil in
+// single-node mode. Only the node hosting a storage can statfs it, so this
+// is the sole source of live state for storages this node doesn't own.
 type PeerStorageStatsProvider interface {
 	FindStorageState(storageID string) *apiv1.StorageState
 }
@@ -45,8 +44,7 @@ func (s *SystemServer) ListStorages(
 // recomputed here from the current vault config on every call — never
 // trusted from a possibly-stale cached copy embedded in a peer's last
 // broadcast — so the placements list is always as fresh as config itself,
-// consistent with the "config-derived server-side" requirement
-// (gastrolog-3cobq4).
+// consistent with the "config-derived server-side" requirement.
 func (s *SystemServer) allStorageStates(ctx context.Context) ([]*apiv1.StorageState, error) {
 	nscs, err := s.sysStore.ListNodeStorageConfigs(ctx)
 	if err != nil {
@@ -91,7 +89,7 @@ func (s *SystemServer) allStorageStates(ctx context.Context) ([]*apiv1.StorageSt
 			// subscriber / ListStorages call / GetClusterStatus read
 			// marshaling the same object. Clone it before setting
 			// PlacedVaultIds below — mutating the shared pointer in place
-			// raced under concurrent access (gastrolog-3cobq4 review).
+			// races under concurrent access.
 			state := local[sid]
 			if state == nil && s.peerStorageStats != nil {
 				if peer := s.peerStorageStats.FindStorageState(sid); peer != nil {
@@ -102,10 +100,9 @@ func (s *SystemServer) allStorageStates(ctx context.Context) ([]*apiv1.StorageSt
 				// No live sample yet — owning node down, or hasn't ticked
 				// since this storage was added. Identity from config; live
 				// fields honestly zero rather than fabricated (facts before
-				// speculation, gastrolog-9akebz). Thresholds still publish
-				// EFFECTIVE form even here — the same DefaultDiskFreeWarn/
-				// Floor literals the guard itself would resolve against on
-				// its first tick (gastrolog-3cobq4 review).
+				// speculation). Thresholds still publish EFFECTIVE form even
+				// here — the same DefaultDiskFreeWarn/Floor literals the
+				// guard itself would resolve against on its first tick.
 				warnExpr, warnIsDefault := orchestrator.EffectiveThresholdExpr(fs.DiskFreeWarn, orchestrator.DefaultDiskFreeWarn)
 				floorExpr, floorIsDefault := orchestrator.EffectiveThresholdExpr(fs.DiskFreeFloor, orchestrator.DefaultDiskFreeFloor)
 				state = &apiv1.StorageState{
@@ -171,7 +168,7 @@ func glidsToProtoBytes(ids []glid.GLID) [][]byte {
 
 // storageSnapshotToProto converts the orchestrator's local guard snapshot
 // to the wire StorageState — the local-storage counterpart to what the
-// stats collector builds for the NodeStats broadcast (gastrolog-3cobq4).
+// stats collector builds for the NodeStats broadcast.
 // nodeID is this responding node's own raw ID (every locally-hosted storage
 // shares it — the guard only ever tracks THIS node's own volumes).
 func storageSnapshotToProto(ss orchestrator.StorageSnapshot, nodeID string) *apiv1.StorageState {

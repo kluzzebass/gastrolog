@@ -4,12 +4,11 @@ import { FileStorageCard } from "./FileStorageCard";
 import { FileStorage } from "../../api/gen/gastrolog/v1/storage_pb";
 import { encode } from "../../api/glid";
 
-// gastrolog-9akebz: Disk Free Warn/Floor moved off the vault onto the
-// storage-editing surface (FileStorageCard, rendered from StorageSettings).
-// Pins the round-trip: the card reads FileStorage.diskFreeWarn/diskFreeFloor
-// as its edit defaults, and a save carries the operator's edited values back
-// out — same placeholder-inherits-node-default convention ("10%"/"3%") the
-// vault-level fields used before the move.
+// Disk Free Warn/Floor are edited on the storage surface (FileStorageCard,
+// rendered from StorageSettings), not on the vault. Pins the round-trip:
+// the card reads FileStorage.diskFreeWarn/diskFreeFloor as its edit
+// defaults, and a save carries the operator's edited values back out — with
+// the placeholder-inherits-node-default convention ("10%"/"3%").
 
 function testId(n: number): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(16);
@@ -111,12 +110,11 @@ describe("FileStorageCard", () => {
     expect(edit.diskFreeWarn).toBe("");
   });
 
-  // gastrolog-3cobq4: the inverse cross-link (storage inspector card ->
-  // Settings) already existed; this pins the storage config card's own
-  // link back to its inspector card, matching VaultSettingsCard's and
-  // IngestersSettings' "Open in Inspector" cross-link exactly (same icon,
-  // same title, same entities:<type>:<name> deep-link format the inspector
-  // parses).
+  // The inverse cross-link (storage inspector card -> Settings) exists
+  // already; this pins the storage config card's own link back to its
+  // inspector card, matching VaultSettingsCard's and IngestersSettings'
+  // "Open in Inspector" cross-link exactly (same icon, same title, same
+  // entities:<type>:<name> deep-link format the inspector parses).
   describe("Open in Inspector cross-link", () => {
     const fs = new FileStorage({
       id: testId(4),

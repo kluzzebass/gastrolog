@@ -19,7 +19,7 @@ func TestRetryableCollectErr(t *testing.T) {
 		ErrSegmentUnavailable,
 		ErrCorruptSegment,
 		os.ErrNotExist,
-		// The shapes the transport adapters actually produce (gastrolog-466kq5):
+		// The shapes the transport adapters actually produce:
 		// registry / holder-resolution misses in the segment pull client…
 		fmt.Errorf("%w: segment abc not in vault-ctl registry", ErrSegmentUnavailable),
 		fmt.Errorf("%w: no remote holder for segment abc", ErrSegmentUnavailable),
@@ -31,7 +31,7 @@ func TestRetryableCollectErr(t *testing.T) {
 		fmt.Errorf("%w: segment checksum 0000abcd does not match published checksum 0000ef01", ErrCorruptSegment),
 		fmt.Errorf("pull segment abc: %w", os.ErrNotExist),
 		// …and PromoteVerified losing the pre-head file to a concurrent
-		// release purge (gastrolog-2as548), in both attachment shapes.
+		// release purge, in both attachment shapes.
 		ErrPreHeadPurged,
 		fmt.Errorf("%w: %w", ErrPreHeadPurged, os.ErrNotExist),
 		// A pass aggregate is retryable when every failure it summarizes is.
@@ -68,7 +68,7 @@ func TestRetryableCollectErr(t *testing.T) {
 // string-matching: errors that carry the exact prose the adapters emit — but
 // no sentinel — must classify as terminal. Classification is errors.Is on
 // collection-owned sentinels only; rewording a message in another package can
-// never flip it (gastrolog-466kq5).
+// never flip it.
 func TestRetryableCollectErrIgnoresProse(t *testing.T) {
 	t.Parallel()
 

@@ -29,7 +29,7 @@ const (
 // backoff: quick first retry for transient races (vault-ctl leadership
 // settling), 2s steady-state while applies keep failing. Without this the
 // retry path was a hot loop — enqueue notified the retry signal, the drain
-// re-ran immediately, failed again, and re-notified (gastrolog-353kwm).
+// re-ran immediately, failed again, and re-notified.
 const (
 	publishRetryBaseDelay = 50 * time.Millisecond
 	publishRetryMaxDelay  = 2 * time.Second
@@ -156,7 +156,7 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, root string, cfg VaultConfig)
 	// Registration is an event, not just a table update: every registration
 	// binds a fresh vaultDist whose staging state is empty, so segments
 	// already in completed/ that this registration must own — a publisher
-	// upgrade re-registration after a no-handle window (gastrolog-375el), a
+	// upgrade re-registration after a no-handle window, a
 	// restart backlog registered after Run started, or a completed-channel
 	// delivery that raced the unregister/register swap — are only recoverable
 	// by rescanning completed/ now. The retry wake lets staged retries from
@@ -203,7 +203,7 @@ func (m *Manager) RetireSegments(vaultID glid.GLID, segmentIDs []glid.GLID) {
 }
 
 // VaultPublishStats is one vault's cumulative segment-publish counter on this
-// origin — segments committed to the vault-ctl registry (gastrolog-4r784a).
+// origin — segments committed to the vault-ctl registry.
 type VaultPublishStats struct {
 	VaultID   glid.GLID
 	Published uint64
@@ -503,7 +503,7 @@ func (m *Manager) runPublishIngress(ctx context.Context, completed <-chan segmen
 			}
 			// A stranded rescan may already have staged this segment before
 			// its channel notification was consumed; only the first staging
-			// enqueues, or the segment publishes twice (gastrolog-x5c8ge).
+			// enqueues, or the segment publishes twice.
 			p, alreadyStaged, err := m.stageForPublish(seg)
 			switch {
 			case err != nil:
@@ -524,7 +524,7 @@ func (m *Manager) rescanStranded(ctx context.Context, publishQ chan<- pendingPub
 		// Aggregate failures per pass: a rescan racing the release purge can
 		// fail the stat for every listed segment (files legitimately deleted
 		// between ReadDir and stage), and per-segment warns flooded hundreds
-		// of identical lines in seconds (gastrolog-4elpu1). One summary per
+		// of identical lines in seconds. One summary per
 		// vault per pass carries the same signal.
 		var failed int
 		var firstErr error
@@ -555,7 +555,7 @@ func (m *Manager) enqueuePublish(ctx context.Context, publishQ chan<- pendingPub
 }
 
 // stageForPublish prepares a segment and reports whether an earlier staging
-// already owns its publish — see vaultDist.prepare (gastrolog-x5c8ge).
+// already owns its publish — see vaultDist.prepare.
 func (m *Manager) stageForPublish(seg segmentation.CompletedSegment) (pendingPublish, bool, error) {
 	m.mu.Lock()
 	v, ok := m.vaults[seg.VaultID]

@@ -279,7 +279,7 @@ func TestOpenChunkReaderReadAt(t *testing.T) {
 // TestOpenChunkReaderMatchesForwardOrder proves the positional reader and the
 // forward stream resolve the same record at the same position — across an
 // interleaved multi-segment merge, an overlapping (EventID-deduplicated)
-// sealed ref, and a missing local segment (gastrolog-54mjat).
+// sealed ref, and a missing local segment.
 func TestOpenChunkReaderMatchesForwardOrder(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
@@ -363,8 +363,8 @@ func TestOpenChunkReaderMatchesForwardOrder(t *testing.T) {
 
 // TestOpenChunkReaderOpenCounts proves positional reads do not re-open or
 // re-verify segments per record: one mapped open per distinct segment for the
-// reader's lifetime and zero full-verify opens, however many reads happen
-// (gastrolog-54mjat). Not parallel: it reads process-wide open counters.
+// reader's lifetime and zero full-verify opens, however many reads happen.
+// Not parallel: it reads process-wide open counters.
 func TestOpenChunkReaderOpenCounts(t *testing.T) {
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
 	segA := glid.New()

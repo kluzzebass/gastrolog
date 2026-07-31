@@ -22,7 +22,7 @@ type learnerMember struct {
 // in the narrow terms the promotion evaluator needs. The cluster-ctl
 // group (a single cluster.Server) and each per-vault vault-ctl
 // raftgroup.Group implement it, so a single evaluator drives both group
-// families (gastrolog-4vg17).
+// families.
 type promotionGroup interface {
 	// label identifies the group in logs ("cluster-ctl" or a vault ID).
 	label() string
@@ -62,10 +62,8 @@ type promotionGroup interface {
 // replication-progress observation (v1.7.3 observations are
 // RequestVote / RaftState / PeerObservation / LeaderObservation only).
 // So the arrival of a fresh broadcast carrying a higher applied index IS
-// the "learner made progress" event, and evaluating on it — rather than
-// re-reading the same cached PeerState on a timer — is what makes this
-// event-driven rather than a poll. See gastrolog-4vg17; this retired the
-// 30s cluster-ctl and vault-ctl learner-promoter crons.
+// the "learner made progress" event, and evaluating on it is what makes
+// this event-driven rather than a poll.
 //
 // Discrete triggers complement the broadcast:
 //   - leadership gained: a new leader must (re-)evaluate learners that

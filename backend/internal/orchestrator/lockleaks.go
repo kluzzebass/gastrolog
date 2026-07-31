@@ -17,14 +17,14 @@ const (
 )
 
 // runLockLeakReporter surfaces orphaned o.mu holds and stuck write
-// waiters with their acquisition stacks (gastrolog-1ug3rq). Deliberately
-// a raw ticker goroutine rather than a scheduler job: the scheduler and
-// nearly every other subsystem block on o.mu when the lock wedges — a
-// deadlock detector must not depend on the machinery it diagnoses. This
-// site never calls Clear, and the catalog declares the type Latching: a
+// waiters with their acquisition stacks. Deliberately a raw ticker
+// goroutine rather than a scheduler job: the scheduler and nearly every
+// other subsystem block on o.mu when the lock wedges — a deadlock
+// detector must not depend on the machinery it diagnoses. This site
+// never calls Clear, and the catalog declares the type Latching: a
 // leaked hold cannot be released by anything short of a restart, so a
-// standing alarm is the truth — enforced by the collector now, not by
-// this site's convention. A latched alarm has no release path: it stands
+// standing alarm is the truth — enforced by the collector, not by this
+// site's convention. A latched alarm has no release path: it stands
 // until process restart, and the restart is what clears it.
 func (o *Orchestrator) runLockLeakReporter(ctx context.Context) {
 	if !o.mu.TrackingEnabled() {

@@ -10,8 +10,7 @@ import (
 )
 
 // WatchLogLevels keeps a ComponentFilterHandler's rule set in sync with
-// the cluster-wide LogLevelConfig stored in the system config store
-// (gastrolog-3flfp).
+// the cluster-wide LogLevelConfig stored in the system config store.
 //
 // On startup it reads the current LogLevelConfig and applies it once,
 // then blocks on the config signal: every time the FSM dispatches a

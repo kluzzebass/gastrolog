@@ -23,7 +23,7 @@ type mmapDictEntry struct {
 // subsequent Get for the same ID, so callers may retain it after the mmap
 // backing store is released, and per-record decoding pays the copy once per
 // unique string instead of once per lookup — the per-lookup copies were a
-// measurable slice of drain/search GC churn (gastrolog-11y2iv).
+// measurable slice of drain/search GC churn.
 type MmapStringDict struct {
 	data    []byte
 	entries []mmapDictEntry

@@ -42,7 +42,7 @@ func (s *QueryServer) searchPipeline(
 	if result.Table != nil {
 		// Fan out to remote nodes and merge table results. A remote failure
 		// fails the whole pipeline query — a partial aggregate is silently
-		// wrong (gastrolog-20lrg).
+		// wrong.
 		remoteResults, err := s.collectRemotePipeline(ctx, q, pipeline)
 		if err != nil {
 			return err

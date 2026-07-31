@@ -115,8 +115,8 @@ func TestRuleSet_Resolve_SpecificityOrdering(t *testing.T) {
 	cases := map[string]slog.Level{
 		"orchestrator":                     slog.LevelDebug, // broadest only
 		"orchestrator.lifecycle":           slog.LevelDebug, // broadest only
-		"orchestrator.replication":         slog.LevelWarn,  // mid-tier
-		"orchestrator.replication.target":  slog.LevelWarn,  // mid-tier
+		"orchestrator.replication":         slog.LevelWarn,  // mid-specificity
+		"orchestrator.replication.target":  slog.LevelWarn,  // mid-specificity
 		"orchestrator.replication.catchup": slog.LevelError, // exact
 	}
 	for path, want := range cases {

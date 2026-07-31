@@ -11,7 +11,8 @@ import (
 	"gastrolog/internal/pipeline/ingestion"
 )
 
-// TestEventIDIdentity pins gastrolog-44b9r for the HTTP/Loki ingester.
+// TestEventIDIdentity pins the identity invariant for the HTTP/Loki
+// ingester.
 func TestEventIDIdentity(t *testing.T) {
 	t.Parallel()
 	const ingesterID = "test-http-ingester"

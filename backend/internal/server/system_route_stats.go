@@ -58,7 +58,7 @@ func (s *SystemServer) GetRouteStats(
 	// window over SUMMED cluster counters — one server-side series carrying
 	// instant/30s/1m AND spark history, so the UI never fabricates history
 	// client-side. Fallback (single-node, tests): sum local + peer
-	// per-horizon rates, sparkless (gastrolog-4eh5ns).
+	// per-horizon rates, sparkless.
 	var routedRate, matchedRate *apiv1.ThroughputRate
 	if s.clusterRouteRates != nil {
 		routedRate, matchedRate = s.clusterRouteRates()
@@ -111,11 +111,10 @@ func mergePerRouteStats(m map[string]*apiv1.PerRouteStats, stats []*apiv1.PerRou
 // clusterRouteRates returns cluster-total routing throughput per horizon:
 // the local node's rolling-window rates (stats collector snapshot) plus the
 // sum of live peers' broadcast rates. Shared by the GetRouteStats RPC and
-// the WatchSystemStatus stream builder — the stream previously shipped a
-// response without the rate fields, so the UI cache was continuously
-// overwritten with 0/s while the RPC reported correct rates
-// (gastrolog-4eh5ns). Sparks stay per-node (phase-skewed sums would
-// fabricate a series no node observed).
+// the WatchSystemStatus stream builder — both must fill the rate fields,
+// or the stream overwrites the UI cache with 0/s while the RPC reports
+// correct rates. Sparks stay per-node (phase-skewed sums would fabricate
+// a series no node observed).
 func clusterRouteRates(localStats func() *apiv1.NodeStats, peers PeerRouteStatsProvider) (routed, matched *apiv1.ThroughputRate) {
 	routed = &apiv1.ThroughputRate{}
 	matched = &apiv1.ThroughputRate{}

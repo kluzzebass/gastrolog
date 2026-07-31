@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { gotoAuthenticated, typeQuery } from "./helpers";
 
 /**
- * Keyboard shortcut E2E tests (gastrolog-qowgw).
+ * Keyboard shortcut E2E tests.
  *
  * Verifies global keyboard shortcuts work regardless of current focus state.
  */

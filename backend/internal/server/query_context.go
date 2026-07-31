@@ -232,10 +232,9 @@ func (s *QueryServer) remoteNodeForVault(ctx context.Context, vaultID glid.GLID)
 	return leaderNodeID
 }
 
-// placementsFor reads a vault's placements from their owner. VaultConfig used to
-// carry a mirrored copy and these paths read it from there; the mirror is gone
-// (gastrolog-617qns). Errors read as "no placements", which every caller here
-// already treats as "not remotely held".
+// placementsFor reads a vault's placements from their owner, the config
+// store. Errors read as "no placements", which every caller here already
+// treats as "not remotely held".
 func (s *QueryServer) placementsFor(ctx context.Context, vaultID glid.GLID) []system.VaultPlacement {
 	if s.cfgStore == nil {
 		return nil

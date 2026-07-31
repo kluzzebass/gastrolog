@@ -10,14 +10,14 @@ import (
 	"gastrolog/internal/glid"
 )
 
-// This file pins the writer <-> sweeper contract for cleanOrphanTempFiles
-// (gastrolog-66hmx3): every temp file this package's writers can leave
-// behind in a chunk directory must be matched by isOrphanTempFileName,
-// using the writer's *actual* produced name rather than a hand-typed
-// pattern guess. A mismatch here is exactly the class of bug that let
-// data.glcb.tmp survive the startup sweep forever (gastrolog-5do8sh gap
-// 7d) — cleanOrphanTempFiles's patterns silently drifted from what
-// sealToGLCB actually wrote.
+// This file pins the writer <-> sweeper contract for cleanOrphanTempFiles:
+// every temp file this package's writers can leave behind in a chunk
+// directory must be matched by isOrphanTempFileName, using the writer's
+// *actual* produced name rather than a hand-typed pattern guess. A
+// mismatch here is exactly the class of bug that let data.glcb.tmp
+// survive the startup sweep forever, wedging the chunk —
+// cleanOrphanTempFiles's patterns silently drifted from what sealToGLCB
+// actually wrote.
 
 // TestIsOrphanTempFileName_MatchesSealToGLCBTmpConstant pins the exact
 // literal sealToGLCB uses for its fixed-name output tmp file.

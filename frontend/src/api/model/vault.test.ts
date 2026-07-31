@@ -157,10 +157,10 @@ describe("Vault.placementNodeIds", () => {
 });
 
 describe("Vault.isOn", () => {
-  // gastrolog-2b9yi: the inspector list filter MUST count followers as
-  // "on this node" too, otherwise non-leader pods show "No vaults on this
-  // node" while serving real chunk replicas.
-  test("true for a follower placement (the gastrolog-2b9yi case)", () => {
+  // The inspector list filter MUST count followers as "on this node" too,
+  // otherwise non-leader pods show "No vaults on this node" while serving
+  // real chunk replicas.
+  test("true for a follower placement", () => {
     const f = clusterFixture();
     const config = new VaultConfig({
       id: idBytes(40),

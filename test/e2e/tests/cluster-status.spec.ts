@@ -70,7 +70,7 @@ test.describe.serial("Cluster Status", () => {
     }
   });
 
-  // ── Stats bar tooltips (gastrolog-3swfy) ─────────────────────────
+  // ── Stats bar tooltips ───────────────────────────────────────────
 
   test("stats bar items show tooltips on hover", async ({ page }) => {
     await gotoAuthenticated(page, "/search");

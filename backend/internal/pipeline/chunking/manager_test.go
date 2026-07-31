@@ -94,8 +94,8 @@ func TestManagerBuildOnceBuildsGLCBAndAnnouncesSeal(t *testing.T) {
 		t.Fatal("sealed manifest must clear after SealChunk")
 	}
 
-	// Stage throughput counters (gastrolog-10n6k8): this home materialized
-	// the sealed GLCB, so the seal counters must reflect it.
+	// Stage throughput counters: this home materialized the sealed GLCB, so
+	// the seal counters must reflect it.
 	stats := mgr.SealStats()
 	if len(stats) != 1 || stats[0].VaultID != vaultID {
 		t.Fatalf("SealStats = %+v, want one entry for %s", stats, vaultID)
@@ -105,8 +105,8 @@ func TestManagerBuildOnceBuildsGLCBAndAnnouncesSeal(t *testing.T) {
 			stats[0].SealedRecords, stats[0].SealedBytes)
 	}
 
-	// Chunk-lifecycle stage counters (gastrolog-4r784a): this leader-home
-	// materialized the GLCB (built) and committed CmdSealChunk (sealed).
+	// Chunk-lifecycle stage counters: this leader-home materialized the GLCB
+	// (built) and committed CmdSealChunk (sealed).
 	stage := mgr.StageStats()
 	if len(stage) != 1 || stage[0].VaultID != vaultID {
 		t.Fatalf("StageStats = %+v, want one entry for %s", stage, vaultID)
@@ -215,7 +215,7 @@ func TestManagerBuildOncePurgesHeadStaging(t *testing.T) {
 	if _, err := os.Stat(headPath); !os.IsNotExist(err) {
 		t.Fatalf("head segment should be purged after build+seal, stat err=%v", err)
 	}
-	// gastrolog-4r784a: the head purge is reflected in the stage counter.
+	// The head purge is reflected in the stage counter.
 	stage := mgr.StageStats()
 	if len(stage) != 1 || stage[0].HeadPurges == 0 {
 		t.Fatalf("StageStats head purges = %+v, want > 0", stage)
@@ -268,7 +268,7 @@ func TestManagerPurgesHeadWhenSealWinsElsewhere(t *testing.T) {
 		t.Fatal(err)
 	}
 	// B's worker must run: the ReleaseSegments callback is wake-only and the
-	// worker's release branch performs the purge (gastrolog-38snf4).
+	// worker's release branch performs the purge.
 	ctxB, cancelB := context.WithCancel(context.Background())
 	doneB := make(chan struct{})
 	go func() { _ = mgrB.Run(ctxB); close(doneB) }()
@@ -418,15 +418,14 @@ func TestManagerWorkerReleasesAfterBuildWithoutNewHolderAck(t *testing.T) {
 }
 
 // TestManagerReleaseUnpinsDeadHolderWithFixedPlacement pins the supersession
-// un-pin (gastrolog-36ba70) at the MANAGER level — the enqueue/drain release
-// path (enqueueRegistryReleaseCandidates → partitionPendingRelease → applier
-// proposal), not just the pure gates release_test.go covers. The live
-// dead-node cluster test was confounded: the placement manager shrank the
-// placement away from the dead node within ~26s, so the required-holder set
-// stopped containing the dead node and even the old all-holders gate would
-// have released. Here RequiredHolders is FIXED — dead-home stays a required
-// holder for the whole test — so the ONLY way the segment can release is
-// supersession: its records live in a sealed chunk held by
+// un-pin at the MANAGER level — the enqueue/drain release path
+// (enqueueRegistryReleaseCandidates → partitionPendingRelease → applier
+// proposal), not just the pure gates release_test.go covers. RequiredHolders
+// is FIXED so dead-home stays a required holder for the whole test: a live
+// placement manager shrinks the placement away from a dead node within ~26s,
+// which drops it from the required-holder set and would let the segment
+// release for a reason other than supersession. Here the ONLY way it can
+// release is supersession: its records live in a sealed chunk held by
 // RF = min(2, placement) = 2 live homes.
 func TestManagerReleaseUnpinsDeadHolderWithFixedPlacement(t *testing.T) {
 	t.Parallel()
@@ -448,9 +447,9 @@ func TestManagerReleaseUnpinsDeadHolderWithFixedPlacement(t *testing.T) {
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt, 1, 1, base, base, base, true, sealedAt))
 
-	// Only the live homes ever ack the raw SEGMENT — dead-home never does.
-	// Under the old all-required-holders gate this pinned the registry entry
-	// (and the completed/ bytes behind it) forever.
+	// Only the live homes ever ack the raw SEGMENT — dead-home never does,
+	// so a holder-completeness gate would pin the registry entry (and the
+	// completed/ bytes behind it) forever.
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAckSegmentHolder(segID, "live-a"))
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAckSegmentHolder(segID, "live-b"))
 
@@ -463,8 +462,8 @@ func TestManagerReleaseUnpinsDeadHolderWithFixedPlacement(t *testing.T) {
 		Locate:    chunking.HeadSegmentLocator{Root: home},
 		Applier:   &recordingApplier{out: &applied, fsm: fsm},
 		IsLeader:  func() bool { return true },
-		// FIXED placement including the dead node: the placement shrink that
-		// confounded the live-cluster run cannot happen here.
+		// FIXED placement including the dead node: no placement shrink can
+		// drop dead-home from the required set here.
 		RequiredHolders: func() ([]string, bool) {
 			return []string{"live-a", "live-b", "dead-home"}, true
 		},

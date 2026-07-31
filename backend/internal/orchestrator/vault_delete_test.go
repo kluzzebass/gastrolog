@@ -11,7 +11,6 @@ import (
 // TestRemoveInstanceFromVaultPreservesData verifies that RemoveVaultInstance is
 // non-destructive: it unregisters the vault instance but leaves chunks and
 // the vault directory intact, so placement flaps don't wipe data.
-// See gastrolog-4vz40.
 func TestRemoveInstanceFromVaultPreservesData(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
@@ -45,8 +44,8 @@ func TestRemoveInstanceFromVaultPreservesData(t *testing.T) {
 
 // TestDeleteInstanceFromVaultCleansVaultDirectory verifies that DeleteVaultInstance
 // removes the vault's data directory entirely — not just the chunk subdirs.
-// Regression test for gastrolog-42j4n: orphaned instance directories accumulate
-// on disk after instance deletion.
+// Regression test for orphaned instance directories accumulating on disk
+// after instance deletion.
 func TestDeleteInstanceFromVaultCleansVaultDirectory(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})

@@ -12,7 +12,7 @@ import (
 // readinessRefreshInterval governs how often the orchestrator recomputes
 // the cached LocalVaultsReplicationReady value. 500 ms keeps staleness well
 // under the default K8s readiness probe period (10 s) while letting the
-// /readyz handler stay strictly lock-free. See gastrolog-5n6xz.
+// /readyz handler stay strictly lock-free.
 const readinessRefreshInterval = 500 * time.Millisecond
 
 // Vault readiness — canonical definition.
@@ -36,8 +36,6 @@ const readinessRefreshInterval = 500 * time.Millisecond
 // Use `Vault.ReadinessErr()` when you already hold a non-nil *Vault (e.g.
 // from a map lookup or argument) and `vaultReplicationReadinessErr(id, v)`
 // when `v` may be nil (map lookup before validation).
-//
-// Readiness was introduced in gastrolog-4ip1o.
 
 // ErrVaultNotReady is returned when the vault exists locally but replicated
 // instance metadata (vault control-plane / vault-ctl FSM) has not applied far enough
@@ -61,7 +59,7 @@ func (v *Vault) ReadinessErr() error {
 // signalVaultReadyChange wakes every goroutine blocked in WaitVaultReady so
 // it can re-evaluate the readiness predicate. Called after any vault registry
 // mutation (register, instance add/remove, unregister). Safe to call while
-// holding o.mu — notify.Signal uses its own leaf mutex. See gastrolog-3sdnn.
+// holding o.mu — notify.Signal uses its own leaf mutex.
 //
 // Registry mutations are the complete set of readiness transitions for the
 // drain-target use case: a vault's local instance is only ever built (via
@@ -103,7 +101,7 @@ func (o *Orchestrator) vaultReadyState(vaultID glid.GLID) (ready, present bool) 
 // accept transferred records on this node, or ctx is cancelled. It is the
 // event-driven replacement for the source node's 100ms ForwardListChunks
 // poll: the vault-ready broadcast wakes the waiter at each registry change
-// and it re-evaluates the same predicate the poll used. See gastrolog-3sdnn.
+// and it re-evaluates the same predicate the poll used.
 //
 // Behavior across the four waiter states:
 //   - already ready: returns nil immediately.
@@ -161,7 +159,7 @@ func vaultReplicationReadinessErr(vaultID glid.GLID, v *Vault) error {
 //
 // Tests that need a synchronous result (RegisterVault → assert ready in the
 // same step, without spinning up the refresher) should call
-// liveReplicationReady. See gastrolog-5n6xz, gastrolog-4ip1o.
+// liveReplicationReady.
 func (o *Orchestrator) LocalVaultsReplicationReady() bool {
 	return o.cachedReplicationReady.Load()
 }
@@ -192,7 +190,7 @@ func (o *Orchestrator) liveReplicationReady() bool {
 // if computing the live value would block, the cache continues to reflect
 // the last successful observation rather than freezing the HTTP handler.
 //
-// Exits when ctx is cancelled. See gastrolog-5n6xz.
+// Exits when ctx is cancelled.
 func (o *Orchestrator) runReadinessRefresher(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

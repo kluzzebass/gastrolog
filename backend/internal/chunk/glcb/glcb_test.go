@@ -108,8 +108,7 @@ func writeBlobToTempFile(t *testing.T, chunkID chunk.ChunkID, vaultID glid.GLID,
 }
 
 // openBlobReader mmaps the written blob and returns a record reader — the
-// production GLCB open path (OpenMappedBlob + Reader). The fd-based reader
-// constructors were deleted in gastrolog-2v9d67.
+// production GLCB open path (OpenMappedBlob + Reader).
 func openBlobReader(t *testing.T, tmp *os.File) *glcb.Reader {
 	t.Helper()
 	path := tmp.Name()

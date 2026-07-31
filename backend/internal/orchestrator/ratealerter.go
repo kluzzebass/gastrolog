@@ -11,9 +11,8 @@ import (
 
 // RateAlerter tracks per-vault event rates over a sliding window and raises
 // or clears a cataloged alarm when the sustained rate crosses a threshold.
-// It is the mechanism behind gastrolog-47qyw: detecting and surfacing
-// pathological rotation or retention configurations as operator-visible
-// signals rather than silent throughput collapse.
+// It surfaces pathological rotation or retention configurations as
+// operator-visible signals rather than silent throughput collapse.
 //
 // The alerter owns only the CONDITION definition — the sustained-rate
 // predicate (threshold + window) that decides when "<kind>-rate" is true

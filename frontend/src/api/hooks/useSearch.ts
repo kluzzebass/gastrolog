@@ -197,7 +197,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
         // Prefer the server-reported processing time so the UI displays
         // "what the server actually did", not the round-trip including
         // network/transport overhead. Fall back to client-side wall-clock
-        // for legacy servers that don't set the field. See gastrolog-66b7x.
+        // for legacy servers that don't set the field.
         const elapsed =
           serverElapsedMs ??
           Math.round(performance.now() - searchStartRef.current);

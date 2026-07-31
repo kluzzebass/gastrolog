@@ -35,7 +35,7 @@ type Ingester struct {
 	// pressureGate throttles msgpack reads when the ingest pipeline is backed
 	// up. Pausing before DecodeArrayLen stops reads from the TCP socket, so
 	// the window closes and Fluent senders back off. Injected by the
-	// orchestrator; nil means no throttling. See gastrolog-4fguu.
+	// orchestrator; nil means no throttling.
 	pressureGate *chanwatch.PressureGate
 }
 
@@ -493,7 +493,7 @@ func isCompressed(opt map[string]any) bool {
 // attacker (or a misconfigured forwarder) can send a small gzipped payload
 // that decompresses to gigabytes, OOMing the ingester goroutine. 100 MiB
 // is well above any realistic batch size and well below any single-batch
-// memory budget. See gastrolog-e3qug.
+// memory budget.
 const maxDecompressedFluentBytes = 100 << 20
 
 // gunzip decompresses gzip data, capping the output at

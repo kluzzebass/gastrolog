@@ -2,7 +2,7 @@ import { Badge } from "./Badge";
 import { useNodeRegistry } from "../api/hooks";
 import { decode } from "../api/glid";
 import { idFromBytes } from "../api/model/id";
-// eslint-disable-next-line no-restricted-imports -- no ContributionReport model yet (gastrolog-2e2qs follow-up)
+// eslint-disable-next-line no-restricted-imports -- no ContributionReport model yet
 import { type ContributionReport } from "../api/gen/gastrolog/v1/vault_pb";
 
 /**
@@ -13,7 +13,7 @@ import { type ContributionReport } from "../api/gen/gastrolog/v1/vault_pb";
  * each degraded node and why it fell out.
  *
  * Quiet-until-needed: renders nothing when the report is absent or empty
- * (every peer contributed). See gastrolog-66zrj.
+ * (every peer contributed).
  */
 export function DegradedPeersBadge({
   report,

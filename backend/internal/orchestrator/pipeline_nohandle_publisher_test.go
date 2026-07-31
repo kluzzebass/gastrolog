@@ -1,13 +1,13 @@
 package orchestrator
 
-// Coverage for gastrolog-375el, single-node/no-group mode: an orchestrator
-// without a GroupManager never gets a vault-ctl handle, so the pipeline's
-// origin publisher is the fail-closed noHandlePublisher. The old default
-// (noopPublisher) returned nil, marking segments published that no vault-ctl
-// registry ever saw — the segment-publish stage counter lied, and nothing was
-// staged for the publisher upgrade to republish. Fail-closed means: ingest
-// durability is untouched (ack after fsync), the completed segment stays on
-// disk, and the publish counter stays honest at zero.
+// Coverage for single-node/no-group mode: an orchestrator without a
+// GroupManager never gets a vault-ctl handle, so the pipeline's origin
+// publisher is the fail-closed noHandlePublisher. A publisher that returns nil
+// instead marks segments published that no vault-ctl registry ever saw — the
+// segment-publish stage counter lies, and nothing is staged for the publisher
+// upgrade to republish. Fail-closed means: ingest durability is untouched (ack
+// after fsync), the completed segment stays on disk, and the publish counter
+// stays honest at zero.
 
 import (
 	"context"

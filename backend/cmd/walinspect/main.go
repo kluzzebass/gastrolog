@@ -284,10 +284,10 @@ func tryDecodeLog(data []byte, lg *hraft.Log) bool {
 	return decodeLog(data, lg) == nil
 }
 
-// decodeFSMCmd decodes a Raft log payload as a protobuf VaultRaftCommand
-// (gastrolog-5lrg7) and returns a human-readable command name plus the most
-// useful identifier for that command (chunk ID, holder, or node ID). Returns
-// empty strings for non-command entries or payloads that do not decode.
+// decodeFSMCmd decodes a Raft log payload as a protobuf VaultRaftCommand and
+// returns a human-readable command name plus the most useful identifier for
+// that command (chunk ID, holder, or node ID). Returns empty strings for
+// non-command entries or payloads that do not decode.
 func decodeFSMCmd(data []byte, logType hraft.LogType) (string, string) {
 	if logType != hraft.LogCommand || len(data) == 0 {
 		return "", ""

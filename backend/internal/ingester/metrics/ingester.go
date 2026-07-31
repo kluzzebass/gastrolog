@@ -23,7 +23,7 @@ type ingester struct {
 
 	// pressureGate throttles metric emission when the ingest pipeline is
 	// backed up. Emitting more queue-depth records while the queue is full
-	// is counterproductive. Injected by the orchestrator. See gastrolog-4fguu.
+	// is counterproductive. Injected by the orchestrator.
 	pressureGate *chanwatch.PressureGate
 }
 

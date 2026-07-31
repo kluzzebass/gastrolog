@@ -13,8 +13,8 @@ import (
 )
 
 // TestPostSealProcessRejectsUnsealedChunk verifies that PostSealProcess
-// does not produce a WARN when called with an unsealed chunk ID.
-// Reproduces gastrolog-89k15.
+// rejects an unsealed chunk ID up front instead of falling through to
+// an index build that logs a "chunk is not sealed" WARN.
 func TestPostSealProcessRejectsUnsealedChunk(t *testing.T) {
 	t.Parallel()
 
@@ -47,8 +47,8 @@ func TestPostSealProcessRejectsUnsealedChunk(t *testing.T) {
 		t.Fatal("no active chunk")
 	}
 
-	// PostSealProcess on an unsealed chunk should return an error,
-	// not silently run CompressChunk (no-op) then fail on index build.
+	// PostSealProcess on an unsealed chunk should return an error up
+	// front, not fall through and fail on the index build.
 	err = cm.PostSealProcess(context.Background(), active.ID)
 	if err == nil {
 		t.Error("PostSealProcess should reject unsealed chunks with an error")

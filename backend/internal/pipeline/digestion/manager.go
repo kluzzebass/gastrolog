@@ -54,15 +54,15 @@ func New(cfg Config) (*Manager, <-chan Output) {
 // Run consumes messages until in is closed, then closes the output channel
 // after all workers exit. Run blocks until completion.
 //
-// Shutdown is close-driven, not ctx-driven (gastrolog-5kcq5q): the producer
-// MUST close in on every exit path — ingestion.Manager guarantees this on
-// both Stop and context cancellation — and downstream MUST drain m.out until
-// it closes. Workers receive and send with plain channel ops: the previous
-// per-record 2-case selects (recv+ctx, send+ctx, twice more in a feeder
-// goroutine bridging an unbuffered hand-off channel) put four select
-// rendezvous on every record and showed up as runtime sellock spin at ~31%
-// of calm-profile CPU. Blocking sends on the bounded out queue are the
-// backpressure mechanism — never bypass them.
+// Shutdown is close-driven, not ctx-driven: the producer MUST close in on
+// every exit path — ingestion.Manager guarantees this on both Stop and
+// context cancellation — and downstream MUST drain m.out until it closes.
+// Workers receive and send with plain channel ops: per-record 2-case selects
+// (recv+ctx, send+ctx, twice more in a feeder goroutine bridging an
+// unbuffered hand-off channel) put four select rendezvous on every record
+// and showed up as runtime sellock spin at ~31% of calm-profile CPU.
+// Blocking sends on the bounded out queue are the backpressure mechanism —
+// never bypass them.
 func (m *Manager) Run(ctx context.Context, in <-chan ingestion.IngestMessage) error {
 	if !m.running.CompareAndSwap(false, true) {
 		return ErrAlreadyRunning

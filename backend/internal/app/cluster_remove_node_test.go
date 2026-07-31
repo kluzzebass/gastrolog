@@ -10,10 +10,9 @@ import (
 	sysmem "gastrolog/internal/system/memory"
 )
 
-// Tests for the orphan-refusal gate added in gastrolog-2ch9y. The gate
-// is structured as a pure helper (vaultsOrphanedByRemoval) over a
-// system.Store so it can be unit-tested without standing up a real
-// cluster.
+// Tests for the orphan-refusal gate. The gate is structured as a pure
+// helper (vaultsOrphanedByRemoval) over a system.Store so it can be
+// unit-tested without standing up a real cluster.
 
 func TestVaultsOrphanedByRemoval_EmptyStore(t *testing.T) {
 	t.Parallel()

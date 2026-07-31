@@ -374,9 +374,9 @@ func TestApplyFlagBytes(t *testing.T) {
 		t.Fatalf("empty must stay empty (unbounded), got %q", got)
 	}
 
-	// The CLI now passes size expressions through verbatim; the server
-	// parse-checks them (gastrolog-etcjdx). So "garbage" is carried, not
-	// rejected here — it is the server that refuses it.
+	// The CLI passes size expressions through verbatim; the server
+	// parse-checks them. So "garbage" is carried, not rejected here — it is
+	// the server that refuses it.
 	req, err = run("garbage")
 	if err != nil {
 		t.Fatalf("apply garbage: CLI should pass through, not error: %v", err)

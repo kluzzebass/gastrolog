@@ -10,9 +10,8 @@ import (
 )
 
 // sampled sets SampledAt on a StorageState fixture, so tests exercising
-// warn/protect/ok can be distinguished from the "never sampled" case
-// (gastrolog-3cobq4 review: a never-sampled storage must never render as
-// "ok").
+// warn/protect/ok can be distinguished from the "never sampled" case (a
+// never-sampled storage must never render as "ok").
 func sampled(st *v1.StorageState) *v1.StorageState {
 	st.SampledAt = timestamppb.Now()
 	return st
@@ -27,9 +26,9 @@ func TestStorageVerdict(t *testing.T) {
 		expect string
 	}{
 		{
-			// gastrolog-3cobq4 review: a storage the owning node hasn't
-			// statfs'd yet must never render as "ok" — "no sample" is the
-			// honest fallback (facts before speculation, gastrolog-9akebz).
+			// A storage the owning node hasn't statfs'd yet must never
+			// render as "ok" — "no sample" is the honest fallback
+			// (facts before speculation).
 			name:   "never sampled",
 			st:     &v1.StorageState{},
 			expect: "no sample",
@@ -40,8 +39,8 @@ func TestStorageVerdict(t *testing.T) {
 			expect: "ok",
 		},
 		{
-			// Warn-band verdicts (gastrolog-9akebz alarm pair: low/exhausted)
-			// render as "warn" — server-computed, never re-derived here.
+			// Warn-band verdicts (the low/exhausted alarm pair) render as
+			// "warn" — server-computed, never re-derived here.
 			name:   "warn band",
 			st:     sampled(&v1.StorageState{WarnVerdict: true}),
 			expect: "warn",
@@ -97,9 +96,8 @@ func TestThresholdLabel(t *testing.T) {
 		expect    string
 	}{
 		{
-			// gastrolog-3cobq4 review: there is no configurable node-level
-			// override to inherit from (gastrolog-2mrfdw removed the env
-			// channel) — a defaulted threshold is labeled "default", never
+			// There is no configurable node-level override to inherit
+			// from — a defaulted threshold is labeled "default", never
 			// "inherited", and the wire's effective expression ("10%")
 			// still renders verbatim alongside it.
 			name:      "default",

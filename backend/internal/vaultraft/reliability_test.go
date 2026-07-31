@@ -22,7 +22,7 @@ import (
 // stack. Use the harness defined in reliability_harness_test.go.
 //
 // Scenario coverage:
-//   - FreshCluster_AppliedIndexNonZero     (regression for gastrolog-5j6eu readiness bug)
+//   - FreshCluster_AppliedIndexNonZero     (readiness gate keys on AppliedIndex)
 //   - FreshCluster_FSMsConvergeEmpty
 //   - LeaderApply_ReplicatesToFollowers
 //   - Restart_AllNodes_ChunkStateSurvives
@@ -43,31 +43,28 @@ import (
 // orchestrators with Raft-backed vaults (GroupManager + raftwal +
 // multiraft.Transport on loopback gRPC). That unlocks end-to-end
 // scenarios — ingest, seal, search across nodes during failover —
-// instead of testing the vault control-plane Raft in isolation. Tracked
-// as a follow-up to gastrolog-5ff7z because the wiring (gRPC servers per
-// node, chunk/index factories, scheduler lifecycle, cross-node
-// forwarders) is substantial and deserves its own branch.
+// instead of testing the vault control-plane Raft in isolation. It is
+// deferred because the wiring (gRPC servers per node, chunk/index
+// factories, scheduler lifecycle, cross-node forwarders) is substantial
+// and deserves its own branch.
 //
 // The current harness runs only the vault control-plane Raft — enough
 // to catch metadata-divergence bugs but not orchestrator-layer
-// regressions (like the GetFields UTF-8 bug filed as gastrolog-1uh5h,
-// which lives above this layer).
+// regressions (like the GetFields UTF-8 bug, which lives above this
+// layer).
 
 // On a freshly bootstrapped vault-ctl Raft group — no user commands,
 // no FSM Apply calls — hraft still commits the bootstrap LogConfiguration
 // and the leader's post-election LogNoop. r.AppliedIndex() must advance
 // past zero on every node, including followers. This is the invariant the
 // readiness gate (orchestrator/vault_readiness.go) keys on.
-//
-// Before gastrolog-5j6eu's fix, readiness keyed on FSM.Ready() which only
-// flips on LogCommand entries, wedging every fresh vault as "not ready".
 func TestReliability_FreshCluster_AppliedIndexNonZero(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
 
 	// Wait for full replication of bootstrap + post-election entries.
-	// Progress-based (gastrolog-1pqndk): per-node AppliedIndex is the metric,
-	// so a slow-but-live catch-up under contention isn't mistaken for a stall.
+	// Progress-based: per-node AppliedIndex is the metric, so a
+	// slow-but-live catch-up under contention isn't mistaken for a stall.
 	h.waitProgress("bootstrap AppliedIndex advance", 20*time.Millisecond, func() (string, bool) {
 		lastApplied := map[string]uint64{}
 		allReady := true
@@ -154,9 +151,9 @@ func TestReliability_Failover_LeaderDown_NewLeaderElected(t *testing.T) {
 	oldLeader := h.leaderID()
 	h.stopNode(oldLeader)
 
-	// Wait for a new leader among remaining nodes. Progress-based
-	// (gastrolog-1pqndk): the current leader view is the metric, so election
-	// churn among survivors counts as progress.
+	// Wait for a new leader among remaining nodes. Progress-based: the
+	// current leader view is the metric, so election churn among survivors
+	// counts as progress.
 	h.waitProgress("new leader after failover", 20*time.Millisecond, func() (string, bool) {
 		id := h.leaderID()
 		if id != "" && id != oldLeader {
@@ -220,9 +217,9 @@ func TestReliability_Failover_FollowerDown_QuorumHolds(t *testing.T) {
 // ErrLeadershipTransferInProgress) — retryable transients any raft client
 // must absorb; the FSM commands are convergent so a re-applied command is
 // harmless. At the harness's aggressive 300ms election timeouts the same
-// transients fire spontaneously when a full-suite run starves the scheduler
-// (gastrolog-2qqp8l); this scenario reproduces that failure class
-// deterministically instead of waiting for CPU pressure.
+// transients fire spontaneously when a full-suite run starves the
+// scheduler; this scenario reproduces that failure class deterministically
+// instead of waiting for CPU pressure.
 func TestReliability_ApplyRetriesAcrossLeadershipTransfer(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
@@ -449,8 +446,7 @@ func TestReliability_FollowerWipe_CatchupViaSnapshotOrReplay(t *testing.T) {
 // Restore the vault FSM from the snapshot bytes.
 //
 // This exercises vaultraft.FSM.Snapshot + Restore end-to-end through
-// hraft's snapshot-install path. The streaming Restore fix landed in
-// gastrolog-5j6eu lives here too.
+// hraft's snapshot-install path, including the streaming Restore.
 func TestReliability_SnapshotInstall_CatchesUpWipedFollower(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
@@ -562,8 +558,8 @@ func TestReliability_PipelinedApplies_SurviveLeaderKill(t *testing.T) {
 		}
 	}
 
-	// Wait for new leadership on the surviving pair. Progress-based
-	// (gastrolog-1pqndk): the current leader view is the metric.
+	// Wait for new leadership on the surviving pair. Progress-based: the
+	// current leader view is the metric.
 	var newLeader string
 	h.waitProgress("new leader after leader kill", 20*time.Millisecond, func() (string, bool) {
 		id := h.leaderID()
@@ -732,9 +728,9 @@ func isBenignSnapshotErr(err error) bool {
 
 // Build a large FSM (many instances × many chunks), take a snapshot, Restore
 // into a fresh FSM from the snapshot bytes, compare fingerprints. This
-// is the streaming Restore path from gastrolog-5j6eu under a realistic
-// payload size — the io.ReadFull / io.LimitReader framing must stay
-// aligned across many instance blobs.
+// exercises the streaming Restore path under a realistic payload size —
+// the io.ReadFull / io.LimitReader framing must stay aligned across many
+// instance blobs.
 //
 // Runs entirely in-process (no Raft) to isolate the Snapshot+Restore
 // contract from replication concerns.
@@ -840,9 +836,9 @@ func (r *readBytesCloser) Close() error { return nil }
 // is expected; production code has the same retry shape in
 // cluster.VaultCtlChunkApplyForwarder.
 //
-// Progress-based (gastrolog-1pqndk), like applyCommand, but built directly on
-// pollUntilStall rather than h.waitProgress/h.waitForLeader: this function
-// runs inside the scenario's writer goroutines (TestReliability_
+// Progress-based, like applyCommand, but built directly on pollUntilStall
+// rather than h.waitProgress/h.waitForLeader: this function runs inside the
+// scenario's writer goroutines (TestReliability_
 // ConcurrentWrites_NoDivergence), and *testing.T.Fatal(f) is documented as
 // unsafe to call from any goroutine but the one running the test — it must
 // return an error for the caller to surface via t.Fatal on the right

@@ -23,7 +23,7 @@ var (
 	// cluster (via vault-ctl Raft FSM) considers sealed. Returned by
 	// the Manager's append-side gate so the caller can rotate to a
 	// fresh active chunk instead of silently extending a chunk the
-	// cluster has frozen. See gastrolog-uccg6.
+	// cluster has frozen.
 	ErrChunkSealed = errors.New("chunk is sealed; cannot append")
 )
 
@@ -71,7 +71,6 @@ type ChunkManager interface {
 	// bucket counting must use rank arithmetic. Returns (0, false, nil)
 	// when the chunk has no in-manager TS index (sealed local file
 	// chunks — caller falls through to IndexManager.FindIngestEntryIndex).
-	// See gastrolog-66b7x.
 	FindIngestEntryIndex(id ChunkID, ts time.Time) (uint64, bool, error)
 
 	// HasLocalContent reports whether the chunk's record content is fully
@@ -80,7 +79,7 @@ type ChunkManager interface {
 	// cloud-backed chunks that would require an S3 download. Callers that perform
 	// content-bearing reads purely as a side-effect (notably histogram
 	// level breakdowns) gate on this so that a histogram refresh never
-	// triggers cloud blob downloads. See gastrolog-66b7x.
+	// triggers cloud blob downloads.
 	HasLocalContent(id ChunkID) bool
 
 	// ScanActiveIngestTS iterates the active chunk's IngestTS B+ tree in
@@ -89,15 +88,13 @@ type ChunkManager interface {
 	// not the active chunk. No attr or raw reads — cheap. Used by the
 	// histogram counts path on non-monotonic active chunks (downstream
 	// destinations) where position-as-rank assumptions break.
-	// See gastrolog-66b7x.
 	ScanActiveIngestTS(id ChunkID, cb func(tsNanos int64) bool) error
 
 	// ScanActiveByIngestTS iterates the active chunk's records in physical
 	// (append) order, exposing both IngestTS and Attributes per record.
 	// Returns ErrChunkNotFound if id is not the active chunk. Used by the
 	// histogram level-breakdown path on non-monotonic active chunks where
-	// per-bucket position-based sampling via ScanAttrs is unsafe. See
-	// gastrolog-66b7x.
+	// per-bucket position-based sampling via ScanAttrs is unsafe.
 	ScanActiveByIngestTS(id ChunkID, cb func(ingestTS time.Time, attrs Attributes) bool) error
 
 	// FindSourceStartPosition returns the earliest record position with SourceTS >= ts.
@@ -127,7 +124,7 @@ type ChunkManager interface {
 	// If id is the zero ChunkID, a new ID is generated. Passing a non-zero id
 	// atomically assigns that ID to the imported chunk without going through
 	// Manager-wide state — this is the only way to pin an import's ID when
-	// concurrent Appends may also be creating chunks. See gastrolog-11rzz.
+	// concurrent Appends may also be creating chunks.
 	ImportRecords(id ChunkID, next RecordIterator) (ChunkMeta, error)
 
 	// ScanAttrs iterates records in a chunk starting from startPos, calling fn
@@ -213,7 +210,7 @@ type ChunkIndexBuilder interface {
 // reconcile sweep uses it to detect blobs deleted out-of-band by lifecycle
 // rules without being misled by a still-present warm cache. Returns nil if
 // the blob is reachable, ErrChunkSuspect if it's missing, or another error
-// for transient problems. See gastrolog-24m1t step 7j.
+// for transient problems.
 type CloudBlobChecker interface {
 	HeadCloudBlob(id ChunkID) error
 }
@@ -237,7 +234,7 @@ type ChunkPostSealProcessor interface {
 
 // ChunkCloudUploader extends ChunkManager with the ability to upload a
 // sealed chunk to cloud storage. Used by the cloud backfill path to retry
-// uploads that failed when S3 was unreachable. See gastrolog-68fqk.
+// uploads that failed when S3 was unreachable.
 type ChunkCloudUploader interface {
 	UploadToCloud(id ChunkID) error
 }
@@ -268,8 +265,8 @@ type ChunkBudgetMonitor interface {
 // CloudBackedChunkInfo carries the metadata needed to register a cloud-backed chunk
 // on a node without streaming any records. All fields come from the vault-ctl
 // FSM manifest entry (populated by AnnounceSeal + AnnounceUpload on the leader);
-// the lazy cloud-backed resolver hands it to the chunk manager on a lookup miss
-// (gastrolog-5bnxc).
+// the lazy cloud-backed resolver hands it to the chunk manager on a lookup
+// miss.
 type CloudBackedChunkInfo struct {
 	WriteStart  time.Time
 	WriteEnd    time.Time
@@ -284,7 +281,7 @@ type CloudBackedChunkInfo struct {
 	// param). There is deliberately no DiskBytes here: a node registering
 	// from metadata alone has no local copy yet, so its local warm-cache
 	// footprint starts at 0 regardless of what the leader's blob is sized
-	// at. gastrolog-33ul6h.
+	// at.
 	CloudBytes      int64
 	IngestIdxOffset int64
 	IngestIdxSize   int64
@@ -298,7 +295,7 @@ type CloudBackedChunkInfo struct {
 // whose data.glcb bytes live OUTSIDE the chunk manager's own directory —
 // the pipeline-built case, where the GLCB is owned by the vault's
 // segmentation ChunkRoot (<homeRoot>/chunks/<id>/data.glcb). All fields come
-// from the vault-ctl FSM sealed-chunk entry. See gastrolog-2kysn (Rubicon E1).
+// from the vault-ctl FSM sealed-chunk entry.
 type ExternalGLCBInfo struct {
 	WriteStart      time.Time
 	WriteEnd        time.Time
@@ -322,7 +319,7 @@ type ExternalGLCBInfo struct {
 // path under the vault's segmentation ChunkRoot rather than the manager's own
 // chunk dir. The bytes are NOT copied: the read path resolves the registered
 // path directly. Used by the orchestrator on seal and on reconcile so
-// pipeline-built chunks become queryable. See gastrolog-2kysn (Rubicon E1).
+// pipeline-built chunks become queryable.
 type ExternalGLCBRegistrar interface {
 	RegisterExternalGLCB(id ChunkID, glcbPath string, info ExternalGLCBInfo) error
 }
@@ -359,8 +356,8 @@ type AttrsProjectionSource interface {
 // from a sequential page-cache warm before a full scan. mmap major faults pin
 // scheduler Ps inside non-preemptible kernel fault handlers; a full-chunk
 // scan (retention fan-out) cold-faulting through a mapping stalls the whole
-// runtime under disk saturation (gastrolog-1io54g). PrewarmSequential moves
-// that I/O onto P-releasing syscalls; best-effort and idempotent.
+// runtime under disk saturation. PrewarmSequential moves that I/O onto
+// P-releasing syscalls; best-effort and idempotent.
 type SequentialPrewarmer interface {
 	PrewarmSequential()
 }

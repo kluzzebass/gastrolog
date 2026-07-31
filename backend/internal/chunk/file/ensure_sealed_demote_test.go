@@ -9,32 +9,29 @@ import (
 	"gastrolog/internal/chunk"
 )
 
-// TestUccg6_EnsureSealedDemotesLocalActive is the regression test for
-// gastrolog-uccg6: when the FSM tells the local chunk manager that a
-// chunk is sealed but that chunk is still the local active pointer,
-// EnsureSealed MUST force-demote so subsequent appends don't keep
-// landing on a chunk the rest of the cluster considers immutable.
+// TestEnsureSealedDemotesLocalActive pins the force-demote contract:
+// when the FSM tells the local chunk manager that a chunk is sealed
+// but that chunk is still the local active pointer, EnsureSealed MUST
+// force-demote so subsequent appends don't keep landing on a chunk the
+// rest of the cluster considers immutable.
 //
 // Topology-independent contract: the FSM is authoritative; if it
 // says sealed, the local Manager's active pointer must yield. This
 // holds equally for ingest vaults (where a continuous record-stream
-// would eventually swap active too) and for downstream vaults (where
-// no continuous record-stream means no natural swap, see
-// gastrolog-2yeht). The "skip-active in steady state" variant
-// previously introduced was wrong for downstream vaults — reverted
-// in 2yeht.
+// would eventually swap active too) and for downstream vaults, where
+// no continuous record-stream means no natural swap — skipping the
+// active chunk in steady state would leave it appended-to forever.
 //
-// Original incident: a follower restarted after the cluster sealed
-// its in-flight chunk in absence; pre-fix, EnsureSealed silently
-// skipped the still-active chunk and the local Manager kept
-// appending past the rotation cap (53K records on a 10K-cap vault;
-// replica_count=1).
+// Incident: a follower restarted after the cluster sealed its
+// in-flight chunk in absence; EnsureSealed silently skipped the
+// still-active chunk and the local Manager kept appending past the
+// rotation cap — 53K records on a 10K-cap vault, replica_count=1.
 //
-// Post-fix: EnsureSealed force-demotes the local active pointer
-// whenever the FSM says sealed. Subsequent Appends either land on
-// a fresh active chunk or fail with an explicit error — never
-// silently land on a chunk the cluster has frozen.
-func TestUccg6_EnsureSealedDemotesLocalActive(t *testing.T) {
+// EnsureSealed force-demotes the local active pointer whenever the
+// FSM says sealed. Subsequent Appends either land on a fresh active
+// chunk or fail with an explicit error — never silently land on a
+// chunk the cluster has frozen.
+func TestEnsureSealedDemotesLocalActive(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -75,7 +72,7 @@ func TestUccg6_EnsureSealedDemotesLocalActive(t *testing.T) {
 	// a fresh one on the next Append) or it's a different chunk ID.
 	activeAfterSeal := cm.Active()
 	if activeAfterSeal != nil && activeAfterSeal.ID == frozenChunkID {
-		t.Errorf("active pointer still points at FSM-sealed chunk %s after EnsureSealed (uccg6 regression: appends will keep landing on a frozen chunk)",
+		t.Errorf("active pointer still points at FSM-sealed chunk %s after EnsureSealed (appends will keep landing on a frozen chunk)",
 			frozenChunkID)
 	}
 
@@ -95,7 +92,7 @@ func TestUccg6_EnsureSealedDemotesLocalActive(t *testing.T) {
 		return
 	}
 	if landedID == frozenChunkID {
-		t.Errorf("Append after EnsureSealed landed on frozen chunk %s (uccg6 regression: 53K-record incident exactly)",
+		t.Errorf("Append after EnsureSealed landed on frozen chunk %s (the 53K-record over-append incident exactly)",
 			frozenChunkID)
 	}
 

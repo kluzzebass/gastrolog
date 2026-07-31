@@ -1,10 +1,10 @@
 package cli
 
-// gastrolog-7au6u9: config-accept validation must surface through the
-// existing CLI error path. `config cloud-service create` with a bare
-// endpoint gets the server's InvalidArgument error back verbatim — the
-// operator sees the offending value and both accepted forms instead of a
-// silently persisted config that kills vault init on every node.
+// Config-accept validation must surface through the existing CLI error path.
+// `config cloud-service create` with a bare endpoint gets the server's
+// InvalidArgument error back verbatim — the operator sees the offending value
+// and both accepted forms instead of a silently persisted config that kills
+// vault init on every node.
 
 import (
 	"context"

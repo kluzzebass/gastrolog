@@ -1,10 +1,10 @@
 package server_test
 
-// gastrolog-5yfaqj: refusal generalizes from max-size to every retention
-// policy bound. These tests extend vault_info_admission_test.go's
-// coverage (VaultInfo.AdmissionRefused must reflect the backend's own
-// admission-causes collector) to the two new causes — driven through the
-// same peer-broadcast hooks production wiring installs
+// Refusal applies to every retention policy bound, not just max-size.
+// These tests extend vault_info_admission_test.go's coverage
+// (VaultInfo.AdmissionRefused must reflect the backend's own
+// admission-causes collector) to the age and chunk-count causes — driven
+// through the same peer-broadcast hooks production wiring installs
 // (SetRemoteVaultAgeBoundCapped / SetRemoteVaultChunkCountBoundCapped),
 // standing in for a node that only learns about a vault's swept-and-still-
 // violated bound via another node's NodeStats broadcast (the retention

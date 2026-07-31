@@ -8,7 +8,7 @@ import (
 )
 
 // Raft leadership errors are not equally recoverable, and treating them alike
-// is how an announce gets dropped (gastrolog-4jh4mb).
+// is how an announce gets dropped.
 //
 //   - ErrNotLeader: another node leads. Forward to it. Safe — nothing was
 //     appended here.

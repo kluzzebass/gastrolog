@@ -5,7 +5,7 @@ package orchestrator
 // any completed entry whose Progress is nil, on the next ListJobs call — so a
 // RunOnce job appeared while running and then VANISHED, leaving no trace it had
 // run, succeeded or failed. Post-seal, GLCB build, replication, cloud upload and
-// backfill are all RunOnce (gastrolog-68dusi).
+// backfill are all RunOnce.
 
 import (
 	"context"

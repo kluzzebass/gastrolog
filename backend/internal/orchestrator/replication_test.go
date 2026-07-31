@@ -72,7 +72,6 @@ func testRecord(raw string) chunk.Record {
 // label must be on its Scheduled event, and the descriptions entry must be
 // gone once the job finishes. Describing after RunOnce lost the label and
 // leaked one entry per replicated chunk — unbounded on a busy leader.
-// See gastrolog-69sjlj.
 func TestScheduleReplicationDescribesBeforeScheduling(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
@@ -233,19 +232,20 @@ func TestCatchupSecondaryNoTransferrer(t *testing.T) {
 	}
 }
 
-// TestCatchupSkipsFSMRetiredChunks is the regression test for gastrolog-5grpa.
-// Before the fix, catchupFollower used the leader's on-disk chunk list as the
-// authoritative set, which could include chunks that the instance Raft FSM had
-// already retired (DeleteChunk applied) but whose local file hadn't been
-// unlinked yet. Catchup would ship those orphans to the follower, where the
-// follower's reconcile loop would then delete them within ~1 minute. Net
-// result: catchup work wasted, follower under-replicated, repeat forever.
+// TestCatchupSkipsFSMRetiredChunks guards the FSM-manifest filter in
+// catchupFollower. The leader's on-disk chunk list is not an authoritative
+// set: it can include chunks the instance Raft FSM has already retired
+// (DeleteChunk applied) but whose local file hasn't been unlinked yet.
+// Shipping those orphans to the follower means the follower's reconcile loop
+// deletes them within ~1 minute. Net result: catchup work wasted, follower
+// under-replicated, repeat forever.
 //
-// The fix filters the catchup list by instance.ListManifest() — the FSM's
-// authoritative view of what should exist. This test populates an instance with
-// 3 sealed chunks, configures ListManifest to return only 2 of them
-// (simulating the FSM having retired the third), and asserts that catchup
-// transferred only the 2 manifest-included chunks.
+// catchupFollower therefore filters the catchup list by
+// instance.ListManifest() — the FSM's authoritative view of what should
+// exist. This test populates an instance with 3 sealed chunks, configures
+// ListManifest to return only 2 of them (simulating the FSM having retired
+// the third), and asserts that catchup transferred only the 2
+// manifest-included chunks.
 func TestCatchupSkipsFSMRetiredChunks(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
@@ -368,13 +368,12 @@ func TestCatchupNilManifestUsesAllChunks(t *testing.T) {
 	}
 }
 
-// gastrolog-19241: symmetric peer-to-peer catchup. A follower with the
-// chunk locally must be allowed to push it to a requester that lacks it,
-// regardless of which side is the placement leader. Pre-fix this errored
-// with "not placement leader for vault X (follower)", which is exactly
-// what blocked the leader-from-follower backfill path needed to recover
-// after leadership transferred to a node that didn't have historical
-// chunks.
+// Symmetric peer-to-peer catchup. A follower with the chunk locally must
+// be allowed to push it to a requester that lacks it, regardless of which
+// side is the placement leader. Pre-fix this errored with "not placement
+// leader for vault X (follower)", which is exactly what blocked the
+// leader-from-follower backfill path needed to recover after leadership
+// transferred to a node that didn't have historical chunks.
 func TestCatchupSelectedChunksFromFollowerSucceeds(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-follower"})
@@ -656,11 +655,9 @@ func TestClusterReplicationSealedIdxWriteTSMatchesLeader(t *testing.T) {
 }
 
 // chunkRecordTimestamps opens a cursor on the given chunk and collects each
-// record's IngestTS / WriteTS pair. Routes through cm.OpenCursor so the
-// helper works regardless of whether the sealed chunk is multi-file or
-// data.glcb on disk — the chunk redesign (gastrolog-24m1t) flips this
-// over time, and tests that assert per-record timestamp invariants
-// shouldn't be coupled to the on-disk format.
+// record's IngestTS / WriteTS pair. Routes through cm.OpenCursor so tests
+// that assert per-record timestamp invariants aren't coupled to the sealed
+// chunk's on-disk format.
 func chunkRecordTimestamps(t *testing.T, cm chunk.ChunkManager, id chunk.ChunkID) []recordTimestamps {
 	t.Helper()
 	cursor, err := cm.OpenCursor(id)

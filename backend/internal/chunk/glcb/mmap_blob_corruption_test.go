@@ -1,10 +1,10 @@
 package glcb
 
-// GLCB mmap-open corruption tests (gastrolog-5do8sh): deterministic
-// patched/truncated copies of a valid blob exercise every rejection
-// branch in parseMappedBlob (size guard, preamble validation, dict and
-// record-index range checks), the ParseTOC declared-entry-count guard,
-// and the TOC section-range asymmetry between ParseTOC and ReadTOC.
+// GLCB mmap-open corruption tests: deterministic patched/truncated copies
+// of a valid blob exercise every rejection branch in parseMappedBlob (size
+// guard, preamble validation, dict and record-index range checks), the
+// ParseTOC declared-entry-count guard, and the TOC section-range asymmetry
+// between ParseTOC and ReadTOC.
 //
 // Layout-meta byte offsets below come from encodeBlobLayoutMeta
 // (layout.go): the 128-byte meta block starts at preambleSize (4), so a

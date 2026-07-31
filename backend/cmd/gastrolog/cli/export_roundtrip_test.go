@@ -1,11 +1,11 @@
 package cli
 
-// gastrolog-2nr3aa: `config export` claims to export the full configuration
-// and `config import` is its counterpart. This test is what keeps that claim
-// honest: it creates one of every config entity, exports, imports into a
-// fresh store and diffs the two exports section by section. A config type
-// added to the store but not to the export shows up here as an empty section
-// instead of being discovered on a live cluster at 3am.
+// `config export` claims to export the full configuration and `config import`
+// is its counterpart. This test is what keeps that claim honest: it creates
+// one of every config entity, exports, imports into a fresh store and diffs
+// the two exports section by section. A config type added to the store but
+// not to the export shows up here as an empty section instead of being
+// discovered on a live cluster at 3am.
 
 import (
 	"bytes"
@@ -214,8 +214,8 @@ func TestConfigImportReplaceRemovesStaleEntities(t *testing.T) {
 	staleVault := glid.New()
 	mustPutVault(t, ctx, client, staleVault, "stale-vault", nil)
 	// A lookup the document does not contain. proto3 cannot express "clear this
-	// list", so before gastrolog-4j7srt a stale enrichment table survived
-	// --replace and kept enriching records the restored config never mentions.
+	// list", so a stale enrichment table left behind by --replace would keep
+	// enriching records the restored config never mentions.
 	// Deliberately a YAML-file lookup: the document contains http, static, mmdb
 	// and csv lookups, and PutLookupSettings replaces each list it CONTAINS —
 	// so a stale entry of one of those kinds is cleared as a side effect and
@@ -281,8 +281,9 @@ func TestConfigImportReplaceRemovesStaleEntities(t *testing.T) {
 
 	// The archival chain must survive the round trip intact. An empty class
 	// here would read as "delete at this age" rather than "move to a colder
-	// tier" — the round trip losing this field is a data-destroying outcome,
-	// not a cosmetic one (gastrolog-108bcg).
+	// storage class" — losing this field on the round trip is a data-destroying
+	// outcome,
+	// not a cosmetic one.
 	if got := services[0].Transitions; len(got) != 2 {
 		t.Fatalf("archival transitions after round trip: %+v, want 2", got)
 	} else {
@@ -298,14 +299,14 @@ func TestConfigImportReplaceRemovesStaleEntities(t *testing.T) {
 		t.Fatalf("ListVaults: %v", err)
 	}
 	// Exactly the fixture's vaults, and nothing the target had before. The
-	// fixture seeds two: a memory vault and a file/cloud-tiered one whose
+	// fixture seeds two: a memory vault and a file-backed, cloud-backed one whose
 	// storage_class, replication_factor and cache_* fields a memory vault never
-	// exercises (gastrolog-4j7srt).
+	// exercises.
 	gotVaults := map[string]bool{}
 	for _, v := range vaults {
 		gotVaults[v.Name] = true
 	}
-	if len(vaults) != 2 || !gotVaults["logs"] || !gotVaults["tiered"] {
+	if len(vaults) != 2 || !gotVaults["logs"] || !gotVaults["cloud-backed"] {
 		t.Errorf("after --replace: vaults = %+v, want exactly the two imported ones", vaults)
 	}
 	if gotVaults["stale-vault"] {
@@ -549,16 +550,15 @@ func seedEveryConfigType(t *testing.T, ctx context.Context, addr string, store *
 		t.Fatalf("PutRetentionPolicy: %v", err)
 	}
 
-	// A file-backed, cloud-tiered vault with the fields a memory vault never
+	// A file-backed, cloud-backed vault with the fields a memory vault never
 	// exercises. The round trip is a byte-diff of export -> import -> export, so
 	// it can only detect the loss of fields the FIXTURE populated: a vault that
 	// only ever sets id/name/enabled/type/memory_budget leaves storage_class,
-	// replication_factor, cache_* and the retention disposition untested
-	// (gastrolog-4j7srt).
-	tieredID := glid.New()
+	// replication_factor, cache_* and the retention disposition untested.
+	cloudBackedID := glid.New()
 	if _, err := client.System.PutVault(ctx, connect.NewRequest(&v1.PutVaultRequest{
 		Config: &v1.VaultConfig{
-			Id: tieredID.ToProto(), Name: "tiered", Enabled: true,
+			Id: cloudBackedID.ToProto(), Name: "cloud-backed", Enabled: true,
 			Type:                 v1.VaultType_VAULT_TYPE_FILE,
 			StorageClass:         2,
 			ReplicationFactor:    3,
@@ -568,12 +568,12 @@ func seedEveryConfigType(t *testing.T, ctx context.Context, addr string, store *
 			RetentionDisposition: "delete",
 		},
 	})); err != nil {
-		t.Fatalf("PutVault tiered: %v", err)
+		t.Fatalf("PutVault cloud-backed: %v", err)
 	}
 
 	// Enrichment lookup tables. Every kind, with non-default fields set: these
 	// were absent from the document entirely, and a fixture that leaves a field
-	// zero cannot detect that field being dropped (gastrolog-4j7srt).
+	// zero cannot detect that field being dropped.
 	if _, err := client.System.PutLookupSettings(ctx, connect.NewRequest(&v1.PutLookupSettingsRequest{
 		Lookup: &v1.PutLookupSettings{
 			HttpLookups: []*v1.HTTPLookupEntry{{
@@ -610,7 +610,6 @@ func seedEveryConfigType(t *testing.T, ctx context.Context, addr string, store *
 			// absent class does not mean "unset" — it means DELETE the chunk
 			// at that age. A round trip that drops it would turn a
 			// move-to-colder-storage policy into an expiry policy, silently.
-			// gastrolog-108bcg renamed that field, so it needs covering here.
 			Transitions: []*v1.CloudStorageTransition{
 				{After: "30d", CloudStorageClass: "GLACIER"},
 				{After: "365d", CloudStorageClass: "DEEP_ARCHIVE"},

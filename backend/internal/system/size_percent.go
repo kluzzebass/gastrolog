@@ -56,7 +56,7 @@ func (v SizeOrPercent) Resolve(totalBytes uint64) uint64 {
 // ParseSize expression.
 func ParseSizeOrPercent(s string) (SizeOrPercent, error) {
 	// Same normalization as ParseSize: collapse ALL whitespace, so the two
-	// grammars tolerate exactly the same sloppiness (gastrolog-etcjdx).
+	// grammars tolerate exactly the same sloppiness.
 	s = strings.Join(strings.Fields(s), "")
 	if s == "" {
 		return SizeOrPercent{}, errors.New("empty size string")

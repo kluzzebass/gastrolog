@@ -1,8 +1,8 @@
 package server_test
 
-// Coverage for gastrolog-4eh5ns: GetRouteStats cluster-total throughput rates
-// = local node's rolling-window rates (from the stats collector snapshot) +
-// the sum of live peers' broadcast rates.
+// GetRouteStats cluster-total throughput rates = local node's rolling-window
+// rates (from the stats collector snapshot) + the sum of live peers'
+// broadcast rates.
 
 import (
 	"context"

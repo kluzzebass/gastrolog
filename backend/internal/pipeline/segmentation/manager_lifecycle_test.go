@@ -9,13 +9,12 @@ import (
 	"gastrolog/internal/pipeline/segmentation"
 )
 
-// gastrolog-40anrs: RegisterVault racing Run's startup must never observe the
-// exited-manager state. The old lifecycle split (atomic started flag flipped
-// outside the mutex, runCtx assigned under it) made a starting manager
-// momentarily indistinguishable from an exited one, so a Register landing in
-// that window was rejected with ErrNotRunning — the CI failure shape of
-// TestSupervisorReconcilePlacementFlap. Hammer the exact interleaving; run
-// with -race.
+// RegisterVault racing Run's startup must never observe the exited-manager
+// state: a starting manager has to stay distinguishable from an exited one, or
+// a Register arriving between construction and Run taking hold is rejected with
+// ErrNotRunning. That rejection surfaces as the CI failure shape of
+// TestSupervisorReconcilePlacementFlap. Hammer the exact interleaving; run with
+// -race.
 func TestRegisterDuringRunStartupNeverErrNotRunning(t *testing.T) {
 	t.Parallel()
 	for i := range 300 {

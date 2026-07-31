@@ -177,11 +177,10 @@ func newContributionVaultServer(t *testing.T, localID string, remoteIDs []string
 	return vs, vaultID.String()
 }
 
-// TestListChunks_PartialFanOutNamesDeadPeer pins gastrolog-1ic07: when a
-// hosting peer fails during the ListChunks cross-node fan-out, the merged
-// response must carry a ContributionReport naming that peer, so the
-// inspector reads the chunk list as visibly partial instead of silently
-// dropping the node.
+// TestListChunks_PartialFanOutNamesDeadPeer: when a hosting peer fails
+// during the ListChunks cross-node fan-out, the merged response must carry
+// a ContributionReport naming that peer, so the inspector reads the chunk
+// list as visibly partial instead of silently dropping the node.
 func TestListChunks_PartialFanOutNamesDeadPeer(t *testing.T) {
 	t.Parallel()
 
@@ -261,10 +260,10 @@ func bogusChunkReq(vaultID string) *connect.Request[gastrologv1.GetIndexesReques
 	})
 }
 
-// TestGetIndexes_NotFoundPeersDoNotDegrade pins gastrolog-1ic07: peers
-// that simply don't hold the chunk answer not-found — a benign
-// non-answer. When a holder is found, the response carries its indexes
-// and NO contribution report, even though other peers said not-found.
+// TestGetIndexes_NotFoundPeersDoNotDegrade: peers that simply don't hold
+// the chunk answer not-found — a benign non-answer. When a holder is
+// found, the response carries its indexes and NO contribution report, even
+// though other peers said not-found.
 func TestGetIndexes_NotFoundPeersDoNotDegrade(t *testing.T) {
 	t.Parallel()
 
@@ -322,20 +321,20 @@ func TestGetIndexes_CleanNotFoundWhenAllAnswer(t *testing.T) {
 	if err == nil {
 		t.Fatal("GetIndexes: expected a not-found error, got nil")
 	}
-	// mapVaultError renders chunk-not-found via its message (pre-existing
-	// behaviour, asserted the same way by TestMultiNode_GetIndexesNotFoundAnywhere);
-	// the point here is that a clean not-found stays a hard error, never a
-	// silent empty-with-report.
+	// mapVaultError renders chunk-not-found via its message (asserted the
+	// same way by TestMultiNode_GetIndexesNotFoundAnywhere); the point here
+	// is that a clean not-found stays a hard error, never a silent
+	// empty-with-report.
 	if !strings.Contains(err.Error(), "chunk not found") {
 		t.Errorf("error = %v, want a chunk-not-found error", err)
 	}
 }
 
-// TestGetPipelineBacklog_PartialFanOutCarriesReport pins gastrolog-1ic07:
-// when a peer fails during the pipeline-backlog disk fan-out, the
-// cluster-wide segment totals omit that node, so the response carries a
-// contribution report naming it. Node IDs must be GLIDs here — the
-// pipeline fan-out enumerates ListNodes, not vault placements.
+// TestGetPipelineBacklog_PartialFanOutCarriesReport: when a peer fails
+// during the pipeline-backlog disk fan-out, the cluster-wide segment
+// totals omit that node, so the response carries a contribution report
+// naming it. Node IDs must be GLIDs here — the pipeline fan-out enumerates
+// ListNodes, not vault placements.
 func TestGetPipelineBacklog_PartialFanOutCarriesReport(t *testing.T) {
 	t.Parallel()
 
@@ -375,10 +374,10 @@ func TestGetPipelineBacklog_FullFanOutOmitsReport(t *testing.T) {
 	}
 }
 
-// TestExplain_PartialFanOutCarriesReport pins gastrolog-1ic07 for the
-// Explain plan: a vault whose leader is a remote node is fanned out to
-// that node; when the peer fails, the merged plan omits its chunks and
-// the response carries a contribution report naming it.
+// TestExplain_PartialFanOutCarriesReport: a vault whose leader is a remote
+// node is fanned out to that node; when the peer fails, the merged plan
+// omits its chunks and the response carries a contribution report naming
+// it.
 func TestExplain_PartialFanOutCarriesReport(t *testing.T) {
 	t.Parallel()
 

@@ -197,8 +197,8 @@ func TestManagerCompletesOnSize(t *testing.T) {
 	}
 }
 
-// TestManagerCountsSegmentsCompleted (gastrolog-4r784a): AppendStats reports
-// the segments-completed stage counter, incremented once per working/ →
+// TestManagerCountsSegmentsCompleted: AppendStats reports the
+// segments-completed stage counter, incremented once per working/ →
 // completed/ promotion.
 func TestManagerCountsSegmentsCompleted(t *testing.T) {
 	t.Parallel()
@@ -503,7 +503,7 @@ func TestManagerUnregisterVaultDuringRun(t *testing.T) {
 	}
 }
 
-// --- working/ restart recovery (gastrolog-1sylj7) ---
+// --- working/ restart recovery ---
 
 // seedWorkingSegment simulates a crashed writer: records appended and fsynced
 // (and therefore ACKED) into working/<segID>, process killed before the complete

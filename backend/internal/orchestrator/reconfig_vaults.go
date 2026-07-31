@@ -118,13 +118,13 @@ func findVaultConfig(vaults []system.VaultConfig, id glid.GLID) *system.VaultCon
 // retentionRule objects. The second return names every referenced policy
 // that resolved with NO trigger (ToRetentionPolicy returned nil, nil — none
 // of maxAge/maxSize/maxChunks set): a vault whose RetentionRules are all
-// trigger-less this way is the silent-drain gap gastrolog-1xl29s fixed. The
-// caller uses these labels to name the gap in the retention-unenforceable
-// alarm and log line rather than leaving the operator to read code.
+// trigger-less has retention configured but enforces nothing. The caller
+// uses these labels to name the gap in the retention-unenforceable alarm
+// and log line rather than leaving the operator to read code.
 func resolveRetentionRulesFromVault(cfg *system.Config, vaultCfg system.VaultConfig) ([]retentionRule, []string, error) {
-	// Phase 4 (gastrolog-42f9z): retention rules carry only the trigger
-	// policy. The action enum is gone — every fired event streams records
-	// through the routing engine and always destroys the chunk.
+	// Retention rules carry only the trigger policy: every fired event
+	// streams records through the routing engine and always destroys the
+	// chunk.
 	var rules []retentionRule
 	var triggerLess []string
 	for _, b := range vaultCfg.RetentionRules {
@@ -141,16 +141,11 @@ func resolveRetentionRulesFromVault(cfg *system.Config, vaultCfg system.VaultCon
 			continue
 		}
 
-		// Phase 4 (gastrolog-42f9z): retention has no decision layer
-		// anymore. A fired retention event always streams the chunk's
-		// records through the routing engine and always destroys the
-		// chunk. The retention rule carries only the trigger policy.
-		//
-		// gastrolog-5yfaqj: agePolicy/countPolicy are the SAME
-		// MaxAge/MaxChunks values `policy` was built from
-		// (ToRetentionPolicy), isolated to one dimension apiece so the
-		// post-sweep bound check can test "is THIS bound still violated"
-		// independent of whatever else the composite policy also bounds.
+		// agePolicy/countPolicy are the SAME MaxAge/MaxChunks values
+		// `policy` was built from (ToRetentionPolicy), isolated to one
+		// dimension apiece so the post-sweep bound check can test "is
+		// THIS bound still violated" independent of whatever else the
+		// composite policy also bounds.
 		// Errors here are unreachable in practice — ToRetentionPolicy
 		// above already validated the same expressions — so a parse
 		// failure degrades to "this rule states no such bound" rather
@@ -191,13 +186,12 @@ func retentionPolicyLabel(c system.RetentionPolicyConfig) string {
 // Returns ErrVaultNotEmpty if the vault has any chunks.
 //
 // Authority: the vault-ctl FSM manifest is canonical for whether a
-// vault holds data. Per audit finding F3 (gastrolog-4vym6), the
-// emptiness check consults the FSM first; the local Chunks.List()
-// view is corroborating evidence at most (a sync-lagged follower
-// or post-recovery node may have less on disk than the FSM
-// records). If either source reports non-empty, removal is refused
-// — defense in depth against either an FSM read failure or a
-// stale-disk-but-fresh-FSM state.
+// vault holds data. The emptiness check consults the FSM first; the
+// local Chunks.List() view is corroborating evidence at most (a
+// sync-lagged follower or post-recovery node may have less on disk
+// than the FSM records). If either source reports non-empty, removal
+// is refused — defense in depth against either an FSM read failure or
+// a stale-disk-but-fresh-FSM state.
 func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -224,9 +218,9 @@ func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 
 	// Corroborating: local disk view. Catches the inverse case where
 	// the FSM has caught up to empty but residual chunks linger on
-	// disk (orphans, partial repatriation, etc.) — gastrolog-3y8py
-	// already preserves data-bearing orphans, so this is the operator-
-	// safe stance.
+	// disk (orphans, partial repatriation, etc.) — the chunk manager's
+	// orphan sweep preserves data-bearing orphans rather than deleting
+	// them, so refusing removal is the operator-safe stance.
 	if vaultInst := vault.Instance; vaultInst != nil {
 		metas, err := vaultInst.Chunks.List()
 		if err != nil {
@@ -288,7 +282,7 @@ func (o *Orchestrator) removeVaultJobs(_ glid.GLID, vault *Vault) {
 		// leaves this node mid-backoff keeps its cloud-backfill-stuck alarm
 		// standing until the next evaluateCloudHealth sweep notices (or
 		// forever, if this node never runs that sweep for the vault
-		// again). See gastrolog-4ryguo review follow-up.
+		// again).
 		o.scheduler.RemoveJobsByPrefix(cloudUploadJobPrefix(vaultInst.VaultID))
 		o.purgeBackfillFailuresForVault(vaultInst.VaultID)
 	}
@@ -308,8 +302,7 @@ func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
 	// Same reasoning as removeVaultJobs: a torn-down vault must not leave a
 	// stranded cloud-backfill-stuck alarm behind, and an in-flight upload
-	// must not outlive the chunk manager it reads through. See
-	// gastrolog-4ryguo review follow-up.
+	// must not outlive the chunk manager it reads through.
 	o.scheduler.RemoveJobsByPrefix(cloudUploadJobPrefix(id))
 	o.purgeBackfillFailuresForVault(id)
 
@@ -395,7 +388,7 @@ func (o *Orchestrator) ForceRemoveVault(id glid.GLID) error {
 // forceRemoveVaultData seals the active chunk (if any), deletes all
 // indexes, and locally drops every chunk on the given instance. LOCAL
 // cleanup only — uses chunk.DeleteNoAnnounce so per-chunk deletes do not
-// fan across vault-ctl Raft. See gastrolog-4vz40 / sealAndDeleteAllChunks.
+// fan across vault-ctl Raft. See sealAndDeleteAllChunks.
 func (o *Orchestrator) forceRemoveVaultData(id glid.GLID, vaultInst *VaultInstance) error {
 	if vaultInst == nil {
 		return nil
@@ -438,7 +431,7 @@ func (o *Orchestrator) forceRemoveVaultData(id glid.GLID, vaultInst *VaultInstan
 // reacts to an admin teardown) comes from each node independently running
 // its own RemoveVaultInstance as the config change propagates — not from
 // a delete proposed out of one node. DeleteNoAnnounce is the local-only
-// delete that bypasses the receipt protocol. See gastrolog-4vz40.
+// delete that bypasses the receipt protocol.
 //
 // The seal obeys the same rule: SealNoAnnounce demotes the local active so it
 // can be deleted, where Seal() would announce a cluster-wide Active → Sealing
@@ -482,10 +475,9 @@ func (o *Orchestrator) sealAndDeleteAllChunks(vaultInst *VaultInstance, op strin
 //
 // Returns true if an instance was removed.
 //
-// gastrolog-4vz40: previously this function always wiped chunks, which meant
-// any placement flap (caused by transient peer-conn teardowns from
-// peers.Invalidate) destroyed data cluster-wide. The destructive behaviour is
-// now opt-in via DeleteVaultInstance.
+// Keeping this path non-destructive matters because placement flaps on
+// transient peer-conn teardowns (peers.Invalidate); wiping chunks here
+// would destroy data cluster-wide on a flap.
 func (o *Orchestrator) RemoveVaultInstance(vaultID glid.GLID) bool {
 	return o.removeVaultInstance(vaultID, false)
 }
@@ -538,7 +530,7 @@ func (o *Orchestrator) removeVaultInstance(vaultID glid.GLID, deleteData bool) b
 
 	// Remove the vault's data directory entirely — not just its chunk subdirs.
 	// Without this, leftover files (.lock, cloud.idx) and the directory itself
-	// accumulate on disk forever. See gastrolog-42j4n.
+	// accumulate on disk forever.
 	if deleteData {
 		if remover, ok := vaultInst.Chunks.(chunk.DirRemover); ok {
 			if err := remover.RemoveDir(); err != nil {
@@ -718,17 +710,10 @@ func (o *Orchestrator) VaultConfig(id glid.GLID) (system.VaultConfig, error) {
 	return cfg, nil
 }
 
-// gastrolog-4kkoo (Phase 5): UpdateVaultFilter is gone. Vaults no
-// longer carry filters of their own — match expressions live inline on
-// route stages. Operators change routing by editing the route, which
-// triggers a NotifyRoutePut → ReloadFilters → reloadRoutesFromConfig
-// cycle. The Phase-4 ergonomic API was test-only; no production caller
-// existed.
-
 // buildVaultInstances creates VaultInstance objects for each instance in the vault config.
-// Every node joins every instance's Raft group regardless of storage placement
-// (gastrolog-292yi). Nodes with storage placements also get a VaultInstance with
-// a chunk manager; nodes without storage only participate in the Raft group.
+// Every node joins every instance's Raft group regardless of storage placement.
+// Nodes with storage placements also get a VaultInstance with a chunk manager;
+// nodes without storage only participate in the Raft group.
 func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories) (*VaultInstance, error) {
 	rt := &sys.Runtime
 	o.ensureVaultControlPlaneRaftGroup(vaultCfg.ID, rt.Nodes, factories)
@@ -781,7 +766,7 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 
 // alertVaultInitFailed logs a warning and raises an alert when a vault
 // instance fails to initialize during build. The failed instance is retried on
-// the next reconfig cycle. See gastrolog-68fqk.
+// the next reconfig cycle.
 func (o *Orchestrator) alertVaultInitFailed(vaultID glid.GLID, vaultName string, err error) {
 	o.logger.Warn("buildVaultInstances: vaultInst init failed, skipping",
 		"vault", vaultID, "name", vaultName, "error", err)
@@ -796,7 +781,7 @@ func (o *Orchestrator) alertVaultInitFailed(vaultID glid.GLID, vaultName string,
 // that would occur if findLocalFileStorage picked a different storage by class.
 func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories) (*VaultInstance, error) {
 	// Read placements from VaultConfig (mirrored from vault placements via
-	// the FSM bridge — gastrolog-257l7).
+	// the FSM bridge).
 	storageID := system.LeaderStorageID(sys.PlacementsFor(vaultCfg.ID))
 	if storageID != "" && !strings.HasPrefix(storageID, system.SyntheticStoragePrefix) {
 		ti, err := o.buildInstanceForStorage(sys, vaultCfg, factories, storageID, false)
@@ -876,7 +861,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	setVaultRaftAnnouncer(cm, applier, o.phase, o.logger, o.announceResultHook(vaultCfg.ID))
 	// Wire the FSM-backed integrity verifier so cold-cache cloud downloads
 	// reject blobs whose digest doesn't match what the leader stamped at
-	// upload time. gastrolog-grnc3.
+	// upload time.
 	setIntegrityVerifier(cm, o.IntegrityVerifier())
 
 	// JSONL sinks are write-only — no query engine, no indexes.
@@ -937,7 +922,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 // vault instance and binds it to the instance sub-FSM in the vault control-plane
 // Raft group. Skipped silently when there is no group (memory-mode vaults
 // without replication) — single-node deletes go straight through the chunk
-// manager via deleteChunk's local-only fallback. See gastrolog-51gme.
+// manager via deleteChunk's local-only fallback.
 //
 // Multiple TIs on the same node share an instance sub-FSM (1:1:1 placement makes
 // this rare, but possible). Each TI's reconciler.Wire() call rebinds the
@@ -1180,10 +1165,6 @@ type vaultRaftCallbacks struct {
 // instance's chunk FSM is a sub-FSM keyed by instance ID (see vaultraft.FSM and
 // vaultraft/vaultctlfsm.FSM). With no GroupManager, returns nils.
 //
-// Post-gastrolog-5xxbd there is no per-vault-ctl Raft group. The historical
-// function name ensureVaultCtlMetadata is preserved as a no-op alias in
-// tests only; production wires through this function.
-//
 // Call this BEFORE creating the chunk manager so Raft can start
 // elections while chunk loading is still in progress.
 func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg system.VaultConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, vaultctlfsm.Applier, vaultRaftCallbacks) {
@@ -1209,7 +1190,7 @@ func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg system.VaultConfig, clust
 	// on every ensureVaultCtlMetadata invocation is fine; later calls
 	// just rebind to the same closure. Without this hook, the receipt
 	// protocol's pendingDeletes silently leak across snapshot install
-	// boundaries (the bug gastrolog-51gme step 3 was supposed to close).
+	// boundaries.
 	vaultID := vaultCfg.ID
 	vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
 	vaultFSM := vfsm.EnsureVaultFSM(vaultCfg.ID)
@@ -1338,7 +1319,7 @@ func listFSMByFlag(fsm *vaultctlfsm.FSM, pred func(vaultctlfsm.ManifestEntry) bo
 
 // setIntegrityVerifier wires the manifest-backed digest verifier into a chunk
 // manager that supports it. Cold-cache cloud downloads consult the FSM-recorded
-// hash and reject blobs whose actual digest doesn't match. See gastrolog-grnc3.
+// hash and reject blobs whose actual digest doesn't match.
 func setIntegrityVerifier(cm chunk.ChunkManager, v chunk.IntegrityVerifier) {
 	if v == nil {
 		return
@@ -1354,7 +1335,7 @@ func setIntegrityVerifier(cm chunk.ChunkManager, v chunk.IntegrityVerifier) {
 // the Raft group and chunk manager have been created. The applier handles
 // routing to the vault ctl Raft leader when peers are configured. The phase parameter lets
 // the announcer short-circuit during shutdown so trailing applies don't
-// fire "raft is already shutdown" warnings (see gastrolog-1e5ke).
+// fire "raft is already shutdown" warnings.
 func setVaultRaftAnnouncer(cm chunk.ChunkManager, applier vaultctlfsm.Applier, phase *lifecycle.Phase, logger *slog.Logger, onResult func(op string, id chunk.ChunkID, err error)) {
 	if applier == nil {
 		return
@@ -1439,12 +1420,11 @@ func (o *Orchestrator) clearVaultFSMChunkCallbacks(vaultID glid.GLID) {
 // WatchChunks event bus gets CREATED events as soon as a new active chunk is
 // announced via CmdCreateChunk — the inspector shows the chunk immediately
 // rather than only after seal. Fired on every node where the apply ran;
-// followers learn about the new chunk via Raft replication. See gastrolog-3pf9w.
+// followers learn about the new chunk via Raft replication.
 //
 // Chunk-file deletion is NOT wired here: it flows exclusively through the
 // vault-ctl FSM's receipt protocol (CmdRequestDelete + acks + finalize),
-// executed by VaultLifecycleReconciler. The legacy CmdDeleteChunk OnDelete
-// cascade was removed in gastrolog-lh0rp.
+// executed by VaultLifecycleReconciler.
 //
 // Safe to call with nil group or nil cm: the callback is simply not wired.
 func wireVaultFSMOnCreate(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkManager, o *Orchestrator) {
@@ -1511,7 +1491,7 @@ func wireVaultFSMPipelineChunkEvents(o *Orchestrator, vaultID glid.GLID, fsm *va
 		}
 		o.EmitChunkSealed(vaultID, manifestEntryToChunkMeta(e, true))
 	})
-	// Residency is receipt-only (gastrolog-68wsli), so holder-set changes
+	// Residency is receipt-only, so holder-set changes
 	// are chunk-state changes the inspector must see live: emit PROGRESS
 	// so the WatchChunks relay re-stamps the event with the FSM's current
 	// holder set. Without this edge, a sealed chunk's honest pre-receipt
@@ -1526,7 +1506,7 @@ func wireVaultFSMPipelineChunkEvents(o *Orchestrator, vaultID glid.GLID, fsm *va
 // does NOT happen here: the chunk manager's lazy cloud-backed resolver
 // (wireLazyCloudBackedResolver) fills the cloud index from the FSM manifest on
 // the first lookup miss, covering live CmdUploadChunk replication and snapshot
-// install through the same single path (gastrolog-5bnxc).
+// install through the same single path.
 func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, o *Orchestrator) {
 	if g == nil {
 		return
@@ -1545,8 +1525,7 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, o *Orchestrator
 		// every cluster node's FSM applies the same CmdUploadChunk
 		// payload, so every node emits the same RecordCount /
 		// DiskBytes / CloudBacked. Using local Manager.Meta instead
-		// produced per-node variance and inspector flicker. See
-		// gastrolog-3pf9w.
+		// produced per-node variance and inspector flicker.
 		if o == nil {
 			return
 		}
@@ -1566,7 +1545,7 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, o *Orchestrator
 // Without this, vault-ctl groups stay frozen at their bootstrap membership
 // and a freshly-joined node loops forever in pre-vote campaigns rejected
 // by the original members with "node is not in configuration", blocking
-// chunk catchup and RF expansion. See gastrolog-4zy8a.
+// chunk catchup and RF expansion.
 //
 // Partial resolution short-circuits: if any cluster node's address can't
 // be resolved (transient — the cluster-ctl Raft config has not caught up yet),
@@ -1606,7 +1585,7 @@ func (o *Orchestrator) RefreshVaultCtlMembers(clusterNodes []system.NodeConfig, 
 		// the existing group when it's already up. Without this,
 		// joiners stay permanently missing from every vault-ctl group,
 		// blocking AddVoter commits cluster-wide once quorum starts
-		// requiring an ACK from a new voter. See gastrolog-5n6xz.
+		// requiring an ACK from a new voter.
 		o.ensureVaultControlPlaneRaftGroup(vaultID, clusterNodes, factories)
 		o.vaultCtlLeaders.SetDesiredMembers(vaultID, members)
 	}
@@ -1615,7 +1594,6 @@ func (o *Orchestrator) RefreshVaultCtlMembers(clusterNodes []system.NodeConfig, 
 // buildVaultRaftMembers returns ALL cluster nodes as Raft members for a vault
 // control-plane Raft group. Every node participates regardless of which vaults
 // it stores — nodes without local instance data still replicate instance metadata.
-// See gastrolog-292yi.
 func (o *Orchestrator) buildVaultRaftMembers(clusterNodes []system.NodeConfig, factories Factories) []hraft.Server {
 	if factories.NodeAddressResolver == nil || len(clusterNodes) == 0 {
 		return nil
@@ -1655,12 +1633,11 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNode
 	case system.VaultTypeMemory:
 		// The expression passes through verbatim — the params map is already
 		// strings and the factory resolves it with the shared parser, so
-		// nothing converts here (gastrolog-etcjdx).
+		// nothing converts here.
 		//
 		// Defense in depth: creation defaults an unset budget and rejects an
-		// explicit "0" (gastrolog-1qd5wz), so an unset one here is a pre-change
-		// or bug-produced config. Bound it with the default rather than run
-		// unbounded in RAM.
+		// explicit "0", so an unset one here is a bug-produced config. Bound
+		// it with the default rather than run unbounded in RAM.
 		budget := vaultCfg.MemoryBudget
 		if system.IsQuantityUnset(budget) {
 			budget = system.DefaultVaultMemoryBudget
@@ -1670,7 +1647,7 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNode
 	case system.VaultTypeFile:
 		// Single storage class for all file vaults — local-only and
 		// cloud-backed alike. The active chunk and warm cache live at
-		// the same chunkDir path post-step-7k. See gastrolog-4k5mg.
+		// the same chunkDir path.
 		if vaultCfg.IsCloud() {
 			addCloudParams(params, &sys.Config, vaultCfg)
 			addCacheParams(params, vaultCfg)
@@ -1692,10 +1669,10 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNode
 }
 
 // addCacheParams threads the vault's warm-cache config into the factory param
-// map. Before gastrolog-338j51 nothing populated these keys, so the file
-// manager always read empty and ran with an unbounded cache regardless of
-// config. The expressions pass through verbatim: the params map is strings and
-// the factory resolves them with the shared parser (gastrolog-etcjdx).
+// map. Without these keys the file manager reads empty and runs with an
+// unbounded warm cache regardless of config. The expressions pass through
+// verbatim: the params map is strings and the factory resolves them with
+// the shared parser.
 func addCacheParams(params map[string]string, vaultCfg system.VaultConfig) {
 	if vaultCfg.CacheEviction != "" {
 		params["cache_eviction"] = vaultCfg.CacheEviction
@@ -1709,14 +1686,14 @@ func addCacheParams(params map[string]string, vaultCfg system.VaultConfig) {
 }
 
 // addCloudParams writes cloud-store credentials + bucket info into params
-// for a cloud-backed file instance. Always records the cloud_service_id (snapshot
-// onto every CmdUploadChunk via gastrolog-grnc3); no-op for the rest if the
+// for a cloud-backed file instance. Always records the cloud_service_id
+// (snapshotted onto every CmdUploadChunk); no-op for the rest if the
 // referenced cloud service entry is missing — the chunk manager will start
 // without a CloudStore wired but still knows which service it would pin to.
 //
 // The provider fields come from CloudService.StoreParams — the same mapping
-// PutCloudService validates against at config-accept time (gastrolog-7au6u9),
-// so an accepted config carries exactly the params store creation needs.
+// PutCloudService validates against at config-accept time, so an accepted
+// config carries exactly the params store creation needs.
 func addCloudParams(params map[string]string, cfg *system.Config, vaultCfg system.VaultConfig) {
 	params["cloud_service_id"] = vaultCfg.CloudServiceID.String()
 	cs := findCloudService(cfg, *vaultCfg.CloudServiceID)
@@ -1764,11 +1741,12 @@ func findCloudService(cfg *system.Config, id glid.GLID) *system.CloudService {
 // enumerate. The alarm clears on the next announce that commits, which is the
 // condition genuinely ending rather than a timer expiring.
 //
-// This is the visibility half of gastrolog-3ba5ei. The MetadataAnnouncer
-// contract stays best-effort by design — the calls fire from deferred closures
-// with no caller to return an error to, deferred precisely so a Raft round trip
-// cannot deadlock against the FSM apply path. What changes is that
-// "does not block the local operation" no longer also means "is invisible".
+// The MetadataAnnouncer contract stays best-effort by design — the calls fire
+// from deferred closures with no caller to return an error to, deferred
+// precisely so a Raft round trip cannot deadlock against the FSM apply path.
+// This hook is what keeps "does not block the local operation" from also
+// meaning "is invisible": without it, seals and uploads complete locally while
+// the replicated manifest never learns about them, silently.
 func (o *Orchestrator) announceResultHook(vaultID glid.GLID) func(string, chunk.ChunkID, error) {
 	return func(op string, id chunk.ChunkID, err error) {
 		if o == nil || o.alerts == nil {

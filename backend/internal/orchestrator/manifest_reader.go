@@ -14,7 +14,7 @@ import (
 )
 
 // ManifestReader returns a manifest.Reader backed by the replicated vault-ctl
-// FSMs. Every node is a voter of every vault-ctl Raft group (gastrolog-292yi),
+// FSMs. Every node is a voter of every vault-ctl Raft group,
 // so the sealed-chunk manifest resolves on ANY node — including nodes that
 // host no instance for the vault. Honors the active-chunk exception by
 // filtering on IsSealed().
@@ -29,7 +29,6 @@ func (o *Orchestrator) ManifestReader() manifest.Reader {
 // IntegrityVerifier returns a chunk.IntegrityVerifier backed by the same
 // FSM-projected manifest as ManifestReader. The chunk manager wires this
 // in to verify cold-cache cloud downloads against the FSM-recorded digest.
-// See gastrolog-grnc3.
 func (o *Orchestrator) IntegrityVerifier() chunk.IntegrityVerifier {
 	return &orchestratorManifestReader{o: o}
 }
@@ -49,9 +48,9 @@ var _ chunk.IntegrityVerifier = (*orchestratorManifestReader)(nil)
 
 // ExpectedDigest implements chunk.IntegrityVerifier. Returns the FSM-recorded
 // GLCB whole-blob digest for a chunk; (zero, false) when the chunk isn't
-// in the manifest yet (pre-upload race) or was uploaded before the
-// gastrolog-grnc3 hash field was added (zero Hash on the entry, treated as
-// "no expectation"). Cold-cache downloads consult this to reject blobs
+// in the manifest yet (pre-upload race) or carries no recorded hash (zero
+// Hash on the entry, treated as "no expectation"). Cold-cache downloads
+// consult this to reject blobs
 // whose actual digest doesn't match what the leader stamped at upload time.
 func (r *orchestratorManifestReader) ExpectedDigest(id chunk.ChunkID) ([32]byte, bool) {
 	e, ok := r.Entry(id)
@@ -93,7 +92,7 @@ func (r *orchestratorManifestReader) EntriesForVault(key glid.GLID) []vaultctlfs
 // VaultManifestEntriesIncludingOpen returns every manifest entry (sealed,
 // sealing AND open/active) for the given vault, read from the replicated
 // vault-ctl Raft FSM. Every node participates as a voter in every vault-ctl
-// Raft group (gastrolog-292yi), so the FSM is authoritative cluster-wide and
+// Raft group, so the FSM is authoritative cluster-wide and
 // visible on nodes that don't host any instance for the vault. This is the
 // open-chunk-inclusive projection of the same read core that backs
 // ManifestReader (which stays sealed-only per the active-chunk exception).
@@ -152,7 +151,7 @@ func (o *Orchestrator) manifestEntryByChunk(id chunk.ChunkID) (glid.GLID, vaultc
 }
 
 // vaultCtlFSMs returns every vault-ctl chunk FSM this node participates in,
-// keyed by vault ID. With symmetric seeding (gastrolog-292yi) that is every
+// keyed by vault ID. With symmetric seeding that is every
 // vault in the cluster, whether or not this node hosts an instance for it.
 // Nil when there is no GroupManager (single-node / memory mode).
 func (o *Orchestrator) vaultCtlFSMs() map[glid.GLID]*vaultctlfsm.FSM {
@@ -251,15 +250,15 @@ func vaultManifestEntries(t *VaultInstance) []vaultctlfsm.ManifestEntry {
 }
 
 // IndexReader returns a manifest.IndexReader that resolves IngestTS rank /
-// position lookups on the unified manifest read core (gastrolog-nlepn):
-// vault ownership comes from the replicated vault-ctl FSM (any voter), and
+// position lookups on the unified manifest read core: vault ownership
+// comes from the replicated vault-ctl FSM (any voter), and
 // the lookup is served from whatever ITSI bytes are locally materialized —
 // the owning instance's chunk manager (active chunk B+ tree, cloud-backed
 // cached index), its index manager (sealed local sidecar), a pipeline open
 // chunk's built GLCB, or a sealed GLCB in the vault chunk root that no
 // manager serves (yet). No remote read is fabricated: when the bytes are
 // not local, the lookup reports unresolvable and callers fall back to the
-// FSM-based estimate (gastrolog-1952x).
+// FSM-based estimate.
 func (o *Orchestrator) IndexReader() manifest.IndexReader {
 	return &orchestratorIndexReader{o: o}
 }
@@ -373,16 +372,16 @@ func (r *orchestratorIndexReader) lookupVaultManagers(chunkID chunk.ChunkID) (ch
 
 // manifestBoundaryIngestRank answers rank (and, on monotonic chunks,
 // position) lookups that need no ITSI bytes at all, from the FSM-replicated
-// index metadata (gastrolog-enfwd). On a sealed monotonic chunk the first
+// index metadata. On a sealed monotonic chunk the first
 // appended record carries the minimum IngestTS (IngestStart), so a timestamp
 // strictly before IngestStart resolves to rank 0 — exactly the answer the
 // chunk's own ITSI section would give — on ANY voter, bytes or not.
 // Timestamps at or after IngestStart need bytes and stay unresolvable here
-// (per-timestamp resolvability; consumers fall back to the FSM estimate,
-// gastrolog-1952x). Timestamps past IngestEnd already report unresolvable in
-// the byte tiers, matching the ITSI "past all entries" answer. Non-monotonic
-// chunks get no boundary answer: IngestStart is only the first APPENDED
-// record's timestamp there, not the minimum.
+// (per-timestamp resolvability; consumers fall back to the FSM estimate).
+// Timestamps past IngestEnd already report unresolvable in
+// the byte-backed fallbacks, matching the ITSI "past all entries" answer.
+// Non-monotonic chunks get no boundary answer: IngestStart is only the first
+// APPENDED record's timestamp there, not the minimum.
 func (o *Orchestrator) manifestBoundaryIngestRank(chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
 	_, e, ok := o.manifestEntryByChunk(chunkID)
 	if !ok || !e.IsSealed() || !e.IngestTSMonotonic || e.RecordCount <= 0 {
@@ -399,7 +398,7 @@ func (o *Orchestrator) manifestBoundaryIngestRank(chunkID chunk.ChunkID, ts time
 // no chunk or index manager involvement. Covers sealed pipeline chunks whose
 // GLCB exists in this node's vault chunk root but is not (or not yet)
 // registered with a manager. Nodes without local bytes report false; remote
-// reads are never fabricated (the FSM-estimate residual is gastrolog-1952x).
+// reads are never fabricated; the caller falls back to the FSM estimate.
 func (o *Orchestrator) chunkRootFindIngest(chunkID chunk.ChunkID, ts time.Time) (rank, pos uint64, ok bool) {
 	vid, e, found := o.manifestEntryByChunk(chunkID)
 	if !found || !e.IsSealed() {

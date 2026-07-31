@@ -172,10 +172,10 @@ func TestImportToInstanceConcurrentSafe(t *testing.T) {
 
 // --- ListAllChunkMetas ---
 
-// TestListAllChunkMetasOverlaysFromFSM is the regression test for
-// gastrolog-asg4l, updated for the grounded-read seam (gastrolog-2lfjk/3jerp).
-// The local chunk manager only sets CloudBacked=true on the node that actually
-// uploaded the blob (the cold instance raft leader); followers strip
+// TestListAllChunkMetasOverlaysFromFSM is the regression test for the follower
+// cloud-badge gap, updated for the grounded-read seam. The local chunk manager
+// only sets CloudBacked=true on the node that actually uploaded the blob (the
+// cold instance raft leader); followers strip
 // sealed_backing from their chunk-manager params and never see the cloud state,
 // so their local CloudBacked is permanently false. The fix grounds the
 // cluster-wide FSM view onto each chunk meta the orchestrator returns. Without
@@ -285,7 +285,7 @@ func TestListAllChunkMetasNilOverlayPassthrough(t *testing.T) {
 }
 
 // TestListAllChunkMetasSkipsFollowerInstances is the regression test for
-// gastrolog-2rvak. When a vault has both a leader and a follower instance
+// double-counted record totals. When a vault has both a leader and a follower
 // instance for the same instance on the same node, ListAllChunkMetas must
 // return only the leader's chunks. Including the follower's view double-
 // counts records and produces non-authoritative counts in the Inspector.
@@ -356,7 +356,7 @@ func TestLocalLeaderVaultIDsExcludesFollowerOnlyVaults(t *testing.T) {
 
 // --- Retention action from position ---
 
-// Phase 4 (gastrolog-42f9z) deleted TestRetentionActionDerivedFromPosition:
+// Phase 4 deleted TestRetentionActionDerivedFromPosition:
 // the action enum is gone, retention rules carry only the policy, and the
 // "is this the last instance?" position-based action derivation was removed
 // alongside the multi-transition chain (Phase 2 collapsed the chain).

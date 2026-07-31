@@ -67,7 +67,7 @@ type BlobInfo struct {
 }
 
 // Archiver extends Store with storage-class lifecycle operations.
-// Not all providers support this (GCS has no offline access tiers). Callers
+// Not all providers support this (GCS has no offline storage classes). Callers
 // should type-assert to check availability.
 type Archiver interface {
 	// Archive transitions a blob to an offline storage class.
@@ -87,7 +87,7 @@ type Archiver interface {
 	IsRestoring(ctx context.Context, key string) (bool, error)
 }
 
-// IsArchived returns true if the blob is in an offline access tier that
+// IsArchived returns true if the blob is in an offline storage class that
 // requires a restore operation before it can be read.
 // S3: GLACIER, DEEP_ARCHIVE. Azure: Archive. GCS: always false (all readable).
 func (b BlobInfo) IsArchived() bool {

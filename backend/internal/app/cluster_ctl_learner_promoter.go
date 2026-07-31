@@ -82,12 +82,12 @@ func (g *clusterCtlPromotionGroup) promote(m learnerMember) error {
 
 // newClusterCtlLearnerPromoter builds the event-driven promoter for the
 // cluster-ctl Raft group. Fresh nodes join as Nonvoter / Staging learners
-// (gastrolog-41sut) and are promoted to Voter once they have replicated
-// the existing log — protecting the cluster from the quorum-loss window
-// where a fresh joiner counts as a voter but cannot yet vote because its
-// WAL is still catching up. The single-element group provider means
-// evaluate() consults the one cluster-ctl group; the isLeader() gate
-// inside makes non-leader nodes no-ops. See gastrolog-4vg17.
+// and are promoted to Voter once they have replicated the existing log —
+// protecting the cluster from the quorum-loss window where a fresh joiner
+// counts as a voter but cannot yet vote because its WAL is still catching
+// up. The single-element group provider means evaluate() consults the one
+// cluster-ctl group; the isLeader() gate inside makes non-leader nodes
+// no-ops.
 func newClusterCtlLearnerPromoter(c raftMembership, ps peerStatsReader, logger *slog.Logger) *learnerPromoter {
 	g := &clusterCtlPromotionGroup{cluster: c, peerState: ps, logger: logger}
 	return newLearnerPromoter("cluster-ctl", func() []promotionGroup {

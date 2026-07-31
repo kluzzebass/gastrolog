@@ -3,8 +3,8 @@ package orchestrator
 // A standing condition — a destination parked at its max-size bound — hits every
 // chunk of every sweep, and the abort warn used to be emitted per chunk. On the
 // dev cluster that was tens of identical lines per second, indefinitely. The
-// transfer disposition already throttles the same event; the route path did not
-// (gastrolog-4dr79b).
+// transfer disposition already throttles the same event; the route path did
+// not.
 
 import (
 	"log/slog"

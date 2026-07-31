@@ -81,7 +81,7 @@ func leaderlessFixture(t *testing.T) (*Orchestrator, *alert.Collector, func(time
 // transients are self-healing), must alarm once the window elapses, and must
 // clear the moment a leader resolves again. The window is the catalog's
 // DelayOn, enforced by the collector — the sweep just reports the raw
-// condition each tick (gastrolog-4wvxqh).
+// condition each tick.
 func TestLeaderlessAlarmDelayOnAndClear(t *testing.T) {
 	t.Parallel()
 	o, c, advance := leaderlessFixture(t)

@@ -41,8 +41,7 @@ type sealProgress struct {
 	// manifest so seal retries do not re-purge or re-enqueue segments. The
 	// claim is won at entry but the work runs after it; postSealDoneCh closes
 	// when the claimant finishes, so a caller refused the claim can wait for
-	// completion instead of returning while the purge is still in flight
-	// (gastrolog-4cxvdi).
+	// completion instead of returning while the purge is still in flight.
 	postSeal       buildKey
 	postSealDoneCh chan struct{}
 	// onBuiltFired ensures OnBuilt fires once per sealed manifest build.
@@ -138,16 +137,15 @@ func (p *sealProgress) postSealDone(key buildKey) bool {
 // claimPostSeal wins the post-seal work slot exactly once per cycle, and only
 // after markBuilt. OnSealedManifestCleared can fire on follower homes before
 // local GLCB build finishes; refusing the claim until built keeps that early
-// callback a no-op so finishBuildOnce can run the post-seal work later
-// (gastrolog-3vlse).
+// callback a no-op so finishBuildOnce can run the post-seal work later.
 //
 // A caller refused because the cycle is already claimed receives the
 // claimant's done channel (closed by finishPostSeal) so it can wait for the
 // work to COMPLETE — a refused claim means "someone owns this", not "this is
-// done", and treating the two as the same let BuildOnce return while the
-// OnSealedManifestCleared-spawned claimant was still mid-purge
-// (gastrolog-4cxvdi). The channel is nil when there is nothing to wait for
-// (no claim exists for this cycle yet).
+// done", and treating the two as the same lets BuildOnce return while the
+// OnSealedManifestCleared-spawned claimant is still mid-purge. The channel
+// is nil when there is nothing to wait for (no claim exists for this cycle
+// yet).
 func (p *sealProgress) claimPostSeal(key buildKey) (bool, <-chan struct{}) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

@@ -87,7 +87,7 @@ func (o *Orchestrator) OpenPipelineChunkCursor(vaultID glid.GLID, chunkID chunk.
 // When openReader is set, reverse seeks and Prev use a positional reader that
 // shares QueryOpenChunk's span resolution and merge order — opened lazily on
 // the first positional read, with its segment mappings cached for the cursor
-// lifetime and released in Close (gastrolog-54mjat).
+// lifetime and released in Close.
 type manifestRecordCursor struct {
 	chunkID      chunk.ChunkID
 	pull         func() (chunk.Record, error, bool)

@@ -96,7 +96,7 @@ test.describe.serial("Inspector", () => {
     await expect(dialog).not.toBeVisible();
   });
 
-  // ── Jobs tab (gastrolog-5iji6) ─────────────────────────────────────
+  // ── Jobs tab ───────────────────────────────────────────────────────
 
   test("shows Jobs tab in entities view", async ({ page }) => {
     const dialog = await openInspector(page, "Entities");
@@ -125,7 +125,7 @@ test.describe.serial("Inspector", () => {
     }
   });
 
-  // ── Routes tab (gastrolog-5iji6) ───────────────────────────────────
+  // ── Routes tab ─────────────────────────────────────────────────────
 
   test("shows Routes tab in entities view", async ({ page }) => {
     const dialog = await openInspector(page, "Entities");
@@ -167,7 +167,7 @@ test.describe.serial("Inspector", () => {
     await systemBtn.click();
   });
 
-  // ── Cross-navigation (gastrolog-5hhp3) ──────────────────────────────
+  // ── Cross-navigation ────────────────────────────────────────────────
 
   test("vault detail has Open in Settings link", async ({ page }) => {
     const dialog = await openInspector(page, "Entities");
@@ -215,7 +215,7 @@ test.describe.serial("Inspector", () => {
     }
   });
 
-  // ── Node detail shows jobs (gastrolog-5iji6) ───────────────────────
+  // ── Node detail shows jobs ─────────────────────────────────────────
 
   test("node detail shows jobs section", async ({ page }) => {
     const dialog = await openInspector(page);

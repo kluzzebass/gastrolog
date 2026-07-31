@@ -17,10 +17,10 @@ import (
 )
 
 // These tests pin the event-driven placement reconcile that replaced the 15s
-// orchestrator placement sweep (gastrolog-29xpy). Every case drives
-// ReconcileVaultPlacement / ReconcilePlacements directly — the entry points the
-// FSM config dispatcher calls — with NO scheduler registered, so a green run
-// proves the work happens on the config event, not on a tick.
+// orchestrator placement sweep. Every case drives ReconcileVaultPlacement /
+// ReconcilePlacements directly — the entry points the FSM config dispatcher
+// calls — with NO scheduler registered, so a green run proves the work happens
+// on the config event, not on a tick.
 
 // mnLoader is a mutable SystemLoader so a test can change the placement config
 // between reconcile calls (the way successive CmdSetVaultPlacements applies do).
@@ -32,8 +32,8 @@ func mkSys(vaultID glid.GLID, placements []system.VaultPlacement, nscs []system.
 	return &system.System{
 		Runtime: system.Runtime{
 			NodeStorageConfigs: nscs,
-			// Placements live on the runtime map, their owner; VaultConfig no
-			// longer mirrors them (gastrolog-617qns).
+			// Placements live on the runtime map, their owner; VaultConfig
+			// does not mirror them.
 			VaultPlacements: map[glid.GLID][]system.VaultPlacement{vaultID: placements},
 		},
 		Config: system.Config{Vaults: []system.VaultConfig{{ID: vaultID, Name: "v"}}},
@@ -200,11 +200,11 @@ func TestReconcileVaultPlacement_PropagatesToAllNodes(t *testing.T) {
 	}
 }
 
-// ---- gastrolog-235dm7: stable-leader rebalance wakes the ack reconcile ----
+// ---- stable-leader rebalance wakes the ack reconcile ----
 //
-// gastrolog-3fu9t made the reconciler's leader-only categories converge on the
-// lead-gained edge (ReconcileMembershipCatchup ← onVaultCtlLeadGained). That
-// covers every membership move that comes WITH a leadership change. It does not
+// The reconciler's leader-only categories converge on the lead-gained edge
+// (ReconcileMembershipCatchup ← onVaultCtlLeadGained). That covers every
+// membership move that comes WITH a leadership change. It does not
 // cover a rebalance under a STABLE leader: placements move a follower from one
 // node to another, the leader keeps its role and its vault-ctl Raft leadership,
 // and no lead-gained edge fires — so the leader's pendingDeletes kept naming

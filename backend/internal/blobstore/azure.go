@@ -162,7 +162,7 @@ func azureBlobToInfo(item *container.BlobItem) BlobInfo {
 }
 
 // isAzureArchivedError checks if an Azure error is due to the blob being
-// in the Archive access tier (409 Conflict with "BlobArchived" error code).
+// in the Archive storage class (409 Conflict with "BlobArchived" error code).
 func isAzureArchivedError(err error) bool {
 	if err == nil {
 		return false

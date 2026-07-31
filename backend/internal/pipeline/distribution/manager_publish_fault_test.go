@@ -1,9 +1,9 @@
 package distribution
 
-// Regression coverage for gastrolog-353kwm: a missing-bytes item must not
-// abort its coalesced publish batch (stranding durable batchmates until
-// restart), and failed vault-ctl applies must retry behind a backoff instead
-// of hot-looping invisibly.
+// Regression coverage for publish-batch fault handling: a missing-bytes
+// item must not abort its coalesced publish batch (stranding durable
+// batchmates until restart), and failed vault-ctl applies must retry behind
+// a backoff instead of hot-looping invisibly.
 
 import (
 	"context"

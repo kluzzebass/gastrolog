@@ -6,9 +6,8 @@ import { OfflineBadge } from "./OfflineBadge";
 afterEach(cleanup);
 
 // Only the CURRENT instant is faked. The instant being measured FROM is the
-// backend's ClusterNode.last_seen, which is the entire point of
-// gastrolog-231eli: the browser may format elapsed time, but it must never be
-// the source of the origin.
+// backend's ClusterNode.last_seen: the browser may format elapsed time, but
+// it must never be the source of the origin.
 const NOW_MS = 1_700_000_000_000;
 const NOW_SECS = BigInt(Math.floor(NOW_MS / 1000));
 

@@ -195,8 +195,8 @@ func TestSend_AllPeersReceive(t *testing.T) {
 	b := newBroadcaster(fp, quietLogger(), time.Second)
 	b.Send(context.Background(), testMsg())
 
-	// Send is fire-and-forget (push, not pull — see gastrolog-5oofa).
-	// Poll for delivery with a generous deadline.
+	// Send is fire-and-forget (push, not pull, so one stalled peer can't
+	// block the caller). Poll for delivery with a generous deadline.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		allReceived := true
@@ -230,9 +230,10 @@ func TestSend_AllPeersReceive(t *testing.T) {
 
 // TestSend_ReturnsImmediatelyEvenWithSlowPeer verifies the push-not-pull
 // contract: Send returns immediately regardless of how slow any peer is.
-// Per gastrolog-5oofa, a SIGSTOPed peer must not stall the caller — the
-// fix is to make Send fire-and-forget. Callers (StatsCollector) push
-// their local state; they don't wait for peer acknowledgment.
+// A SIGSTOPed peer must not stall the caller — a synchronous Send let one
+// paused peer head-of-line block the whole cluster, hence fire-and-forget.
+// Callers (StatsCollector) push their local state; they don't wait for
+// peer acknowledgment.
 func TestSend_ReturnsImmediatelyEvenWithSlowPeer(t *testing.T) {
 	if testing.Short() {
 		t.Skip("waits out a real 2s broadcast timeout for the slow peer; -short skips")

@@ -208,16 +208,13 @@ func newScheduler(logger *slog.Logger, maxConcurrent int, now func() time.Time) 
 //
 // Membership in s.jobs IS "pending": the completion path records the result in
 // s.completed and deletes the job from s.jobs, so a name still present has not
-// finished. This used to additionally test s.completed[name], which could never
-// match — s.completed is keyed by job ID, not name — so the predicate silently
-// degraded to the membership test it now performs openly. Harmless because the
-// two agree, but a helper whose body claims a check it does not perform is how
-// the next reader mistakes it for a dedup guard (gastrolog-1scomn).
+// finished. Do not additionally test s.completed[name] — s.completed is keyed
+// by job ID, not name, so that test can never match.
 //
 // NOT a deduplication guard. Pairing it with RunOnce to mean "enqueue this
 // work unless it is already queued" is a check-then-act race, and the answer
 // goes stale the instant the job completes. Use RunOnceIfAbsent, which does
-// the check and the registration under one lock hold. See gastrolog-3hwngy.
+// the check and the registration under one lock hold.
 func (s *Scheduler) HasPendingPrefix(prefix string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -243,9 +240,9 @@ func (s *Scheduler) WaitIdle(timeout time.Duration) bool {
 	for time.Now().Before(deadline) {
 		s.mu.Lock()
 		pending := 0
-		// Same as HasPendingPrefix: a completed job is gone from s.jobs, and the
-		// s.completed[name] test this used to perform was keyed by name against a
-		// map keyed by job ID, so it never matched (gastrolog-1scomn).
+		// Same as HasPendingPrefix: a completed job is gone from s.jobs, and
+		// s.completed is keyed by job ID rather than name, so testing it here
+		// could never match.
 		for name := range s.jobs {
 			if sched, ok := s.schedules[name]; ok && sched == "once" {
 				pending++
@@ -358,8 +355,7 @@ func (s *Scheduler) Rebuild(maxConcurrent int) error {
 // Callers whose registration is idempotent by nature (re-run on every config
 // apply) should test for it with errors.Is rather than guarding the call with
 // HasJob: the pre-check is a check-then-act race and it hides genuine
-// registration failures behind a shape that looks deliberate. See
-// gastrolog-69sjlj.
+// registration failures behind a shape that looks deliberate.
 var ErrJobExists = errors.New("scheduled job already exists")
 
 // AddJob registers a named cron job. The name must be unique across all subsystems.
@@ -582,11 +578,10 @@ func (s *Scheduler) RunOnce(name string, taskFn any, args ...any) error {
 // Callers must NOT open-code this as HasJob/HasPendingPrefix followed by
 // RunOnce. That shape is a check-then-act race — both callers observe
 // "absent" and both enqueue — and it is exactly how the cloud-upload paths
-// double-enqueued a chunk (gastrolog-3hwngy). It is also why RunOnce's
-// silent same-name overwrite is dangerous: the first job's completion
-// listener deletes s.jobs[name], which by then points at the SECOND job, so
-// the second job's own completion finds nothing and publishes no terminal
-// event.
+// double-enqueued a chunk. It is also why RunOnce's silent same-name
+// overwrite is dangerous: the first job's completion listener deletes
+// s.jobs[name], which by then points at the SECOND job, so the second job's
+// own completion finds nothing and publishes no terminal event.
 func (s *Scheduler) RunOnceIfAbsent(name string, taskFn any, args ...any) (bool, error) {
 	return s.runOnce(name, &onceClaim{}, taskFn, args...)
 }
@@ -597,12 +592,10 @@ func (s *Scheduler) RunOnceIfAbsent(name string, taskFn any, args ...any) (bool,
 // hold of s.mu, so a stampede cannot overshoot the budget.
 //
 // This exists so a bounded pool of one-time jobs needs no second copy of "what
-// is outstanding" beside the scheduler's own job map. The GLCB replica
-// catch-up used to keep exactly that — a per-chunk inflight map with its own
-// mutex, released by the job body's defer — which meant two owners of the same
-// fact: cancelling those jobs with RemoveJobsByPrefix would have stranded the
-// map entries and stopped those chunks from ever being pulled again. See
-// gastrolog-69sjlj and the single-source-of-truth rule in CLAUDE.md.
+// is outstanding" beside the scheduler's own job map: a separate inflight map
+// released by the job body would be a second owner of the same fact, and
+// cancelling the jobs with RemoveJobsByPrefix would strand its entries. See
+// the single-source-of-truth rule in CLAUDE.md.
 //
 // The claim is a lease on outstanding work, released when the job leaves the
 // registry — on completion (completeOneTimeJob) or on cancellation
@@ -676,9 +669,9 @@ func (s *Scheduler) runOnceWith(name string, claim *onceClaim, prog *JobProgress
 	// Every one-time job gets a progress record, even when its task never
 	// touches it. Two reasons: the job is otherwise invisible in the Jobs
 	// inspector beyond a bare name, and cleanupCompletedLocked DELETES any
-	// completed entry whose Progress is nil — so a RunOnce job used to vanish
-	// entirely the moment anything called ListJobs, leaving no trace that it
-	// ran, succeeded or failed (gastrolog-68dusi).
+	// completed entry whose Progress is nil — so without a record a RunOnce
+	// job vanished entirely the moment anything called ListJobs, leaving no
+	// trace that it ran, succeeded or failed.
 	//
 	// If the caller supplied its own record (RunOnceWithProgress) it is already
 	// in s.progress under this id; otherwise start a status-only one.
@@ -835,18 +828,12 @@ func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) 
 // completeOneTimeJob moves a finished one-time job from the active maps into
 // the completed registry.
 //
-// Keyed by the job's OWN id, which gocron hands to the event listener. It used
-// to discard that id and re-derive one by looking the NAME up in s.jobs — which
-// is only the same job when no one has since registered another under that
-// name. RunOnce overwrites s.jobs[name] without touching the job already
-// running, so after an overwrite the first job's completion recorded the
-// SECOND job's id, stamped it with a LastRun the second job had not reached,
-// and deleted the registry entry while that job was still running. The second
-// job's own completion then found nothing under the name and returned silently:
-// no completion record, no onJobChange notification, and any progress it wrote
-// afterwards leaked with nothing left to delete it. WaitIdle and
-// HasPendingPrefix read s.jobs, so they reported idle mid-flight
-// (gastrolog-1scomn).
+// Keyed by the job's OWN id, which gocron hands to the event listener, never by
+// re-deriving one from the NAME in s.jobs: RunOnce overwrites s.jobs[name]
+// without touching the job already running, so after an overwrite a name lookup
+// answers with the SECOND job — which is how the first job's completion once
+// recorded the second job's id, stamped a LastRun it had not reached, and
+// deleted its registry entry mid-flight.
 //
 // Both bodies still run — a duplicate schedule is the caller's bug, and this
 // does not try to hide it. What it stops is the scheduler misreporting its own
@@ -881,8 +868,8 @@ func (s *Scheduler) completeOneTimeJob(id uuid.UUID, name string, failed bool, t
 
 	// Stamp the terminal status. A task that reported its own outcome (Complete
 	// or Fail) keeps it; one that never touched its record is completed here, so
-	// the retained entry says something rather than sitting at "running" forever
-	// (gastrolog-68dusi).
+	// the retained entry says something rather than sitting at "running"
+	// forever.
 	if info.Progress != nil {
 		info.Progress.mu.RLock()
 		status := info.Progress.Status
@@ -899,7 +886,7 @@ func (s *Scheduler) completeOneTimeJob(id uuid.UUID, name string, failed bool, t
 	// Classify the terminal event from the progress record, which every
 	// one-time job now has. gocron calls a DIFFERENT listener on error, so the
 	// task's failure reaches us as the `failed` argument rather than having to
-	// be inferred (gastrolog-68dusi).
+	// be inferred.
 	kind := JobEventCompleted
 	if info.Progress != nil {
 		info.Progress.mu.RLock()
@@ -913,8 +900,8 @@ func (s *Scheduler) completeOneTimeJob(id uuid.UUID, name string, failed bool, t
 	// success path logged "job finished" — so the only observable difference
 	// between a job that worked and one that died was the absence of a line.
 	// That is how a failing post-seal can strand a chunk in Sealing with no
-	// trace anywhere (gastrolog-231ik: the stall was unfalsifiable across runs
-	// precisely because this path is silent).
+	// trace anywhere; a stall like that was unfalsifiable across test runs
+	// precisely because this path was silent.
 	//
 	// Logged BEFORE the listeners are woken, so anything that reacts to the
 	// terminal event — an operator tailing logs, a test waiting on the

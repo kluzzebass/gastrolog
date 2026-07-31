@@ -32,12 +32,11 @@ func (s *blockingStore) Upload(ctx context.Context, _ string, _ io.Reader, _ map
 	return ctx.Err()
 }
 
-// TestCloudUploadTimeout is the regression test for gastrolog-21xs8.
-// Before the fix, uploadToCloud passed context.Background() to the
-// CloudStore.Upload call, so a slow or unresponsive S3 would block the
-// post-seal pipeline indefinitely. The fix wraps the call with a
-// per-call deadline (cloudUploadTimeout). This test uses a mock Store
-// whose Upload method blocks forever, and asserts that PostSealProcess
+// TestCloudUploadTimeout pins the per-call deadline
+// (cloudUploadTimeout) that uploadToCloud wraps around
+// CloudStore.Upload: without it a slow or unresponsive S3 blocks the
+// post-seal pipeline indefinitely. This test uses a mock Store whose
+// Upload method blocks forever, and asserts that PostSealProcess
 // returns within cloudUploadTimeout + margin rather than hanging.
 //
 // The production cloudUploadTimeout is 60s, which is too slow for a

@@ -17,7 +17,7 @@ import (
 	sysmem "gastrolog/internal/system/memory"
 )
 
-// Tests for the RF-preservation gate (gastrolog-3vyex): a node removal
+// Tests for the RF-preservation gate: a node removal
 // that would leave a vault with fewer surviving placements than its
 // configured replication factor, and nowhere to re-place, is refused for
 // operator-driven removal and allowed for preStop self-removal.
@@ -717,7 +717,7 @@ func TestNodeRemover_AllowedRemovalIsReplacedByReconcile(t *testing.T) {
 
 	// The placement manager sees the surviving nodes and the spare. Zero
 	// raft-contact TTL: this test feeds liveness through broadcast Update only,
-	// so the Raft input stays disabled (gastrolog-1lbifx).
+	// so the Raft input stays disabled.
 	peers := cluster.NewPeerState(time.Minute, 0)
 	now := time.Now()
 	peers.Update(c.ids["b"].String(), nil, now)

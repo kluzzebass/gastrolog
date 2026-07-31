@@ -14,16 +14,15 @@ import (
 	"gastrolog/internal/server"
 )
 
-// YieldLeadership is the preStop-time leadership handoff that replaces
-// demote-self. Three behaviors to pin:
+// YieldLeadership is the preStop-time leadership handoff. It moves Raft
+// leadership off this node without changing cluster membership. Three
+// behaviors to pin:
 //
 //   1. Leader → calls LeadershipTransfer, returns transferred=true.
 //   2. Follower → no-op, returns transferred=false (preStop must NOT
 //      error on follower pods, otherwise rolling restart blocks every
 //      non-leader pod).
 //   3. Single-node / no cluster → no-op, no error.
-//
-// See gastrolog-2yeie.
 
 func yieldClient(t *testing.T, mc server.ClusterStatusProvider) gastrologv1connect.LifecycleServiceClient {
 	t.Helper()

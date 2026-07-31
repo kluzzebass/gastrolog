@@ -25,7 +25,7 @@ func ParamDefaults() map[string]string {
 // The CaptureHandler reference is used to apply the min_level param and to
 // raise the capture filter level under pressure. Capture-channel overflow is
 // NOT surfaced here: the drop count is a metric read by the stats collector
-// (NodeStats.self_ingester_drops_total), not an alarm (gastrolog-3phtqv).
+// (NodeStats.self_ingester_drops_total), not an alarm.
 func NewFactory(
 	ch <-chan logging.CapturedRecord,
 	capture *logging.CaptureHandler,

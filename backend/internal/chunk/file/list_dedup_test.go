@@ -16,7 +16,6 @@ import (
 //
 // This can happen briefly during upload (after cloud index insert, before
 // metas delete) or when stale local files survive after adoptCloudBlob.
-// See gastrolog-68fqk.
 func TestListDeduplicatesCloudAndLocal(t *testing.T) {
 	t.Parallel()
 

@@ -72,12 +72,12 @@ func readBackNow(t *testing.T, node *testNode, id glid.GLID, where string) *syst
 }
 
 // TestFourNodeFollowerReadAfterForwardedWrite is the multi-node regression
-// test for the event-driven apply wait (gastrolog-3klg1, extends
-// gastrolog-2nxij): on a 4-node cluster, a mutation forwarded from ANY
-// follower must be visible to an immediate read on that same follower —
-// woken by the FSM apply notification, never by polling. Also exercises
-// leader change: after a leadership transfer the barrier must keep holding
-// for writes forwarded by the deposed leader and the remaining followers.
+// test for the event-driven apply wait: on a 4-node cluster, a mutation
+// forwarded from ANY follower must be visible to an immediate read on that
+// same follower — woken by the FSM apply notification, never by polling.
+// Also exercises leader change: after a leadership transfer the barrier
+// must keep holding for writes forwarded by the deposed leader and the
+// remaining followers.
 func TestFourNodeFollowerReadAfterForwardedWrite(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {

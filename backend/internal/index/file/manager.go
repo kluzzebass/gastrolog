@@ -148,9 +148,9 @@ func (m *Manager) BuildAdapter() chunk.ChunkIndexBuilder {
 func (m *Manager) DeleteIndexes(chunkID chunk.ChunkID) error {
 	m.evictCache(chunkID)
 
-	// Remove final index files. tsidx ingest/source no longer have
-	// sidecars — their content lives in the GLCB blob's ITSI/STSI
-	// sections, removed when data.glcb is removed by the chunk manager.
+	// Remove final index files. tsidx ingest/source have no sidecars —
+	// their content lives in the GLCB blob's ITSI/STSI sections, removed
+	// when data.glcb is removed by the chunk manager.
 	paths := []string{
 		filetoken.IndexPath(m.dir, chunkID),
 		fileattr.KeyIndexPath(m.dir, chunkID),
@@ -490,8 +490,8 @@ func (m *Manager) evictCache(chunkID chunk.ChunkID) {
 // IndexSizes returns the on-disk file size for each index.
 func (m *Manager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 	sizes := make(map[string]int64)
-	// tsidx ingest/source no longer have sidecars — sizes for ITSI/STSI
-	// roll into data.glcb's reported size.
+	// tsidx ingest/source have no sidecars — sizes for ITSI/STSI roll
+	// into data.glcb's reported size.
 	paths := map[string]string{
 		"token":    filetoken.IndexPath(m.dir, chunkID),
 		"attr_key": fileattr.KeyIndexPath(m.dir, chunkID),

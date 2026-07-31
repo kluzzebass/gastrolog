@@ -79,7 +79,7 @@ func NewS3(ctx context.Context, cfg S3Config) (*S3Store, error) {
 // RequestChecksumCalculationWhenRequired disables the SDK default of always
 // computing a trailing CRC on PutObject. Trailing checksums need a seekable
 // body or TLS; our upload path streams GLCB through zstd + io.Pipe over plain
-// HTTP to MinIO and similar mocks. See gastrolog-4agaw.
+// HTTP to MinIO and similar mocks.
 // ResponseChecksumValidationWhenRequired is the download-side mirror: MinIO
 // and other S3-compatibles return no checksum headers, so the default
 // WhenSupported mode logs a per-GetObject "Response has no supported

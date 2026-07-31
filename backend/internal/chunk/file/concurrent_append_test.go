@@ -10,9 +10,10 @@ import (
 	"gastrolog/internal/chunk"
 )
 
-// TestConcurrentAppendAttrIntegrity is a focused reproducer for gastrolog-4dd48:
-// concurrent Append calls corrupt attr.log data, causing "invalid attributes data"
-// errors when reading back via cursor.
+// TestConcurrentAppendAttrIntegrity is a focused reproducer for attr.log
+// corruption under concurrent Append: unserialized Append calls corrupt
+// attr.log data, causing "invalid attributes data" errors when reading
+// back via cursor.
 func TestConcurrentAppendAttrIntegrity(t *testing.T) {
 	t.Parallel()
 

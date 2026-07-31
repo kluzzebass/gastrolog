@@ -17,9 +17,8 @@ import (
 // above any healthy peer's round-trip on small metadata payloads
 // (typical: tens of ms; warm-cache worst case: a few hundred ms) and
 // well below any operator's tolerance for a frozen UI. A paused or
-// partitioned peer hits this limit and is silently dropped from the
-// merged result, leaving the UI usable instead of frozen. See
-// gastrolog-csspr.
+// partitioned peer hits this limit and is dropped from the merged
+// result, leaving the UI usable instead of frozen.
 const peerInspectorTimeout = 3 * time.Second
 
 // peerFanOut runs fn concurrently against each node and returns the
@@ -37,9 +36,9 @@ const peerInspectorTimeout = 3 * time.Second
 //
 // The third return value is a ContributionReport naming every peer that
 // failed to contribute, so callers can stamp their merged response as
-// visibly partial instead of silently dropping the peer (gastrolog-66zrj
-// / gastrolog-1ic07). It is nil when every peer contributed (or only
-// benign placement-churn errors occurred), so the happy path stays quiet.
+// visibly partial instead of silently dropping the peer. It is nil when
+// every peer contributed (or only benign placement-churn errors
+// occurred), so the happy path stays quiet.
 // Benign placement-churn errors are still elided from results but are NOT
 // counted as degradation — they are expected during reconfiguration, not
 // operational failures.
@@ -47,7 +46,7 @@ const peerInspectorTimeout = 3 * time.Second
 // Use this for unary inspector RPCs only (small request/response).
 // Streaming RPCs (SearchStream, Follow) have their own concurrency
 // shape and do not need this helper — those return channels that
-// naturally end when the parent context cancels. See gastrolog-csspr.
+// naturally end when the parent context cancels.
 func peerFanOut[T any](
 	ctx context.Context,
 	logger *slog.Logger,
@@ -71,9 +70,9 @@ func peerFanOut[T any](
 			if err != nil {
 				// Demote benign placement-churn errors (peer no longer
 				// owns the vault) to Debug — these fire during
-				// reconfiguration and aren't operational failures. See
-				// gastrolog-5z607. Benign errors are elided from results
-				// but must not be reported as degradation.
+				// reconfiguration and aren't operational failures.
+				// Benign errors are elided from results but must not be
+				// reported as degradation.
 				benign := orchestrator.IsPlacementChurnErr(err)
 				level := slog.LevelWarn
 				if benign {

@@ -395,8 +395,8 @@ func TestBackfillCloudUploads_SkipsWhenChunkIsCloudBacked(t *testing.T) {
 }
 
 // TestBackfillCloudUploadsLeaderOnly verifies backfill runs only on the instance
-// Raft leader. See gastrolog-2nngw — followers learn about cloud-backed
-// chunks via the FSM, so duplicate backfill on every node is wasteful.
+// Raft leader: followers learn about cloud-backed chunks via the FSM, so
+// duplicate backfill on every node is wasteful.
 func TestBackfillCloudUploadsLeaderOnly(t *testing.T) {
 	t.Parallel()
 
@@ -537,7 +537,7 @@ func countJobsNamed(o *Orchestrator, name string) int {
 // that same chunk may enqueue a second one — not a repeat catch-up sweep, and
 // not the live seal effect on the other code path. Both paths claim the same
 // scheduler job name through RunOnceIfAbsent, so the name is the idempotency
-// key. See gastrolog-3hwngy.
+// key.
 func TestBackfillCloudUploads_DeduplicatesPendingJobs(t *testing.T) {
 	t.Parallel()
 
@@ -662,7 +662,7 @@ func TestCloudUpload_ConcurrentRequestsClaimOnce(t *testing.T) {
 	}
 }
 
-// ---------- gastrolog-576bm: backfill demoted from 5s primary to edge-driven ----------
+// ---------- backfill demoted from 5s primary to edge-driven ----------
 
 // TestEvaluateCloudHealth_SteadyStateHealthyDoesNotResweep pins the demotion:
 // the retired 5s tick swept every cloud vault on every tick. Now the periodic

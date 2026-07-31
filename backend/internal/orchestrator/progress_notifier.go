@@ -19,8 +19,7 @@ import (
 // Idle cluster: zero work (the goroutine blocks on the trigger channel).
 // Busy cluster: at most two fan-outs per window per orchestrator
 // regardless of how many call sites fired (record append, seal,
-// compress, upload, FSM apply across peers, retention sweep). See
-// gastrolog-4y03v.
+// compress, upload, FSM apply across peers, retention sweep).
 type progressNotifier struct {
 	// Buffered=1 so coincident Signal() calls collapse to a single
 	// pending token. The throttle loop reads tokens to detect

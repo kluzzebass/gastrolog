@@ -22,7 +22,7 @@ func testServer() *Server {
 // the preStop hook against the cluster's RemoveNode → NotifyEviction
 // broadcast, the evicted node tries to re-bootstrap itself as a fresh
 // single-node cluster mid-shutdown, and the pod hangs in Terminating until
-// kubelet force-kills it — blocking the rollout. See gastrolog-5z7l8.
+// kubelet force-kills it — blocking the rollout.
 
 func TestNotifyEviction_SkipsHandlerWhenShuttingDown(t *testing.T) {
 	t.Parallel()

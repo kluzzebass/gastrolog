@@ -19,7 +19,7 @@ const (
 	//
 	// "Contact" is PeerState.LastSeen: the most recent Raft contact on any
 	// group shared with the peer, or the arrival of its stats broadcast,
-	// whichever is newer (gastrolog-1lbifx). The transition phase runs on
+	// whichever is newer. The transition phase runs on
 	// the cluster-ctl leader, and cluster-ctl spans every node, so the
 	// deciding node is replicating to every peer several times a second —
 	// this threshold is measured against a signal that refreshes far faster
@@ -55,8 +55,8 @@ const (
 // peer's stats broadcast, whichever is newer. Runs on the cluster-ctl leader
 // only.
 //
-// Contact-driven gating closes the RF=1 redeploy bug (gastrolog-2i1g9):
-// when a node briefly disappears (pod restart, network blip), the sweep
+// Contact-driven gating keeps RF=1 vaults intact across redeploys: when
+// a node briefly disappears (pod restart, network blip), the sweep
 // flips its NodeConfig.State to Unreachable, which the placement guard
 // (placement.go) reads to refuse leader rotation. The chunks stay where
 // they live; placement does not move them off the absent node.
@@ -138,8 +138,8 @@ func durationFromEnv(logger *slog.Logger, key string, fallback time.Duration) ti
 	return d
 }
 
-// tickOnce runs both phases of the sweep — the scheduler handles
-// cadence, so the loop and ticker that used to live here are gone.
+// tickOnce runs both phases of the sweep once; the scheduler owns
+// cadence.
 //
 //   - Transition phase (leader-only): scans NodeConfig records and
 //     proposes Live↔Unreachable transitions based on PeerState
@@ -245,8 +245,8 @@ func (s *unreachableSweep) tick(ctx context.Context) {
 			// StateSince records when the node actually went silent,
 			// not when the sweep noticed. Anchors the inspector's
 			// "unreachable Xm" duration to the same moment the
-			// client-side offline tracker started counting
-			// (gastrolog-778iv) so the badge transition is seamless.
+			// client-side offline tracker started counting, so the
+			// badge transition is seamless.
 			if err := s.cfgStore.SetNodeState(ctx, n.ID, system.NodeStateUnreachable, lastSeen); err != nil {
 				s.logger.Warn("unreachable_sweep: propose Unreachable",
 					"node", id, "elapsed", elapsed, "error", err)

@@ -25,7 +25,7 @@ type glcbCursor struct {
 
 	// onClose, when non-nil, is invoked exactly once at the end of Close to
 	// release the per-chunk read lock and MappedBlob retain pin that
-	// openLocalGLCBCursor acquired. See gastrolog-26zu1.
+	// openLocalGLCBCursor acquired.
 	onClose func()
 }
 

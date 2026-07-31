@@ -39,13 +39,13 @@ type rateSeries struct {
 	// (cluster totals from TTL-live peer broadcasts). A contributor whose
 	// stats expired and later resumed rejoins the sum as a one-tick upward
 	// jump indistinguishable from real traffic — the 5m EWMA read 138K/s from
-	// a 40K/s source (gastrolog-mliwrd). Any fingerprint change re-anchors the
+	// a 40K/s source. Any fingerprint change re-anchors the
 	// window exactly like a counter reset: no sample, EWMA + spark preserved.
 	// Per-entity series pass a constant fingerprint and never trigger it.
 	membership string
 	// Unix-load-style EWMAs (one float per horizon, no history buffer): each
 	// step folds the instantaneous rate in with e^(-dt/tau) decay, tau =
-	// 1m/5m/15m (gastrolog-4eh5ns).
+	// 1m/5m/15m.
 	ewma [3]float64
 	// ring is the per-tick rate history rendered as the wire spark. It is a
 	// generic sparkline.Sparkline[float64] — the same domain-free bounded-history
@@ -90,7 +90,7 @@ func (s *rateSeries) observe(now time.Time, counter int64, membership string, st
 		// Contributor set changed under a summed series: this tick's delta
 		// mixes real traffic with counters entering/leaving the sum, so it is
 		// not a measurable sample. Re-anchor, preserve EWMAs and spark, emit no
-		// sample (gastrolog-mliwrd).
+		// sample.
 		s.membership = membership
 		s.last = counter
 		s.lastAt = now
@@ -171,7 +171,7 @@ func (c *StatsCollector) emitRate(now time.Time, key string, counter int64, step
 }
 
 // emitRateM is emitRate with an explicit membership fingerprint for summed
-// cluster series (gastrolog-mliwrd).
+// cluster series.
 func (c *StatsCollector) emitRateM(now time.Time, key string, counter int64, membership string, step bool) *gastrologv1.ThroughputRate {
 	c.mu.Lock()
 	defer c.mu.Unlock()

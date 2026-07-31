@@ -12,7 +12,7 @@ import (
 )
 
 // ForwardSearchEngine resolves the query engine for a ForwardSearch RPC,
-// honoring sealed-chunk subset fields when present (gastrolog-2qj7m).
+// honoring sealed-chunk subset fields when present.
 func ForwardSearchEngine(o *orchestrator.Orchestrator, req *apiv1.ForwardSearchRequest) (*query.Engine, error) {
 	vaultID := glid.FromBytes(req.GetVaultId())
 	if vaultID.IsZero() {
@@ -31,7 +31,7 @@ func ForwardSearchEngine(o *orchestrator.Orchestrator, req *apiv1.ForwardSearchR
 // ForwardSearchIncludesHistogram reports whether a ForwardSearch handler should
 // run the ITSI histogram pre-pass before streaming records. Partitioned holder
 // slices skip it — each slice blocked the stream's first message on histogram
-// work and N holders multiplied that cost (gastrolog-2qj7m perf).
+// work and N holders multiplied that cost.
 func ForwardSearchIncludesHistogram(req *apiv1.ForwardSearchRequest, q query.Query) bool {
 	if q.BoolExpr != nil {
 		return false

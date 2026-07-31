@@ -107,7 +107,7 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 		pairs = append(pairs, [2]string{"Path", v.Path})
 	}
 	// Quantities are stored as the operator's own expression, so display is an
-	// exact echo — no formatter, no drift (gastrolog-etcjdx).
+	// exact echo — no formatter, no drift.
 	addExpr := func(label, expr string) {
 		if expr != "" {
 			pairs = append(pairs, [2]string{label, expr})
@@ -277,9 +277,8 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 }
 
 // applyVaultCacheFlags overlays the warm-cache budget/ttl flags. Both are
-// numeric on the wire (gastrolog-338j51); cache-budget is proto-optional so
-// an empty flag is "unset" (server defaults it for cloud vaults) rather than
-// (see gastrolog-etcjdx).
+// expression strings on the wire, carried through verbatim; an empty
+// cache-budget is "unset" (the server defaults it for cloud vaults).
 func applyVaultCacheFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
 	setFromFlag(cmd, "cache-budget", &cfg.CacheBudget)
 	setFromFlag(cmd, "cache-ttl", &cfg.CacheTtl)
@@ -288,10 +287,10 @@ func applyVaultCacheFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
 
 // applyVaultSizeFlags overlays the size expression flags. Quantities are
 // stored as the operator typed them and validated/resolved server-side, so
-// the CLI just carries the string through — no parsing here (gastrolog-etcjdx).
-// gastrolog-9akebz: disk-free-warn/disk-free-floor moved off the vault onto
-// the storage entity a vault's placements reference (system.FileStorage);
-// a storage-level CLI/UI surface for them is tracked separately.
+// the CLI just carries the string through — no parsing here.
+// disk-free-warn/disk-free-floor are not vault flags: they belong to the
+// storage entity a vault's placements reference (system.FileStorage), and
+// are set with `node add-storage`.
 func applyVaultSizeFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
 	setFromFlag(cmd, "memory-budget", &cfg.MemoryBudget)
 	return nil
@@ -323,7 +322,7 @@ func resolveVaultCloudService(ctx context.Context, cmd *cobra.Command, client *s
 // (vault name or ID) onto RetentionTransferTargetVaultId. An empty value
 // clears the target; the server enforces the transfer-disposition
 // constraints (target required when disposition=transfer, target != self,
-// both source and target plain non-cloud file vaults — gastrolog-2l918).
+// both source and target plain non-cloud file vaults).
 func resolveVaultRetentionTransferTarget(ctx context.Context, cmd *cobra.Command, client *server.Client, cfg *v1.VaultConfig) error {
 	target, _ := cmd.Flags().GetString("retention-transfer-target")
 	if target == "" {
@@ -368,11 +367,10 @@ func resolveVaultRetentionPolicy(ctx context.Context, cmd *cobra.Command, client
 	}
 	cfg.RetentionRules = []*v1.RetentionRule{{
 		RetentionPolicyId: retIDBytes,
-		// Phase 4 (gastrolog-42f9z): retention rules carry only the
-		// trigger policy. Routing of expired chunks' records is the
-		// routing engine's job — give a vault a route with
-		// source=ROUTE_SOURCE_RETENTION_TRIGGER to receive its retired
-		// records (Phase 5 wires this fully).
+		// Retention rules carry only the trigger policy. Routing of
+		// expired chunks' records is the routing engine's job — give a
+		// vault a route matching _source = "retention" to receive
+		// another vault's retired records.
 	}}
 	return nil
 }

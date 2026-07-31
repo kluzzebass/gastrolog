@@ -35,7 +35,7 @@ import (
 // It mirrors the production configDispatcher but lives in the test package.
 // ReloadFilters failures are reported instead of swallowed: a harness whose
 // pipeline vault registration fails silently makes every route-touching test
-// pass vacuously (gastrolog-4cl2u4).
+// pass vacuously.
 func testAfterConfigApply(t *testing.T, orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories) func(raftfsm.Notification) {
 	return func(n raftfsm.Notification) {
 		ctx := context.Background()
@@ -139,8 +139,8 @@ func TestDeleteVaultForce(t *testing.T) {
 
 	vaultID := glid.New()
 
-	// gastrolog-4kkoo (Phase 5): no FilterConfig — the test wires a filter
-	// set directly onto the orchestrator below, so no Put step is needed.
+	// The test wires a filter set directly onto the orchestrator below, so
+	// no filter Put step is needed.
 	_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
 			Id:      vaultID.Bytes(),
@@ -210,10 +210,10 @@ func TestDeleteVaultNotFound(t *testing.T) {
 	}
 }
 
-// TestPutVaultRejectsTypeChange covers the gastrolog-3ul0s guard: changing
-// `type` on an existing vault would leave the running orchestrator on the
-// old manager while the next restart rebuilds with the new type, silently
-// reinterpreting on-disk layout. PutVault must reject.
+// TestPutVaultRejectsTypeChange covers the vault-shape immutability guard:
+// changing `type` on an existing vault would leave the running orchestrator
+// on the old manager while the next restart rebuilds with the new type,
+// silently reinterpreting on-disk layout. PutVault must reject.
 func TestPutVaultRejectsTypeChange(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
 	ctx := context.Background()
@@ -248,9 +248,10 @@ func TestPutVaultRejectsTypeChange(t *testing.T) {
 	}
 }
 
-// TestPutVaultRejectsCloudServiceIDChange covers the gastrolog-3ul0s guard
-// for the cloud-binding field: swapping cloud_service_id would orphan blobs
-// in the original bucket while pointing the manager at a different one.
+// TestPutVaultRejectsCloudServiceIDChange covers the vault-shape
+// immutability guard for the cloud-binding field: swapping cloud_service_id
+// would orphan blobs in the original bucket while pointing the manager at a
+// different one.
 func TestPutVaultRejectsCloudServiceIDChange(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
 	ctx := context.Background()
@@ -346,8 +347,8 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 
 	vaultID := glid.New()
 
-	// gastrolog-4kkoo (Phase 5): expression inlined on the route via Stages
-	// — no separate FilterConfig entity.
+	// The filter expression is inlined on the route via Stages; filters are
+	// not a standalone entity.
 	_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
 			Id:      vaultID.Bytes(),
@@ -465,9 +466,8 @@ func TestPauseVaultPersistsToConfig(t *testing.T) {
 
 	vaultID := glid.New()
 
-	// gastrolog-4kkoo (Phase 5): no FilterConfig — the test only verifies
-	// PauseVault config persistence and doesn't rely on a route, so the
-	// preflight Filter+Route setup is gone.
+	// The test only verifies PauseVault config persistence and doesn't rely
+	// on a route, so no preflight route setup is needed.
 	_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
 			Id:      vaultID.Bytes(),
@@ -555,9 +555,8 @@ func TestDuplicateEntityNames(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
 	ctx := context.Background()
 
-	// gastrolog-4kkoo (Phase 5): the "filter" subtest is gone — filters are
-	// no longer a standalone entity, so duplicate-name semantics apply only
-	// to vaults / ingesters / routes / policies.
+	// Filters are not a standalone entity, so duplicate-name semantics apply
+	// only to vaults / ingesters / routes / policies.
 
 	t.Run("vault", func(t *testing.T) {
 		_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
@@ -672,8 +671,8 @@ func TestDuplicateEntityNames(t *testing.T) {
 
 	t.Run("update_self_allowed", func(t *testing.T) {
 		// Creating with an explicit ID, then updating with the same ID and name should work.
-		// gastrolog-4kkoo (Phase 5): asserted on a Route now that filters are
-		// not a standalone entity. Same self-update semantics for any Put*.
+		// Asserted on a Route because filters are not a standalone entity.
+		// Same self-update semantics for any Put*.
 		id := glid.New()
 		_, err := client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
 			Config: &gastrologv1.RouteConfig{Id: id.Bytes(), Name: "self-update", Enabled: true},
@@ -728,8 +727,7 @@ func TestDuplicateEntityNames(t *testing.T) {
 	})
 
 	t.Run("empty_name_rejected", func(t *testing.T) {
-		// gastrolog-4kkoo (Phase 5): asserted on a Route now that filters
-		// are not a standalone entity.
+		// Asserted on a Route because filters are not a standalone entity.
 		_, err := client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
 			Config: &gastrologv1.RouteConfig{Name: "", Enabled: true},
 		}))
@@ -1166,8 +1164,8 @@ func TestGetRouteStats(t *testing.T) {
 		t.Error("expected routeTableActive=false before routes configured")
 	}
 
-	// Configure a vault and route. gastrolog-4kkoo (Phase 5): expression
-	// inlined on the route via Stages — no FilterConfig entity.
+	// Configure a vault and route. The filter expression is inlined on the
+	// route via Stages; filters are not a standalone entity.
 	vaultID := glid.New()
 	routeID := glid.New()
 
@@ -1256,14 +1254,6 @@ func waitForRouteStats(t *testing.T, client gastrologv1connect.SystemServiceClie
 		time.Sleep(5 * time.Millisecond)
 	}
 }
-
-// ---------- Eject route & retention rule validation ----------
-
-// gastrolog-4kkoo (Phase 5): TestPutRouteEjectOnly removed. The Phase-4
-// RouteSource enum is gone — retention firing will route through the
-// engine via synthetic _source=retention attribute injection (todo step 7
-// of gastrolog-4kkoo). The replacement test will assert that a route
-// matching `_source == retention` activates only on retention events.
 
 // ---------------------------------------------------------------------------
 // DeleteLookup tests
@@ -1459,9 +1449,8 @@ func TestDeleteLookupIdempotentSecondCallFails(t *testing.T) {
 	}
 }
 
-// gastrolog-4kkoo (Phase 5): ValidateExpression covers what the lean
-// route filter editor needs from the backend — parse + semantic check
-// without committing the route.
+// ValidateExpression covers what the lean route filter editor needs from
+// the backend — parse + semantic check without committing the route.
 func TestValidateExpression(t *testing.T) {
 	t.Parallel()
 	client, _, _ := newConfigTestSetup(t)
@@ -1508,9 +1497,9 @@ func TestValidateExpression(t *testing.T) {
 	}
 }
 
-// gastrolog-1rbuf regression: PutRotationPolicy must reject a policy with
-// no conditions set. An empty policy is a silent no-op when assigned, which
-// is almost always operator confusion rather than intent. Same for
+// Regression: PutRotationPolicy must reject a policy with no conditions
+// set. An empty policy is a silent no-op when assigned, which is almost
+// always operator confusion rather than intent. Same for
 // PutRetentionPolicy.
 func TestPutPolicyRejectsEmpty(t *testing.T) {
 	t.Parallel()

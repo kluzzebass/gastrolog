@@ -112,7 +112,7 @@ func TestRateAlerterRaisesAtThreshold(t *testing.T) {
 	}
 }
 
-// TestRateAlerterCatalogOwnsPriority pins gastrolog-1cruar end to end: the
+// TestRateAlerterCatalogOwnsPriority pins priority ownership end to end: the
 // alerter raises through the ordinary catalog path, so a real collector
 // stamps retention-rate with the catalog's Low verdict — the alerter never
 // chooses a priority.

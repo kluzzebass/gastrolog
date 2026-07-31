@@ -27,8 +27,7 @@ var _ system.Store = (*Store)(nil)
 // Forwarder forwards pre-marshaled config commands to the Raft leader.
 // Implemented by cluster.Forwarder in multi-node mode. Returns the Raft
 // log index at which the leader applied the command so the follower can
-// wait for its own FSM to catch up before reading post-mutation state
-// (gastrolog-2nxij).
+// wait for its own FSM to catch up before reading post-mutation state.
 type Forwarder interface {
 	Forward(ctx context.Context, data []byte) (uint64, error)
 }
@@ -84,12 +83,13 @@ func (s *Store) apply(ctx context.Context, cmd *gastrologv1.SystemCommand) error
 // returns. On a follower, the command is forwarded to the leader for
 // commit, and the follower then waits for its own local FSM to apply up
 // to the returned index before returning. This guarantees that the caller
-// can read post-mutation state from the local FSM immediately — fixes the
-// read-after-write race described in gastrolog-2nxij.
+// can read post-mutation state from the local FSM immediately, closing the
+// read-after-write race that otherwise leaves a follower serving stale
+// config right after a write it just made.
 func (s *Store) applyRaw(ctx context.Context, data []byte) (uint64, error) {
 	// Retry while a leadership transfer is in progress before deciding what to
-	// do with the error (gastrolog-4jh4mb). ErrLeadershipTransferInProgress is
-	// NOT ErrNotLeader — this node still leads, it is just refusing new entries
+	// do with the error. ErrLeadershipTransferInProgress is NOT
+	// ErrNotLeader — this node still leads, it is just refusing new entries
 	// mid-handover — so forwarding would bounce straight back. The transfer
 	// settles in milliseconds; afterwards this either applies or returns
 	// ErrNotLeader and forwards. ErrLeadershipLost stays un-retried: the entry
@@ -134,16 +134,15 @@ func (s *Store) forwardAndWait(ctx context.Context, data []byte) (uint64, error)
 // given index, bounded by the effective timeout. Used on followers after
 // Forward to ensure post-mutation reads see the new state.
 //
-// Event-driven (gastrolog-3klg1): the FSM advances its applywait.Tracker
-// as it applies each committed entry (and on snapshot restore), waking
-// this wait the moment the mutation is locally visible — no polling. This
-// also closes a race the previous 5ms raft.AppliedIndex() poll had:
-// hashicorp/raft advances AppliedIndex when it enqueues an entry for the
-// FSM goroutine, before FSM.Apply runs, so the poll could release a
-// reader while the store still showed pre-mutation state. Times out if
-// the follower never catches up (partitioned, log truncated, etc.) so a
-// stuck cluster surfaces as a client-visible error rather than a hang.
-// See gastrolog-2nxij.
+// Event-driven: the FSM advances its applywait.Tracker as it applies each
+// committed entry (and on snapshot restore), waking this wait the moment
+// the mutation is locally visible — no polling. The tracker must be fed
+// by FSM.Apply rather than by raft.AppliedIndex(), which advances when an
+// entry is enqueued for the FSM goroutine, before FSM.Apply runs, and so
+// would release a reader while the store still showed pre-mutation state.
+// Times out if the follower never catches up (partitioned, log truncated,
+// etc.) so a stuck cluster surfaces as a client-visible error rather than
+// a hang.
 func (s *Store) waitForLocalApply(ctx context.Context, target uint64) error {
 	if target == 0 {
 		return nil
@@ -178,7 +177,7 @@ func (s *Store) effectiveTimeout(ctx context.Context) time.Duration {
 // index at which the command was applied. Used by the cluster ForwardApply
 // handler on the leader to apply commands received from followers; the
 // returned index is sent back to the follower so it can wait for its own
-// FSM to catch up. See gastrolog-2nxij.
+// FSM to catch up.
 func (s *Store) ApplyRaw(data []byte) (uint64, error) {
 	return s.applyRaw(context.Background(), data)
 }
@@ -188,14 +187,13 @@ func (s *Store) ApplyRaw(data []byte) (uint64, error) {
 // reflects every entry committed cluster-wide before the call returned.
 //
 // It reuses the read-after-write machinery (applyRaw + the event-driven
-// apply-wait tracker, gastrolog-3klg1): on the leader raft.Apply is
-// synchronous, so the FSM is current on return; on a follower the barrier is
-// forwarded to the leader and this blocks on the tracker until the local FSM
-// applies up to the barrier's committed index — no polling, no stability
-// window. The barrier is an ordinary LogCommand (not a raft LogBarrier) so it
-// flows through FSM.Apply, which the FSM-fed tracker requires to advance.
-// Used by startup FSM catch-up (gastrolog-1go57); bound the wait by passing a
-// ctx with a deadline.
+// apply-wait tracker): on the leader raft.Apply is synchronous, so the FSM is
+// current on return; on a follower the barrier is forwarded to the leader and
+// this blocks on the tracker until the local FSM applies up to the barrier's
+// committed index — no polling. The barrier is an ordinary LogCommand (not a
+// raft LogBarrier) so it flows through FSM.Apply, which the FSM-fed tracker
+// requires to advance. Used by startup FSM catch-up; bound the wait by
+// passing a ctx with a deadline.
 func (s *Store) Barrier(ctx context.Context) error {
 	data, err := command.Marshal(command.NewCatchupBarrier())
 	if err != nil {

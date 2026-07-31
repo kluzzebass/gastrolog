@@ -20,10 +20,10 @@ const (
 // list error, or a node not yet ready at boot dispatch, simply skips): a node
 // that misses its trigger runs no ingesters until the next config change. A
 // full-cluster restart left one node with zero ingesters for 40+ minutes
-// while its peers ingested (gastrolog-3mnjlo). reconcileIngesters is
-// idempotent and never flaps running ingesters, so the sweep is safe to run
-// unconditionally; it also logs divergence — desired ingesters not actually
-// running — so a convergence failure is never silent.
+// while its peers ingested. reconcileIngesters is idempotent and never flaps
+// running ingesters, so the sweep is safe to run unconditionally; it also
+// logs divergence — desired ingesters not actually running — so a
+// convergence failure is never silent.
 //
 // Divergence is a LOG, not an alarm (operator razor): the sweep itself
 // re-dispatches every tick and the run loop retries failed ingesters with

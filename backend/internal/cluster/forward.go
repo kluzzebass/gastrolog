@@ -27,9 +27,9 @@ import (
 // it returns a TableResult with a nil iterator. The histogram slice (if
 // non-nil) provides an approximate volume histogram for the searched vault.
 // Used by the ForwardSearch handler to serve remote search requests.
-// The request may carry sealed-chunk subset fields for distributed search
-// (gastrolog-2qj7m). The returned getToken function returns a resume token
-// for the next page (nil if exhausted).
+// The request may carry sealed-chunk subset fields for distributed search.
+// The returned getToken function returns a resume token for the next page
+// (nil if exhausted).
 type SearchExecutor func(ctx context.Context, req *gastrologv1.ForwardSearchRequest) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error)
 
 // ContextExecutor fetches records surrounding a specific position in a local vault.
@@ -42,8 +42,7 @@ type ListChunksExecutor func(ctx context.Context, vaultID glid.GLID) ([]*gastrol
 // WaitVaultReadyExecutor blocks until a local vault is registered and ready to
 // accept transferred records, or ctx is cancelled. Used by the
 // ForwardWaitVaultReady handler so a draining source node can block on the
-// target's vault-ready signal instead of polling ForwardListChunks. See
-// gastrolog-3sdnn.
+// target's vault-ready signal instead of polling ForwardListChunks.
 type WaitVaultReadyExecutor func(ctx context.Context, vaultID glid.GLID) error
 
 // PipelineBacklogDiskExecutor returns local on-disk segment counts for remote
@@ -145,7 +144,7 @@ func (s *Server) SetSearchExecutor(fn SearchExecutor) {
 // Defined as a callback rather than a typed Subscribe/Unsubscribe pair
 // to avoid exposing notify.Bus or the orchestrator's event type into
 // the cluster package — only the wire proto and the loop semantics live
-// here. See gastrolog-3pf9w.
+// here.
 type ChunkEventSubscriber func(ctx context.Context, send func(*gastrologv1.ForwardWatchChunksResponse) error) error
 
 // SetChunkEventSubscriber injects the callback used by the streaming
@@ -166,7 +165,7 @@ func (s *Server) SetListChunksExecutor(fn ListChunksExecutor) {
 }
 
 // SetWaitVaultReadyExecutor injects the callback for handling remote
-// WaitVaultReady requests (drain synchronization). See gastrolog-3sdnn.
+// WaitVaultReady requests (drain synchronization).
 func (s *Server) SetWaitVaultReadyExecutor(fn WaitVaultReadyExecutor) {
 	s.waitVaultReadyExecutor = fn
 }
@@ -294,7 +293,7 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 		// Cluster server is shutting down — treat as end of iteration so
 		// the importer finalizes with the records received so far. The
 		// partial chunk is safe because ImportRecords has atomic-seal
-		// semantics. See gastrolog-1e5ke.
+		// semantics.
 		if errors.Is(recvErr, errShuttingDown) {
 			return chunk.Record{}, chunk.ErrNoMoreRecords
 		}
@@ -353,8 +352,7 @@ func forwardFollowStreamHandler(srv any, stream grpc.ServerStream) error {
 // WatchChunks stream served to the client. The handler delegates to the
 // orchestrator-supplied chunkEventSubscriber callback, which owns the
 // loop that subscribes to the local ChunkBus and pushes events through
-// stream.SendMsg until ctx is cancelled or send errors out. See
-// gastrolog-3pf9w.
+// stream.SendMsg until ctx is cancelled or send errors out.
 func forwardWatchChunksStreamHandler(srv any, stream grpc.ServerStream) error {
 	s := srv.(*Server)
 	if s.chunkEventSubscriber == nil {
@@ -517,7 +515,7 @@ func (s *Server) forwardListChunks(ctx context.Context, req *gastrologv1.Forward
 // the named local vault is registered and ready to accept transferred
 // records, or the RPC's context is cancelled (the caller's drain context, or
 // its deadline). Replaces the source-side ForwardListChunks poll used by
-// DrainVault. See gastrolog-3sdnn.
+// DrainVault.
 func (s *Server) forwardWaitVaultReady(ctx context.Context, req *gastrologv1.ForwardWaitVaultReadyRequest) (*gastrologv1.ForwardWaitVaultReadyResponse, error) {
 	if s.waitVaultReadyExecutor == nil {
 		return nil, status.Error(codes.Unavailable, "wait vault ready executor not configured")
@@ -708,7 +706,7 @@ func (s *Server) forwardExplain(ctx context.Context, req *gastrologv1.ForwardExp
 //
 // The response carries the Raft log index at which the command was applied;
 // the follower uses it to wait for its own FSM to catch up before reading
-// post-mutation state in its mutation handler. See gastrolog-2nxij.
+// post-mutation state in its mutation handler.
 func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApplyRequest) (*gastrologv1.ForwardApplyResponse, error) {
 	if s.applyFn == nil {
 		return nil, status.Error(codes.Unavailable, "apply function not configured")
@@ -725,8 +723,7 @@ func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApply
 // command (see NewVaultCtlChunkApplyForwarder) or a native vault-ctl
 // command. The group ID is the vault-ctl Raft group ID. Dispatches to
 // the shared groupApplyFn and returns the applied log index so the
-// forwarding follower can wait for its own group FSM to catch up
-// (gastrolog-4l24u).
+// forwarding follower can wait for its own group FSM to catch up.
 func (s *Server) forwardVaultApply(ctx context.Context, req *gastrologv1.ForwardVaultApplyRequest) (*gastrologv1.ForwardVaultApplyResponse, error) {
 	if s.groupApplyFn == nil {
 		return nil, status.Error(codes.Unavailable, "group apply function not configured")
@@ -747,7 +744,7 @@ func (s *Server) forwardVaultApply(ctx context.Context, req *gastrologv1.Forward
 // filtering tombstoned / cloud-backed / locally-missing). Pushes
 // happen asynchronously inside the orchestrator handler — this RPC
 // returns as soon as the requests are scheduled, not when delivery
-// completes. See gastrolog-2dgvj.
+// completes.
 func (s *Server) requestReplicaCatchup(ctx context.Context, req *gastrologv1.RequestReplicaCatchupRequest) (*gastrologv1.RequestReplicaCatchupResponse, error) {
 	if s.replicaCatchupFn == nil {
 		return nil, status.Error(codes.Unavailable, "replica catchup function not configured")
@@ -812,7 +809,7 @@ func (s *Server) forwardSetNodeSuffrage(ctx context.Context, req *gastrologv1.Fo
 // notification is ignored. Otherwise the handler races graceful shutdown:
 // it would re-bootstrap a fresh raft system on this node *while* the
 // process is exiting — which leaves the pod stuck in Terminating until
-// kubelet force-kills it, blocking k8s rolling restarts. See gastrolog-5z7l8.
+// kubelet force-kills it, blocking k8s rolling restarts.
 func (s *Server) notifyEviction(_ context.Context, req *gastrologv1.NotifyEvictionRequest) (*gastrologv1.NotifyEvictionResponse, error) {
 	if s.stopCtx != nil && s.stopCtx.Err() != nil {
 		s.logger.Info("ignoring eviction notification — server already shutting down",
@@ -895,11 +892,11 @@ func pullManagedFileStreamHandler(srv any, stream grpc.ServerStream) error {
 // pullFrameSize is the Data payload per streamed pull frame when the serve
 // seam copies through ReadFrom (io.Copy from an *os.File lands there). Sized
 // just under 1MB so the marshaled frame (payload + a few bytes of proto
-// framing) still fits grpc-go's largest pooled marshal-buffer tier (1MB in
+// framing) still fits grpc-go's largest pooled marshal-buffer size (1MB in
 // mem.defaultBufferPoolSizes) instead of spilling to the fallback pool, and
 // stays far under the 4MB default client receive limit. Large frames
 // amortize per-frame SendMsg/flow-control/stats overhead ~32x versus the
-// 32KB io.Copy scratch that set the frame size before (gastrolog-47jm3m).
+// 32KB io.Copy scratch that set the frame size before.
 const pullFrameSize = 1<<20 - 1<<10
 
 // pullFrameBufPool recycles the per-transfer frame buffer across pulls. The
@@ -955,7 +952,7 @@ func (w *segmentChunkWriter) Write(p []byte) (int, error) {
 	// No per-frame copy: SendMsg marshals the message into the transport's
 	// wire buffer before returning, so p is fully consumed by the time
 	// io.Copy reuses its scratch. The copy this replaced was 17GB/run of
-	// garbage feeding GC sweep stalls (gastrolog-1xee1s). Constraint:
+	// garbage feeding GC sweep stalls. Constraint:
 	// nothing on the internode server may retain the message past SendMsg —
 	// serverStatsHandler reads only WireLength; a payload-retaining
 	// StatsHandler or codec would need the copy back.
@@ -1049,9 +1046,9 @@ func pullSegmentStreamHandler(srv any, stream grpc.ServerStream) error {
 	if err := s.segmentPullServer(vaultID, segmentID, w); err != nil {
 		// Encode the seam's typed sentinel as a status code the pulling side
 		// can translate back into collection.ErrSegmentUnavailable — the wire
-		// carries a machine-readable code, never classification-bearing prose
-		// (gastrolog-466kq5). Anything else (open/copy failure mid-stream) is
-		// a real serving fault, not "try another holder later".
+		// carries a machine-readable code, never classification-bearing
+		// prose. Anything else (open/copy failure mid-stream) is a real
+		// serving fault, not "try another holder later".
 		if errors.Is(err, collection.ErrSegmentUnavailable) {
 			return status.Errorf(codes.NotFound, "serve segment %s/%s: %v", vaultID, segmentID, err)
 		}
@@ -1641,8 +1638,7 @@ func NewForwardRemoveNodeClient(cc grpc.ClientConnInterface) *ForwardRemoveNodeC
 // ForwardRemoveNode asks the leader to remove a node from the cluster.
 // opts carries the force flag (bypasses every removal gate) and the
 // removal policy, which must survive the follower → leader hop so the
-// leader's RF-preservation gate applies the right stance
-// (gastrolog-3vyex).
+// leader's RF-preservation gate applies the right stance.
 func (c *ForwardRemoveNodeClient) ForwardRemoveNode(ctx context.Context, nodeID string, opts RemoveNodeOptions) error {
 	req := &gastrologv1.ForwardRemoveNodeRequest{
 		NodeId:      []byte(nodeID),

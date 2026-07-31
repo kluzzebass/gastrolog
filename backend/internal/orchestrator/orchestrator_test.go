@@ -456,12 +456,12 @@ func (f *failOnceIngester) Run(ctx context.Context, _ chan<- ingestion.IngesterM
 	return ctx.Err()
 }
 
-// TestIngesterAliveTracksErrorRetry pins the observability chain behind the
-// gastrolog-fjwhbr fix: a non-passive ingester whose run returns an error
+// TestIngesterAliveTracksErrorRetry pins the observability chain behind
+// ingester error retry: a non-passive ingester whose run returns an error
 // drops its alive state (OnIngesterAlive false, IsIngesterRunning false — the
-// trigger for the ingester convergence sweep's divergence log,
-// gastrolog-3mnjlo), and the pipeline retry re-arms the run so the alive state
-// comes back up, which is what lets the sweep clear the alert on recovery.
+// trigger for the ingester convergence sweep's divergence log), and the
+// pipeline retry re-arms the run so the alive state comes back up, which is
+// what lets the sweep clear the alert on recovery.
 func TestIngesterAliveTracksErrorRetry(t *testing.T) {
 	t.Parallel()
 
@@ -984,7 +984,7 @@ func getRecordMessages(t *testing.T, cm chunk.ChunkManager) []string {
 func TestRoutingIntegration(t *testing.T) {
 	orch, vaults := newRoutedTestSetup(t)
 
-	// gastrolog-4kkoo (Phase 5): priority-ordered first-match-wins.
+	// Priority-ordered first-match-wins.
 	// Specific routes at priority 10 (env=prod, env=staging) fire first;
 	// the catch-all sits at priority 100 and absorbs everything else.
 	// Each record reaches exactly one vault (no multi-fan-out unless a
@@ -1109,9 +1109,9 @@ func TestRoutingNoRouteTableDropsRecords(t *testing.T) {
 func TestRoutingEmptyMatchExpressionReceivesNothing(t *testing.T) {
 	orch, vaults := newRoutedTestSetup(t)
 
-	// gastrolog-4kkoo (Phase 5): a route with an empty match expression
-	// (MatchNone) is enrolled but never fires — useful as a temporary
-	// "muted" state. prod is muted at priority 10, archive catches at 100.
+	// A route with an empty match expression (MatchNone) is enrolled but
+	// never fires — useful as a temporary "muted" state. prod is muted at
+	// priority 10, archive catches at 100.
 	prodRoute, _ := routing.CompileRoute(glid.New(), "prod", 10, "", []glid.GLID{vaults.prod})
 	archiveRoute, _ := routing.CompileRoute(glid.New(), "archive", 100, "*", []glid.GLID{vaults.archive})
 
@@ -1139,8 +1139,8 @@ func TestRoutingEmptyMatchExpressionReceivesNothing(t *testing.T) {
 func TestRoutingComplexMatchExpression(t *testing.T) {
 	orch, vaults := newRoutedTestSetup(t)
 
-	// gastrolog-4kkoo (Phase 5): prod route at priority 10 with a complex
-	// expression; archive catch-all at priority 100.
+	// Prod route at priority 10 with a complex expression; archive
+	// catch-all at priority 100.
 	prodRoute, err := routing.CompileRoute(glid.New(), "prod", 10,
 		"(env=prod AND level=error) OR (env=prod AND level=critical)",
 		[]glid.GLID{vaults.prod})
@@ -1183,7 +1183,7 @@ func TestRoutingComplexMatchExpression(t *testing.T) {
 		}
 	}
 
-	// gastrolog-4kkoo (Phase 5): first-match-wins — archive only catches
+	// First-match-wins — archive only catches
 	// the records that didn't match the prod route. The fixture has 2
 	// matching (prod+error, prod+critical) and 2 falling through (prod+info,
 	// staging+error), so archive sees 2.

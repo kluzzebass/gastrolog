@@ -1,7 +1,7 @@
 package distribution_test
 
-// Coverage for gastrolog-375el: a vault registered while no vault-ctl handle
-// exists runs a fail-closed publisher, and the publisher upgrade
+// Coverage for the publisher upgrade: a vault registered while no vault-ctl
+// handle exists runs a fail-closed publisher, and the publisher upgrade
 // (re-registration with the real publisher) must republish every completed
 // segment the no-handle window refused — without a restart and without a
 // completed-channel overflow. The recovery event is the registration itself:
@@ -124,8 +124,8 @@ func waitPromoted(t *testing.T, ch <-chan glid.GLID, what string) glid.GLID {
 	}
 }
 
-// TestPublisherUpgradeRepublishesRefusedSegments is the core gastrolog-375el
-// scenario: a segment completed while the vault's publisher refuses (no
+// TestPublisherUpgradeRepublishesRefusedSegments is the core scenario: a
+// segment completed while the vault's publisher refuses (no
 // vault-ctl handle) becomes visible — vault-ctl committed and head-promoted —
 // purely from the publisher-upgrade re-registration. No restart, no second
 // completed-channel delivery, no overflow-driven rescan.

@@ -10,8 +10,7 @@ import (
 
 // FuzzOpenMappedBlob throws arbitrary bytes at the production GLCB open
 // path (OpenMappedBlob + Reader + first record read); it must reject
-// garbage with errors, never panic. Replaces the fuzz over the deleted
-// fd-based NewReader (gastrolog-2v9d67).
+// garbage with errors, never panic.
 func FuzzOpenMappedBlob(f *testing.F) {
 	// Seed corpus: empty, tiny, header-sized, and slightly larger blobs.
 	f.Add([]byte{})

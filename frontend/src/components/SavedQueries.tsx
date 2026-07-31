@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useClickOutside } from "../hooks/useClickOutside";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { clickableProps } from "../utils";
-// eslint-disable-next-line no-restricted-imports -- no SavedQuery model yet (gastrolog-2e2qs follow-up)
+// eslint-disable-next-line no-restricted-imports -- no SavedQuery model yet
 import type { SavedQuery } from "../api/gen/gastrolog/v1/system_pb";
 
 export function SavedQueries({

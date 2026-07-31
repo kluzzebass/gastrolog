@@ -85,7 +85,7 @@ type RunConfig struct {
 	// across restarts (Kubernetes pod IP rotation, Docker network
 	// rescheduling), the advertised address MUST be a stable identifier
 	// (DNS name) so peers reconnect after IP changes without manual
-	// reconfiguration. See gastrolog-4zy8a.
+	// reconfiguration.
 	ClusterAdvertise string
 	// ServicePoolMaxPerPeer caps parallel outbound service-lane gRPC
 	// connections per peer (0 = default 4).
@@ -98,7 +98,7 @@ type RunConfig struct {
 	// Empty if pprof is disabled. Advertised to cluster peers via broadcast.
 	PprofAddr string
 
-	// Non-interactive cluster bootstrap (gastrolog-o9z6o).
+	// Non-interactive cluster bootstrap.
 	//
 	// File-based path (default; no shared HTTP needed):
 	//   - WriteBootstrapToken: the bootstrap node atomically writes its
@@ -124,7 +124,7 @@ type RunConfig struct {
 	BootstrapTokenURL         string
 	BootstrapTokenSecret      string
 
-	// Initial admin provisioning (gastrolog-3ot7r).
+	// Initial admin provisioning.
 	//
 	// When set on a bootstrap node (no --join-addr) and no users exist
 	// in the cluster yet, an admin user is created at startup. The
@@ -138,10 +138,10 @@ type RunConfig struct {
 	InitialAdminUser     string
 	InitialAdminPassword string
 
-	// Environment banner (gastrolog-4vr0l). Display-only metadata surfaced
-	// to the UI header so operators can tell which deployment they are
-	// looking at without inspecting hostnames or URLs. Both empty by
-	// default; empty label hides the banner entirely.
+	// Environment banner. Display-only metadata surfaced to the UI
+	// header so operators can tell which deployment they are looking
+	// at without inspecting hostnames or URLs. Both empty by default;
+	// empty label hides the banner entirely.
 	EnvironmentLabel string
 	EnvironmentColor string
 
@@ -150,10 +150,10 @@ type RunConfig struct {
 	SegmentHotPathFsync bool
 
 	// RaftHeartbeatTimeout and RaftLeaderLease override the node-wide base
-	// Raft failure-detector timing when > 0 (gastrolog-o6plq9). Zero keeps
-	// the raftgroup defaults. The operator lever for substrates whose
-	// scheduler-stall tail exceeds the shipped detector window; boot fails
-	// if lease > heartbeat.
+	// Raft failure-detector timing when > 0. Zero keeps the raftgroup
+	// defaults. The operator lever for substrates whose scheduler-stall
+	// tail exceeds the shipped detector window; boot fails if lease >
+	// heartbeat.
 	RaftHeartbeatTimeout time.Duration
 	RaftLeaderLease      time.Duration
 
@@ -166,8 +166,8 @@ type RunConfig struct {
 	SlogCaptureHandler *logging.CaptureHandler
 
 	// LogFilter is the ComponentFilterHandler whose rule set is driven
-	// from the system config store (gastrolog-3flfp). The watcher reads
-	// LogLevelConfig and calls SetRuleSet on every configSignal fire.
+	// from the system config store. The watcher reads LogLevelConfig
+	// and calls SetRuleSet on every configSignal fire.
 	LogFilter *logging.ComponentFilterHandler
 }
 
@@ -224,11 +224,11 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
-	// gastrolog-o9z6o: when running unattended (Docker, K8s), the
-	// operator may have configured --bootstrap-token-file or
-	// --bootstrap-token-url instead of supplying --join-token directly.
-	// Resolve those into cfg.JoinToken before setupCluster reads it.
-	// No-op if --join-token is already set or if no source is configured.
+	// When running unattended (Docker, K8s), the operator may have
+	// configured --bootstrap-token-file or --bootstrap-token-url instead
+	// of supplying --join-token directly. Resolve those into
+	// cfg.JoinToken before setupCluster reads it. No-op if --join-token
+	// is already set or if no source is configured.
 	if err := resolveJoinTokenFromSources(ctx, &cfg, logger); err != nil {
 		return fmt.Errorf("resolve bootstrap token: %w", err)
 	}
@@ -238,18 +238,12 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
-	// gastrolog-2yeie: the boot-time auto-rejoin path (gastrolog-24iv4
-	// Step C) used to fire here, asking the cluster "do you still have
-	// me?" and renaming raftDir away if not. That mechanism was
-	// destructive (wiped node identity + cluster state) and racy (a
-	// startup-time GetConfiguration RPC could return stale data and
-	// trigger a spurious wipe). With yield-leadership preStop preserving
-	// membership across restart, the recovery path that motivated this
-	// code is no longer needed — raft loads its WAL, heartbeats with
-	// peers, and resumes. If a node IS truly evicted and the operator
-	// wants to bring it back fresh, that's an explicit operator action
-	// (delete /config/raft/ before starting the pod), not a silent
-	// boot-time decision.
+	// There is no boot-time auto-rejoin check here: yield-leadership
+	// preStop preserves membership across restart, so raft simply loads
+	// its WAL, heartbeats with peers, and resumes. Bringing a truly
+	// evicted node back fresh is an explicit operator action (delete
+	// /config/raft/ before starting the pod), not a silent boot-time
+	// decision that a stale GetConfiguration reply could trigger.
 
 	// Alarm state is in-memory only: nothing survives restart — after a
 	// restart a re-detected condition is simply a standing alarm again.
@@ -297,8 +291,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
-	// gastrolog-3ot7r: provision the initial admin user from --initial-admin-file
-	// or --initial-admin-user/--initial-admin-password if configured and no
+	// Provision the initial admin user from --initial-admin-file or
+	// --initial-admin-user/--initial-admin-password if configured and no
 	// users exist yet. Joiners skip this entirely. The interactive
 	// first-access UI remains the fallback for any unconfigured bootstrap.
 	if err := provisionInitialAdmin(ctx, cfgStore, cfg, logger); err != nil {
@@ -311,24 +305,24 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
-	// Scheduler-stall watchdog (gastrolog-1io54g phase 2): measures runtime
-	// starvation — the one resource every Raft group on this node shares.
-	// Stalls past the leader lease raise an operator alert; the WARN log
-	// timestamps correlate against election events to pin the liveness leak.
+	// Scheduler-stall watchdog: measures runtime starvation — the one
+	// resource every Raft group on this node shares. Stalls past the leader
+	// lease raise an operator alert; the WARN log timestamps correlate
+	// against election events to pin the liveness leak.
 	schedWatch := schedwatch.New(logger, raftLease)
 	go schedWatch.Run(ctx)
 
 	// Shared shutdown phase. Constructed once per process and threaded into
 	// every subsystem that needs to short-circuit work during drain — the
 	// orchestrator's replication fanout, the cluster server's stream
-	// handlers, the vault announcer, etc. See gastrolog-1e5ke.
+	// handlers, the vault announcer, etc.
 	shutdownPhase := lifecycle.New()
 
 	// Async reconciler for SetIngesterAlive Raft applies. Decouples the
 	// per-ingester run goroutine (which toggles alive state) from Raft
-	// latency and retries transient failures (gastrolog-1ox8z). Without
-	// this, an unlucky startup race drops the apply, the error is silently
-	// swallowed, and the FSM alive map stays empty for the goroutine's life.
+	// latency and retries transient failures. Without this, an unlucky
+	// startup race drops the apply, the error is silently swallowed, and the
+	// FSM alive map stays empty for the goroutine's life.
 	aliveReconciler := NewAliveReconciler(cfgStore, nodeID, logger)
 	go aliveReconciler.Run(ctx)
 
@@ -359,12 +353,12 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	}
 
 	// Ingest-pipeline channel pressure was demoted from an alarm to a
-	// diagnostic (gastrolog-3phtqv, gastrolog-5nvb4y); its transition edges
-	// are records of occurrence, and the gate's OnChange hook is the
-	// existing choke point — one log line per level change, no per-tick
-	// chatter. The log stream is the event record.
-	// Attr discipline: the pressure tier is "pressure", never "level" (that
-	// key belongs to slog itself), and an empty cause channel is omitted
+	// diagnostic; its transition edges are records of occurrence, and
+	// the gate's OnChange hook is the existing choke point — one log
+	// line per level change, no per-tick chatter. The log stream is the
+	// event record.
+	// Attr discipline: the pressure level is keyed "pressure", never "level"
+	// (that key belongs to slog itself), and an empty cause channel is omitted
 	// rather than logged as channel="".
 	pressureLogger := logger.With("component", "orchestrator")
 	orch.PressureGate().AddOnChange(func(tr chanwatch.PressureTransition) {
@@ -415,7 +409,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// Sync the ComponentFilterHandler's rule set with the system config
 	// store. Watcher runs until ctx is cancelled; on every configSignal
 	// fire it reads LogLevelConfig and atomically swaps the rule set
-	// across every derived handler in the process (gastrolog-3flfp).
+	// across every derived handler in the process.
 	if cfg.LogFilter != nil {
 		go WatchLogLevels(ctx, cfg.LogFilter, cfgStore, configSignal, logger)
 	}
@@ -423,8 +417,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		orch.ScheduleCatchup(vaultID, followerNodeIDs)
 	}
 
-	// Wire follower-driven replica catchup (gastrolog-2dgvj). The cluster
-	// server's RequestReplicaCatchup handler delegates here; the orchestrator
+	// Wire follower-driven replica catchup. The cluster server's
+	// RequestReplicaCatchup handler delegates here; the orchestrator
 	// validates leadership, filters chunk eligibility, and fans out pushes
 	// asynchronously via the existing replicateToFollower machinery.
 	if clusterSrv != nil {
@@ -462,8 +456,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	}
 
 	// Aggregate Raft liveness sources: the vault-group WAL + GroupManager
-	// counters, and the cluster-ctl store's own WAL + counters
-	// (gastrolog-1io54g). Nil-tolerant: single-node mode may lack any.
+	// counters, and the cluster-ctl store's own WAL + counters.
+	// Nil-tolerant: single-node mode may lack any.
 	raftLive := &raftLivenessAdapter{}
 	if vaultWAL != nil {
 		raftLive.wals = append(raftLive.wals, vaultWAL)
@@ -505,9 +499,9 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			localNodeID: nodeID,
 			logger:      compPlacement.Apply(logger),
 			triggerCh:   make(chan struct{}, 1),
-			// Local half of the degraded-home check (gastrolog-38bm9t):
-			// peers report their vault storage-protect state via
-			// NodeStats, but the local node isn't in its own peer table.
+			// Local half of the degraded-home check: peers report their
+			// vault storage-protect state via NodeStats, but the local
+			// node isn't in its own peer table.
 			localVaultStorageProtected: func(id glid.GLID) bool {
 				return slices.Contains(orch.StorageProtectedVaults(), id)
 			},
@@ -525,29 +519,28 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			}
 		}
 
-		// Periodic placement reconcile (gastrolog-1ia46, gastrolog-29xpy).
-		// Config-input changes reconcile event-driven from the dispatcher;
-		// this scheduled job pokes pm.Trigger() to re-evaluate peer-heartbeat
-		// liveness, the one placement input with no FSM event (TTL-based).
-		// Scheduler-registered so the cadence is visible in the inspector.
+		// Periodic placement reconcile. Config-input changes reconcile
+		// event-driven from the dispatcher; this scheduled job pokes
+		// pm.Trigger() to re-evaluate peer-heartbeat liveness, the one
+		// placement input with no FSM event (TTL-based). Scheduler-registered
+		// so the cadence is visible in the inspector.
 		register("vault-placement-reconcile", startPlacementReconcile(ctx, orch.Scheduler(), pm))
 
-		// Heartbeat-driven node-state sweep (gastrolog-39m2k). Flips
-		// NodeConfig.State between Live and Unreachable based on
-		// PeerState freshness so the placement guard sees soft-offline
-		// nodes without operator intervention. Registered with the
-		// orchestrator's job scheduler so it shows up in the inspector's
-		// Scheduled view alongside the rest of the periodic work
-		// (gastrolog-28o8p).
+		// Heartbeat-driven node-state sweep. Flips NodeConfig.State
+		// between Live and Unreachable based on PeerState freshness so
+		// the placement guard sees soft-offline nodes without operator
+		// intervention. Registered with the orchestrator's job scheduler
+		// so it shows up in the inspector's Scheduled view alongside the
+		// rest of the periodic work.
 		sweep := newUnreachableSweep(cfgStore, clusterSrv, peerState, nodeID, alertCollector, compPlacement.Apply(logger))
 		register("unreachable-sweep", startUnreachableSweep(ctx, orch.Scheduler(), sweep))
 
-		// Cluster-ctl learner promoter — event-driven (gastrolog-4vg17,
-		// retiring the 30s cron). Fresh nodes join as Nonvoter / Staging
-		// learners (gastrolog-41sut) and are promoted to Voter once their
-		// broadcast RaftAppliedIndex reaches the leader's applied index —
-		// protecting the quorum-loss window where a fresh joiner counts as
-		// a voter but cannot yet vote because its WAL is still catching up.
+		// Cluster-ctl learner promoter — event-driven, no cron. Fresh nodes
+		// join as Nonvoter / Staging learners and are promoted to Voter
+		// once their broadcast RaftAppliedIndex reaches the leader's
+		// applied index — protecting the quorum-loss window where a fresh
+		// joiner counts as a voter but cannot yet vote because its WAL is
+		// still catching up.
 		//
 		// The only channel by which the leader learns a learner's applied
 		// index is that learner's NodeStats broadcast (hashicorp/raft
@@ -569,7 +562,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		// (a single O(1) subscription covers every vault group — no
 		// per-group timer) plus the per-vault leadership-gain hook so a
 		// placement-driven leader transfer evaluates the new leader's
-		// learners immediately. (gastrolog-4vg17)
+		// learners immediately.
 		if groupMgr != nil {
 			vcPromoter := newVaultCtlLearnerPromoter(ctx, cfgStore, groupMgr, peerState, compCluster.Apply(logger))
 			go vcPromoter.Run(ctx)
@@ -578,14 +571,13 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		}
 	}
 
-	// Ingester convergence sweep (gastrolog-3mnjlo). Event-driven ingester
-	// dispatch is one-shot per FSM notification with silent early returns; a
-	// node that misses its boot dispatch runs no ingesters until the next
-	// config change (a full-cluster restart left one node originating nothing
-	// for 40+ minutes). This periodic safety net re-reconciles
-	// desired-vs-running (idempotent) and logs any divergence, once per
-	// state change. Registered unconditionally — single-node deploys
-	// converge the same way.
+	// Ingester convergence sweep. Event-driven ingester dispatch is one-shot
+	// per FSM notification with silent early returns; a node that misses its
+	// boot dispatch runs no ingesters until the next config change (a
+	// full-cluster restart left one node originating nothing for 40+
+	// minutes). This periodic safety net re-reconciles desired-vs-running
+	// (idempotent) and logs any divergence, once per state change. Registered
+	// unconditionally — single-node deploys converge the same way.
 	if err := startIngesterReconcileSweep(ctx, orch.Scheduler(), disp, logger.With("component", "ingestion")); err != nil {
 		logger.Warn("startup: register scheduled job", "job", "ingester-reconcile", "error", err)
 	}
@@ -602,8 +594,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// orch.ApplyConfig was called with appSys=nil (a no-op). Without
 	// this replay, every AllNodes:true ingester would never register
 	// or run on the joiner — even though the dashboard correctly lists
-	// it as a target. See gastrolog-3hcfm. No-op for restart-of-voter
-	// and bootstrap paths because appSys is non-nil there.
+	// it as a target. No-op for restart-of-voter and bootstrap paths
+	// because appSys is non-nil there.
 	if appSys == nil {
 		disp.ReplayConfigFromStore(ctx)
 	}
@@ -626,15 +618,12 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		// Register eviction handler: reinitialize as a fresh single-node cluster.
 		clusterSrv.SetEvictionHandler(makeEvictionHandler(proxy, clusterSrv, clusterTLS, hd, nodeID, orch, disp, logger))
 
-		// gastrolog-24iv4: the stale-voter-reaper that previously lived
-		// here is gone. Its only role was cleaning up after operators
-		// who used `kubectl scale` directly instead of the supported
-		// `cluster remove-node` path (gastrolog-6bfwk). The preStop
-		// hook + `cluster demote-self` CLI in this same PR makes every
-		// K8s-managed termination call cluster.RemoveNode cleanly,
-		// closing that operator-discipline gap at the source. Raft
-		// handles unreachable voters correctly without intervention;
-		// auto-eviction added risk (maintenance-window evictions,
+		// No stale-voter reaper here: the preStop hook + `cluster
+		// demote-self` CLI make every K8s-managed termination call
+		// cluster.RemoveNode cleanly, including operators who reach for
+		// `kubectl scale` instead of `cluster remove-node`. Raft handles
+		// unreachable voters correctly without intervention;
+		// auto-eviction adds risk (maintenance-window evictions,
 		// no-quorum-gate cascades) without solving any problem the
 		// preStop hook doesn't already solve.
 	}
@@ -802,8 +791,7 @@ func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestra
 // setupClusterStats creates the broadcaster, peer state tracker, and stats
 // collector. Returns nils for single-node mode.
 // raftLivenessAdapter sums WAL append latency and liveness counters across
-// every Raft instance on this node for the stats collector
-// (gastrolog-1io54g).
+// every Raft instance on this node for the stats collector.
 type raftLivenessAdapter struct {
 	wals     []*raftwal.WAL
 	counters []*raftgroup.LivenessCounters
@@ -859,14 +847,13 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 	//
 	// The stats TTL bounds how long a peer's cached NodeStats stays
 	// queryable, so it is a multiple of the NodeStats broadcast cadence.
-	// It used to be a multiple of the 1s liveness heartbeat instead, because
-	// that heartbeat was also what kept liveness fresh — the multiplier had
-	// to be raised to 8× to stop a single late message flapping the
-	// inspector every ~5 seconds (gastrolog-4iacg). With liveness moved to
-	// Raft last-contact (gastrolog-1lbifx), this window no longer gates
-	// detection speed at all, so 3× the 5s broadcast gives MORE absolute
-	// slack than the old 8× 1s while tolerating two consecutive missed
-	// broadcasts. Networks with worse jitter tune GLOG_PEER_TTL_MULTIPLIER.
+	// Liveness comes from Raft last-contact, so this window no longer gates
+	// detection speed at all: 3× the 5s broadcast tolerates two consecutive
+	// missed broadcasts and gives MORE absolute slack than the 8× multiple
+	// of the 1s liveness heartbeat that was needed back when that heartbeat
+	// was also the liveness clock and a single late message flapped the
+	// inspector every ~5 seconds. Networks with worse jitter tune
+	// GLOG_PEER_TTL_MULTIPLIER.
 	//
 	// The Raft window is what detection speed now rides on; see
 	// raftContactTTL.
@@ -880,7 +867,7 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 
 	// Write a placeholder NodeConfig for every newly admitted peer so
 	// fresh joiners never display as raw GLIDs in the UI while their
-	// own async ensureNodeConfig write is in flight (gastrolog-4dqfs).
+	// own async ensureNodeConfig write is in flight.
 	// Leader-only; the joiner's own write later updates Name to its
 	// preferred value (e.g. pod hostname).
 	observePeerAdditions(ctx, clusterSrv, cfgStore, logger)
@@ -896,13 +883,13 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		LogDrops: logDrops,
 		// Cluster-total route counters: local + live peers' cumulative
 		// broadcast totals. Windowed server-side so cluster rate history is
-		// system data, not client-side accumulation (gastrolog-4eh5ns).
+		// system data, not client-side accumulation.
 		ClusterRouteTotals: func() (int64, int64, string) {
 			rs := statsAdapter.RouteStats()
 			pRouted, pMatched, members := peerState.AggregateRouteTotals()
 			// "self" + sorted live peers: the summed window re-anchors on
 			// any change so peers entering/leaving the sum never read as
-			// traffic (gastrolog-mliwrd).
+			// traffic.
 			return rs.Routed + pRouted, rs.Matched + pMatched,
 				"self," + strings.Join(members, ",")
 		},
@@ -939,9 +926,8 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 
 	// Evict per-peer satellite state the moment a node is removed
 	// from the Raft configuration. Without this the various caches
-	// grow unboundedly on clusters that churn nodes. See gastrolog-9ohip
-	// for the inventory; predecessor gastrolog-19bq4 covered the first
-	// two (PeerState, PeerJobState) but missed the rest.
+	// grow unboundedly on clusters that churn nodes. Every per-peer cache
+	// on this node belongs in the argument list below.
 	observePeerRemovals(ctx, clusterSrv, logger,
 		peerState,
 		peerJobState,
@@ -1012,9 +998,8 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 		//      NotifyVaultConfigPut events fire for the existing vaults.
 		//      If we return nil here, the orchestrator boots with vaults=0
 		//      forever and no vault-ctl Raft groups ever start on this
-		//      node. See gastrolog-1gh5s — operator-visible symptom was
-		//      vault-ctl groups stuck without a leader after every
-		//      rolling upgrade.
+		//      node. The operator-visible symptom was vault-ctl groups
+		//      stuck without a leader after every rolling upgrade.
 		//
 		// Distinguish the two by probing the local FSM. If it already has
 		// vault configs or a bootstrapped server-settings JWT secret,
@@ -1042,9 +1027,9 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 		//
 		// cluster.sh run restarts nodes without --join-addr; a returning voter
 		// still has a snapshot-restored FSM and must take the same restart
-		// shortcut as the JoinAddr path (gastrolog-1gh5s) instead of blocking
-		// on WaitForFSMCatchup — under load the stability window may not
-		// complete within 10s while vault-ctl snapshots stream.
+		// shortcut as the JoinAddr path instead of blocking on
+		// WaitForFSMCatchup — under load the stability window may not complete
+		// within 10s while vault-ctl snapshots stream.
 		if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
 			return nil, false, err
 		}
@@ -1075,10 +1060,10 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 
 // requestClusterMembership asks the cluster leader to add this node to
 // the Raft configuration. Fresh joiners enter as nonvoters (learners)
-// and get promoted by the cluster-ctl learner promoter (gastrolog-2czh9)
-// once caught up; restart-of-existing-voter requests use AddVoter for
-// idempotent address refresh. The fresh-vs-restart decision probes the
-// local FSM (presence of vault configs or a JWT secret).
+// and get promoted by the cluster-ctl learner promoter once caught up;
+// restart-of-existing-voter requests use AddVoter for idempotent
+// address refresh. The fresh-vs-restart decision probes the local FSM
+// (presence of vault configs or a JWT secret).
 //
 // No-op if join parameters are not set.
 func requestClusterMembership(ctx context.Context, logger *slog.Logger, cfg RunConfig, cfgStore system.Store, clusterTLS *cluster.ClusterTLS, nodeID string) error {
@@ -1269,11 +1254,11 @@ func ensureNodeConfigAsync(ctx context.Context, cfgStore system.Store, nodeID, c
 	}
 	// Registration failures right after quorum are usually transient: a
 	// freshly-joined node may observe the leader before its raft log has
-	// backfilled (gastrolog-1rw6df), and the first forward can race that
-	// window. Retry with backoff instead of giving up until the next
-	// restart — self-registration is what makes the node visible to
-	// operators, so a one-shot here turns a 50ms race into a permanently
-	// missing registry entry.
+	// backfilled, and the first forward can race that window. Retry with
+	// backoff instead of giving up until the next restart —
+	// self-registration is what makes the node visible to operators, so
+	// a one-shot here turns a 50ms race into a permanently missing
+	// registry entry.
 	backoff := 250 * time.Millisecond
 	const maxBackoff = 10 * time.Second
 	for {
@@ -1347,18 +1332,18 @@ func loadMaxConcurrentJobs(ctx context.Context, cfgStore system.Store) int {
 //
 // 3× tolerates two consecutive missed broadcasts. It was 8× against the 1s
 // liveness heartbeat, because that heartbeat was also the liveness clock and
-// a single late one flapped the inspector (gastrolog-4iacg). Anchored on the
-// 5s broadcast instead, 3× is 15s of slack where 8× 1s was 8s — more
-// tolerance, not less — and it no longer costs detection latency, which now
-// rides on raftContactTTL.
+// a single late one flapped the inspector. Anchored on the 5s broadcast
+// instead, 3× is 15s of slack where 8× 1s was 8s — more tolerance, not less
+// — and it no longer costs detection latency, which now rides on
+// raftContactTTL.
 const defaultPeerTTLMultiplier = 3
 
 // peerTTLMultiplier returns the PeerState stats-TTL multiplier, sourced
 // from GLOG_PEER_TTL_MULTIPLIER if set to a positive integer,
 // otherwise defaultPeerTTLMultiplier. Operators on pathological
-// networks can raise this to absorb worse jitter; since gastrolog-1lbifx
-// raising it costs no detection latency at all, because peer liveness is
-// derived from Raft last-contact rather than from broadcast arrival.
+// networks can raise this to absorb worse jitter; raising it costs no
+// detection latency at all, because peer liveness is derived from Raft
+// last-contact rather than from broadcast arrival.
 func peerTTLMultiplier(logger *slog.Logger) time.Duration {
 	v := os.Getenv("GLOG_PEER_TTL_MULTIPLIER")
 	if v == "" {
@@ -1374,8 +1359,8 @@ func peerTTLMultiplier(logger *slog.Logger) time.Duration {
 }
 
 // wireRaftContactRecorder makes PeerState the sink for the Raft transport's
-// per-peer reachability evidence (gastrolog-1lbifx) — every outbound probe and
-// every contact, in either direction, on every group.
+// per-peer reachability evidence — every outbound probe and every contact,
+// in either direction, on every group.
 //
 // Wired here rather than at transport construction because PeerState is built
 // with the stats collector, well after the transport. That leaves a boot
@@ -1395,7 +1380,7 @@ func wireRaftContactRecorder(tm *multiraft.Transport[string], peerState *cluster
 }
 
 // raftContactTTLMultiplier is how many Raft heartbeat timeouts of silence
-// make a peer we are actively probing read as unreachable (gastrolog-1lbifx).
+// make a peer we are actively probing read as unreachable.
 //
 // 2× is chosen against the transport's own budget, not picked for feel: a
 // leader probes each follower roughly every HeartbeatTimeout/10, and a probe
@@ -1405,14 +1390,14 @@ func wireRaftContactRecorder(tm *multiraft.Transport[string], peerState *cluster
 // heartbeats at the shipped 2s/200ms shape — while still detecting a paused
 // peer in about half the time the deleted 1s liveness broadcast managed
 // (8× 1s). Anything tighter would let one slow-but-successful probe flip a
-// healthy peer, which is the gastrolog-4iacg flapping failure again.
+// healthy peer, which is the inspector-flapping failure again.
 const raftContactTTLMultiplier = 2
 
 // raftContactTTL derives the PeerState Raft-evidence window from the Raft
 // failure detector's configured heartbeat timeout, so widening the detector
 // (GLOG_RAFT_HEARTBEAT_TIMEOUT) widens this in lockstep instead of leaving
-// liveness stricter than consensus — the same inversion gastrolog-1io54g had
-// to unwind inside the transport.
+// liveness stricter than consensus — the same inversion that had to be
+// unwound inside the transport.
 func raftContactTTL() time.Duration {
 	heartbeat, _, _ := raftgroup.RaftTimeouts(raftgroup.GroupConfig{})
 	return raftContactTTLMultiplier * heartbeat
@@ -1503,13 +1488,13 @@ type serverDeps struct {
 	ConfigStore         io.Closer    // rawStore — closed before gRPC for clean Raft shutdown
 	PlacementReconcile  func(ctx context.Context)
 
-	// gastrolog-o9z6o: when non-empty, the server registers
-	// /cluster/bootstrap-token gated on this secret. BootstrapTokenFn
-	// returns the cluster join token from the live config store.
+	// When non-empty, the server registers /cluster/bootstrap-token
+	// gated on this secret. BootstrapTokenFn returns the cluster join
+	// token from the live config store.
 	BootstrapTokenServeSecret string
 	BootstrapTokenFn          func() (string, error)
 
-	// Environment banner (gastrolog-4vr0l). Display-only metadata.
+	// Environment banner. Display-only metadata.
 	EnvironmentLabel string
 	EnvironmentColor string
 
@@ -1577,7 +1562,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	}
 
 	// Shutdown order: vault multiraft → cluster-ctl Raft → vault WAL → cluster WAL (via ConfigStore) → gRPC.
-	// Cluster-ctl and vault groups use separate raftwal directories (gastrolog-3tp89). Raft must
+	// Cluster-ctl and vault groups use separate raftwal directories. Raft must
 	// shut down WHILE the transport is alive, otherwise the leader's replication goroutines block
 	// on dead gRPC connections.
 	if deps.GroupMgr != nil {
@@ -1683,8 +1668,7 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 // ingester's narrow StatsSource interface. The orchestrator's
 // orchestrator.VaultSnapshot stays a vault-domain DTO; this adapter converts
 // it into ingestmetrics.VaultSnapshot at the wiring seam so
-// internal/ingester/metrics depends on nothing in internal/orchestrator
-// (gastrolog-5e04ld).
+// internal/ingester/metrics depends on nothing in internal/orchestrator.
 type metricsStatsAdapter struct {
 	orch *orchestrator.Orchestrator
 }
@@ -1723,7 +1707,7 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore sys
 	listen := func(factory ingestion.IngesterFactory, defaults func() map[string]string, addrs func(map[string]string) []ingestion.ListenAddr) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, ListenAddrs: addrs}
 	}
-	// SingletonSupported table (see gastrolog-2kcw4):
+	// SingletonSupported table:
 	//   chatterbox / scatterbox  — synthetic, both parallel and singleton-with-failover are legitimate
 	//   kafka / mqtt             — depends on broker setup (consumer group / shared subscription)
 	//   docker / self / tail / metrics — per-node-local source, singleton would hide 3/4 of cluster data

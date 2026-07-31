@@ -32,9 +32,10 @@ var (
 	}
 )
 
-// TestGoldenBytesPinFormat is the byte-compat proof for gastrolog-130ff7:
-// it hardcodes the 12-byte entries independent of both tsindex and tsidx,
-// then asserts every read/write path in both packages agrees on them.
+// TestGoldenBytesPinFormat is the byte-compat proof for the 12-byte
+// TS-index wire layout: it hardcodes the entries independent of both
+// tsindex and tsidx, then asserts every read/write path in both packages
+// agrees on them.
 func TestGoldenBytesPinFormat(t *testing.T) {
 	t.Parallel()
 

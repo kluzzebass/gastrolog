@@ -481,8 +481,8 @@ func (g *gatedPull) pulledSegment(id glid.GLID) bool {
 // a worker pass is already in flight is NOT satisfied by that pass: the pass
 // read the log before the request and can return stale success. The waiter
 // must be completed by a pass that starts after the request registers
-// (gastrolog-38snf4 gate finding — TestCollectOnceWaitersShareWorkerPass flaked
-// exactly this way under full-suite load).
+// (TestCollectOnceWaitersShareWorkerPass flaked exactly this way under
+// full-suite load).
 func TestCollectOnceWaiterWaitsForFreshPass(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
@@ -580,12 +580,12 @@ func TestCollectOncePullFailure(t *testing.T) {
 }
 
 // TestCollectOncePromotesPreHeadOrphan is restart survival for the crash
-// window between the pull's rename commit and promote (gastrolog-5zotim): a
-// fresh manager finds the assigned segment already sitting in pre-head/. It
-// must verify the file against the published checksum, promote it in place —
-// no pull; the empty pull client fails any pull attempt — and commit the
-// holder receipt. The old behavior skipped the segment forever: the receipt
-// never committed and the release gate stalled for its manifest.
+// window between the pull's rename commit and promote: a fresh manager
+// finds the assigned segment already sitting in pre-head/. It must verify
+// the file against the published checksum, promote it in place — no pull;
+// the empty pull client fails any pull attempt — and commit the holder
+// receipt. Skipping it instead wedges the segment forever: the receipt
+// never commits and the release gate stalls for its manifest.
 func TestCollectOncePromotesPreHeadOrphan(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
@@ -625,7 +625,7 @@ func TestCollectOncePromotesPreHeadOrphan(t *testing.T) {
 
 // TestRunConvergesPreHeadOrphanAtStartup asserts the worker's startup pass —
 // with no Notify, no publish event — promotes and receipts a crash-orphaned
-// pre-head segment (gastrolog-5zotim restart survival).
+// pre-head segment — restart survival.
 func TestRunConvergesPreHeadOrphanAtStartup(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
@@ -773,7 +773,7 @@ func TestCollectOnceReplacesStaleOrphanWithPulledBytes(t *testing.T) {
 // TestCollectOnceRejectsPulledChecksumMismatch: pulled bytes that are
 // internally valid but do not match the published checksum must not be
 // promoted or receipted — a holder serving wrong-but-valid bytes would merge
-// divergent segments into this home's GLCB (gastrolog-5zotim). The discarded
+// divergent segments into this home's GLCB. The discarded
 // pull must converge once the holder serves matching bytes.
 func TestCollectOnceRejectsPulledChecksumMismatch(t *testing.T) {
 	t.Parallel()
@@ -830,10 +830,10 @@ func TestCollectOnceRejectsPulledChecksumMismatch(t *testing.T) {
 // TestCollectOnceRejectsTamperedHolderBytes: a holder serving a same-length
 // content substitution with fixed-up frame CRCs — identical frame geometry,
 // different record bytes — must be rejected against the published checksum
-// and never promoted or receipted. The content-blind rolling CRC32 passed
-// exactly this substitution through segment.Open, publish, and the
-// published-checksum verify (gastrolog-1vepg0). Convergence once the holder
-// serves authentic bytes is pinned too.
+// and never promoted or receipted. A content-blind checksum passes exactly
+// this substitution through segment.Open, publish, and the
+// published-checksum verify. Convergence once the holder serves authentic
+// bytes is pinned too.
 func TestCollectOnceRejectsTamperedHolderBytes(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
@@ -904,7 +904,7 @@ func (p *mismatchThenMatchPull) Pull(_ context.Context, _, _ glid.GLID, dest io.
 // TestRunRepullsAfterChecksumMismatch pins retryability: a checksum mismatch
 // must re-arm the manager's own backoff wake (like any deferred pull) — the
 // publish event that assigned the segment already fired, so nothing else
-// retries it (gastrolog-5zotim).
+// retries it.
 func TestRunRepullsAfterChecksumMismatch(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
@@ -1070,11 +1070,12 @@ func (p *retryablePull) Pull(ctx context.Context, nodeID glid.GLID, segmentID gl
 
 // TestDeferredPassRetriesWithoutNewEvents pins the retry edge for deferred
 // collect passes. A retryable pull failure (catch-up race: registry lists the
-// segment before any holder can serve bytes) used to be logged as "deferred"
-// and then dropped — the retry relied on a FUTURE publish event, which never
-// arrives for the last segments of a burst. The worker must retry on its own
-// backoff wake with no external Notify (gastrolog-38snf4: follower homes
-// stalled without their sealed-chunk segments, GLCB never materialized).
+// segment before any holder can serve bytes) must not be logged as
+// "deferred" and then dropped: that leaves the retry relying on a FUTURE
+// publish event, which never arrives for the last segments of a burst, and
+// follower homes stall without their sealed-chunk segments, GLCB never
+// materializing. The worker must retry on its own backoff wake with no
+// external Notify.
 func TestDeferredPassRetriesWithoutNewEvents(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
@@ -1226,7 +1227,7 @@ func (p *failingPull) Pull(_ context.Context, _ glid.GLID, segmentID glid.GLID, 
 	return fmt.Errorf("pull segment %s: %w", segmentID, os.ErrNotExist)
 }
 
-// TestPartialPassFiresOnPassCompleteOnce pins the gastrolog-3fv0dt acceptance:
+// TestPartialPassFiresOnPassCompleteOnce pins partial-pass progress:
 // a pass that lands 2 of 3 segments while the 3rd keeps failing retryably
 // fires OnPassComplete exactly once. The joined pull error must not suppress
 // the chunking wake for the segments that DID land, and the no-progress
@@ -1309,8 +1310,8 @@ func TestPartialPassFiresOnPassCompleteOnce(t *testing.T) {
 	}
 }
 
-// TestFullyFailedPassDoesNotFireOnPassComplete pins the zero-progress side of
-// gastrolog-3fv0dt: a pass in which every pull fails must not wake chunking —
+// TestFullyFailedPassDoesNotFireOnPassComplete pins the zero-progress side:
+// a pass in which every pull fails must not wake chunking —
 // OnPassComplete means "something landed in head/", not "a pass ran".
 func TestFullyFailedPassDoesNotFireOnPassComplete(t *testing.T) {
 	t.Parallel()
@@ -1385,11 +1386,10 @@ func (g *segGatedPull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, d
 	return g.inner.Pull(ctx, vaultID, segmentID, dest)
 }
 
-// TestCollectSegmentsDoesNotWaitForFullPass pins the gastrolog-1b51yf fix:
-// a targeted CollectSegments (chunking build materializing manifest refs)
-// must complete while a full collect pass is wedged mid-pull. Before the fix
-// collectSegments took passMu and the serial seal queue drained at one chunk
-// per full pass under backlog.
+// TestCollectSegmentsDoesNotWaitForFullPass: a targeted CollectSegments
+// (chunking build materializing manifest refs) must complete while a full
+// collect pass is wedged mid-pull. If collectSegments took passMu, the
+// serial seal queue would drain at one chunk per full pass under backlog.
 func TestCollectSegmentsDoesNotWaitForFullPass(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
@@ -1439,7 +1439,7 @@ func TestCollectSegmentsDoesNotWaitForFullPass(t *testing.T) {
 			t.Fatalf("CollectSegments: %v", err)
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("CollectSegments blocked behind the in-flight full pass (gastrolog-1b51yf regression)")
+		t.Fatal("CollectSegments blocked behind the in-flight full pass")
 	}
 	if _, err := os.Stat(paths.HeadSegment(root, targetSeg)); err != nil {
 		t.Fatalf("targeted segment not in head/: %v", err)
@@ -1530,7 +1530,7 @@ func TestCollectOncePullsInParallel(t *testing.T) {
 // TestRewireVaultFSMRebindsLiveRegistry for collection: after a vault-ctl
 // snapshot Restore swaps the sub-FSM, RewireVaultFSM must rebind the whole
 // collaborator bundle (log reader, pull client, receipt committer, FSM) as
-// one atomic snapshot (gastrolog-50m2vi). A publish applied to the NEW
+// one atomic snapshot. A publish applied to the NEW
 // (live) FSM must trigger a collect pass that pulls from the NEW source and
 // receipts to the NEW committer; the OLD bundle must never be consulted.
 func TestRewireVaultFSMRebindsLiveDeps(t *testing.T) {
@@ -1548,8 +1548,8 @@ func TestRewireVaultFSMRebindsLiveDeps(t *testing.T) {
 	// The stale pull source ALSO holds the segment bytes: if a torn rewire
 	// left the old pull client behind, the pass would still land the right
 	// bytes in head/ — the counting wrapper, not head/ content, is what
-	// proves which source served the pull (the gastrolog-50m2vi torn-bundle
-	// hazard: fresh FSM with a stale pull client).
+	// proves which source served the pull (the torn-bundle hazard: fresh
+	// FSM with a stale pull client).
 	staleInner := newMemoryPull()
 	staleInner.Put(segID, data)
 	stalePull := &countingSlowPull{inner: staleInner}
@@ -1711,16 +1711,14 @@ func TestRewireVaultFSMValidation(t *testing.T) {
 	}
 }
 
-// TestRegisterVaultSweepsPullingOrphanAndRepullStillOverwrites verifies the
-// gastrolog-66hmx3 fix for gastrolog-5do8sh gap 7: PullToPreHead streams
-// into "<segID>.pulling" (transfer.go preHeadPullSuffix) and a crash before
-// the rename commit used to leave that temp file in pre-head/ forever —
-// unlike FINAL-named pre-head orphans (promoted in place, gastrolog-5zotim),
-// a .pulling file is invisible to collect passes, so nothing else would
-// ever touch it. RegisterVault now sweeps pre-head/*.pulling orphans before
-// the vault's worker can start (sweepOrphanPullingFiles, called from
-// newVaultCollect) — before any real pull could legitimately be holding
-// that path open.
+// TestRegisterVaultSweepsPullingOrphanAndRepullStillOverwrites: PullToPreHead
+// streams into "<segID>.pulling" (transfer.go preHeadPullSuffix), and a crash
+// before the rename commit leaves that temp file in pre-head/. Unlike
+// FINAL-named pre-head orphans (promoted in place), a .pulling file is
+// invisible to collect passes, so nothing else would ever touch it.
+// RegisterVault sweeps pre-head/*.pulling orphans before the vault's worker
+// can start (sweepOrphanPullingFiles, called from newVaultCollect) — before
+// any real pull could legitimately be holding that path open.
 //
 // The second half still pins the self-healing edge that makes a
 // still-live .pulling harmless for assigned segments even without the
@@ -1761,8 +1759,8 @@ func TestRegisterVaultSweepsPullingOrphanAndRepullStillOverwrites(t *testing.T) 
 		t.Fatalf(".pulling orphan should be swept by RegisterVault, stat err = %v", err)
 	}
 
-	// Startup/converge pass (the path the gastrolog-5zotim orphan tests
-	// drive): with nothing assigned it must not touch pre-head/.
+	// Startup/converge pass (the path the pre-head orphan tests drive):
+	// with nothing assigned it must not touch pre-head/.
 	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
 		t.Fatal(err)
 	}
@@ -1801,7 +1799,7 @@ func TestRegisterVaultSweepsPullingOrphanAndRepullStillOverwrites(t *testing.T) 
 }
 
 // TestRegisterVaultPullingSweepDoesNotTouchLiveOrFinalFiles verifies the
-// construction-time sweep (gastrolog-66hmx3) only removes *.pulling names
+// construction-time sweep only removes *.pulling names
 // and leaves a segment mid-pull under a different name (simulated by a
 // plain, non-.pulling pre-head file) and a promoted head/ file alone.
 func TestRegisterVaultPullingSweepDoesNotTouchLiveOrFinalFiles(t *testing.T) {
@@ -1813,7 +1811,7 @@ func TestRegisterVaultPullingSweepDoesNotTouchLiveOrFinalFiles(t *testing.T) {
 	if err := paths.EnsurePreHeadDir(root); err != nil {
 		t.Fatal(err)
 	}
-	// A FINAL-named pre-head file (gastrolog-5zotim shape) must survive.
+	// A FINAL-named pre-head file (crash-orphan shape) must survive.
 	finalPreHeadPath := paths.PreHeadSegment(root, finalSegID)
 	finalBytes := []byte("already-verified pre-head bytes")
 	if err := os.WriteFile(finalPreHeadPath, finalBytes, 0o600); err != nil {

@@ -184,7 +184,7 @@ func decodeStatus(b byte) (index.KVIndexStatus, error) {
 // Load functions — all use idxmmap.Load to avoid slurping the index file
 // into a heap-allocated []byte. The decoders return a 3-tuple (entries,
 // status, error); the status is captured via closure since the generic
-// helper only handles single-value returns. See gastrolog-3rvws.
+// helper only handles single-value returns.
 
 func LoadKeyIndex(dir string, chunkID chunk.ChunkID) ([]index.KVKeyIndexEntry, index.KVIndexStatus, error) {
 	status := index.KVComplete

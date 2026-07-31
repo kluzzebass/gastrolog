@@ -4,12 +4,11 @@ import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 import { StorageState } from "../../api/gen/gastrolog/v1/storage_pb";
 import { EntityListPane } from "./EntityListPane";
 
-// gastrolog-3cobq4: the storages entity tab renders a FLAT list, exactly
-// the VaultsList shape — no node grouping, no group headers. The node is
-// already a badge on each card (StorageCard renders NodeBadge), so a
-// grouped presentation would only duplicate the per-node view
-// (NodeDetailPane's Storages section) with nothing new to offer. These
-// tests replace the deleted groupStoragesByNode grouping tests.
+// The storages entity tab renders a FLAT list, exactly the VaultsList
+// shape — no node grouping, no group headers. The node is already a badge
+// on each card (StorageCard renders NodeBadge), so a grouped presentation
+// would only duplicate the per-node view (NodeDetailPane's Storages
+// section) with nothing new to offer.
 
 function testId(n: number): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(16);

@@ -1,10 +1,10 @@
 package orchestrator
 
-// gastrolog-1xl29s: a vault whose retention_rules resolve to zero usable
-// policies (every referenced policy is trigger-less — no maxAge, maxSize, or
-// maxChunks set) used to exit retentionTargetForInstance silently: no log,
-// no alarm, and the vault's only drain simply never ran again. Same class
-// for the HasRaftLeader()==false early return. These tests pin the fix:
+// A vault whose retention_rules resolve to zero usable policies (every
+// referenced policy is trigger-less — no maxAge, maxSize, or maxChunks set)
+// used to exit retentionTargetForInstance silently: no log, no alarm, and the
+// vault's only drain simply never ran again. Same class for the
+// HasRaftLeader()==false early return. These tests pin the fix:
 // case 3 (trigger-less policies) raises alarmRetentionUnenforceable and logs
 // a throttled warn; case 1 (no vault-ctl Raft leader) logs a throttled warn
 // (a genuinely different condition than the vault-leaderless alarm, which
@@ -143,7 +143,7 @@ func TestRetentionTargetClearsUnenforceableAlarmWhenTriggerRestored(t *testing.T
 }
 
 // TestRetentionTargetMaxSizeOnlyPolicyProducesSweepTargetNoAlarm pins the
-// positive case directly (gastrolog-33ul6h): a policy that sets ONLY
+// positive case directly: a policy that sets ONLY
 // MaxSize (no MaxAge/MaxChunks) is a drain policy — it resolves to exactly
 // one SizeRetentionPolicy rule, produces a live sweep target, and never
 // raises retention-unenforceable. "Bound-only" is not a concept anymore; a

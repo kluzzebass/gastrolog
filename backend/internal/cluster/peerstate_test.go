@@ -49,12 +49,12 @@ func TestPeerState_Delete_SurvivesLaterUpdate(t *testing.T) {
 	}
 }
 
-// The central invariant gastrolog-2kio8 introduced, carried over to its
+// The central invariant of fast paused-node detection, carried over to its
 // replacement: the fast liveness signal refreshes reachability WITHOUT
 // touching the cached NodeStats, so a peer's last known payload stays
 // queryable between the heavy 5s broadcasts. That signal used to be an empty
-// Heartbeat broadcast; since gastrolog-1lbifx it is Raft contact, and the
-// invariant has to survive the swap.
+// Heartbeat broadcast; it is now Raft contact, and the invariant has to
+// survive the swap.
 func TestPeerState_RaftContactDoesNotClobberCachedStats(t *testing.T) {
 	ps := NewPeerState(4*time.Second, 4*time.Second)
 	stats := &gastrologv1.NodeStats{NodeName: "alpha", Version: "v1"}
@@ -85,8 +85,8 @@ func TestPeerState_RaftContactDoesNotClobberCachedStats(t *testing.T) {
 // Only NodeStats moves peer state. A NodeJobs broadcast rides the same
 // envelope and lands on the same subscriber list, and it must NOT be mistaken
 // for liveness — the peer-jobs cache is a separate consumer with its own TTL.
-// Before gastrolog-1lbifx an empty Heartbeat payload was the other case
-// handled here; nothing replaced it, and nothing should.
+// Before liveness moved to Raft contact, an empty Heartbeat payload was the
+// other case handled here; nothing replaced it, and nothing should.
 func TestPeerState_HandleBroadcast_IgnoresNonStatsPayloads(t *testing.T) {
 	ps := NewPeerState(4*time.Second, 4*time.Second)
 
@@ -103,7 +103,7 @@ func TestPeerState_HandleBroadcast_IgnoresNonStatsPayloads(t *testing.T) {
 	}
 }
 
-// The timing acceptance from gastrolog-2kio8, re-pointed at the signal that
+// The paused-node detection timing acceptance, re-pointed at the signal that
 // replaced the heartbeat broadcast: a peer whose Raft contact stops while we
 // keep probing must drop out of LivePeers within its TTL plus polling slack.
 //
@@ -245,15 +245,15 @@ func TestPeerState_VaultStorageProtected(t *testing.T) {
 	}
 }
 
-// TestPeerState_FindStorageState pins the cross-node lookup contract for
-// gastrolog-3cobq4: a storage is only ever reported by the node that owns
-// it, so FindStorageState scans every live peer's broadcast and returns
-// that one entry, keyed by the GLID's canonical String() form (parsed and
-// compared against the wire's raw bytes — never a raw-bytes-vs-string
-// mismatch, see the function's own doc comment). An unknown ID, an
-// unparsable ID, and an expired reporting peer all resolve to nil — this
-// is the surface "every node can serve every storage's state including
-// remote ones" rests on.
+// TestPeerState_FindStorageState pins the cross-node lookup contract behind
+// ListStorages, the entity-list analogue of ListVaults: a storage is only
+// ever reported by the node that owns it, so FindStorageState scans every
+// live peer's broadcast and returns that one entry, keyed by the GLID's
+// canonical String() form (parsed and compared against the wire's raw bytes
+// — never a raw-bytes-vs-string mismatch, see the function's own doc
+// comment). An unknown ID, an unparsable ID, and an expired reporting peer
+// all resolve to nil — this is the surface "every node can serve every
+// storage's state including remote ones" rests on.
 func TestPeerState_FindStorageState(t *testing.T) {
 	hosted := glid.New()
 	unknown := glid.New()
@@ -291,10 +291,10 @@ func TestPeerState_FindStorageState(t *testing.T) {
 	}
 }
 
-// TestPeerState_VaultStorageProtectedNodeNames pins a review finding on
-// gastrolog-9akebz: the "reported by <node>" admission detail must name
-// nodes, not raw IDs, and the joined list must be stable between reads
-// (sorted) rather than following Go's randomized map iteration order.
+// TestPeerState_VaultStorageProtectedNodeNames pins a review finding: the
+// "reported by <node>" admission detail must name nodes, not raw IDs, and
+// the joined list must be stable between reads (sorted) rather than
+// following Go's randomized map iteration order.
 // Names come from each peer's own broadcast NodeStats.NodeName — a peer
 // that hasn't reported one yet (empty string) falls back to its node ID,
 // same contract as placementManager.nameOrID.

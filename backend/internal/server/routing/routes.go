@@ -50,16 +50,16 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.SystemServiceListManagedFilesProcedure:    {Strategy: RouteLocal},
 		gastrologv1connect.SystemServiceWatchSystemProcedure:         {Strategy: RouteLocal, IsStreaming: true},
 		// ListStorages composes replicated config with local-or-peer-broadcast
-		// guard state itself (gastrolog-3cobq4) — RouteLocal like the other
-		// config reads above, not RouteFanOut: no per-node fan-out is needed,
-		// the responding node already resolves every storage's live state.
+		// guard state itself — RouteLocal like the other config reads above,
+		// not RouteFanOut: no per-node fan-out is needed, the responding
+		// node already resolves every storage's live state.
 		gastrologv1connect.SystemServiceListStoragesProcedure: {Strategy: RouteLocal},
 		// Node-local operations — run on whichever node received the request.
 		gastrologv1connect.SystemServiceTestIngesterProcedure: {Strategy: RouteLocal},
 		// TriggerIngester is an imperative action on a specific ingester: it
 		// must run where that ingester runs. The backend resolves the owning
 		// node from the replicated alive map — no X-Target-Node from the
-		// client, no config mutation tunnelled through Raft (gastrolog-51ge9).
+		// client, no config mutation tunnelled through Raft.
 		gastrologv1connect.SystemServiceTriggerIngesterProcedure: {
 			Strategy:     RouteToResourceOwner,
 			Resource:     OwnerOf(ResourceIngester, func(m *apiv1.TriggerIngesterRequest) string { return ProtoGLID(m.GetId()) }),
@@ -152,7 +152,7 @@ func DefaultRoutes() map[string]RPCRoute {
 			Resource:     OwnerOf(ResourceVault, (*apiv1.GetChunkRequest).GetVault),
 			WrapResponse: NewRespWrapper[apiv1.GetChunkResponse](),
 		},
-		gastrologv1connect.VaultServiceGetIndexesProcedure:         {Strategy: RouteLocal}, // gastrolog-3570f: handler fans out to vault-hosting peers
+		gastrologv1connect.VaultServiceGetIndexesProcedure:         {Strategy: RouteLocal}, // handler fans out to vault-hosting peers
 		gastrologv1connect.VaultServiceGetPipelineBacklogProcedure: {Strategy: RouteLocal},
 
 		gastrologv1connect.VaultServiceAnalyzeChunkProcedure: {

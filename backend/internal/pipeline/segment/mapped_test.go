@@ -1,7 +1,7 @@
 package segment_test
 
-// Coverage for gastrolog-1rca2d: MappedSegment must read exactly what the
-// verified Open path reads, from a read-only mapping with no per-record I/O.
+// MappedSegment must read exactly what the verified Open path reads, from a
+// read-only mapping with no per-record I/O.
 
 import (
 	"path/filepath"

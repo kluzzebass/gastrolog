@@ -1,4 +1,4 @@
-// Package jsonl implements a write-only JSONL sink tier. Every record
+// Package jsonl implements a write-only JSONL sink. Every record
 // is appended as a single JSON line to a file. No chunking, rotation,
 // indexing, or searching — purely for end-to-end verification.
 package jsonl
@@ -66,7 +66,7 @@ func NewFactory() chunk.ManagerFactory {
 	return func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
 		path := params["path"]
 		if path == "" {
-			return nil, errors.New("jsonl tier requires 'path' parameter")
+			return nil, errors.New("jsonl sink requires 'path' parameter")
 		}
 		return NewManager(Config{Path: path})
 	}

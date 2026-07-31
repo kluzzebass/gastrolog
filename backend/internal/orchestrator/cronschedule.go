@@ -55,9 +55,9 @@ func CronEvery(interval time.Duration) string {
 // on real sweep ticks: at production cadence a single retention-driven
 // assertion costs a 60s cron period and a catch-up assertion costs 20s, which
 // is what made the package's non-short runtime wall-clock rather than
-// compute bound (gastrolog-4yzpcj). Compressing the cadence keeps the periodic
-// code path under test — the sweeps still run on their own timer, nothing is
-// poked by hand — it just stops the suite from sitting out real minutes.
+// compute bound. Compressing the cadence keeps the periodic code path under
+// test — the sweeps still run on their own timer, nothing is poked by hand —
+// it just stops the suite from sitting out real minutes.
 var sweepCadenceOverride string
 
 // sweepCron resolves the cron expression a periodic sweep registers with.

@@ -46,7 +46,7 @@ func (o *Orchestrator) ServeSegmentPull(vaultID, segmentID glid.GLID, w io.Write
 // contract the cluster PullSegment handler encodes as a NotFound status so
 // the pulling home's SegmentPuller can re-attach the same sentinel. Every
 // other error (open/copy failures mid-stream) passes through and reaches the
-// puller as a terminal failure (gastrolog-466kq5).
+// puller as a terminal failure.
 func translateServePullError(err error) error {
 	if err == nil {
 		return nil
@@ -87,18 +87,18 @@ func (o *Orchestrator) ServeChunkGLCBPull(vaultID glid.GLID, chunkID chunk.Chunk
 // ErrStorageDiskProtect, ErrVaultBacklogBudget) surfaces here so the caller can
 // abort the whole chunk fan-out and retain the chunk — before the ack was
 // wired, the routing gate's whole-record nack went to a nil ack and the
-// record silently vanished (gastrolog-5ct2av).
+// record silently vanished.
 func (o *Orchestrator) SubmitRetentionRecord(ctx context.Context, sourceVaultID glid.GLID, rec chunk.Record, reason string) error {
 	o.mu.RLock()
 	pl := o.pipeline
 	o.mu.RUnlock()
 	if pl == nil {
 		// Same terminal condition as a stopped supervisor: callers abort
-		// their fan-out on this sentinel (gastrolog-5034va).
+		// their fan-out on this sentinel.
 		return pipeline.ErrNotRunning
 	}
 	// Owned conversion: the drain cursor materializes rec.Attrs fresh per
-	// record; nothing else holds the map (gastrolog-11y2iv).
+	// record; nothing else holds the map.
 	prec := convert.ChunkToRecordOwned(rec)
 	ack := make(chan error, 1)
 	if err := pl.SubmitDrain(ctx, routing.Input{
@@ -217,7 +217,7 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 			// lookup means the placement could not be resolved (config load
 			// failure, vault dropped from config) — report unresolved so the
 			// chunking release/purge gates fail closed instead of reading
-			// empty as "no holders required" (gastrolog-4w1vt).
+			// empty as "no holders required".
 			ids := o.vaultPlacementNodeIDs(vaultID)
 			return ids, len(ids) > 0
 		}
@@ -244,13 +244,12 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 
 // onPipelineChunkBuilt handles a freshly-built pipeline GLCB on this home.
 // Queryability needs no action — the lazy on-miss GLCB resolver serves the
-// chunk on first lookup the moment its FSM entry and file both exist
-// (gastrolog-34kmv). Two build-completion effects remain event-driven here:
-// the home's holder receipt (build completion is the byte-presence proof the
-// receipt asserts, and it covers the build-finishes-after-seal ordering gap
-// where onSeal fired before the file existed), and — once the chunk is fully
-// Sealed — its cloud upload. A Sealing-only entry defers both to the later
-// seal.
+// chunk on first lookup the moment its FSM entry and file both exist. Two
+// build-completion effects remain event-driven here: the home's holder receipt
+// (build completion is the byte-presence proof the receipt asserts, and it
+// covers the build-finishes-after-seal ordering gap where onSeal fired before
+// the file existed), and — once the chunk is fully Sealed — its cloud upload.
+// A Sealing-only entry defers both to the later seal.
 func (o *Orchestrator) onPipelineChunkBuilt(vaultID glid.GLID, fsm *vaultctlfsm.FSM, id chunk.ChunkID) {
 	e := fsm.Get(id)
 	if e == nil {
@@ -377,9 +376,9 @@ func (o *Orchestrator) resolveChunkPolicy(sys *system.System, vaultID glid.GLID)
 // chunking manifest policy plus its cron expression. This is a config→runtime
 // boundary: the operator's expressions are resolved here, once, through the
 // shared parser, so both rotation paths read the same numbers from the same
-// source (gastrolog-etcjdx). A malformed expression cannot reach here —
-// PutRotationPolicy parse-checks at write — so a parse failure is a bug and
-// leaves the threshold unset rather than guessing.
+// source. A malformed expression cannot reach here — PutRotationPolicy
+// parse-checks at write — so a parse failure is a bug and leaves the threshold
+// unset rather than guessing.
 func manifestRotationPolicy(c system.RotationPolicyConfig) (chunking.ManifestRotationPolicy, string) {
 	var p chunking.ManifestRotationPolicy
 	if c.MaxRecords != nil && *c.MaxRecords > 0 {
@@ -503,7 +502,7 @@ func (o *Orchestrator) pipelineVaultsMap() map[glid.GLID]pipelineVaultReg {
 // lookupPipelineVault reads a vault's pipeline registration WITHOUT taking o.mu.
 //
 // Safe to call from the vault-ctl Raft apply pump, which must never block on
-// o.mu — see the pipelineVaults field comment and gastrolog-1abzem.
+// o.mu — see the pipelineVaults field comment.
 func (o *Orchestrator) lookupPipelineVault(vaultID glid.GLID) (pipelineVaultReg, bool) {
 	reg, ok := o.pipelineVaultsMap()[vaultID]
 	return reg, ok
@@ -540,9 +539,8 @@ func (o *Orchestrator) deletePipelineVaultLocked(vaultID glid.GLID) {
 // pipeline GLCBs to register. Lock-free: reads the published registration
 // snapshot, and segmentsDir is write-once at construction. The caller does the
 // stat/registration I/O afterwards. Both properties are required, not
-// incidental — the Raft apply pump calls this (gastrolog-1abzem).
+// incidental — the Raft apply pump calls this.
 // Mirrors the path math in originRoot + buildPipelineVaultSpec (spec.ChunkRoot).
-// See gastrolog-2kysn (Rubicon E1).
 func (o *Orchestrator) pipelineVaultChunkRoot(vaultID glid.GLID) (string, bool) {
 	if o.segmentsDir == "" {
 		return "", false
@@ -559,10 +557,10 @@ func (o *Orchestrator) pipelineVaultChunkRoot(vaultID glid.GLID) (string, bool) 
 // (<segmentsDir>/<vaultID> — the parent of working/, completed/, head/,
 // pre-head/ and chunks/). Unlike pipelineVaultChunkRoot it is NOT
 // home-gated: origins hold completed/ files too, and the staging-orphan
-// sweep (gastrolog-27czpq) must purge released segments on every role.
+// sweep must purge released segments on every role.
 //
 // Lock-free for the same reason as pipelineVaultChunkRoot: reachable from the
-// Raft apply pump, which must not block on o.mu (gastrolog-1abzem).
+// Raft apply pump, which must not block on o.mu.
 func (o *Orchestrator) pipelineVaultStagingRoot(vaultID glid.GLID) (string, bool) {
 	if o.segmentsDir == "" {
 		return "", false
@@ -583,10 +581,10 @@ var errNoVaultCtlHandle = errors.New("no vault-ctl handle; segment publish defer
 // vault-ctl handle is available (vault-ctl group not present yet during
 // startup, or single-node/memory mode without a group manager). It refuses
 // every publish with a retryable error so completed segments ride the existing
-// publish-retry machinery until the handle appears: the old noop default
-// returned nil, which marked segments published that vault-ctl never saw, and
-// the publisher upgrade had nothing to republish — durable segments invisible
-// to collection and chunking until restart (gastrolog-375el).
+// publish-retry machinery until the handle appears. Returning nil instead
+// would mark segments published that vault-ctl never saw, leaving the
+// publisher upgrade nothing to republish — durable segments invisible to
+// collection and chunking until restart.
 //
 // When the handle appears, reloadPipelineFromConfig re-registers the vault
 // with the real VaultCtlPublisher; distribution's registration wake (stranded

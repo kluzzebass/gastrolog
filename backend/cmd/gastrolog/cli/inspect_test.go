@@ -20,24 +20,22 @@ func TestChunkBadges(t *testing.T) {
 			expect: "active",
 		},
 		{
-			// gastrolog-5wh571: SEALING is not "active" — a wedged seal
-			// and a healthy open chunk are opposite diagnoses.
+			// SEALING is not "active" — a wedged seal and a healthy
+			// open chunk are opposite diagnoses.
 			name:   "sealing chunk",
 			chunk:  &v1.ChunkMeta{State: v1.ChunkState_CHUNK_STATE_SEALING},
 			expect: "sealing",
 		},
 		{
-			// gastrolog-24m1t step 7f dropped the "compressed" badge —
-			// sealed chunks are GLCB and GLCB is zstd-compressed by
-			// construction, so the flag carried no information.
+			// No "compressed" badge: sealed chunks are GLCB and GLCB
+			// is zstd-compressed by construction, so the flag carries
+			// no information.
 			name:   "sealed (GLCB is implicitly compressed)",
 			chunk:  &v1.ChunkMeta{State: v1.ChunkState_CHUNK_STATE_SEALED, Sealed: true},
 			expect: "sealed",
 		},
 		{
-			// Unspecified state renders as "unknown", never a guess
-			// (gastrolog-5wh571). The zero-value else-branch used to
-			// claim "active" here.
+			// Unspecified state renders as "unknown", never a guess.
 			name:   "unspecified state",
 			chunk:  &v1.ChunkMeta{},
 			expect: "unknown",
@@ -83,12 +81,11 @@ func TestChunkBadges(t *testing.T) {
 	}
 }
 
-// TestChunkSizeBytes pins the gastrolog-33ul6h fix: an evicted cloud-backed
+// TestChunkSizeBytes pins the local-disk size rule: an evicted cloud-backed
 // chunk (CloudBacked, DiskBytes==0) must report 0, never fall back to
-// logical Bytes — the object still exists in the cloud store, at
-// CloudBytes, a currency this local-disk stat never touches. The existing
-// pipeline-chunk fallback (non-cloud, DiskBytes unset -> logical Bytes,
-// gastrolog-45ywhx) must still hold.
+// logical Bytes — the object still exists in the cloud store, at CloudBytes,
+// a currency this local-disk stat never touches. The pipeline-chunk fallback
+// (non-cloud, DiskBytes unset -> logical Bytes) must still hold.
 func TestChunkSizeBytes(t *testing.T) {
 	t.Parallel()
 
@@ -103,7 +100,7 @@ func TestChunkSizeBytes(t *testing.T) {
 			expect: 900,
 		},
 		{
-			name:   "pipeline GLCB chunk falls back to logical Bytes (gastrolog-45ywhx)",
+			name:   "pipeline GLCB chunk falls back to logical Bytes",
 			chunk:  &v1.ChunkMeta{Bytes: 4000, DiskBytes: 0},
 			expect: 4000,
 		},

@@ -7,7 +7,7 @@ import (
 	"gastrolog/internal/ingester/identitytest"
 )
 
-// TestEventIDIdentity pins gastrolog-44b9r for the Docker ingester.
+// TestEventIDIdentity pins the identity invariant for the Docker ingester.
 // Docker requires a real daemon; we drive buildMessage directly —
 // the seam where IngesterID and IngestTS land on the IngestMessage.
 func TestEventIDIdentity(t *testing.T) {

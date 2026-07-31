@@ -12,7 +12,7 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
-// Steady-state chunking reproduction for gastrolog-68sfsl.
+// Steady-state chunking reproduction.
 //
 // The 18h cluster run showed a cloud-backed, age-rotation, short-give-up-TTL
 // vault seal exactly ONE chunk while shedding 43k never-chunked segments — even
@@ -28,8 +28,8 @@ import (
 //     ZERO seals, exactly matching the cluster. The standing give-up alarm
 //     (Task 2) annunciates the starvation and clears once shedding stops.
 //
-// The gate itself is correct (gastrolog-4bl9xx: a single-copy chunk wedges the
-// seal queue if its sole holder dies). The disease these tests localize is
+// The gate itself is correct (a single-copy chunk wedges the seal queue if
+// its sole holder dies). The disease these tests localize is
 // upstream: collection failing to deliver the second holder within the TTL.
 
 func TestSteadyStateSealsWithHealthyHolders(t *testing.T) {
@@ -105,7 +105,7 @@ func TestSteadyStateGiveUpRaisesAndClearsStandingAlert(t *testing.T) {
 }
 
 // TestRoutedOldRecordsChunkDespiteAgePastTTL is the definitive experiment for
-// the PRIMARY cluster cause (gastrolog-68sfsl): records routed from another
+// the PRIMARY cluster cause: records routed from another
 // vault's retention-expired output arrive carrying their ORIGINAL IngestTS,
 // already older than this destination's give-up TTL — even though collection is
 // healthy and delivers every holder. Anchoring the give-up on record IngestTS
@@ -115,7 +115,7 @@ func TestSteadyStateGiveUpRaisesAndClearsStandingAlert(t *testing.T) {
 // the full TTL window to be collected and chunked; normal retention then
 // deletes the records AFTER chunking.
 //
-// Fails before the fix (segments shed at arrival, zero seals); passes after.
+// With an IngestTS anchor it fails: segments shed at arrival, zero seals.
 func TestRoutedOldRecordsChunkDespiteAgePastTTL(t *testing.T) {
 	t.Parallel()
 	h := newSteadyHarness(t, chunking.ManifestRotationPolicy{MaxAge: 2 * time.Minute}, 3*time.Minute, []string{"leader", "peer"})

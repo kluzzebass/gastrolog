@@ -8,10 +8,10 @@ import (
 )
 
 // boundaryOnlyIR mimics the orchestrator IndexReader on a voter with no
-// local ITSI bytes (gastrolog-enfwd): sealed monotonic chunk metadata
-// answers rank 0 for timestamps strictly before IngestStart; every other
-// lookup is unresolvable. Partial resolvability is exactly what the
-// per-lookup ok tracking in timechartChunkByIndex must handle.
+// local ITSI bytes: sealed monotonic chunk metadata answers rank 0 for
+// timestamps strictly before IngestStart; every other lookup is
+// unresolvable. Partial resolvability is exactly what the per-lookup ok
+// tracking in timechartChunkByIndex must handle.
 type boundaryOnlyIR struct {
 	ingestStart time.Time
 }
@@ -75,9 +75,8 @@ func TestTimechartChunkByIndexSingleBucketExactFromMetadata(t *testing.T) {
 
 // A multi-bucket chunk with only boundary answers is NOT fully resolvable:
 // rank arithmetic must be abandoned on the first interior miss. Cloud-backed
-// chunks fall back to the proportional FSM overlap estimate (the
-// gastrolog-1952x residual); local chunks report false and contribute
-// nothing rather than fabricating counts.
+// chunks fall back to the proportional FSM overlap estimate; local chunks
+// report false and contribute nothing rather than fabricating counts.
 func TestTimechartChunkByIndexPartialResolutionFallsBack(t *testing.T) {
 	t.Parallel()
 	start := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)

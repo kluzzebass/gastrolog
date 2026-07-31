@@ -14,7 +14,7 @@ import (
 )
 
 // Regression for whole-file GLCB mmap: histogram TS lookups must not SIGSEGV
-// when retention deletes a chunk concurrently (gastrolog-26zu1 class).
+// when retention deletes a chunk concurrently.
 func TestGLCBMmapSurvivesConcurrentDeleteAndTSLookup(t *testing.T) {
 	t.Parallel()
 

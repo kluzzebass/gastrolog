@@ -50,7 +50,7 @@ func TestSelfIngesterEmit(t *testing.T) {
 // TestSelfIngesterRunOpensAndClosesCaptureGate verifies that the self
 // ingester's Run loop flips the CaptureHandler gate on at start and off
 // at teardown. This is the contract that keeps the capture channel
-// empty when the self ingester is disabled — see gastrolog-6bvu6.
+// empty when the self ingester is disabled.
 func TestSelfIngesterRunOpensAndClosesCaptureGate(t *testing.T) {
 	ch := make(chan logging.CapturedRecord, 4)
 	inner := slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug})

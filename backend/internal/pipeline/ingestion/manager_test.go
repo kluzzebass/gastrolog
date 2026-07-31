@@ -1,8 +1,8 @@
 package ingestion_test
 
-// Unit tests cover IngestionManager in isolation. Integration coverage for
-// behaviors that need downstream pipeline or cluster context is tracked on
-// gastrolog-214bz (pipeline integration):
+// Unit tests cover IngestionManager in isolation. These behaviors need
+// downstream pipeline or cluster context, so they are covered by
+// integration tests rather than here:
 //   - PressureGate throttling under real digestion-queue backpressure
 //   - ingestion Ack after durable segment write (nil / error semantics)
 //   - singleton ingester reassignment across 4+ nodes
@@ -548,7 +548,7 @@ func (f *failNTimesIngester) Run(ctx context.Context, _ chan<- ingestion.Ingeste
 	return ctx.Err()
 }
 
-// TestManagerActiveIngesterErrorRetry pins the gastrolog-fjwhbr fix: a
+// TestManagerActiveIngesterErrorRetry pins the error-retry contract: a
 // non-passive ingester whose run returns an error is retried (with the
 // configured delay) until a run holds, instead of being logged once and
 // abandoned. Attempts are observed via channel sends from the fake — no
@@ -884,9 +884,9 @@ func (s *scriptedPassiveIngester) Run(ctx context.Context, _ chan<- ingestion.In
 	return ctx.Err()
 }
 
-// TestManagerRetryFailureCountResets pins the RetryDelay seam contract
-// (gastrolog-3nfvo1 backoff): consecutiveFailures counts error exits since
-// the last clean run — it increments across failures and resets to 0 when a
+// TestManagerRetryFailureCountResets pins the RetryDelay seam contract:
+// consecutiveFailures counts error exits since the last clean run — it
+// increments across failures and resets to 0 when a
 // passive run exits cleanly, so a recovered listener that later fails again
 // backs off from the base delay, not from its old streak. Observed entirely
 // through the injected seam with zero delays; no sleeps.
@@ -959,8 +959,8 @@ func TestManagerRetryFailureCountResets(t *testing.T) {
 	_ = mgr.Stop()
 }
 
-// rebuildFake is a controllable ingester for the gastrolog-4rdb9f rebuild
-// ordering tests. Run announces itself on the shared ordered events channel
+// rebuildFake is a controllable ingester for the rebuild ordering tests.
+// Run announces itself on the shared ordered events channel
 // ("<label>:run" on entry, "<label>:exit" via defer as the very last thing
 // before returning), emits messages until the pipeline is saturated (one
 // buffered token per successful send on sent), and exits only on ctx
@@ -1024,8 +1024,8 @@ func drainOnStop(t *testing.T, mgr *ingestion.Manager, out <-chan ingestion.Inge
 	})
 }
 
-// TestManagerRebuildWaitsForOldRunUnderBackpressure is the gastrolog-4rdb9f
-// regression test. Field incident: a config rebuild under a saturated
+// TestManagerRebuildWaitsForOldRunUnderBackpressure is a regression test.
+// Field incident: a config rebuild under a saturated
 // pipeline cancelled the old run without waiting for it; the old run — parked
 // in a send on the full digestion queue — woke AFTER the successor had
 // started, and its deferred teardown (the orchestrator adapter's alive-false
@@ -1298,8 +1298,8 @@ func TestManagerRebuildInterruptsRetryBackoff(t *testing.T) {
 	expectEvent(t, events, "new:run")
 }
 
-// TestManagerCheckpointPeriodicSave exercises the CheckpointInterval knob
-// (gastrolog-3nfvo1): a running Checkpointable ingester is saved on the
+// TestManagerCheckpointPeriodicSave exercises the CheckpointInterval knob:
+// a running Checkpointable ingester is saved on the
 // configured cadence, not only at run exit. A tiny interval keeps the test
 // event-driven — it waits for saves to arrive, never for wall-clock margins.
 func TestManagerCheckpointPeriodicSave(t *testing.T) {

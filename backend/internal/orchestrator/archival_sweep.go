@@ -58,15 +58,14 @@ func (s *suspectTracker) suspectSince(id chunk.ChunkID) (time.Time, bool) {
 
 // startArchivalSweep registers the hourly archival sweep job.
 //
-// Verdict (gastrolog-15nn1 — policy vs compensator): this is a *genuine
-// time-based policy evaluation*, not a compensator for a missed event. An
-// archival transition is defined by wall-clock age — a cloud-backed chunk
-// becomes eligible for a storage-class transition when now-WriteEnd crosses a
-// threshold in the cloud service's transition chain. There is no discrete
-// upstream event to "become eligible" that the tick could be missing; the age
-// crossing IS the trigger, exactly like retention-age evaluation
-// (retentionSweepAll, the audit's canonical legitimate policy tick). So the
-// hourly tick is kept as the primary evaluation cadence.
+// This is a *genuine time-based policy evaluation*, not a compensator for a
+// missed event. An archival transition is defined by wall-clock age — a
+// cloud-backed chunk becomes eligible for a storage-class transition when
+// now-WriteEnd crosses a threshold in the cloud service's transition chain.
+// There is no discrete upstream event to "become eligible" that the tick could
+// be missing; the age crossing IS the trigger, exactly like retention-age
+// evaluation (retentionSweepAll). So the hourly tick is the primary evaluation
+// cadence.
 //
 // The one event-driven input is a *config* change to the archival policy: an
 // operator editing a cloud service's transition chain (e.g. shortening the
@@ -95,14 +94,12 @@ func (o *Orchestrator) startArchivalSweep() error {
 //
 // Concurrent triggers coalesce, and the job name is what makes that true: the
 // claim is taken with RunOnceIfAbsent, which does the presence check and the
-// registration under one hold of the scheduler mutex. The previous shape —
-// HasJob followed by RunOnce — only claimed to coalesce: two config edits
-// landing together (a transition-chain edit fans out to every node from the
-// same NotifyCloudServicePut) could both observe "nothing pending" and both
-// enqueue, and the duplicate then silently overwrote the first registration so
-// one of the two runs published no terminal job event to the inspector. See
-// gastrolog-69sjlj, and gastrolog-3hwngy for the same shape causing duplicate
-// cloud uploads.
+// registration under one hold of the scheduler mutex. A separate HasJob check
+// followed by RunOnce would only claim to coalesce: two config edits landing
+// together (a transition-chain edit fans out to every node from the same
+// NotifyCloudServicePut) could both observe "nothing pending" and both
+// enqueue, and the duplicate would silently overwrite the first registration
+// so one of the two runs published no terminal job event to the inspector.
 func (o *Orchestrator) TriggerArchivalSweep() {
 	if o.scheduler == nil {
 		return
@@ -163,10 +160,9 @@ func (o *Orchestrator) archivalSweepAll() {
 // Iteration domain: the vault-ctl FSM manifest (cluster-coordinated
 // truth). The local Chunks.List() view is the per-chunk routing
 // input — "does this node hold a replica of this chunk?" — not the
-// iteration source. This closes audit finding F4 (gastrolog-b0o94):
-// previously the sweep walked local disk and overlaid FSM, which
-// could skip chunks the FSM knows about but local disk lost (post-
-// recovery, partial repatriation), or process chunks the local
+// iteration source. Walking local disk and overlaying FSM instead
+// would skip chunks the FSM knows about but local disk lost (post-
+// recovery, partial repatriation), and process chunks the local
 // disk has but the FSM no longer recognizes (orphans).
 //
 // Memory-mode vaults / no GroupManager have no FSM manifest at all
@@ -219,10 +215,10 @@ func (o *Orchestrator) archivalSweepVault(vaultInst *VaultInstance, cs *system.C
 				continue
 			}
 		} else {
-			// Legacy path: ground disk-derived meta in the FSM.
-			// gastrolog-1huz5 phase 3: gate on FSM-Sealed; archive only
-			// chunks whose GLCB has been committed. groundChunkMeta is a
-			// no-op in memory mode (no vault-ctl FSM), leaving local truth.
+			// Legacy path: ground disk-derived meta in the FSM. Gate on
+			// FSM-Sealed; archive only chunks whose GLCB has been
+			// committed. groundChunkMeta is a no-op in memory mode (no
+			// vault-ctl FSM), leaving local truth.
 			m = o.groundChunkMeta(vaultInst.VaultID, m)
 		}
 		if !m.Sealed || !m.CloudBacked {
@@ -263,7 +259,7 @@ func (o *Orchestrator) archivalSweepVault(vaultInst *VaultInstance, cs *system.C
 // terminal "delete" transition. Routes through the receipt protocol when a
 // reconciler is wired (every node drops its index entry symmetrically);
 // falls back to the local Manager.Delete path for memory-mode vaults without
-// Raft. See gastrolog-51gme step 6.
+// Raft.
 func (o *Orchestrator) archivalExpire(vaultInst *VaultInstance, id chunk.ChunkID, age time.Duration) {
 	if vaultInst.Reconciler != nil {
 		if err := vaultInst.Reconciler.deleteChunk(id, "archived-to-glacier", o.placementMembership(vaultInst)); err != nil {
@@ -364,8 +360,7 @@ func (o *Orchestrator) reconcileVault(vaultInst *VaultInstance, cs *system.Cloud
 		// design — reading it would 404, we'd mark it suspect, and the
 		// operator would see a flood of alerts for a chunk WE deleted.
 		// Tombstone propagation is faster than local cloud-index purge,
-		// so checking the tombstone here catches the gap. See
-		// gastrolog-2c96i.
+		// so checking the tombstone here catches the gap.
 		if vaultInst.IsTombstoned != nil && vaultInst.IsTombstoned(m.ID) {
 			continue
 		}
@@ -376,9 +371,9 @@ func (o *Orchestrator) reconcileVault(vaultInst *VaultInstance, cs *system.Cloud
 // reconcileCloudBackedChunk probes one cloud-backed chunk against the blob store and
 // advances its suspect-tracking state. Uses HeadCloudBlob so the probe hits
 // the authoritative copy in S3 — OpenCursor would happily serve from the
-// in-tree warm cache (gastrolog-24m1t step 7j) and miss out-of-band lifecycle
-// deletions. Falls back to OpenCursor for managers that don't implement
-// CloudBlobChecker (no cloud store configured / non-file backends).
+// in-tree warm cache and miss out-of-band lifecycle deletions. Falls back to
+// OpenCursor for managers that don't implement CloudBlobChecker (no cloud
+// store configured / non-file backends).
 func (o *Orchestrator) reconcileCloudBackedChunk(vaultInst *VaultInstance, id chunk.ChunkID, graceDays uint32, now time.Time) {
 	var readErr error
 	if checker, ok := vaultInst.Chunks.(chunk.CloudBlobChecker); ok {
@@ -443,7 +438,7 @@ func (o *Orchestrator) markSuspect(vaultInst *VaultInstance, id chunk.ChunkID, n
 // elapsed without the blob reappearing. Routes through the receipt protocol
 // when a reconciler is wired (every node drops its index entry symmetrically);
 // falls back to the local Manager.Delete path for memory-mode vaults without
-// Raft. See gastrolog-51gme step 6.
+// Raft.
 func (o *Orchestrator) expireSuspect(vaultInst *VaultInstance, id chunk.ChunkID, suspectDays uint32) {
 	if vaultInst.Reconciler != nil {
 		if err := vaultInst.Reconciler.deleteChunk(id, "cloud-blob-missing", o.placementMembership(vaultInst)); err != nil {

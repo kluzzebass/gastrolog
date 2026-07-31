@@ -88,9 +88,6 @@ func (p *StoreProxy) Load(ctx context.Context) (*System, error) {
 	return p.inner.Load(ctx)
 }
 
-// gastrolog-4kkoo (Phase 5): GetFilter/ListFilters/PutFilter/DeleteFilter
-// proxy methods removed. Filters inlined onto RouteConfig.Stages[].Match.
-
 func (p *StoreProxy) GetRotationPolicy(ctx context.Context, id glid.GLID) (*RotationPolicyConfig, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

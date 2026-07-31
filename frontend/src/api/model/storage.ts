@@ -1,13 +1,12 @@
 // Storage domain model — wraps the published StorageState wire message
 // (ListStorages / NodeStats.storages / WatchSystemStatusResponse.storages).
 //
-// Operator directive (gastrolog-9akebz, extended to storages by
-// gastrolog-3cobq4): every threshold and verdict here is rendered verbatim
-// from the wire — free/total, warn/floor bytes, warn/protect verdicts, and
-// the default-vs-explicit flags are all server-computed. This model does
-// no derivation of its own; it only reshapes proto bytes into typed
-// EntityID values for the UI layer, the same role Vault plays for
-// VaultInfo.
+// Operator directive: every threshold and verdict here is rendered
+// verbatim from the wire — free/total, warn/floor bytes, warn/protect
+// verdicts, and the default-vs-explicit flags are all server-computed.
+// This model does no derivation of its own; it only reshapes proto bytes
+// into typed EntityID values for the UI layer, the same role Vault plays
+// for VaultInfo.
 
 import type { StorageState } from "../gen/gastrolog/v1/storage_pb";
 import { type EntityID, idFromBytes } from "./id";
@@ -41,9 +40,8 @@ export class Storage {
 
   /**
    * The owning node's raw ID — the stable join key for grouping/filtering
-   * storages by node (gastrolog-3cobq4 review: nodeName alone collides on
-   * rename/duplicate names). nodeName stays the display label; this is the
-   * key.
+   * storages by node (nodeName alone collides on rename/duplicate names).
+   * nodeName stays the display label; this is the key.
    */
   get nodeId(): EntityID {
     return idFromBytes(this.state.nodeId);
@@ -67,8 +65,7 @@ export class Storage {
   /**
    * True when warnExpr came from the built-in default rather than an
    * explicit override. There is no configurable node-level override to
-   * "inherit" from (gastrolog-2mrfdw removed the env channel) — an unset
-   * expression is DEFAULTED, not inherited (gastrolog-3cobq4 review).
+   * "inherit" from, so an unset expression is DEFAULTED, not inherited.
    */
   get warnIsDefault(): boolean {
     return this.state.warnIsDefault;

@@ -60,7 +60,8 @@ func TestVaultRetentionGiveUpTTL(t *testing.T) {
 // TestChunkOnItsWayOut pins the doomed-pull gate: a sealed chunk flagged
 // retention-pending, or with an in-flight delete, must never be scheduled for
 // a replica catch-up pull — the bytes are being deleted on every home, so the
-// pull fails on every peer (the constant failure stream of gastrolog-423tpt).
+// pull fails on every peer: the "GLCB replica pull failed from every peer"
+// stream that ramped 26/h → 191/h through a sustained-load incident.
 func TestChunkOnItsWayOut(t *testing.T) {
 	t.Parallel()
 	live := vaultctlfsm.ManifestEntry{ID: chunk.NewChunkID(), State: chunk.ChunkStateSealed}

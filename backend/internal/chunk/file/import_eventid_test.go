@@ -8,18 +8,15 @@ import (
 	"gastrolog/internal/glid"
 )
 
-// TestImportRecordsPreservesEventID is the regression test for
-// gastrolog-5qwkw: importState.writeRecord was calling
-// EncodeIdxEntry without IngestSeq, IngesterID, or NodeID, so any
-// chunk imported via ImportRecords (cross-node sealed-chunk
-// replication, MoveChunk fallback, etc.) ended up with zero
-// EventIDs in idx.log. The downstream effect: histogram dedup
-// can't match follower-replicated records against leader
-// originals (rec.EventID == zero skips the dedup branch entirely),
-// silently double-counting during cross-node search aggregation.
-//
-// The fix existed in a stash from gastrolog-4xusf but never
-// landed; this commit moves it to main and pins it with the test.
+// TestImportRecordsPreservesEventID pins that
+// importState.writeRecord passes IngestSeq, IngesterID and NodeID
+// to EncodeIdxEntry. Without them any chunk imported via
+// ImportRecords (cross-node sealed-chunk replication, MoveChunk
+// fallback, etc.) ends up with zero EventIDs in idx.log, and
+// histogram dedup can't match follower-replicated records against
+// leader originals (rec.EventID == zero skips the dedup branch
+// entirely), silently double-counting during cross-node search
+// aggregation.
 //
 // Test flow:
 //  1. Append a record into Manager A with an explicit non-zero
@@ -126,11 +123,11 @@ func TestImportRecordsPreservesEventID(t *testing.T) {
 		t.Fatalf("cursorB.Next: %v", err)
 	}
 
-	// THE assertion that fails pre-fix: imported record's EventID
-	// must match the original. Pre-fix all three EventID fields
+	// THE assertion: the imported record's EventID must match the
+	// original. When the import drops them, all three EventID fields
 	// (IngesterID, NodeID, IngestSeq) come back zero.
 	if !eventIDEqual(dstRec.EventID, originalEventID) {
-		t.Errorf("imported record EventID = %+v\nwant                       %+v\n(gastrolog-5qwkw: importState.writeRecord must include all EventID fields in EncodeIdxEntry)",
+		t.Errorf("imported record EventID = %+v\nwant                       %+v\n(importState.writeRecord must include all EventID fields in EncodeIdxEntry)",
 			dstRec.EventID, originalEventID)
 	}
 }

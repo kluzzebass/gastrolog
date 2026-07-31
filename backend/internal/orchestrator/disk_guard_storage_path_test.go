@@ -1,15 +1,15 @@
 package orchestrator
 
-// Coverage for gastrolog-3cobq4's live-cluster regression: system.FileStorage
-// paths are stored relative by the same convention vault "dir" params are
-// (see resolveVaultDir's contract in reconfig_vaults.go) — the operator
+// Coverage for storage-path resolution: system.FileStorage paths are stored
+// relative by the same convention vault "dir" params are (see
+// resolveVaultDir's contract in reconfig_vaults.go) — the operator
 // configures "storage/disk-1", and each node resolves it against its own
-// home. refreshStorageGuards handed fs.Path RAW to the disk guard, so
-// statfs("storage/disk-1") resolved against the process's CWD instead of
-// the node's home, failed silently, and worstFreeOf skipped the storage
+// home. Handing fs.Path RAW to the disk guard made
+// statfs("storage/disk-1") resolve against the process's CWD instead of the
+// node's home; it failed silently and worstFreeOf skipped the storage
 // forever: no sample, no protect, an inherited "10%" threshold resolving
-// against a 0 total ("0 B"). Every existing guard fixture used absolute
-// temp paths, so nothing caught it.
+// against a 0 total ("0 B"). Guard fixtures that use absolute temp paths
+// cannot catch that, hence this file.
 
 import (
 	"context"

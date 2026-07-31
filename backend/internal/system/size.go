@@ -18,7 +18,7 @@ func ParseSize(s string) (uint64, error) {
 	// Collapse all whitespace, not just the ends: no size expression gives
 	// internal spaces meaning, so "5 GB", "5  GB", and "5 G B" all mean 5GB.
 	// Being forgiving here beats an arbitrary "space is fine before the unit
-	// but not inside it" rule (gastrolog-etcjdx).
+	// but not inside it" rule.
 	s = strings.Join(strings.Fields(s), "")
 	if s == "" {
 		return 0, errors.New("empty size string")

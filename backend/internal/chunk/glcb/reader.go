@@ -16,7 +16,7 @@ import (
 // sliced straight from the whole-file mapping of the owning MappedBlob —
 // every GLCB open path (warm cache, cloud-download promote, pipeline
 // cursors) goes through OpenMappedBlob + MappedBlob.Reader(); there is no
-// file-descriptor read path (gastrolog-2v9d67).
+// file-descriptor read path.
 type Reader struct {
 	meta           BlobMeta
 	dict           chunk.DictReader
@@ -30,7 +30,7 @@ type Reader struct {
 // it announces how many entries precede it. Each entry is tocEntrySize
 // (42) bytes. Exported for callers that need to verify a downloaded
 // blob's whole-blob digest without constructing a full Reader (e.g.
-// cache-populate integrity checks — gastrolog-grnc3).
+// cache-populate integrity checks).
 //
 // Every entry's section range is validated against fileSize: an entry
 // with Offset+Size past EOF (corrupt or truncated blob) is rejected here
@@ -157,23 +157,19 @@ func (rd *Reader) ReadRecord(pos uint32) (chunk.Record, error) {
 
 // prewarmMadvise is the page-cache warm applied by PrewarmSequential. It is a
 // package var so tests can observe that the retention SequentialPrewarmer path
-// actually reaches the warm call — the earlier implementation was an
-// unreachable no-op (gastrolog-2v9d67 / gastrolog-5gmb99). Production always
-// uses madviseSequential.
+// actually reaches the warm call. Production always uses madviseSequential.
 var prewarmMadvise = madviseSequential
 
 // PrewarmSequential warms the OS page cache for the whole GLCB mapping ahead of
-// a sequential full-chunk scan (retention fan-out drain — gastrolog-1io54g).
-// It advises the kernel of front-to-back access and kicks off asynchronous
-// readahead so the scan's mmap accesses land as minor faults rather than cold
-// major faults that pin scheduler Ps in non-preemptible kernel fault handlers
-// under disk saturation.
+// a sequential full-chunk scan (retention fan-out drain). It advises the
+// kernel of front-to-back access and kicks off asynchronous readahead so the
+// scan's mmap accesses land as minor faults rather than cold major faults that
+// pin scheduler Ps in non-preemptible kernel fault handlers under disk
+// saturation.
 //
-// The warm runs directly on the whole-file mmap (mmapData) rather than the
-// pread-style fd loop the original never had — MappedBlob closes its fd right
-// after mmap, so no Reader ever carried one, which is why the historical warm
-// was unreachable from day one. madvise needs no fd; it operates on the mapping
-// the Reader already holds.
+// The warm runs directly on the whole-file mmap (mmapData): MappedBlob closes
+// its fd right after mmap, so no Reader carries one. madvise needs no fd; it
+// operates on the mapping the Reader already holds.
 //
 // Best-effort and idempotent. Safe on a closed/released cursor: Close() nils
 // mmapData, so the warm becomes a no-op instead of touching freed address
@@ -260,7 +256,7 @@ func (rd *Reader) Close() error {
 // Raw aliases frame bytes: the Attrs map and its strings come from
 // DecodeWithDict, and both DictReader implementations return heap strings
 // (MmapStringDict interns; StringDict stores), so cloning them re-copied
-// memory that never touched the mmap (gastrolog-11y2iv).
+// memory that never touched the mmap.
 func cloneMmapRecord(rec chunk.Record) chunk.Record {
 	if len(rec.Raw) > 0 {
 		rec.Raw = slices.Clone(rec.Raw)

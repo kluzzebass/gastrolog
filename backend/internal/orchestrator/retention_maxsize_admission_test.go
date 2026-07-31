@@ -1,7 +1,7 @@
 package orchestrator
 
-// Coverage for gastrolog-33ul6h finding 3: "a policy-sourced budget caps a
-// vault and the cap refuses cluster-wide" — the spec-promised multi-node
+// Coverage for "a policy-sourced budget caps a vault and the cap refuses
+// cluster-wide" — the spec-promised multi-node
 // scenario. resolveVaultSizeBound/resolveVaultSizeBoundSource (config→
 // number) and the sweep-time cap flip (disk_guard_maxsize_test.go's
 // TestRefreshVaultDiskGuardsCappedFromPolicyMaxSizeLifecycle) already had
@@ -100,9 +100,9 @@ func TestResolvedPolicyBudgetCapsSubmitToVaultLocally(t *testing.T) {
 			},
 		}},
 		RetentionPolicies: []system.RetentionPolicyConfig{
-			// Refuse:true explicit — refuse now defaults off
-			// (gastrolog-5yfaqj); this test is about the size-refuse
-			// mechanism itself, so the fixture states its intent.
+			// Refuse:true explicit — refuse now defaults off; this
+			// test is about the size-refuse mechanism itself, so
+			// the fixture states its intent.
 			{ID: policyID, Name: "budget-policy", MaxSize: &budget, Refuse: new(true)},
 		},
 	}
@@ -183,9 +183,9 @@ func TestResolvedBudgetRederivesFromConfigAfterRestartNotFromOrchestratorState(t
 	store := sysmem.NewStore()
 	ctx := context.Background()
 	if err := store.PutRetentionPolicy(ctx, system.RetentionPolicyConfig{
-		// Refuse:true explicit — refuse now defaults off (gastrolog-5yfaqj);
-		// this test is about restart-survival of the resolved budget, not
-		// the refuse default itself.
+		// Refuse:true explicit — refuse now defaults off; this test is
+		// about restart-survival of the resolved budget, not the refuse
+		// default itself.
 		ID: policyID, Name: "budget-policy", MaxSize: &budget, Refuse: new(true),
 	}); err != nil {
 		t.Fatalf("PutRetentionPolicy: %v", err)

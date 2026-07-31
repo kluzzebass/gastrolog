@@ -55,7 +55,7 @@ func (c *captureCatchupReplicator) RequestReplicaCatchup(_ context.Context, lead
 	return c.scheduledRet, nil
 }
 
-// gastrolog-51gme step 4 — receipt protocol integration via reconciler.
+// ---------- Receipt protocol integration via the reconciler ----------
 
 // reconcilerFakeChunkManager is a chunk-manager stub that records
 // delete calls so the reconciler tests can assert local-file deletion
@@ -66,7 +66,7 @@ type reconcilerFakeChunkManager struct {
 
 // reconcilerFakeSealEnsurerChunkManager extends the fake chunk manager
 // with the chunk.SealEnsurer interface so onSeal / ReconcileFromSnapshot
-// projection tests can observe EnsureSealed calls. See gastrolog-51gme step 8.
+// projection tests can observe EnsureSealed calls.
 type reconcilerFakeSealEnsurerChunkManager struct {
 	retentionFakeChunkManager
 	ensured []chunk.ChunkID
@@ -177,12 +177,12 @@ func TestReconcilerOnRequestDeleteIgnoresNotInExpectedFrom(t *testing.T) {
 	}
 }
 
-// TestReconcilerOnAckDeleteAutoFinalizesInsideApply pins the
-// gastrolog-15fm8 invariant: when CmdAckDelete drains ExpectedFrom to
-// empty, the FSM finalizes atomically inside the same apply — no
-// leader-only callback proposes CmdFinalizeDelete. The reconciler's
-// onAckDelete is audit-only post-fix; any leader-only proposal would
-// re-introduce the leader-transfer leak the fix closes.
+// TestReconcilerOnAckDeleteAutoFinalizesInsideApply pins the invariant:
+// when CmdAckDelete drains ExpectedFrom to empty, the FSM finalizes
+// atomically inside the same apply — no leader-only callback proposes
+// CmdFinalizeDelete. The reconciler's onAckDelete is audit-only; a
+// leader-only proposal would let a leader transfer between the ack and
+// the proposal leak the pendingDeletes entry.
 func TestReconcilerOnAckDeleteAutoFinalizesInsideApply(t *testing.T) {
 	t.Parallel()
 
@@ -281,14 +281,13 @@ func TestReconcilerDeleteChunkSingleNodeFallback(t *testing.T) {
 	}
 }
 
-// TestReconcilerOnPruneNodeAutoFinalizesInsideApply pins the
-// gastrolog-15fm8 invariant: when CmdPruneNode drains a pendingDelete's
-// ExpectedFrom to empty, the FSM finalizes atomically inside the same
-// apply — no leader-only callback proposes CmdFinalizeDelete. The
-// onFinalizeDelete callback fires once per finalized chunk through the
-// FSM's apply dispatch; the reconciler's onPruneNode is audit-only
-// post-fix. Pre-fix, the leader proposed finalize in a goroutine that
-// could drop on leadership transfer mid-prune.
+// TestReconcilerOnPruneNodeAutoFinalizesInsideApply pins the invariant:
+// when CmdPruneNode drains a pendingDelete's ExpectedFrom to empty, the
+// FSM finalizes atomically inside the same apply — no leader-only
+// callback proposes CmdFinalizeDelete. The onFinalizeDelete callback
+// fires once per finalized chunk through the FSM's apply dispatch; the
+// reconciler's onPruneNode is audit-only. A leader-only proposal in a
+// goroutine could drop on leadership transfer mid-prune.
 func TestReconcilerOnPruneNodeAutoFinalizesInsideApply(t *testing.T) {
 	t.Parallel()
 
@@ -365,7 +364,7 @@ func TestReconcilerOnPruneNodeAutoFinalizesInsideApply(t *testing.T) {
 	}
 }
 
-// TestReconcilerOnSealProjectsToLocalManager pins the gastrolog-51gme step 8
+// TestReconcilerOnSealProjectsToLocalManager pins the seal-projection
 // invariant: when CmdSealChunk applies, the reconciler asks the local chunk
 // Manager to project the FSM-sealed state via the SealEnsurer interface. The
 // Manager's EnsureSealed contract handles the no-op cases internally; the
@@ -398,9 +397,8 @@ func TestReconcilerOnSealProjectsToLocalManager(t *testing.T) {
 
 // TestReconcileFromSnapshotProjectsAllSealedEntries pins that after FSM
 // Restore, every sealed entry in the FSM is projected to the local
-// Manager. This is the catchup pass that replaces the deleted
-// "multiple unsealed → seal all but newest" startup heuristic. See
-// gastrolog-51gme step 8 / gastrolog-uccg6.
+// Manager. Without this catchup pass the local chunk manager can keep
+// appending to a chunk the FSM has already sealed.
 func TestReconcileFromSnapshotProjectsAllSealedEntries(t *testing.T) {
 	t.Parallel()
 
@@ -555,7 +553,6 @@ func TestSweepLocalOrphansDeletesOnlyTombstonedAbsentEntries(t *testing.T) {
 	// force-demote and falls back to the safe path: log + skip. The
 	// "demote-then-delete" happy path with a real SealEnsurer is
 	// covered by TestSweepLocalOrphansDemotesActiveTombstonedChunk.
-	// See gastrolog-533l9.
 	idUnsealed := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idUnsealed, now, now, now)})
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalRequestDelete(idUnsealed, now, "test", []string{"node-A"})})
@@ -586,16 +583,16 @@ func TestSweepLocalOrphansDeletesOnlyTombstonedAbsentEntries(t *testing.T) {
 
 // TestSweepLocalOrphansPreservesDataBearingUnknownOrphans pins the
 // no-auto-delete-of-unknown-orphans invariant from
-// docs/disk-authority-audit.md / gastrolog-3y8py. A sealed chunk with
-// real records but no FSM record, no tombstone, and no pendingDelete
-// is exactly the recovery surface FSM-glitch scenarios need preserved.
-// The sweep must alert (the alert side is exercised in
-// TestAlertUnknownOrphanRaisesAlert below) and MUST NOT delete.
+// docs/disk-authority-audit.md. A sealed chunk with real records but no
+// FSM record, no tombstone, and no pendingDelete is exactly the recovery
+// surface FSM-glitch scenarios need preserved. The sweep must alert (the
+// alert side is exercised in TestAlertUnknownOrphanRaisesAlert below)
+// and MUST NOT delete.
 //
 // Distinct from idUnknown in the previous test, which has
 // RecordCount=0 and WriteEnd zero — that's an announce-in-flight or
 // rotation artifact, handled by SweepLocalOrphans's rotation-ghost
-// branch (gastrolog-66b7x). Data-bearing chunks are different.
+// branch. Data-bearing chunks are different.
 func TestSweepLocalOrphansPreservesDataBearingUnknownOrphans(t *testing.T) {
 	t.Parallel()
 
@@ -629,10 +626,9 @@ func TestSweepLocalOrphansPreservesDataBearingUnknownOrphans(t *testing.T) {
 }
 
 // TestSweepLocalOrphansDeletesEmptyRotationGhost verifies the
-// rotation-artifact branch still fires for chunks with zero records
-// (gastrolog-66b7x). Required because the split in
-// gastrolog-3y8py is "preserve data, delete artifacts" — and the
-// artifact path must not regress under the new guard.
+// rotation-artifact branch still fires for chunks with zero records.
+// The sweep's split is "preserve data, delete artifacts" — the artifact
+// path must not regress under the data-bearing guard.
 func TestSweepLocalOrphansDeletesEmptyRotationGhost(t *testing.T) {
 	t.Parallel()
 
@@ -785,16 +781,16 @@ func TestSweepMissingReplicasBatchesCatchupRequests(t *testing.T) {
 	}
 }
 
-// gastrolog-19241: when leadership transfers to a node that doesn't
-// have historical sealed chunks (e.g. a scale-out joiner that became
-// leader), SweepMissingReplicas on the LEADER must ask its follower
-// targets to push the missing chunks back. Without this, the new
-// leader is permanently under-replicated until the stale-fsm sweep
-// deletes the chunks as "unrecoverable" — silent data loss.
+// When leadership transfers to a node that doesn't have historical
+// sealed chunks (e.g. a scale-out joiner that became leader),
+// SweepMissingReplicas on the LEADER must ask its follower targets to
+// push the missing chunks back. Without this, the new leader is
+// permanently under-replicated until the stale-fsm sweep deletes the
+// chunks as "unrecoverable" — silent data loss.
 //
-// This test pins the leader-side direction of the now-symmetric peer-
-// to-peer catchup: leader has empty disk, FollowerTargets enumerates
-// two peers, the sweep must dial both.
+// This test pins the leader-side direction of the symmetric peer-to-peer
+// catchup: leader has empty disk, FollowerTargets enumerates two peers,
+// the sweep must dial both.
 func TestSweepMissingReplicasFromLeaderAsksEveryFollower(t *testing.T) {
 	t.Parallel()
 
@@ -839,9 +835,9 @@ func TestSweepMissingReplicasFromLeaderAsksEveryFollower(t *testing.T) {
 	}
 }
 
-// gastrolog-19241: a leader with no FollowerTargets (single-node
-// placement, or placement just collapsed mid-failover) must not dial
-// anywhere. The next placement tick will re-populate FollowerTargets.
+// A leader with no FollowerTargets (single-node placement, or placement
+// just collapsed mid-failover) must not dial anywhere. The next
+// placement tick will re-populate FollowerTargets.
 func TestSweepMissingReplicasFromLeaderWithNoFollowersIsNoOp(t *testing.T) {
 	t.Parallel()
 
@@ -874,8 +870,8 @@ func TestSweepMissingReplicasFromLeaderWithNoFollowersIsNoOp(t *testing.T) {
 	}
 }
 
-// gastrolog-19241: a transient failure to reach one peer must not
-// short-circuit the sweep. The leader keeps dialing remaining peers;
+// A transient failure to reach one peer must not short-circuit the
+// sweep. The leader keeps dialing remaining peers;
 // the next sweep tick retries the failed one. This is the failure-path
 // mirror of TestSweepMissingReplicasFromLeaderAsksEveryFollower.
 func TestSweepMissingReplicasFromLeaderContinuesPastPeerError(t *testing.T) {
@@ -1018,22 +1014,17 @@ func (f *fakeSealEnsurerThatDemotesActive) Delete(id chunk.ChunkID) error {
 	return nil
 }
 
-// TestFulfillObligationDemotesLocalActiveBeforeDelete pins
-// gastrolog-2yeht: the receipt-protocol delete obligation MUST call
-// EnsureSealed before deleteLocalCopy so a chunk that's still local
-// active on a follower (downstream instance with no continuous record
-// stream → no natural active swap) gets force-demoted and then
-// deleted, instead of bouncing off ErrActiveChunk every periodic
-// sweep tick.
+// TestFulfillObligationDemotesLocalActiveBeforeDelete pins that the
+// receipt-protocol delete obligation MUST call EnsureSealed before
+// deleteLocalCopy so a chunk that's still local active on a follower
+// (downstream instance with no continuous record stream → no natural
+// active swap) gets force-demoted and then deleted, instead of bouncing
+// off ErrActiveChunk every periodic sweep tick.
 //
-// Pre-fix: fulfillObligation called deleteLocalCopy directly;
-// receipt protocol stuck forever on vaults with no record stream
-// because deleteInternal returned ErrActiveChunk.
-//
-// Post-fix: fulfillObligation calls EnsureSealed first; the
-// EnsureSealed contract demotes local-active chunks; deleteLocalCopy
-// then succeeds because the chunk is no longer active; the ack
-// fires; finalize lands; orphan sweep can clean up downstream.
+// The expected sequence: EnsureSealed demotes the local-active chunk;
+// deleteLocalCopy then succeeds because the chunk is no longer active;
+// the ack fires; finalize lands; the orphan sweep can clean up
+// downstream.
 func TestFulfillObligationDemotesLocalActiveBeforeDelete(t *testing.T) {
 	t.Parallel()
 
@@ -1078,20 +1069,15 @@ func TestFulfillObligationDemotesLocalActiveBeforeDelete(t *testing.T) {
 	}
 }
 
-// TestSweepLocalOrphansDemotesActiveTombstonedChunk pins
-// gastrolog-533l9: when a chunk is the local Manager's active
-// pointer AND the FSM has only a tombstone for it (no manifest
-// entry, no pendingDeletes entry), SweepLocalOrphans must
-// force-demote the active first via EnsureSealed and then delete
-// the local files. Failure mode: a node SIGBUS-crashes with chunk
-// X active; while offline, the cluster seals → retention-deletes
-// → finalizes X; node restarts; FSM has only the tombstone; pre-
-// fix the orphan sweep skipped X because it was !Sealed locally.
-//
-// The pre-fix orphan sweep only handled sealed-on-disk chunks
-// (the snapshot-restore-after-finalize case). The post-fix sweep
-// also handles the local-active-after-finalize case by demoting
-// first.
+// TestSweepLocalOrphansDemotesActiveTombstonedChunk pins that when a
+// chunk is the local Manager's active pointer AND the FSM has only a
+// tombstone for it (no manifest entry, no pendingDeletes entry),
+// SweepLocalOrphans must force-demote the active first via EnsureSealed
+// and then delete the local files. Failure mode: a node SIGBUS-crashes
+// with chunk X active; while offline, the cluster seals →
+// retention-deletes → finalizes X; node restarts; FSM has only the
+// tombstone. Without the demote the sweep skips X because it is
+// !Sealed locally.
 func TestSweepLocalOrphansDemotesActiveTombstonedChunk(t *testing.T) {
 	t.Parallel()
 
@@ -1133,12 +1119,12 @@ func TestSweepLocalOrphansDemotesActiveTombstonedChunk(t *testing.T) {
 	}
 }
 
-// ---------- gastrolog-2ob86: WatchChunks signal on follower-side events ----------
+// ---------- WatchChunks signal on follower-side events ----------
 
 // recordingSilentDeleter implements chunk.SilentDeleter on top of the
 // shared fake chunk manager so the rest of chunk.ChunkManager is
-// satisfied by embedding. Used by gastrolog-2ob86 tests that need to
-// observe wireVaultFSMOnDelete's local-delete behavior alongside the
+// satisfied by embedding. Used by the WatchChunks-signal tests that need
+// to observe wireVaultFSMOnDelete's local-delete behavior alongside the
 // orchestrator-level signal.
 type recordingSilentDeleter struct {
 	retentionFakeChunkManager
@@ -1171,8 +1157,7 @@ func waitForChunkSignal(ch <-chan struct{}, timeout time.Duration) bool {
 // goroutine for the duration of the test. NotifyChunkChange enqueues
 // to progressTrigger; without this goroutine, the chunkSignal never
 // fans out and any test asserting the signal will hang. Uses a tight
-// 10ms window so leading-edge fires land promptly within test
-// timeouts. See gastrolog-4y03v.
+// 10ms window so leading-edge fires land promptly within test timeouts.
 func startThrottleForTest(t *testing.T, orch *Orchestrator) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1180,11 +1165,11 @@ func startThrottleForTest(t *testing.T, orch *Orchestrator) {
 	go orch.runProgressNotifier(ctx, 10*time.Millisecond)
 }
 
-// TestReconcilerOnSealNotifiesChunkChange pins the gastrolog-2ob86 fix:
-// when CmdSealChunk applies on this node (originating from any node in
-// the cluster), the WatchChunks signal must fire so subscribers refetch.
-// Pre-fix the FSM seal projected to the local Manager but the inspector
-// view never knew about the seal, leaving follower caches stale.
+// TestReconcilerOnSealNotifiesChunkChange pins that when CmdSealChunk
+// applies on this node (originating from any node in the cluster), the
+// WatchChunks signal must fire so subscribers refetch. Without it the
+// FSM seal projects to the local Manager but the inspector view never
+// learns about the seal, leaving follower caches stale.
 func TestReconcilerOnSealNotifiesChunkChange(t *testing.T) {
 	t.Parallel()
 
@@ -1236,7 +1221,7 @@ func (f *reconcilerFailEnsurerChunkManager) EnsureSealed(chunk.ChunkID) error {
 // signal fires unconditionally. EnsureSealed errors are logged and the
 // FSM apply moves on; the inspector view must still refresh because the
 // FSM's authoritative seal flag flipped regardless of what the local
-// chunk file looks like. See gastrolog-2ob86.
+// chunk file looks like.
 func TestReconcilerOnSealNotifiesEvenWhenEnsureSealedFails(t *testing.T) {
 	t.Parallel()
 
@@ -1326,10 +1311,10 @@ func TestReconcilerOnFinalizeDeleteEmitsChunkDeleted(t *testing.T) {
 // TestWireInstanceFSMOnUploadFiresNotifyChunkChange pins that follower
 // nodes, on receiving a CmdUploadChunk via Raft (the leader's
 // AnnounceUpload propagated through), refresh their inspector view.
-// Pre-fix the cloud-backed transition was invisible until manual
-// reload. See gastrolog-2ob86. (Cloud-index registration is no longer an
-// onUpload effect — the chunk manager's lazy cloud-backed resolver fills
-// the index from the FSM at first lookup; gastrolog-5bnxc.)
+// Without the notify the cloud-backed transition stays invisible until a
+// manual reload. (Cloud-index registration is not an onUpload effect —
+// the chunk manager's lazy cloud-backed resolver fills the index from
+// the FSM at first lookup.)
 func TestWireInstanceFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
 	t.Parallel()
 
@@ -1358,7 +1343,7 @@ func TestWireInstanceFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
 	}
 }
 
-// TestReconcileFromSnapshotResumesSealingChunks pins the Phase 3
+// TestReconcileFromSnapshotResumesSealingChunks pins the
 // crash-recovery invariant: when a leader crashes between CmdBeginSeal
 // (Active → Sealing) and CmdSealChunk (Sealing → Sealed), the FSM is
 // left holding a Sealing entry. After restore, the reconciler must
@@ -1376,7 +1361,6 @@ func TestWireInstanceFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
 //
 // Asserts: only the Sealing chunk's ID is scheduled. Active is too
 // early (no GLCB to assemble); Sealed is too late (already done).
-// gastrolog-1huz5.
 func TestReconcileFromSnapshotResumesSealingChunks(t *testing.T) {
 	t.Parallel()
 
@@ -1509,12 +1493,12 @@ func TestReconcileFromSnapshotSkipsSealingWithUnsealedLocalChunk(t *testing.T) {
 }
 
 // TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk pins
-// the Phase 3 (gastrolog-1huz5) follow-on for SweepStaleLeaderFSMEntries:
-// when the FSM holds a Sealing entry whose chunk this leader does not have
-// locally — the classic "leader transferred mid-PostSealProcess" case in
-// 1:1:1 placement — the sweep must propose CmdRequestDelete after grace
-// period, not skip it. Without this, a stranded Sealing entry would sit in
-// the FSM forever, blocking nothing useful but accumulating as garbage.
+// the Sealing half of SweepStaleLeaderFSMEntries: when the FSM holds a
+// Sealing entry whose chunk this leader does not have locally — the classic
+// "leader transferred mid-PostSealProcess" case in 1:1:1 placement — the
+// sweep must propose CmdRequestDelete after the grace period, not skip it.
+// Without this, a stranded Sealing entry sits in the FSM forever, blocking
+// nothing useful but accumulating as garbage.
 //
 // Setup seeds three chunks with carefully aged WriteStarts so the grace
 // period anchors are easy to reason about:
@@ -1704,10 +1688,9 @@ func TestSweepStaleLeaderFSMEntriesRespectsSealedAtGrace(t *testing.T) {
 // them from every entry's ExpectedFrom; the FSM's applyPruneNode then
 // atomically finalizes any entries whose ExpectedFrom drained.
 //
-// Setup mirrors the live K8s incident from gastrolog-2eclw-cascade-fix
-// follow-up: first-vault has chunks stuck retention-pending with
-// ExpectedFrom containing only stale-node, while current placement is
-// {leader-node + follower-node}.
+// Setup mirrors the live K8s incident: first-vault has chunks stuck
+// retention-pending with ExpectedFrom containing only stale-node, while
+// current placement is {leader-node + follower-node}.
 func TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes(t *testing.T) {
 	t.Parallel()
 
@@ -2085,9 +2068,8 @@ func TestSweepIdleActiveSkipsChunksNotHeldLocally(t *testing.T) {
 // index rebuild + replication) every 20s on each orphan — multi-GB
 // memory churn per tick.
 //
-// gastrolog-2eclw follow-up: the first implementation shipped without
-// this check and was caught live by 2866 sweep firings on a single
-// chunk on gastrolog-6, peaking VmRSS at 15GB.
+// Without the guard this was observed live as 2866 sweep firings on a
+// single chunk on gastrolog-6, peaking VmRSS at 15GB.
 func TestSweepIdleActiveSkipsAlreadyLocallySealedChunks(t *testing.T) {
 	t.Parallel()
 
@@ -2172,11 +2154,11 @@ func TestSweepIdleActiveSkipsSealingAndSealedEntries(t *testing.T) {
 	}
 }
 
-// ---- gastrolog-3fu9t: event-driven reconcile wakes ----
+// ---- Event-driven reconcile wakes ----
 //
-// These tests pin the doctrine of gastrolog-3fu9t: each reconcile
-// category that has a genuine upstream event now converges on that event,
-// WITHOUT waiting for the periodic backstop tick. Each fires only the
+// These tests pin the doctrine that each reconcile category with a
+// genuine upstream event converges on that event, WITHOUT waiting for
+// the periodic backstop tick. Each fires only the
 // upstream event (ReconcileFromSnapshot for the snapshot-install edge,
 // ReconcileMembershipCatchup for the lead-gained edge) and asserts the
 // reconcile action happened — never calling ReconcileTick /
@@ -2274,7 +2256,7 @@ func TestReconcileMembershipCatchupPrunesStalePendingAcks(t *testing.T) {
 // TestReconcileMembershipCatchupRequestsMissingReplicasFromFollowers is
 // the multi-node convergence case for the replication category: a node
 // that just gained vault-ctl leadership but joined the placement set late
-// (gastrolog-19241) holds the FSM manifest without the historical bytes.
+// holds the FSM manifest without the historical bytes.
 // The lead-gained catchup wake must ask every follower to re-push the
 // missing sealed chunks — event-driven, without the backstop tick.
 func TestReconcileMembershipCatchupRequestsMissingReplicasFromFollowers(t *testing.T) {

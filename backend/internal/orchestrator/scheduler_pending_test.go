@@ -6,8 +6,7 @@ package orchestrator
 // completion path deletes from s.jobs — so nothing was broken, but a helper
 // whose body claims a check it does not perform is how the next reader mistakes
 // it for a dedup guard, which is exactly the shape that produced duplicate S3
-// PUTs in gastrolog-3hwngy. These tests pin the behaviour the name promises
-// (gastrolog-1scomn).
+// PUTs. These tests pin the behaviour the name promises.
 
 import (
 	"context"

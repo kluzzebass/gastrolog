@@ -44,7 +44,7 @@ type Ingester struct {
 	// pressureGate throttles socket reads when the ingest pipeline is backed up.
 	// The ack-gated message flow already provides indirect backpressure; this
 	// gate provides a faster signal via the TCP window before senders queue up
-	// on pending ACKs. Injected by the orchestrator. See gastrolog-4fguu.
+	// on pending ACKs. Injected by the orchestrator.
 	pressureGate *chanwatch.PressureGate
 }
 

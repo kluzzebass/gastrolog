@@ -134,8 +134,8 @@ export function SetupWizard() {
     // Pre-compute IDs and derived values outside try/catch so the React
     // Compiler can analyze conditional/logical expressions (it can't
     // optimize value blocks inside try/catch).
-    // gastrolog-4kkoo (Phase 5): no FilterConfig — the catch-all expression
-    // is inlined on the route's MatchStage below.
+    // No FilterConfig — the catch-all expression is inlined on the route's
+    // MatchStage below.
     const vaultIdBytes = crypto.getRandomValues(new Uint8Array(16));
     const ingesterIdBytes = crypto.getRandomValues(new Uint8Array(16));
     const rotationIdBytes = hasRotation ? crypto.getRandomValues(new Uint8Array(16)) : new Uint8Array(16);
@@ -193,8 +193,8 @@ export function SetupWizard() {
       });
 
       // 3. Create route + ingester in parallel (route fans out to the vault).
-      // gastrolog-4kkoo (Phase 5): catch-all expression inlined as the
-      // route's single MatchStage. No separate FilterConfig.
+      // Catch-all expression inlined as the route's single MatchStage. No
+      // separate FilterConfig.
       await Promise.all([
         systemClient.putRoute({
           config: {

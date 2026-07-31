@@ -1,10 +1,10 @@
 // Package locktrack provides a drop-in sync.RWMutex replacement that
-// records who holds the lock and who is stuck waiting for it
-// (gastrolog-1ug3rq). Born from a node-wide deadlock where an
-// orchestrator read lock was acquired and never released: the leaker's
-// goroutine had moved on, so no goroutine dump could name the
-// acquisition site. With tracking on, the acquisition stack of every
-// live hold is retained and a leak report names the exact line.
+// records who holds the lock and who is stuck waiting for it. An
+// orchestrator read lock acquired and never released wedges the whole
+// node, and a goroutine dump cannot name the acquisition site because the
+// leaker's goroutine has already moved on. With tracking on, the
+// acquisition stack of every live hold is retained and a leak report names
+// the exact line.
 //
 // Semantics assumed (true for the orchestrator, enforced by review):
 // RUnlock is called on the same goroutine that called RLock. Cross-

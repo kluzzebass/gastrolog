@@ -41,8 +41,8 @@ func PromoteToHead(completedPath, vaultRoot string) (string, error) {
 	switch err := linkHead(filepath.Clean(completedPath), dest); {
 	case err == nil:
 		// Durability barrier: head/ entries feed GLCB builds whose seal
-		// commits to vault-ctl (gastrolog-4mqy06). The segment bytes
-		// were already synced when the working segment was finalized;
+		// commits to vault-ctl. The segment bytes were already
+		// synced when the working segment was finalized;
 		// a link adds only a directory entry, so syncing head/ is the
 		// whole barrier.
 		if err := paths.SyncDir(paths.HeadDir(vaultRoot)); err != nil {
@@ -53,8 +53,7 @@ func PromoteToHead(completedPath, vaultRoot string) (string, error) {
 		// Already promoted (rescan or restart replay). Segments are
 		// immutable and head/ names are only ever installed complete
 		// (link, or temp+rename on the fallback path), so the existing
-		// bytes are the segment's bytes — the same end state the old
-		// copy path reached by overwriting them with identical content.
+		// bytes are the segment's bytes.
 		return dest, nil
 	case linkUnsupported(err):
 		return copyToHead(completedPath, dest, vaultRoot)
@@ -93,8 +92,7 @@ func copyToHead(completedPath, dest, vaultRoot string) (string, error) {
 		return "", err
 	}
 	// Durability barrier: head/ copies feed GLCB builds whose seal commits
-	// to vault-ctl; the bytes must survive a crash once referenced
-	// (gastrolog-4mqy06).
+	// to vault-ctl; the bytes must survive a crash once referenced.
 	if err := out.Sync(); err != nil {
 		_ = out.Close()
 		_ = os.Remove(tmp)

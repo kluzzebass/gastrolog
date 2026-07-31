@@ -139,7 +139,7 @@ func waitAnyLeader(t *testing.T, nodes []*testNode, timeout time.Duration) *test
 
 // TestFourNodeClusterElectionWithTLSLaneIsolation verifies cluster-ctl can
 // elect a leader when outbound raft dials use per-group SNI (gastrolog-raft.config).
-// Regression for gastrolog-1dg8z: broken TLS verification on per-group SNIs
+// Regression: broken TLS verification on per-group SNIs
 // caused silent pre-vote RPC failures (refused=3) after switching from the
 // legacy gastrolog-raft lane.
 func TestFourNodeClusterElectionWithTLSLaneIsolation(t *testing.T) {

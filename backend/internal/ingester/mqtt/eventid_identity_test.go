@@ -7,7 +7,7 @@ import (
 	"gastrolog/internal/ingester/identitytest"
 )
 
-// TestEventIDIdentity pins gastrolog-44b9r for the MQTT ingester.
+// TestEventIDIdentity pins the identity invariant for the MQTT ingester.
 // MQTT requires a real broker, which we can't run in unit tests, so
 // we drive buildMessage directly — the single seam where IngesterID
 // and IngestTS land on the IngestMessage. Both v3 and v5 handlers

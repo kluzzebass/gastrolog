@@ -12,7 +12,8 @@ import (
 	"gastrolog/internal/pipeline/ingestion"
 )
 
-// TestEventIDIdentity pins gastrolog-44b9r for the file-tail ingester.
+// TestEventIDIdentity pins the identity invariant for the file-tail
+// ingester.
 func TestEventIDIdentity(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

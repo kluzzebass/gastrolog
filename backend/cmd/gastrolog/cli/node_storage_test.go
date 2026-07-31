@@ -1,9 +1,9 @@
 package cli
 
-// Regression coverage for gastrolog-4gp8h: NodeId on the wire is the UTF-8
-// GLID string ([]byte(cfg.NodeID)). add-storage decoded it as binary GLID
-// bytes, never matched the existing config, and clobbered a node's storages
-// instead of merging.
+// Regression coverage: NodeId on the wire is the UTF-8 GLID string
+// ([]byte(cfg.NodeID)). add-storage decoded it as binary GLID bytes, never
+// matched the existing config, and clobbered a node's storages instead of
+// merging.
 
 import (
 	"testing"
@@ -13,12 +13,12 @@ import (
 	v1 "gastrolog/api/gen/gastrolog/v1"
 )
 
-// TestNodeAddStorageCmdDiskFreeFlags pins gastrolog-9akebz: disk-free-warn
-// and disk-free-floor moved off `vault create/update` onto the storage
-// surface (`node add-storage`) — this is the CLI's answer to "where do I
-// set the thresholds now." Registration-level check (no live client): both
-// flags exist, default empty (inherit the node default), and round-trip
-// through Set/GetString the way the RunE closure reads them.
+// TestNodeAddStorageCmdDiskFreeFlags pins where the thresholds are set:
+// disk-free-warn and disk-free-floor live on the storage surface
+// (`node add-storage`), not on `vault create/update`. Registration-level
+// check (no live client): both flags exist, default empty (inherit the node
+// default), and round-trip through Set/GetString the way the RunE closure
+// reads them.
 func TestNodeAddStorageCmdDiskFreeFlags(t *testing.T) {
 	t.Parallel()
 	cmd := newNodeAddStorageCmd()
@@ -49,11 +49,10 @@ func TestNodeAddStorageCmdDiskFreeFlags(t *testing.T) {
 	}
 }
 
-// TestThresholdExprLabel pins gastrolog-3cobq4's review fix for the
-// list-storage columns: a defaulted expression gets a "(default)" suffix,
-// never "(inherited)" — there is no configurable node-level override to
-// inherit from since gastrolog-2mrfdw removed the env channel. An explicit
-// expression renders bare, verbatim from config.
+// TestThresholdExprLabel pins the list-storage columns: a defaulted
+// expression gets a "(default)" suffix, never "(inherited)" — there is no
+// configurable node-level override to inherit from. An explicit expression
+// renders bare, verbatim from config.
 func TestThresholdExprLabel(t *testing.T) {
 	t.Parallel()
 	if got := thresholdExprLabel("10%", true); got != "10% (default)" {

@@ -303,9 +303,9 @@ func TestLeaderPlannerRotatesAtMaxRecords(t *testing.T) {
 // long a manifest stays OPEN, anchored at open-time wall clock — never at
 // segment PublishedAt. A manifest opened over a lagging backlog (published
 // hours ago) must NOT rotate at its first evaluation; it rotates once the
-// clock advances MaxAge past the open (gastrolog-4olqp6: the PublishedAt
-// anchor made every backlog manifest born expired, flooding the seal queue
-// with ~30K-record chunks).
+// clock advances MaxAge past the open (a PublishedAt anchor makes every
+// backlog manifest born expired, flooding the seal queue with ~30K-record
+// chunks).
 func TestLeaderPlannerRotatesAtMaxAgeWhenCaughtUp(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
@@ -849,8 +849,9 @@ func TestPlannerOpensManifestAfterPickingSegment(t *testing.T) {
 	}
 }
 
-// TestLoadSegmentViewsCachesIndexesAcrossPlanSteps guards gastrolog-3bn3q:
-// once a segment index is warm, later partial-manifest steps must not reopen it.
+// TestLoadSegmentViewsCachesIndexesAcrossPlanSteps guards the planner's
+// segment index cache: once a segment index is warm, later partial-manifest
+// steps must not reopen it.
 func TestLoadSegmentViewsCachesIndexesAcrossPlanSteps(t *testing.T) {
 	t.Parallel()
 	const segmentCount = 20
@@ -974,7 +975,7 @@ func TestLoadSegmentViewsIndexesAllActiveSegments(t *testing.T) {
 }
 
 // TestPlannerCatchUpBatchesRefsInOneApply verifies planCatchUp amortizes many
-// segment refs into a single vault-ctl apply (gastrolog-3i9nt).
+// segment refs into a single vault-ctl apply.
 func TestPlannerCatchUpBatchesRefsInOneApply(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
@@ -1091,7 +1092,7 @@ func TestPlannerCatchUpAppliesRefsBeforeSealAtMaxRecords(t *testing.T) {
 // TestLeaderPlannerGatesSingleCopySegments: the planner never references a
 // segment with fewer than min(2, placement) holders — a single-copy segment
 // in a manifest wedges the vault's serial seal queue if that copy's node
-// dies (gastrolog-4bl9xx). Holders accrue via receipts; planning follows.
+// dies. Holders accrue via receipts; planning follows.
 func TestLeaderPlannerGatesSingleCopySegments(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
@@ -1172,8 +1173,8 @@ func TestLeaderPlannerGatesSingleCopySegments(t *testing.T) {
 
 // TestLeaderPlannerUnderReplicatedAlert: segments gated past the grace
 // period raise the under-replicated alert; reaching the holder minimum
-// clears it (gastrolog-4bl9xx — a stuck replication window is a visible
-// registry condition, not a silent planning stall).
+// clears it (a stuck replication window is a visible registry condition, not
+// a silent planning stall).
 func TestLeaderPlannerUnderReplicatedAlert(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)

@@ -20,7 +20,7 @@ var ErrNoVaultRaftLeader = errors.New("no vault raft leader")
 // If this node is the Raft leader, it applies locally; otherwise it forwards
 // via ForwardVaultApply (same pattern as VaultCtlChunkApplyForwarder) and
 // blocks until the local group FSM has applied the leader's index — the
-// read-after-write barrier (gastrolog-4l24u).
+// read-after-write barrier.
 type VaultApplyForwarder struct {
 	raft      *hraft.Raft
 	groupID   string
@@ -44,11 +44,11 @@ func NewVaultApplyForwarder(r *hraft.Raft, groupID string, applyWait *applywait.
 }
 
 // Apply applies a vault control-plane command. Tries locally first; forwards on
-// ErrNotLeader, and retries while a leadership transfer is in progress
-// (gastrolog-4jh4mb — see applyRetryingLeadershipTransfer for why those two
-// errors get different treatment). When forwarded, Apply returns only after
-// this node's own group FSM has caught up to the leader's applied index, so an
-// immediate local read sees post-mutation state.
+// ErrNotLeader, and retries while a leadership transfer is in progress (see
+// applyRetryingLeadershipTransfer for why those two errors get different
+// treatment). When forwarded, Apply returns only after this node's own group
+// FSM has caught up to the leader's applied index, so an immediate local read
+// sees post-mutation state.
 func (f *VaultApplyForwarder) Apply(data []byte) error {
 	err := applyRetryingLeadershipTransfer(func() error {
 		return f.raft.Apply(data, f.timeout).Error()
@@ -89,9 +89,10 @@ func (f *VaultApplyForwarder) forwardToLeader(data []byte) error {
 //
 // Event-driven: the group FSM advances its applywait.Tracker as it applies
 // each committed entry (and on snapshot restore), waking this wait the
-// moment the mutation is locally visible — never a poll (gastrolog-3klg1
-// mechanism, mirrored onto vault-ctl by gastrolog-4l24u). A zero target
-// (nothing meaningful to wait for) and a nil tracker return immediately.
+// moment the mutation is locally visible — never a poll. Deliberately the
+// same applywait mechanism the system-config forward barrier in
+// system/raftstore uses; keep the two in step. A zero target (nothing
+// meaningful to wait for) and a nil tracker return immediately.
 // Times out if the follower never catches up (partitioned, log truncated,
 // etc.) so a stuck group surfaces as a caller-visible error rather than a
 // hang.

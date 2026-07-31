@@ -165,7 +165,7 @@ func TestDecodeObjectMetadata_ZeroBoundsAbsent(t *testing.T) {
 
 // TestDecodeObjectMetadata_Malformed asserts every malformed / mangled input
 // surfaces as an error instead of silently producing a zero-record,
-// zero-time ChunkMeta presented as authoritative (the gastrolog-5opw43 bug).
+// zero-time ChunkMeta presented as authoritative.
 func TestDecodeObjectMetadata_Malformed(t *testing.T) {
 	id := chunk.NewChunkID()
 

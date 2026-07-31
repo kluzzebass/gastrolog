@@ -2,10 +2,9 @@ package server_test
 
 // The lookup converters skip entries they cannot represent — an http lookup
 // with no url_template, a file-backed lookup with no file_id. That filtering is
-// the right validation outcome, but PutLookupSettings performed it SILENTLY and
-// returned success: a client was told the write landed and got nothing, with
-// nothing logged. Found when a test fixture's lookup vanished and only a debug
-// print explained why (gastrolog-7eu4nt).
+// the right validation outcome, but it must not happen silently:
+// PutLookupSettings rejects such entries up front, naming the entry and the
+// field, rather than returning success for a write that stored nothing.
 
 import (
 	"context"

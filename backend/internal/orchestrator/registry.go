@@ -96,7 +96,6 @@ func (o *Orchestrator) TriggerIngester(id glid.GLID) error {
 // IsRunning returns true if the orchestrator is running. Lock-free so the
 // /readyz HTTP handler stays responsive under any o.mu contention pattern
 // (vault registration, vault-ctl AddVoter burst, retention sweep, etc.).
-// See gastrolog-5n6xz.
 func (o *Orchestrator) IsRunning() bool {
 	return o.running.Load()
 }
@@ -184,7 +183,7 @@ func (o *Orchestrator) MultiVaultQueryEngine() *query.Engine {
 
 // searchReadyRegistry implements manifest.VaultRegistry for multi-vault search,
 // exposing only replication-ready vaults so partially applied instance metadata
-// cannot be queried (gastrolog-4ip1o).
+// cannot be queried.
 type searchReadyRegistry struct {
 	o *Orchestrator
 }
@@ -253,7 +252,7 @@ func (o *Orchestrator) LeaderVaultQueryEngine() *query.Engine {
 // required and follower-replica data is "good enough." Avoids cross-node
 // gRPC fan-out when chunks are already replicated locally (RF > 1). Records
 // must NOT use this engine — use LeaderVaultQueryEngine for authoritative
-// reads. See gastrolog-66b7x.
+// reads.
 func (o *Orchestrator) LocalVaultQueryEngine() *query.Engine {
 	return query.NewWithRegistry(&localVaultRegistry{o: o}, o.logger)
 }

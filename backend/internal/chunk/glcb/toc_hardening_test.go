@@ -1,9 +1,9 @@
 package glcb
 
-// TOC hardening tests (gastrolog-3wrb9m): oversized TOC entries fail the
-// seal with an error instead of panicking, and corrupt/truncated blob
-// tails are rejected at ReadTOC time so section mmap windows never map
-// past EOF and SIGBUS on first access.
+// TOC hardening tests: oversized TOC entries fail the seal with an error
+// instead of panicking, and corrupt/truncated blob tails are rejected at
+// ReadTOC time so section mmap windows never map past EOF and SIGBUS on
+// first access.
 
 import (
 	"crypto/sha256"

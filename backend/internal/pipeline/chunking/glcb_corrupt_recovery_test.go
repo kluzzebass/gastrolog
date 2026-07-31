@@ -19,9 +19,8 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
-// These tests assert the UNIFIED corrupt-GLCB recovery story (gastrolog-687m11,
-// replacing the gastrolog-5do8sh gap 4 divergence pins). Both the build pass
-// and restart recovery now share one story for an existing-but-unreadable
+// These tests assert the UNIFIED corrupt-GLCB recovery story. Both the build
+// pass and restart recovery share one story for an existing-but-unreadable
 // sealed GLCB: detect → quarantine the file to a .corrupt sibling → raise the
 // per-vault operator alert → heal (rebuild from source segments when they are
 // still available; otherwise the quarantine's stat-miss on the canonical path

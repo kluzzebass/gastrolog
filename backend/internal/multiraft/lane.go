@@ -9,8 +9,8 @@ import (
 // gastrolog-raft.config or gastrolog-raft.vault.<id>.ctl.
 const RaftLaneSNIPrefix = "gastrolog-raft"
 
-// LegacyRaftLaneSNI is the pre-per-group raft lane name. Inbound connections
-// with this SNI are routed to the cluster config group ("config").
+// LegacyRaftLaneSNI is the raft lane SNI carrying no group suffix. Inbound
+// connections with this SNI are routed to the cluster config group ("config").
 const LegacyRaftLaneSNI = RaftLaneSNIPrefix
 
 // ClusterConfigGroupID is the multiraft group ID for cluster-ctl Raft RPCs.

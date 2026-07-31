@@ -19,8 +19,8 @@ func DefaultConfig() *Config {
 	ingesterID := glid.New()
 
 	return &Config{
-		// gastrolog-4kkoo (Phase 5): no separate Filters; the default route
-		// carries its catch-all expression inline via MatchStage.
+		// The default route carries its catch-all expression inline via
+		// MatchStage.
 		RotationPolicies: []RotationPolicyConfig{
 			{ID: rotationID, Name: "default", MaxAge: new("5m")},
 		},

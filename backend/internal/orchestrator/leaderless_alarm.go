@@ -18,9 +18,8 @@ import (
 // immediately.
 //
 // leaderlessReported tracks only set membership (which vaults were reported
-// leaderless last pass) so departures diff to a Clear; the per-vault clocks
-// that used to live here moved into the collector with the suppression
-// phase (gastrolog-4wvxqh).
+// leaderless last pass) so departures diff to a Clear; the per-vault
+// suppression clocks live in the collector.
 //
 // Called from ReconcilePlacements with the full outcome map for the cluster-
 // wide reconcile (NSC change, config replay). Single-vault placement events

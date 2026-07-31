@@ -216,7 +216,7 @@ test.describe.serial("Settings", () => {
     ).toBeVisible();
   });
 
-  // ── Rotation policy editing (gastrolog-2m5w5) ─────────────────────
+  // ── Rotation policy editing ───────────────────────────────────────
 
   test("creates a rotation policy for editing", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Rotation Policies");
@@ -258,7 +258,7 @@ test.describe.serial("Settings", () => {
     });
   });
 
-  // ── Retention policy editing (gastrolog-2m5w5) ───────────────────
+  // ── Retention policy editing ─────────────────────────────────────
 
   test("creates a retention policy for editing", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Retention Policies");
@@ -300,7 +300,7 @@ test.describe.serial("Settings", () => {
     });
   });
 
-  // ── Cluster settings tab (gastrolog-6da4x) ──────────────────────
+  // ── Cluster settings tab ────────────────────────────────────────
 
   test("cluster tab shows cluster info", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Cluster");
@@ -308,7 +308,7 @@ test.describe.serial("Settings", () => {
     await expect(dialog.getByText(/cluster/i).first()).toBeVisible();
   });
 
-  // ── Nodes settings tab (gastrolog-6da4x) ────────────────────────
+  // ── Nodes settings tab ──────────────────────────────────────────
 
   test("nodes tab shows cluster nodes", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Nodes");
@@ -328,7 +328,7 @@ test.describe.serial("Settings", () => {
     await expect(copyBtn.first()).toBeVisible({ timeout: 10_000 });
   });
 
-  // ── Certificates tab (gastrolog-ftyjd) ──────────────────────────
+  // ── Certificates tab ────────────────────────────────────────────
 
   test("certificates tab is accessible", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Certificates");
@@ -338,7 +338,7 @@ test.describe.serial("Settings", () => {
     ).toBeVisible();
   });
 
-  // ── Files tab (gastrolog-38tzr) ─────────────────────────────────
+  // ── Files tab ───────────────────────────────────────────────────
 
   test("files tab is accessible", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Files");
@@ -346,7 +346,7 @@ test.describe.serial("Settings", () => {
     await expect(dialog.getByRole("heading", { name: "Files" })).toBeVisible();
   });
 
-  // ── Lookups tab (gastrolog-4a08t) ───────────────────────────────
+  // ── Lookups tab ─────────────────────────────────────────────────
 
   test("lookups tab is accessible", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Lookups");
@@ -412,7 +412,7 @@ test.describe.serial("Settings", () => {
     });
   });
 
-  // ── Users tab (gastrolog-4ynbb) ─────────────────────────────────
+  // ── Users tab ───────────────────────────────────────────────────
 
   test("users tab shows admin user", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Users");
@@ -429,7 +429,7 @@ test.describe.serial("Settings", () => {
     ).toBeVisible();
   });
 
-  // ── Cross-navigation (gastrolog-5hhp3) ──────────────────────────
+  // ── Cross-navigation ────────────────────────────────────────────
 
   test("vault card has Open in Inspector link", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Vaults");

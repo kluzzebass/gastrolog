@@ -42,17 +42,17 @@ func glcbCatchupJobName(vaultID glid.GLID, chunkID chunk.ChunkID) string {
 // back to holding its replica — without this, retention starves forever
 // while the manifest still reports the home as a holder.
 //
-// Doubles as the destination-side half of retention transfer disposition
-// (gastrolog-2l918): when e.TransferSourceVaultID is set, this entry
-// arrived via announce-import (CmdRepatriateChunk proposed by the SOURCE
-// vault's retention runner) rather than local chunking, and no peer of
-// THIS (destination) vault has the bytes yet — only nodes holding the
-// SOURCE vault's placement do. glcbSourceVaultID/glcbPullSources address
-// the pull at the source vault while the local write path (glcbPath,
-// registration, holder receipt) stays this — the destination's — own
-// vault throughout, exactly like same-vault replica catch-up. This is the
-// seam that makes "destination homes pull the chunk" work across vaults
-// without a parallel transfer-fetch mechanism.
+// Doubles as the destination-side half of retention transfer disposition:
+// when e.TransferSourceVaultID is set, this entry arrived via
+// announce-import (CmdRepatriateChunk proposed by the SOURCE vault's
+// retention runner) rather than local chunking, and no peer of THIS
+// (destination) vault has the bytes yet — only nodes holding the SOURCE
+// vault's placement do. glcbSourceVaultID/glcbPullSources address the pull
+// at the source vault while the local write path (glcbPath, registration,
+// holder receipt) stays this — the destination's — own vault throughout,
+// exactly like same-vault replica catch-up. This is the seam that makes
+// "destination homes pull the chunk" work across vaults without a parallel
+// transfer-fetch mechanism.
 //
 // No-op when the file exists, the vault has no pipeline home registration
 // here, a pull for the chunk is already in flight, or the in-flight cap is
@@ -83,7 +83,7 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 	// (RetentionPending precedes the expunge) or the delete protocol is
 	// mid-flight. The bytes are being deleted on every home, so the pull is
 	// doomed on every peer — at expiry-backlog scale these doomed pulls were a
-	// constant failure stream (gastrolog-423tpt).
+	// constant failure stream.
 	if chunkOnItsWayOut(e, o.vaultCtlPendingDelete(vaultID, e.ID)) {
 		return
 	}
@@ -120,15 +120,12 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 
 	// Describe BEFORE scheduling — see scheduleReplication for why (missing
 	// label on the Scheduled event, leaked descriptions entry when the job
-	// finishes first). gastrolog-69sjlj.
+	// finishes first).
 	name := glcbCatchupJobName(vaultID, e.ID)
 	o.scheduler.Describe(name, fmt.Sprintf("Replica catch-up pull of chunk %s from a peer home", e.ID))
 	// Claim the pull and check the in-flight budget in one hold of the
-	// scheduler's lock. Both facts now live in exactly one place — the
-	// scheduler's job map — which is the point: this used to be a separate
-	// glcbPullInflight map with its own mutex, a second copy of "is this work
-	// outstanding" that RemoveJobsByPrefix could never release. See
-	// gastrolog-69sjlj.
+	// scheduler's lock. Both facts live in exactly one place — the
+	// scheduler's job map.
 	if _, err := o.scheduler.RunOnceIfAbsentUnderLimit(name, glcbCatchupJobPrefix, maxConcurrentGLCBPulls, func() {
 		o.runGLCBPull(vaultID, sourceVaultID, e, glcbPath) // destVaultID=vaultID, sourceVaultID may differ (transfer)
 	}); err != nil {
@@ -143,21 +140,19 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 // local reconciler/chunk-manager gets the registration + holder receipt);
 // sourceVaultID is whose placement/bytes to pull FROM — equal to
 // destVaultID for ordinary same-vault replica catch-up, and the transfer's
-// source vault for a transfer-introduced entry (gastrolog-2l918; see
-// pullMissingGLCB).
+// source vault for a transfer-introduced entry (see pullMissingGLCB).
 //
 // When sourceVaultID differs from destVaultID (a transfer-introduced
 // entry) and the source vault's placement peers yield nothing — 0 peers,
 // or every pull attempt fails — falls back to this DESTINATION vault's
 // own confirmed holders (e.Holders), addressing the RPC at destVaultID
-// instead. This is the defense-in-depth half of gastrolog-2l918 review
-// finding 1: fireTransferEvent clears TransferSourceVaultID on
-// completion, but if that clear is ever missed (crash, apply failure
-// between receipts-met and the clear), the source vault's placement
-// peers have nothing left to give once the source expires its own
-// copies — without this fallback, replica repair for that chunk would be
-// permanently stuck addressing a vault with no bytes, even though other
-// DESTINATION homes hold a perfectly good copy right now.
+// instead. Defense in depth: fireTransferEvent clears
+// TransferSourceVaultID on completion, but if that clear is ever missed
+// (crash, apply failure between receipts-met and the clear), the source
+// vault's placement peers have nothing left to give once the source
+// expires its own copies — without this fallback, replica repair for that
+// chunk would be permanently stuck addressing a vault with no bytes, even
+// though other DESTINATION homes hold a perfectly good copy right now.
 func (o *Orchestrator) runGLCBPull(destVaultID, sourceVaultID glid.GLID, e vaultctlfsm.ManifestEntry, glcbPath string) {
 	sources := o.glcbPullSources(sourceVaultID)
 	// Only a transfer-introduced entry (sourceVaultID != destVaultID) is
@@ -205,8 +200,8 @@ func (o *Orchestrator) runGLCBPull(destVaultID, sourceVaultID glid.GLID, e vault
 	o.logger.Info("GLCB replica recovered from peer",
 		"vault", destVaultID, "source_vault", fromVaultID, "chunk", e.ID, "from", fromNode)
 	// A verified copy is back on the canonical path: clear any
-	// corrupt-GLCB quarantine + alert chunking raised for this chunk
-	// (gastrolog-687m11). No-op when the miss was a plain byte loss.
+	// corrupt-GLCB quarantine + alert chunking raised for this chunk.
+	// No-op when the miss was a plain byte loss.
 	if o.pipeline != nil {
 		o.pipeline.NoteGLCBRestored(destVaultID, e.ID)
 	}
@@ -219,8 +214,7 @@ func (o *Orchestrator) runGLCBPull(destVaultID, sourceVaultID glid.GLID, e vault
 	if rec != nil {
 		// The pulled bytes are now on the canonical path; the lazy resolver
 		// makes them queryable on first lookup. Propose this node's holder
-		// receipt event-driven now that the verified copy is on disk
-		// (gastrolog-34kmv).
+		// receipt event-driven now that the verified copy is on disk.
 		rec.ackOwnHolderReceipt(e)
 	}
 }
@@ -340,9 +334,8 @@ func (o *Orchestrator) retentionMootsPull(vaultID glid.GLID, e vaultctlfsm.Manif
 		r.mu.Lock()
 		rules := r.rules
 		r.mu.Unlock()
-		// Resolved from current config, not the sweep-captured field
-		// (gastrolog-6ckv0y). Read OUTSIDE r.mu: currentDisposition takes it
-		// for its fallback path.
+		// Resolved from current config, not the sweep-captured field. Read
+		// OUTSIDE r.mu: currentDisposition takes it for its fallback path.
 		disposition, _ := r.currentDisposition()
 		if disposition != system.RetentionDispositionDelete {
 			return false
@@ -395,9 +388,8 @@ func (o *Orchestrator) vaultRetentionGiveUpTTL(vaultID glid.GLID) (time.Duration
 		r.mu.Lock()
 		rules := r.rules
 		r.mu.Unlock()
-		// Resolved from current config, not the sweep-captured field
-		// (gastrolog-6ckv0y). Read OUTSIDE r.mu: currentDisposition takes it
-		// for its fallback path.
+		// Resolved from current config, not the sweep-captured field. Read
+		// OUTSIDE r.mu: currentDisposition takes it for its fallback path.
 		disposition, _ := r.currentDisposition()
 		if disposition != system.RetentionDispositionDelete {
 			return 0, false

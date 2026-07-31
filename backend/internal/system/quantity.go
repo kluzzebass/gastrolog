@@ -13,7 +13,7 @@ import (
 //
 // These are the ONLY resolution entry points for config quantities. No call
 // site parses one itself: unit handling and the unset rule live here, so a
-// change to either happens in one place (gastrolog-etcjdx).
+// change to either happens in one place.
 //
 // The parsers (ParseSize, ParseDuration) are deterministic and pinned by
 // round-trip tests — that is what makes it safe to replicate the expression

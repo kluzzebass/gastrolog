@@ -1,9 +1,9 @@
 // Ingester domain model.
 //
 // Wraps `IngesterConfig` from the wire format with computed properties that
-// the inspector and settings UIs need. Replaces four inline copies of the
-// AllNodes/NodeIDs eligibility logic (fixed across gastrolog-my66y,
-// gastrolog-3fftf, gastrolog-3syzn) with a single owner.
+// the inspector and settings UIs need. It is the single owner of the
+// AllNodes/NodeIDs eligibility logic, which no consumer may reimplement
+// inline.
 
 import type { IngesterConfig } from "../gen/gastrolog/v1/system_pb";
 import { type EntityID, idFromBytes } from "./id";
@@ -68,14 +68,10 @@ export class Ingester {
    * Number of nodes that have reported alive=true in the FSM map AND
    * are still present in the cluster's current live-node set.
    *
-   * gastrolog-485u1: the backend's IngesterAlive map can carry stale
-   * flags for nodes that have been removed via `cluster remove-node`
-   * (the FSM apply path used to leak per-node references on
-   * DeleteNode). Filtering by `liveNodes` here is defense-in-depth: a
-   * snapshot captured before the backend sweep landed, or a backend
-   * still on the pre-fix binary, won't produce an inflated badge.
-   * Steady-state post-fix this filter is a no-op because the backend
-   * keeps the FSM clean.
+   * Filtering by `liveNodes` is defense-in-depth: a stale alive flag for
+   * a node removed via `cluster remove-node` would inflate the badge.
+   * DeleteNode sweeps those entries out of the FSM, so steady-state this
+   * filter is a no-op.
    */
   runningCount(aliveMap: ReadonlyMap<EntityID, NodeStatusMap>, liveNodes: ReadonlySet<EntityID>): number {
     const ns = aliveMap.get(this.id);

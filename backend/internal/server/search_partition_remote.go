@@ -32,7 +32,7 @@ func forwardSearchRequestFromTarget(t searchPartitionTarget, queryExpr string, r
 // collectPartitionRemote opens streaming ForwardSearch RPCs for remote holder
 // partitions and returns a merged sorted iterator, combined histogram, and
 // the set of remote vaults fanned out to (the contributor set — see
-// collectRemote and gastrolog-20lrg).
+// collectRemote).
 func (s *QueryServer) collectPartitionRemote(
 	ctx context.Context,
 	q query.Query,

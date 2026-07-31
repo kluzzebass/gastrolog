@@ -8,11 +8,10 @@ import (
 	"github.com/hashicorp/raft"
 )
 
-// Coverage for gastrolog-1lbifx: the Raft transport is the source of the
-// per-peer reachability evidence that replaced the dedicated cluster
-// heartbeat broadcast. These tests pin the two facts the cluster layer
-// distinguishes — a PROBE (we asked) versus CONTACT (they answered) — because
-// the entire liveness rule rests on being able to tell them apart.
+// The Raft transport is the source of the per-peer reachability evidence
+// the cluster layer uses for liveness. These tests pin the two facts it
+// distinguishes — a PROBE (we asked) versus CONTACT (they answered) —
+// because the entire liveness rule rests on telling them apart.
 
 type contactEvent struct {
 	kind  string // "probe" | "contact"

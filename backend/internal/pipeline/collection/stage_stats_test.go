@@ -1,7 +1,7 @@
 package collection_test
 
-// Coverage for gastrolog-10n6k8: home-side ingress counters (records/bytes
-// arriving in head/) via both the remote-pull and local-promotion paths.
+// Coverage for home-side ingress counters (records/bytes arriving in head/)
+// via both the remote-pull and local-promotion paths.
 
 import (
 	"context"

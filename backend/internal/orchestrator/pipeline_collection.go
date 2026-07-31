@@ -134,8 +134,7 @@ func segmentNeedsLocalRepull(fsm *vaultctlfsm.FSM, entry vaultctlfsm.CompletedSe
 // is pulled into a private buffer and copied only on success. Streaming
 // matters at scale — buffering held every segment fully in RAM and the
 // bytes.Buffer doubling growth alone was 24% of all bytes allocated in a soak
-// run, garbage that fed the GC sweep stalls behind election churn
-// (gastrolog-1xee1s).
+// run, garbage that fed the GC sweep stalls behind election churn.
 type segmentPullClient struct {
 	lookup      func() *vaultctlfsm.FSM
 	puller      segmentPuller
@@ -332,6 +331,6 @@ func (c *segmentReceiptCommitter) CommitHolderReceipts(_ context.Context, _ glid
 	if len(segmentIDs) == 0 {
 		return nil
 	}
-	// One vault-ctl apply for the whole pass (gastrolog-38snf4).
+	// One vault-ctl apply for the whole pass.
 	return c.applier.Apply(vaultctlfsm.MarshalAckSegmentHolders(segmentIDs, c.localNodeID))
 }

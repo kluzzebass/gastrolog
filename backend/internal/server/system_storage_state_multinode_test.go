@@ -1,14 +1,14 @@
 package server_test
 
-// Multi-node coverage for the storage inspector's entity-list surface
-// (gastrolog-3cobq4): ListStorages composes NodeStorageConfigs (config,
+// Multi-node coverage for the storage inspector's entity-list surface:
+// ListStorages composes NodeStorageConfigs (config,
 // replicated to every node) with live disk-guard state from the owning
 // node — locally via the orchestrator, remotely via PeerStorageStats (the
 // harness's mnPeerStorageStats stands in for the real NodeStats broadcast +
 // PeerState.FindStorageState, the same shortcut mnPeerVaultStats takes for
 // vault stats elsewhere in this package).
 //
-// Two tiers, matching this codebase's convention for a scheduler-driven
+// Two tests, matching this codebase's convention for a scheduler-driven
 // surface with no test-only trigger (see
 // retention_unenforceable_multinode_test.go's package comment for the
 // precedent this file follows): a fast config-only test that needs no
@@ -72,8 +72,7 @@ func waitForMNStorageState(t *testing.T, h *multiNodeHarness, id glid.GLID, want
 
 // seedStorageWithPlacement writes a FileStorage on nodeID (config store
 // directly, replicated to every harness node) plus a file vault placed on
-// it, mirroring how gastrolog-9akebz's storage config and gastrolog-3cobq4's
-// placements-on-storage are both config-derived.
+// it: storage config and placements-on-storage are both config-derived.
 func seedStorageWithPlacement(t *testing.T, h *multiNodeHarness, nodeID, path, floorExpr string) (storageID, vaultID glid.GLID) {
 	t.Helper()
 	ctx := context.Background()
@@ -113,8 +112,7 @@ func seedStorageWithPlacement(t *testing.T, h *multiNodeHarness, nodeID, path, f
 // disk-guard tick has sampled it, ListStorages reports its identity and
 // config-derived placements correctly while every live field (free/total/
 // verdicts) stays honestly zero — never fabricated (facts before
-// speculation, gastrolog-9akebz). Fast: no scheduler wait, runs under
-// -short.
+// speculation). Fast: no scheduler wait, runs under -short.
 func TestMultiNodeListStorages_ConfigOnlyBeforeFirstSample(t *testing.T) {
 	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"})
 
@@ -154,10 +152,10 @@ func TestMultiNodeListStorages_ConfigOnlyBeforeFirstSample(t *testing.T) {
 // COORDINATOR's ListStorages via PeerStorageStats — "every node can serve
 // every storage's state including remote ones." The storage is then
 // removed from config and must disappear immediately (config-driven
-// identity; gastrolog-9akebz no-strand precedent) with no further wait.
+// identity, so a removed storage must not strand) with no further wait.
 func TestMultiNodeListStorages_RealTickReportsProtectPlacementsAndRemoval(t *testing.T) {
 	if testing.Short() {
-		t.Skip("waits for a real disk-guard cron tick (diskGuardSchedule, 15s cadence) — gastrolog-3cobq4")
+		t.Skip("waits for a real disk-guard cron tick (diskGuardSchedule, 15s cadence)")
 	}
 	t.Parallel()
 

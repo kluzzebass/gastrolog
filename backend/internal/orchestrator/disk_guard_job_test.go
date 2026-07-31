@@ -1,23 +1,20 @@
 package orchestrator
 
-// Coverage for a review finding on gastrolog-9akebz: evaluateStorages had NO
-// production call site — startDiskGuard's scheduler job ran evaluate ->
-// refreshVaultDiskGuards -> refreshBacklogBudget -> evaluateVaults, and the
-// free-space pass had moved out of evaluateVaults into evaluateStorages,
-// which nothing ever called. On a live node this meant: no storage protect
-// ever engaged, no storage alarms, an empty broadcast — the floor
-// protection the base commit had was silently gone, and every test in
-// disk_guard_test.go still passed because they all call
-// g.evaluate()/g.evaluateStorages()/g.evaluateVaults() directly, pinning the
-// guard's internal methods rather than the job body startDiskGuard actually
-// registers.
+// Coverage for the disk guard's SCHEDULER JOB. A guard pass missing from
+// the job body is invisible to disk_guard_test.go: those tests all call
+// g.evaluate() / g.evaluateStorages() / g.evaluateVaults() directly, pinning
+// the guard's internal methods rather than the job body startDiskGuard
+// registers. That gap shipped once: the job body ran evaluate ->
+// refreshVaultDiskGuards -> refreshBacklogBudget -> evaluateVaults with no
+// evaluateStorages, so storage floor protection was silently gone while every
+// test in disk_guard_test.go still passed. Without it there is no storage
+// protect on a live node, no storage alarms, an empty
+// broadcast — with every one of those tests still green.
 //
-// This file closes that gap: it drives the EXACT gocron.Job object
-// startDiskGuard hands the scheduler (via the schedulerJob test accessor,
-// which takes the same lock Scheduler's own methods do) rather than calling
-// diskGuardTick directly or re-deriving its steps — so a future regression
-// that again detaches a guard pass from the job closure fails here, not
-// silently.
+// This file drives the EXACT gocron.Job object startDiskGuard hands the
+// scheduler (via the schedulerJob test accessor, which takes the same lock
+// Scheduler's own methods do) rather than calling diskGuardTick directly or
+// re-deriving its steps.
 
 import (
 	"errors"

@@ -18,8 +18,8 @@ import {
 import { VaultsSettings } from "./VaultsSettings";
 import { IngestersSettings } from "./IngestersSettings";
 import { CertificatesSettings } from "./CertificatesSettings";
-// gastrolog-4kkoo (Phase 5): FiltersSettings tab removed — match expressions
-// live inline on routes; the Routes tab edits them directly.
+// There is no Filters tab: match expressions live inline on routes, and the
+// Routes tab edits them directly.
 import { RoutesSettings } from "./RoutesSettings";
 import { PoliciesSettings } from "./PoliciesSettings";
 import { RetentionPoliciesSettings } from "./RetentionPoliciesSettings";

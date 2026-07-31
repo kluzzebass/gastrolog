@@ -18,13 +18,13 @@ import (
 // placement guards exist to protect a node that still exists, and none of them
 // should pin a placement to one that does not.
 //
-// Before gastrolog-68y1vn a departed LEADER read as NodeStateUnknown (the zero
-// value of the nodeStates map), fell into the Unknown/Live case, failed the
-// heartbeat check, and had its placement retained forever by the two-clock
-// guard's "node just went quiet" branch. Nothing converged it, and followers
-// were never extended to compensate because the placement target already looked
-// met. Follower departures re-placed correctly the whole time — the leader was
-// the case that stranded.
+// The LEADER is the case these tests pin. A departed leader reads as
+// NodeStateUnknown (the zero value of the nodeStates map), so without an
+// explicit departure test it falls into the Unknown/Live case, fails the
+// heartbeat check, and keeps its placement forever via the two-clock guard's
+// "node just went quiet" branch — with followers never extended to compensate,
+// because the placement target already looks met. Follower departures re-place
+// without any of this.
 //
 // These tests drive the real removal path (nodeRemover.remove, which deletes
 // the NodeConfig) and then reconcile, so they exercise departure the way the
@@ -147,10 +147,10 @@ func TestPlacement_DepartedLeader_FileVault_IsReplaced(t *testing.T) {
 }
 
 // The other half of the distinction, and the property that must NOT regress: a
-// leader that is merely unreachable keeps its placement. That is the soft-offline
-// guard (gastrolog-slc6l) and the two-clock guard (gastrolog-2d35dc) doing their
-// job — a transiently-absent node must not have its chunks orphaned — and it is
-// also the no-auto-remove stance: only an operator removes a node.
+// leader that is merely unreachable keeps its placement. That is the
+// soft-offline guard and the two-clock guard doing their job — a
+// transiently-absent node must not have its chunks orphaned — and it is also
+// the no-auto-remove stance: only an operator removes a node.
 //
 // Same shape as the departed tests, minus the removal, so the two sit side by
 // side and the difference between them is exactly "does the NodeConfig exist".

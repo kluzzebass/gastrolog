@@ -33,7 +33,7 @@ func (b *blockingServerStream) RecvMsg(any) error {
 }
 
 // TestRecvOrShutdownReturnsQuicklyOnCancel is the regression test for
-// the cluster-server half of gastrolog-1e5ke. Before this change,
+// the cluster-server half of ordered shutdown drain. Before this change,
 // long-running stream handlers (vault replication, stream forward
 // records, forward import records) sat in stream.RecvMsg forever, and
 // cluster.Server.Stop()'s GracefulStop had to wait the full 5-second

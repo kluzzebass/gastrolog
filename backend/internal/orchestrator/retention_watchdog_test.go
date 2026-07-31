@@ -1,9 +1,9 @@
 package orchestrator
 
-// gastrolog-5ct2av: a destination that passes its admission gate but stops
-// draining must not hang the retention sweep. The watchdog aborts a fan-out
-// that makes no progress for a full stall window. Tested through injected
-// ticks and the pure stalled() predicate — never by racing real timers.
+// A destination that passes its admission gate but stops draining must not
+// hang the retention sweep. The watchdog aborts a fan-out that makes no
+// progress for a full stall window. Tested through injected ticks and the
+// pure stalled() predicate — never by racing real timers.
 
 import (
 	"errors"

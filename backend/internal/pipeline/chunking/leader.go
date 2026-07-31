@@ -126,8 +126,7 @@ func (v *vaultChunking) planOnce(ctx context.Context, cronDue bool) error {
 // Segments that become eligible mid-pass (replication catching up, fresh
 // publishes) are picked up on the next pass — catch-up is iterative. This is
 // what breaks the O(N^2) plan pass (budget ∝ N steps × O(N) scan each) that let
-// completed/ accumulate under sustained load (gastrolog-36ba70 / gastrolog-423tpt;
-// hot paths named in gastrolog-2m0f75).
+// completed/ accumulate under sustained load.
 type plannerPass struct {
 	eligible   []vaultctlfsm.CompletedSegmentEntry
 	resume     map[glid.GLID]uint32
@@ -232,7 +231,7 @@ func (v *vaultChunking) planStepLocked(cronDue bool, maxRefs int, pass *plannerP
 		if !ready {
 			// Non-blocking: collection's pass completion re-wakes this
 			// worker (OnPassComplete). Blocking on a full pass here stalled
-			// planning and sealing under backlog (gastrolog-1b51yf).
+			// planning and sealing under backlog.
 			return planStepDecision{action: planStepIdle, nudge: nudge}, pass
 		}
 		return planStepDecision{action: planStepOpenManifest, openWire: wire}, pass
@@ -270,8 +269,7 @@ func (v *vaultChunking) planLeaderStep(ctx context.Context, cronDue bool, maxRef
 		if err := v.applier().Apply(decision.openWire); err != nil {
 			return err
 		}
-		// Leader-owned chunk-planned milestone (gastrolog-4r784a): one open
-		// manifest opened.
+		// Leader-owned chunk-planned milestone: one open manifest opened.
 		v.chunksPlanned.Add(1)
 		return nil
 
@@ -378,7 +376,7 @@ func (v *vaultChunking) applySealOpenManifest(chunkID chunk.ChunkID, sealedAt ti
 		return err
 	}
 	// The vault chunked a manifest — chunking recovered, so a standing
-	// retention-give-up alarm no longer holds (gastrolog-68sfsl).
+	// retention-give-up alarm no longer holds.
 	v.clearRetentionGiveUp()
 	return nil
 }
@@ -410,12 +408,13 @@ func (v *vaultChunking) proposeOpenManifestWire(
 		return nil, false
 	}
 	chunkID := v.cfg.newChunkID()
-	// OpenedAt is the manifest's max-age rotation anchor and MUST be the
-	// wall clock at open — never a segment-derived timestamp. The previous
-	// stamp (newest eligible PublishedAt) trails open time by exactly the
-	// planning lag, so under seal backlog every new manifest was born
-	// already older than MaxAge and rotated at its first ref batch,
-	// flooding the FIFO seal queue with tiny chunks (gastrolog-4olqp6).
+	// OpenedAt is the manifest's max-age rotation anchor and must be the wall
+	// clock at open wherever one is available. A segment-derived stamp (newest
+	// eligible PublishedAt) trails open time by exactly the planning lag, so
+	// under seal backlog a manifest anchored that way is born already older
+	// than MaxAge and rotates at its first ref batch, flooding the FIFO seal
+	// queue with tiny chunks. The segment fallback below applies only to
+	// replay-style callers that have no wall clock to use.
 	openedAt := evalNow
 	if openedAt.IsZero() {
 		// Replay-style callers without a clock: fall back to the segment
@@ -467,7 +466,7 @@ func (p manifestProgress) advancedFrom(prev manifestProgress) bool {
 // job), independent of this vault's worker goroutine (startWorkerLocked's
 // wake loop, which reaches planCatchUp via runBuildPass) — so an unlocked
 // newPlannerPass call here could race a concurrent locked one from
-// planStepLocked for the same vault (gastrolog-cqz1ef).
+// planStepLocked for the same vault.
 func (v *vaultChunking) planCatchUp(ctx context.Context) error {
 	if !v.cfg.IsLeader() || v.applier() == nil {
 		return nil
@@ -560,8 +559,8 @@ func (v *vaultChunking) eligibleFromEntries(entries []vaultctlfsm.CompletedSegme
 		if segmentExhaustedForPlanning(v.fsm(), entry) {
 			continue
 		}
-		// Replication-window gate (gastrolog-4bl9xx): never plan a segment
-		// whose bytes exist on fewer than minHolders nodes. Registry publish
+		// Replication-window gate: never plan a segment whose bytes exist
+		// on fewer than minHolders nodes. Registry publish
 		// precedes replication, and a manifest referencing a single-copy
 		// segment wedges the vault's entire serial seal queue if that copy's
 		// node dies (builds require real bytes on every home; skipping would
@@ -600,7 +599,7 @@ func (v *vaultChunking) plannerMinHolders() int {
 // an operator alert. Fresh segments are under-replicated for the seconds
 // between publish and the first holder receipts; anything gated minutes has
 // lost its replication path (origin died holding the only copy) and the
-// loss-vs-wait decision is explicit operator territory (gastrolog-4bl9xx).
+// loss-vs-wait decision is explicit operator territory.
 const underReplicatedAlertAfter = 2 * time.Minute
 
 // underReplicatedAlarmType is the catalog type ID for replication-gated
@@ -651,8 +650,8 @@ func (v *vaultChunking) pruneSegmentIndexCache(eligible []vaultctlfsm.CompletedS
 }
 
 // planFailure tracks one segment whose on-disk index cannot be opened or read.
-// Log rate limiting is state-based (gastrolog-6wwdos): the Warn line emits when
-// the failure message changes (first failure included), never once per retry.
+// Log rate limiting is state-based: the Warn line emits when the failure
+// message changes (first failure included), never once per retry.
 type planFailure struct {
 	count   int
 	lastMsg string
@@ -671,8 +670,7 @@ const unplannableAlarmType = "chunking-unplannable-segment"
 // notePlanFailure records that a segment's on-disk index could not be opened
 // or read. Such a segment is skipped by every planner pass: its records are
 // never planned into a sealed manifest, never queryable via the chunk path,
-// and its head copy is never purged — previously with zero diagnostics
-// (gastrolog-6wwdos). Caller holds planMu.
+// and its head copy is never purged. Caller holds planMu.
 func (v *vaultChunking) notePlanFailure(id glid.GLID, stage string, err error) {
 	if v.planFailures == nil {
 		v.planFailures = make(map[glid.GLID]*planFailure)
@@ -774,7 +772,7 @@ func (v *vaultChunking) segmentViewForEntry(entry vaultctlfsm.CompletedSegmentEn
 			// A registry segment whose index cannot be built is never
 			// planned into any sealed manifest: its records stay
 			// unchunked and its head copy cannot be purged. Silent
-			// skipping hid that condition entirely (gastrolog-6wwdos).
+			// skipping would hide that condition entirely.
 			v.notePlanFailure(entry.SegmentID, "open segment index", err)
 			return SegmentView{}, false
 		}

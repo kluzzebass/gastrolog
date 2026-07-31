@@ -1,6 +1,9 @@
 package raftwal
 
-// Coverage for gastrolog-1io54g: submit latency accounting on the shared WAL.
+// Submit latency accounting on the shared WAL: cumulative totals plus a
+// take-once maximum. Every group on a node shares this WAL, so a slow append
+// here delays consensus in all of them at once — the accounting is how that
+// becomes visible instead of surfacing as unexplained elections.
 
 import (
 	"testing"

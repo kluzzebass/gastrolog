@@ -10,10 +10,10 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
-// TestOrchRel_ManifestReadsOnVoterWithoutInstance covers the FSM tier of the
-// unified manifest read core (gastrolog-3w8qj): vault B is homed on nodes
+// TestOrchRel_ManifestReadsOnVoterWithoutInstance covers the FSM path of the
+// unified manifest read core: vault B is homed on nodes
 // {0,1,2} only, but node 3 — the ingest origin — is still a voter of B's
-// vault-ctl Raft group (symmetric seeding, gastrolog-292yi) and must serve
+// vault-ctl Raft group (symmetric seeding) and must serve
 // sealed manifest reads from the replicated FSM without hosting any instance
 // for the vault.
 func TestOrchRel_ManifestReadsOnVoterWithoutInstance(t *testing.T) {

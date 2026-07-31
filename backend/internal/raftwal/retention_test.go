@@ -1,6 +1,6 @@
 package raftwal
 
-// Coverage for gastrolog-53lk2 (heap retention): the per-group log index
+// Coverage for heap retention: the per-group log index
 // stays in memory, but payloads live in the recent window only up to
 // Config.LogCacheBudgetBytes — older entries are read back from WAL segment
 // files. Heap is bounded by the budget, not by log length.

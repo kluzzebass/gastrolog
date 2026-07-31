@@ -35,7 +35,7 @@ type CaptureHandler struct {
 	// consumer (self ingester disabled). Shared across WithAttrs/WithGroup
 	// clones via pointer semantics. Flipped by the self ingester at
 	// Run/teardown so a runtime enable/disable toggles the gate without
-	// reinstalling the slog handler chain. See gastrolog-6bvu6.
+	// reinstalling the slog handler chain.
 	enabled *atomic.Bool
 
 	// dropped counts records that tried to enter the capture channel but
@@ -43,7 +43,7 @@ type CaptureHandler struct {
 	// WithAttrs/WithGroup clones via pointer semantics so every handler
 	// in the chain reports to the same counter. Polled externally by the
 	// self-ingester's drop monitor, which raises an alert when the
-	// counter advances — see gastrolog-5d5a3.
+	// counter advances.
 	dropped *atomic.Int64
 }
 
@@ -105,7 +105,7 @@ func (h *CaptureHandler) Handle(ctx context.Context, r slog.Record) error {
 	// the channel (self ingester disabled). Without this gate every
 	// WARN+ record would accumulate monotonically in the capture
 	// channel; the chanwatch monitor would eventually trip and drops
-	// would start — even though nothing is wrong. See gastrolog-6bvu6.
+	// would start — even though nothing is wrong.
 	if !h.enabled.Load() {
 		return h.inner.Handle(ctx, r)
 	}

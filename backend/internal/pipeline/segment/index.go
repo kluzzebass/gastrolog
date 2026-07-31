@@ -87,8 +87,8 @@ func sortIndexRegion(data []byte) {
 // BuildIndex appends a sorted (EventID, filepos) tail and updates IndexOffset
 // and checksums. Writer-created segments build both index tails from the
 // in-memory per-frame capture — sort in memory, ONE pwrite per tail, CRCs
-// over the in-memory buffers (gastrolog-oin19g). The disk-scan path below
-// remains for Open-path (crash-recovered) segments, whose capture is absent:
+// over the in-memory buffers. The disk-scan path below remains for
+// Open-path (crash-recovered) segments, whose capture is absent:
 // it re-reads the file with ~8 preads and issues 2 pwrites per record, which
 // stalled the writer's record loop for the whole rebuild at rotation time.
 // The segment must not already be indexed.
@@ -171,7 +171,7 @@ func (sf *File) BuildIndex() error {
 // buildIndexFromMemory writes both index tails from the per-append capture:
 // in-memory sorts, ONE pwrite per tail, checksums over the in-memory buffers.
 // Output is byte-identical to the disk-scan path (same comparators, same
-// entry encodings, same header fields) — enforced by test (gastrolog-oin19g).
+// entry encodings, same header fields) — enforced by test.
 func (sf *File) buildIndexFromMemory(recordEnd uint32) error {
 	entries := make([]memIndexEntry, len(sf.memEntries))
 	copy(entries, sf.memEntries)
@@ -311,7 +311,7 @@ func (sf *File) RecordAtEventOrder(pos uint32) (record.Record, error) {
 // grown); the view is valid only until the buffer's next reuse. For scan
 // loops that read many records but consume only fixed fields — the planner's
 // bounds pass fully materialized every record for three timestamps, 24GB of
-// cumulative garbage on a loaded home (gastrolog-11y2iv).
+// cumulative garbage on a loaded home.
 func (sf *File) ReadViewAtFilePos(filePos uint32, scratch []byte) (record.View, []byte, error) {
 	recEnd, err := sf.recordsEnd()
 	if err != nil {
@@ -335,10 +335,10 @@ func (sf *File) ViewAtEventOrder(pos uint32, scratch []byte) (record.View, []byt
 
 // IndexFilePositions bulk-reads the frame offset of every index entry in
 // EventID order with a single ReadAt over the contiguous index region.
-// Per-record planner loops previously issued two preads per record
-// (index entry + frame length prefix); frames are appended back-to-back, so
-// callers can derive every frame length from these positions alone
-// (gastrolog-2m0f75).
+// Frames are appended back-to-back, so callers can derive every frame length
+// from these positions alone — one read per segment instead of the two
+// preads per record (index entry + frame length prefix) a per-record planner
+// loop needs.
 func (sf *File) IndexFilePositions() ([]uint32, error) {
 	if sf.hdr.IndexOffset == 0 {
 		return nil, ErrNoIndex

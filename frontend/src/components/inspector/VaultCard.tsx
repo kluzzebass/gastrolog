@@ -9,7 +9,7 @@ import { useNodeRegistry } from "../../api/hooks";
 import { usePipelineBacklog } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
-// eslint-disable-next-line no-restricted-imports -- no Chunk model yet (gastrolog-2e2qs follow-up)
+// eslint-disable-next-line no-restricted-imports -- no Chunk model yet
 import { type ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import { VaultAdmissionCause, type Vault, type VaultAdmissionRefusal } from "../../api/model/vault";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
@@ -56,7 +56,7 @@ function chunkStartInstant(chunk: ChunkMeta): Date | undefined {
 // still lives in the cloud store, at cloudBytes, a currency this never
 // substitutes in. Otherwise diskBytes wins when recorded, falling back to
 // logical bytes only for chunks with no disk-bytes tracking at all
-// (pipeline GLCB chunks). See gastrolog-33ul6h.
+// (pipeline GLCB chunks).
 export function chunkDiskClaimBytes(chunk: ChunkMeta): number {
   const diskBytes = Number(chunk.diskBytes);
   if (chunk.cloudBacked && diskBytes === 0) return 0;
@@ -87,9 +87,9 @@ function chunkSizeCellTitle(chunk: ChunkMeta): string | undefined {
 // (VaultInfo.admissionRefused, populated from the responding node's own
 // admission-causes collector — backend/internal/orchestrator/disk_guard.go's
 // VaultAdmissionCauses) to a terse tooltip phrase. A first-class backend
-// signal, not a UI-side derivation from alarm state (gastrolog-33ul6h).
-// gastrolog-9akebz: VAULT_DISK_PROTECT renamed STORAGE_DISK_PROTECT — the
-// disk-free thresholds moved from the vault to the storage it's placed on.
+// signal, not a UI-side derivation from alarm state. The disk-free
+// thresholds belong to the storage a vault is placed on, not the vault,
+// hence STORAGE_DISK_PROTECT.
 const vaultAdmissionCauseLabels: Partial<Record<VaultAdmissionCause, string>> = {
   [VaultAdmissionCause.MAX_SIZE_BOUND]: "at max-size bound",
   [VaultAdmissionCause.STORAGE_DISK_PROTECT]: "storage below floor",
@@ -113,8 +113,8 @@ export function vaultRefusingCauseLabels(refusals: readonly VaultAdmissionRefusa
 // vaultRefusalDetails pairs each active cause's label with the backend's own
 // detail string, verbatim — the expanded card's refusal section renders
 // exactly this, never reconstructing the specifics client-side
-// (gastrolog-9akebz: VaultAdmissionRefusal carries {cause, detail} on the
-// wire). Same UNSPECIFIED-drop discipline as vaultRefusingCauseLabels.
+// (VaultAdmissionRefusal carries {cause, detail} on the wire). Same
+// UNSPECIFIED-drop discipline as vaultRefusingCauseLabels.
 export interface VaultRefusalDetail {
   label: string;
   detail: string;
@@ -153,7 +153,7 @@ export function VaultCard({
   // Vault size = summed per-chunk local disk claim — the same quantity the
   // max-size bound measures. An evicted cloud-backed chunk contributes 0,
   // not its logical bytes (the object is still in the cloud store, not on
-  // this node). See gastrolog-33ul6h.
+  // this node).
   const sizeBytes = (chunks ?? []).reduce(
     (sum, c) => sum + chunkDiskClaimBytes(c),
     0,
@@ -214,7 +214,7 @@ export function VaultCard({
 // signal that drives the header's "refusing" badge, expanded into a
 // dedicated section while it's non-empty. No client-side reconstruction of
 // which storage or bound is involved: the detail text is exactly what the
-// backend attached (gastrolog-9akebz). Matches the Topology/Throughput
+// backend attached. Matches the Topology/Throughput
 // section chrome (uppercase muted heading, bordered well panel).
 function VaultRefusalSection({
   refusals,
@@ -268,7 +268,7 @@ interface IdleNote {
 // ingress), collected (segments arriving in head/ at the home), and sealed
 // (records materialized into GLCBs). A downstream stage's rate falling away
 // from its upstream is a pipeline stall in progress; the backlog panel below
-// shows where the inventory stacks (gastrolog-10n6k8).
+// shows where the inventory stacks.
 function VaultThroughputSection({
   vaultId,
   dark,
@@ -354,7 +354,7 @@ function VaultThroughputSection({
   // Answers "why is COLLECTED 4x APPEND?" inline instead of via tooltip:
   // replicated stages count each record once PER HOME, so their Σ runs at
   // append × home-count when healthy — and ahead of it when a rejoined
-  // node backfills or backlog drains (gastrolog-4deb9e).
+  // node backfills or backlog drains.
   const totalAppend = append.reduce((s, r) => s + r.recordsPerSec, 0);
   const replicationNote = (rows: StageRow[]): IdleNote | undefined => {
     if (rows.length < 2) return undefined;
@@ -371,7 +371,7 @@ function VaultThroughputSection({
   // rows) so changing number widths never shift columns horizontally.
   // STAGE ("COLLECTED") and NODE ("Σ 4 homes") have fixed-width content, so
   // they get fixed columns; STATUS is the only prose column and takes all
-  // spare width — it was clipping while NODE flexed (gastrolog-4deb9e).
+  // spare width — it was clipping while NODE flexed.
   const gridCols = "grid grid-cols-[5rem_5.5rem_4.5rem_5rem_5.5rem_minmax(10rem,1fr)] items-center gap-x-3";
 
   return (
@@ -763,8 +763,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
       return bTime - aTime;
     });
 
-  // One placement summary per vault, then a single chunk table. Placement used
-  // to render as a colspan row between the table header and chunk rows (gastrolog-28yi3).
+  // One placement summary per vault, then a single chunk table.
   const nscs = config?.nodeStorageConfigs ?? [];
   const vaultIds = vaultMatches.map((v: { id: Uint8Array }) => encode(v.id));
   const chunkRows = vaultIds.flatMap((vId: string) => {

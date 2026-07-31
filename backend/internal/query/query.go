@@ -464,12 +464,8 @@ func (e *Engine) listVaults() []glid.GLID {
 // Unsealed chunks are always included (their WriteEnd is not final).
 // If chunkIDs is non-nil, only chunks with matching IDs are included.
 //
-// gastrolog-5sywa removed the transition-streamed filter: the receipt
-// protocol is gone, retention firing is synchronous through the routing
-// engine (Phase 4 / gastrolog-42f9z), and there's no longer a
-// "post-stream / pre-expire" window where a chunk has been transferred
-// out but not yet deleted at the source. The vaultID argument is kept
-// for callers that already pass it; it's no longer consulted here.
+// The vaultID argument is not consulted; it is kept for callers that
+// already pass it.
 func (e *Engine) selectChunks(vaultID glid.GLID, metas []chunk.ChunkMeta, q Query, chunkIDs []chunk.ChunkID) []chunk.ChunkMeta {
 	_ = vaultID
 	lower, upper := q.TimeBounds()
@@ -548,8 +544,7 @@ func chunkMatchesQuery(m chunk.ChunkMeta, q Query, lower, upper time.Time, chunk
 // ascending start, reverse = live chunks first, then descending end. The
 // lazy-prime merge (vaultChunksOverlap, one-scanner-at-a-time opening)
 // assumes this order holds GLOBALLY across the chunk list it receives —
-// per-vault sorted runs concatenated in registry order are not enough
-// (gastrolog-33bkl7).
+// per-vault sorted runs concatenated in registry order are not enough.
 func chunkCmp(orderBy OrderBy, reverse bool) func(a, b chunk.ChunkMeta) int {
 	startTS, endTS := chunkTimeBounds(orderBy)
 	if reverse {
@@ -702,7 +697,7 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 	// decides which bound it is: forward has already returned everything
 	// below the resume position, reverse everything at or above it. Using
 	// minPos for a reverse resume would exclude every remaining record and
-	// silently truncate pagination (gastrolog-i2uman).
+	// silently truncate pagination.
 	if startPos != nil {
 		if q.Reverse() {
 			b.setMaxPosition(*startPos)

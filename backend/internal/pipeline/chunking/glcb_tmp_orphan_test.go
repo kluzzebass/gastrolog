@@ -11,13 +11,13 @@ import (
 	"gastrolog/internal/pipeline/chunking"
 )
 
-// TestRecoverOnceSweepsGLCBTempOrphan verifies the gastrolog-66hmx3 fix for
-// gastrolog-5do8sh gap 7: BuildGLCBFile stages the blob via
-// os.CreateTemp(workDir, glcbBuildTmpPrefix+"*") with only an in-process
-// defer cleanup, so a crash between CreateTemp and the rename used to
-// strand the temp file in the chunk workdir forever (no startup sweep).
-// RecoverOnce now sweeps glcbBuildTmpPrefix orphans (sweepOrphanGLCBBuildTmp)
-// before doing anything else, so the leak no longer survives a restart.
+// TestRecoverOnceSweepsGLCBTempOrphan pins the crash-orphan sweep:
+// BuildGLCBFile stages the blob via os.CreateTemp(workDir,
+// glcbBuildTmpPrefix+"*") with only an in-process defer cleanup, so a crash
+// between CreateTemp and the rename strands the temp file in the chunk
+// workdir. RecoverOnce sweeps glcbBuildTmpPrefix orphans
+// (sweepOrphanGLCBBuildTmp) before doing anything else, so the leak does not
+// survive a restart.
 func TestRecoverOnceSweepsGLCBTempOrphan(t *testing.T) {
 	t.Parallel()
 	fx := setupSealingChunkWithBuiltGLCB(t)
@@ -71,8 +71,8 @@ func TestRecoverOnceSweepsGLCBTempOrphan(t *testing.T) {
 // TestIsGLCBBuildTmpName_MatchesRealBuildGLCBFileOutput drives the exact
 // os.CreateTemp pattern BuildGLCBFile uses for its staging file and
 // asserts the sweep predicate matches the real produced name, not a
-// hand-typed guess — the writer/sweeper drift is what let this orphan
-// survive every restart before gastrolog-66hmx3.
+// hand-typed guess — writer/sweeper drift is what lets an orphan survive
+// every restart.
 func TestIsGLCBBuildTmpName_MatchesRealBuildGLCBFileOutput(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -93,17 +93,17 @@ func TestIsGLCBBuildTmpName_MatchesRealBuildGLCBFileOutput(t *testing.T) {
 	}
 }
 
-// TestRecoverOnceSweepSerializesWithInFlightBuild pins the fix for the
-// regression the gastrolog-66hmx3 sweep introduced: RecoverOnce runs on the
-// vault-registration catch-up goroutine concurrently with the wake-driven
-// worker's build pass, and an unserialized sweepOrphanGLCBBuildTmp deleted
-// the ".glcb.tmp.*" a live BuildGLCBFile was about to rename ("BuildOnce:
-// rename ... no such file or directory"). The sweep now runs under buildMu.
+// TestRecoverOnceSweepSerializesWithInFlightBuild pins the sweep's
+// serialization: RecoverOnce runs on the vault-registration catch-up
+// goroutine concurrently with the wake-driven worker's build pass, so an
+// unserialized sweepOrphanGLCBBuildTmp deletes the ".glcb.tmp.*" a live
+// BuildGLCBFile is about to rename ("BuildOnce: rename ... no such file or
+// directory"). The sweep runs under buildMu.
 //
-// The mid-flight assertion is deterministic with the fix in place: while
-// this test holds buildMu, the sweep cannot have run, so the staged file
-// must still exist no matter how the goroutines interleave. Only a
-// regression (sweep outside buildMu) can make it fail.
+// The mid-flight assertion is deterministic: while this test holds buildMu,
+// the sweep cannot have run, so the staged file must still exist no matter
+// how the goroutines interleave. Only a regression (sweep outside buildMu)
+// can make it fail.
 func TestRecoverOnceSweepSerializesWithInFlightBuild(t *testing.T) {
 	t.Parallel()
 	fx := setupSealingChunkWithBuiltGLCB(t)

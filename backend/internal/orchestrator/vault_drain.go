@@ -82,11 +82,8 @@ func (o *Orchestrator) DrainInstance(ctx context.Context, vaultID glid.GLID, mod
 	// Validate mode-specific requirements.
 	switch mode {
 	case DrainDecommission:
-		// Phase 4 (gastrolog-42f9z): the multi-transition chain is gone (Phase 2
-		// collapsed it) and the transition concept is gone with it.
-		// Decommission drain just fires retention events on every chunk —
-		// the routing engine + retention path produce the same observable
-		// behavior the old "transition to next instance" produced.
+		// No mode-specific requirements: decommission destroys the source
+		// chunks in place, so there is no target node to validate.
 	case DrainRebalance:
 		if targetNodeID == "" {
 			o.mu.Unlock()
@@ -124,7 +121,7 @@ func (o *Orchestrator) DrainInstance(ctx context.Context, vaultID glid.GLID, mod
 
 	// Submit async drain job. Describe BEFORE submitting — see
 	// scheduleReplication for why (missing label on the Scheduled event,
-	// leaked descriptions entry when the job finishes first). gastrolog-69sjlj.
+	// leaked descriptions entry when the job finishes first).
 	jobName := fmt.Sprintf("drain-vault:%s:%s", vaultID, vaultID)
 	o.scheduler.Describe(jobName, fmt.Sprintf("Drain vault %s from vault", vaultID))
 	jobID := o.scheduler.Submit(jobName, func(ctx2 context.Context, job *JobProgress) {
@@ -210,10 +207,10 @@ func (o *Orchestrator) drainVaultChunks(ctx context.Context, sys *system.System,
 	}
 
 	for _, meta := range metas {
-		// Phase 3 (gastrolog-1huz5): overlay through FSM so Sealing
-		// chunks (active-form sealed locally but GLCB not yet committed)
-		// are skipped. Drain ships sealed-form GLCBs; a Sealing chunk
-		// would race with concurrent PostSealProcess.
+		// Overlay through the FSM so Sealing chunks (active-form sealed
+		// locally but GLCB not yet committed) are skipped. Drain ships
+		// sealed-form GLCBs; a Sealing chunk would race with concurrent
+		// PostSealProcess.
 		meta = o.groundChunkMeta(vaultID, meta)
 		if !meta.Sealed {
 			continue
@@ -240,10 +237,9 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 		return fmt.Errorf("open cursor: %w", err)
 	}
 	// Close-on-return is the safety net; we Close explicitly post-stream
-	// before deleteDrainSource so the cursor's per-chunk RLock
-	// (gastrolog-26zu1) is released before Delete tries to take the
-	// write lock — otherwise the same goroutine self-deadlocks on
-	// RLock→Lock upgrade.
+	// before deleteDrainSource so the cursor's per-chunk RLock is released
+	// before Delete tries to take the write lock — otherwise the same
+	// goroutine self-deadlocks on RLock→Lock upgrade.
 	cursorClosed := false
 	defer func() {
 		if !cursorClosed {
@@ -253,12 +249,9 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 
 	switch mode {
 	case DrainDecommission:
-		// Phase 4 (gastrolog-42f9z): no "next instance" anymore. Decommission
-		// just destroys the chunks — equivalent to firing a retention
-		// event with no matching retention-trigger routes (the legacy
-		// expire behavior). Phase 5's richer routing table will let
-		// operators provide a destination route to receive drained
-		// chunks if needed.
+		// Decommission destroys the chunks rather than moving them —
+		// equivalent to firing a retention event that matches no
+		// retention-trigger route.
 		_ = cursor // caller closes
 		_ = sys
 
@@ -278,8 +271,7 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 
 	// Delete source chunk via the receipt protocol when wired (production)
 	// or via direct local cleanup otherwise (memory-mode vaults without a
-	// reconciler). Reason "instance-drain" lands in pendingDeletes audit. See
-	// gastrolog-51gme.
+	// reconciler). Reason "instance-drain" lands in pendingDeletes audit.
 	if err := o.deleteDrainSource(vaultInst, vaultID, chunkID); err != nil {
 		return err
 	}

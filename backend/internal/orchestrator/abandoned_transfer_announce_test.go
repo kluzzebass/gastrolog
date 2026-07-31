@@ -1,15 +1,14 @@
 package orchestrator
 
-// gastrolog-2l918 review finding 4: when a transfer defers terminally at
-// the source (disposition changed away from transfer, target changed,
-// corruption mismatch), nothing retracts the destination's announce-
-// imported placeholder entry. reconcileAbandonedTransferAnnounces
-// (vault_lifecycle_reconciler.go) is the destination-side GC that closes
-// this: a manifest entry introduced by transfer (TransferSourceVaultID
-// set) with zero confirmed holders, sitting past
-// abandonedTransferAnnounceGCAge, gets retracted via the same
-// receipt-based deleteChunk every other retirement path in the
-// reconciler uses.
+// When a transfer defers terminally at the source (disposition changed
+// away from transfer, target changed, corruption mismatch), nothing
+// retracts the destination's announce-imported placeholder entry.
+// reconcileAbandonedTransferAnnounces (vault_lifecycle_reconciler.go) is
+// the destination-side GC that closes this: a manifest entry introduced by
+// transfer (TransferSourceVaultID set) with zero confirmed holders,
+// sitting past abandonedTransferAnnounceGCAge, gets retracted via the same
+// receipt-based deleteChunk every other retirement path in the reconciler
+// uses.
 
 import (
 	"log/slog"

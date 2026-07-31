@@ -1,4 +1,4 @@
-// Package vaultraft holds the vault control-plane Raft FSM (gastrolog-5xxbd).
+// Package vaultraft holds the vault control-plane Raft FSM.
 // Vault chunk metadata is namespaced under OpVaultChunkFSM (per-vault sub-FSMs) on that
 // same Raft group, without changing the vaultctlfsm wire encoding.
 package vaultraft
@@ -40,15 +40,13 @@ type FSM struct {
 	// any pendingDeletes obligations the rejoining node owes and
 	// projects FSM-sealed state onto local files. Without this hook
 	// the receipt protocol's catchup mechanism is dead code.
-	// See gastrolog-51gme.
 	onAfterRestore func()
 
 	// applyWait is advanced after each log entry is applied (and after a
 	// snapshot restore, up to the index the snapshot embeds). The vault-ctl
 	// forward paths block on it after forwarding a command to the group
 	// leader so their next local read sees post-mutation state — the
-	// read-after-write barrier (gastrolog-4l24u), event-driven per
-	// gastrolog-3klg1.
+	// read-after-write barrier, event-driven rather than polled.
 	applyWait *applywait.Tracker
 }
 
@@ -158,8 +156,8 @@ func (f *FSM) EnsureVaultFSM(vaultID glid.GLID) *vaultctlfsm.FSM {
 }
 
 // Snapshot returns a snapshot of all vault sub-FSMs as a VaultGroupSnapshot
-// proto (gastrolog-5lrg7). Vaults are emitted in GLID order so equal FSM
-// state yields a byte-stable group snapshot.
+// proto. Vaults are emitted in GLID order so equal FSM state yields a
+// byte-stable group snapshot.
 func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

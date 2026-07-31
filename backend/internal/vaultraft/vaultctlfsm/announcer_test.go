@@ -160,11 +160,10 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 		t.Fatalf("Seal: %v", err)
 	}
 
-	// Get the chunk ID. Phase 3 (gastrolog-1huz5): AnnounceSeal now
-	// fires from PostSealProcess after sealToGLCB completes; tests that
-	// drive the manager directly (no orchestrator scheduler) must invoke
-	// PostSealProcess explicitly to walk the chunk through Sealing →
-	// Sealed.
+	// Get the chunk ID. AnnounceSeal fires from PostSealProcess after
+	// sealToGLCB completes; tests that drive the manager directly (no
+	// orchestrator scheduler) must invoke PostSealProcess explicitly to
+	// walk the chunk through Sealing → Sealed.
 	metas, err := mgr.List()
 	if err != nil {
 		t.Fatal(err)
@@ -211,12 +210,11 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 
 	// ---- archival: the class must reach EVERY node's FSM ----
 	//
-	// Only the node that calls the cloud API knows which class a blob moved
-	// to. That used to be the end of it — the class lived in a node-local map
-	// — so the archival sweep, which compares a chunk's current class against
-	// its transition chain's target, read an empty string on the FSM path and
-	// a multi-step chain could never advance past its first step
-	// (gastrolog-35ygqv). This is the assertion that the class is now
+	// Only the node that calls the cloud API learns which class a blob moved
+	// to. The archival sweep builds its view from the manifest entry alone, so
+	// unless that class is replicated the comparison reads an empty string on
+	// every node — including the one that made the call — and a multi-step
+	// chain never advances past its first step. This asserts the class is
 	// replicated state rather than local knowledge.
 	waitClass := func(want string) {
 		t.Helper()
@@ -286,11 +284,11 @@ func (a *recordingApplier) Apply(_ []byte) error {
 	return a.err
 }
 
-// TestAnnouncerSealingStateVisibleAcrossReplicas pins the Phase 3
-// (gastrolog-1huz5) three-state lifecycle invariant under real Raft
-// replication: between `mgr.Seal()` (which fires AnnounceBeginSeal)
-// and `mgr.PostSealProcess()` (which fires AnnounceSeal after
-// sealToGLCB completes), every node's FSM must observe State=Sealing.
+// TestAnnouncerSealingStateVisibleAcrossReplicas pins the three-state
+// lifecycle invariant under real Raft replication: between `mgr.Seal()`
+// (which fires AnnounceBeginSeal) and `mgr.PostSealProcess()` (which fires
+// AnnounceSeal after sealToGLCB completes), every node's FSM must observe
+// State=Sealing.
 // After PostSealProcess, every node must observe State=Sealed and
 // Sealed=true. This is what unblocks downstream gates (cloud upload,
 // retention, replication catchup) — they consult the FSM, not the
@@ -500,19 +498,19 @@ func TestAnnouncerSealingStateVisibleAcrossReplicas(t *testing.T) {
 	}
 }
 
-// TestAnnouncerShortCircuitsDuringShutdown is the regression test for the
-// announcer half of gastrolog-1e5ke. When the orchestrator's drain queues
-// a last-minute chunk event (seal, create, delete, etc.) after the local
-// vault-ctl Raft has already been shut down, the previous code would call
-// Applier.Apply, receive "raft is already shutdown", and log a WARN. This
-// fired 2-4 times per node shutdown and added noise without any value —
-// missed announces are reconciled on next startup from local chunk state.
+// TestAnnouncerShortCircuitsDuringShutdown pins the announcer's shutdown
+// short-circuit. When the orchestrator's drain queues a last-minute chunk
+// event (seal, create, delete, etc.) after the local vault-ctl Raft has
+// already been shut down, calling Applier.Apply returns "raft is already
+// shutdown" and logs a WARN — that fired 2-4 times per node shutdown and
+// added noise without any value, since missed announces are reconciled on
+// next startup from local chunk state.
 //
-// The fix: when phase.ShuttingDown() is true, the announcer returns
-// immediately without calling the Applier. This test constructs an
-// announcer with a recording Applier and a phase, issues one pre-shutdown
-// announce (which MUST reach the Applier), flips the phase, issues two
-// more announces (which MUST NOT reach the Applier), and asserts the
+// So when phase.ShuttingDown() is true, the announcer returns immediately
+// without calling the Applier. This test constructs an announcer with a
+// recording Applier and a phase, issues one pre-shutdown announce (which
+// MUST reach the Applier), flips the phase, issues two more announces
+// (which MUST NOT reach the Applier), and asserts the
 // Apply count is exactly 1.
 func TestAnnouncerShortCircuitsDuringShutdown(t *testing.T) {
 	t.Parallel()
@@ -541,8 +539,7 @@ func TestAnnouncerShortCircuitsDuringShutdown(t *testing.T) {
 
 // TestAnnouncerNilPhaseDoesNotPanic guards the single-node / test-harness
 // case where the announcer is constructed without a shared phase. Every
-// announce must still reach the Applier, preserving pre-gastrolog-1e5ke
-// behaviour.
+// announce must still reach the Applier.
 func TestAnnouncerNilPhaseDoesNotPanic(t *testing.T) {
 	t.Parallel()
 

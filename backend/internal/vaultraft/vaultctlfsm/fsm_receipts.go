@@ -1,17 +1,15 @@
 package vaultctlfsm
 
-// Receipt-based deletion protocol — gastrolog-51gme step 2.
+// Receipt-based deletion protocol.
 //
-// A single-shot delete command can't survive snapshot install: when a
+// A single-shot delete command cannot survive snapshot install: when a
 // node has been offline long enough that the rest of the cluster has
 // snapshotted past the individual delete log entries, the rejoining
 // node's FSM.Restore sets the new state directly without firing any
-// per-entry delete callbacks. The local Manager never learns about
-// those deletions and only catches up via a periodic disk-vs-FSM walk
-// (the path removed in step 5).
-//
-// The replacement is an N-way receipt protocol that lives in the FSM
-// state itself, so a snapshot carries it across the boundary intact:
+// per-entry delete callbacks, so the local Manager never learns about
+// those deletions. Instead this is an N-way receipt protocol that lives
+// in the FSM state itself, so a snapshot carries it across the boundary
+// intact:
 //
 //   1. Vault leader proposes CmdRequestDelete(chunkID, expectedFrom, reason).
 //      The FSM stores the entry in pendingDeletes with expectedFrom equal
@@ -111,8 +109,7 @@ func (f *FSM) IsExpectedToAck(chunkID chunk.ChunkID, nodeID string) bool {
 // back to placement intent or fan-out reachability — an optimistic
 // placement default made residency non-monotonic (full set before the
 // first receipt, collapsing to the true holders when it landed), which
-// the inspector rendered as sealed pips regressing to amber
-// (gastrolog-68wsli).
+// the inspector rendered as sealed pips regressing to amber.
 //
 // For chunks with no in-flight delete: residency = the entry's Holders
 // set — nodes that built or pulled verified GLCB bytes (AckChunkHolder),
@@ -136,7 +133,6 @@ func (f *FSM) IsExpectedToAck(chunkID chunk.ChunkID, nodeID string) bool {
 //
 // Used by the WatchChunks stamp and the ListChunks overlay so clients
 // never have to reconstruct residency from per-node event evidence.
-// See gastrolog-66vmg.
 func (f *FSM) ChunkResidency(chunkID chunk.ChunkID) []string {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -198,17 +194,15 @@ func (f *FSM) applyRequestDelete(c *gastrologv1.RequestDeleteCommand) (*PendingD
 // never expected, the apply succeeds but returns nil — Raft has the
 // entry, the FSM is consistent, and the callback is suppressed.
 //
-// gastrolog-15fm8: when this ack drains ExpectedFrom to empty, the
-// apply ALSO finalizes the delete atomically — removing the
-// pendingDeletes entry, removing the manifest entry, and writing the
-// tombstone. This is the same FSM-local mutation that
-// applyFinalizeDelete performs; folding it in here closes the
-// leader-only "natural finalize" leak where leadership transfer
-// between the last ack apply and the leader's onAckDelete callback
-// dropped the CmdFinalizeDelete proposal. CmdFinalizeDelete stays in
-// the protocol for explicit external triggers (operator-initiated
-// cleanup) but the receipt protocol's natural completion no longer
-// depends on a leader-only post-apply callback. See gastrolog-3qr8z.
+// When this ack drains ExpectedFrom to empty, the apply ALSO finalizes
+// the delete atomically — removing the pendingDeletes entry, removing
+// the manifest entry, and writing the tombstone. This is the same
+// FSM-local mutation that applyFinalizeDelete performs; folding it in
+// here means a leadership transfer between the last ack apply and any
+// post-apply callback cannot strand the entry. CmdFinalizeDelete stays
+// in the protocol for explicit external triggers (operator-initiated
+// cleanup), but the receipt protocol's natural completion does not
+// depend on a leader-only post-apply callback.
 func (f *FSM) applyAckDelete(c *gastrologv1.AckDeleteCommand) (*chunk.ChunkID, string, bool, error) {
 	id := chunkIDFromProto(c.GetId())
 	nodeID := c.GetNodeId()
@@ -247,7 +241,7 @@ func (f *FSM) applyFinalizeDelete(c *gastrologv1.FinalizeDeleteCommand) (*chunk.
 
 	// Tombstone unconditionally so a stale ImportSealed/Append/Seal
 	// command racing the receipt protocol can be rejected even if the
-	// chunk metadata never lived in this FSM. See gastrolog-11rzz.
+	// chunk metadata never lived in this FSM.
 	f.tombstones[id] = time.Now()
 
 	_, hadPending := f.pendingDeletes[id]
@@ -273,24 +267,21 @@ func (f *FSM) applyFinalizeDelete(c *gastrologv1.FinalizeDeleteCommand) (*chunk.
 // applyPruneNode removes nodeID from every pendingDeletes entry's
 // ExpectedFrom set. Returns the prunedNodeID and the slice of chunkIDs
 // whose ExpectedFrom became empty as a result of the prune — those
-// chunks are atomically finalized in the same apply (gastrolog-15fm8).
+// chunks are atomically finalized in the same apply.
 //
 // Idempotent: pruning a node that no entry expected from is a no-op.
 // Pruning twice yields the same final state (the second pass finds
 // nothing to remove and returns an empty finalizable list).
 //
-// gastrolog-15fm8: the pre-fix shape returned `finalizable` and
-// relied on the leader's onPruneNode callback to propose
-// CmdFinalizeDelete for each chunk in a goroutine. That goroutine
-// dropped on leadership transfer between the prune apply and the
-// callback firing, leaving pendingDeletes entries with empty
-// ExpectedFrom stranded forever. The fix folds the finalize INTO this
-// apply: chunks with drained ExpectedFrom are tombstoned, removed from
-// pendingDeletes, and removed from f.chunks atomically before this
-// function returns. The `finalizable` slice is still returned for the
-// onPruneNode callback's audit / observability use; subscribers
-// expecting onFinalizeDelete for each chunk receive it via the
-// per-chunk firing in fsm.go's applyLocked dispatch.
+// The finalize happens inside this apply rather than via the leader's
+// onPruneNode callback, so a leadership transfer between the prune apply
+// and the callback firing cannot strand pendingDeletes entries with an
+// empty ExpectedFrom: chunks with drained ExpectedFrom are tombstoned,
+// removed from pendingDeletes, and removed from f.chunks atomically
+// before this function returns. The `finalizable` slice is returned for
+// the onPruneNode callback's audit / observability use; subscribers
+// expecting onFinalizeDelete for each chunk receive it via the per-chunk
+// firing in fsm.go's applyLocked dispatch.
 func (f *FSM) applyPruneNode(c *gastrologv1.PruneNodeCommand) (string, []chunk.ChunkID, error) {
 	nodeID := c.GetNodeId()
 	if nodeID == "" {
@@ -360,7 +351,7 @@ func MarshalFinalizeDelete(id chunk.ChunkID) []byte {
 // NewPruneNode builds a CmdPruneNode command message. The leader
 // proposes this after a node is removed from the vault-ctl Raft group
 // (decommissioned or rebalanced away) so its outstanding ack obligations
-// don't pin pendingDeletes entries forever. See gastrolog-51gme step 10.
+// don't pin pendingDeletes entries forever.
 func NewPruneNode(nodeID string) *gastrologv1.VaultCtlCommand {
 	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_PruneNode{PruneNode: &gastrologv1.PruneNodeCommand{NodeId: nodeID}}}
 }

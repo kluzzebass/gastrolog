@@ -1,8 +1,8 @@
 package server_test
 
-// Coverage for gastrolog-338j51 / gastrolog-etcjdx: the warm-cache budget is a
-// stored expression, resolved at use, scoped to cloud-backed vaults. Unset →
-// default; explicit "0" → rejected; non-cloud → left empty.
+// Coverage: the warm-cache budget is a stored expression, resolved at use,
+// scoped to cloud-backed vaults. Unset → default; explicit "0" → rejected;
+// non-cloud → left empty.
 
 import (
 	"context"

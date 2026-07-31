@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// TestIsPlacementChurnErr pins the gastrolog-5z607 helper. The matrix
+// TestIsPlacementChurnErr pins the placement-churn error helper. The matrix
 // covers the four authentic origin shapes (local sentinel direct,
 // local sentinel wrapped via fmt.Errorf %w, cross-RPC rendered string
 // for legacy "vault not found" wording, cross-RPC rendered string for

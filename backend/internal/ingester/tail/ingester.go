@@ -51,7 +51,7 @@ type ingester struct {
 	// pressureGate throttles the Run event loop when the ingest pipeline is
 	// backed up. Tail's natural rate limiter is filesystem writes — pausing
 	// the event loop defers fsnotify/poll handling, which defers line reads
-	// and emission. Injected by the orchestrator. See gastrolog-4fguu.
+	// and emission. Injected by the orchestrator.
 	pressureGate *chanwatch.PressureGate
 }
 

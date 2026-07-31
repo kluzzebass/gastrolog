@@ -105,10 +105,10 @@ func TestCronJobSingletonModePreservedAcrossRebuild(t *testing.T) {
 }
 
 // TestRunOnceIfAbsentClaimsExactlyOnce pins the primitive that replaced the
-// check-then-act dedup guard in the cloud-upload paths (gastrolog-3hwngy):
-// with N goroutines racing on one job name, exactly one wins the claim and
-// exactly one task body runs. The winning task blocks on a gate for the whole
-// stampede, so a non-atomic guard would let losers through.
+// check-then-act dedup guard in the cloud-upload paths: with N goroutines
+// racing on one job name, exactly one wins the claim and exactly one task body
+// runs. The winning task blocks on a gate for the whole stampede, so a
+// non-atomic guard would let losers through.
 func TestRunOnceIfAbsentClaimsExactlyOnce(t *testing.T) {
 	t.Parallel()
 
@@ -276,7 +276,7 @@ func awaitSchedulerJobScheduled(t *testing.T, sub *JobSubscription, name string)
 // description is snapshotted into the Scheduled event's JobInfo at
 // registration time, and completeOneTimeJob deletes the entry when the job
 // finishes — so describing first is what puts the label on the event AND what
-// lets the entry be released. See gastrolog-69sjlj.
+// lets the entry be released.
 func TestDescribeBeforeRunOnceLabelsEventAndReleases(t *testing.T) {
 	t.Parallel()
 
@@ -371,8 +371,7 @@ func blockingClaims(t *testing.T, sched *Scheduler, prefix string, limit, n int)
 // claim: with the limit's worth of jobs outstanding, further distinct names
 // are declined until one finishes. This is the property that used to live in
 // the orchestrator's own glcbPullInflight map (maxConcurrentGLCBPulls), moved
-// onto the scheduler so "what is outstanding" has one owner. See
-// gastrolog-69sjlj.
+// onto the scheduler so "what is outstanding" has one owner.
 func TestRunOnceIfAbsentUnderLimitHoldsTheBudget(t *testing.T) {
 	t.Parallel()
 

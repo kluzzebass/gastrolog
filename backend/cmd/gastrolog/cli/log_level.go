@@ -13,7 +13,7 @@ import (
 )
 
 // newLogLevelCmd returns the "config log-level" subcommand group for
-// cluster-wide per-component log-level management (gastrolog-3flfp).
+// cluster-wide per-component log-level management.
 func newLogLevelCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "log-level",

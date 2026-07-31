@@ -7,7 +7,7 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
-// gastrolog-1rw6df: a freshly-joined node knows the leader's identity and
+// A freshly-joined node knows the leader's identity and
 // address from the first heartbeat before its raft log has backfilled the
 // configuration entries. Address resolution must serve the leader from that
 // observation instead of failing until backfill completes.

@@ -890,7 +890,7 @@ func (m *PeerConnManager) resolveAddr(nodeID string) (string, error) {
 // address from the first AppendEntries heartbeat before its log backfills
 // the configuration — in that window the config scan finds nothing, but raft
 // itself already holds the authoritative answer, so "leader known" must
-// imply "leader dialable" (gastrolog-1rw6df).
+// imply "leader dialable".
 func resolveAddrFromRaft(servers []hraft.Server, leaderAddr hraft.ServerAddress, leaderID hraft.ServerID, nodeID string) (string, error) {
 	for _, srv := range servers {
 		if string(srv.ID) == nodeID {

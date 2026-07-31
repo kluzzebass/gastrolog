@@ -76,17 +76,17 @@ type SystemServerConfig struct {
 	CloudTesters         map[string]CloudServiceTester
 	Tokens               *auth.TokenService
 	PlacementReconcile   func(ctx context.Context)                             // synchronous placement for RPC handlers
-	LogFilter            *logging.ComponentFilterHandler                       // log-level RPC handlers (gastrolog-3flfp); nil disables them
+	LogFilter            *logging.ComponentFilterHandler                       // log-level RPC handlers; nil disables them
 	LocalStats           func() *apiv1.NodeStats                               // local NodeStats snapshot (rolling-window rates); nil in tests
 	ClusterRouteRates    func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate) // server-side cluster rate series; nil in single-node/tests
 
-	// Environment banner (gastrolog-4vr0l). Display-only metadata
-	// surfaced on GetSystem so the UI header can render a per-deployment
-	// label. Empty label hides the banner.
+	// Environment banner. Display-only metadata surfaced on GetSystem so
+	// the UI header can render a per-deployment label. Empty label hides
+	// the banner.
 	EnvironmentLabel string
 	EnvironmentColor string
 
-	// Logger records config mutations. See PutVault (gastrolog-1jnfco).
+	// Logger records config mutations. See PutVault.
 	Logger *slog.Logger
 }
 
@@ -335,9 +335,9 @@ func (s *SystemServer) loadSystemIngesters(ctx context.Context, resp *apiv1.GetS
 	return nil
 }
 
-// gastrolog-4kkoo (Phase 5): no FilterConfig entity; expressions live
-// inline on RouteConfig.Stages[].Match.Expression. The dedicated
-// loadConfigFilters helper is gone.
+// Filters have no entity of their own: route match expressions live inline
+// on RouteConfig.Stages[].Match.Expression, so there is nothing for
+// GetSystem to load separately.
 
 func (s *SystemServer) loadConfigRotationPolicies(ctx context.Context, resp *apiv1.GetSystemResponse) error {
 	policies, err := s.sysStore.ListRotationPolicies(ctx)
@@ -552,10 +552,9 @@ func (s *SystemServer) PutLookupSettings(
 		return nil, err
 	}
 	// Validate BEFORE converting. The converters skip entries they cannot
-	// represent, which is the right validation OUTCOME but was happening
-	// silently while this RPC returned success: a client submitting a file
-	// lookup with no file ID was told the write succeeded and got nothing, with
-	// nothing logged (gastrolog-7eu4nt).
+	// represent, which is the right validation OUTCOME but a silent one:
+	// without this check a client submitting a file lookup with no file ID is
+	// told the write succeeded and gets nothing, with nothing logged.
 	if connErr := validateSubmittedLookups(req.Msg.Lookup); connErr != nil {
 		return nil, connErr
 	}
@@ -822,8 +821,7 @@ func (s *SystemServer) GenerateName(
 }
 
 // ValidateExpression parses and semantically validates a route match
-// expression. gastrolog-4kkoo (Phase 5): drives live editor feedback in
-// the route filter UI.
+// expression. Drives live editor feedback in the route filter UI.
 //
 // The check uses routing.CompileRoute (the pipeline route compiler) so the
 // RPC's verdict is identical to what PutRoute will accept at save time. A
@@ -1184,9 +1182,9 @@ func mmdbLookupsFromProto(entries []*apiv1.MMDBLookupEntry) []system.MMDBLookupC
 // unrecognised file ID falls through to string(b) and is stored as-is, so the
 // way OUT must cope with whatever that produced. It used to call
 // glid.MustParse, which PANICS — so a file ID the write path accepted crashed
-// the HTTP handler on the next GetSettings, on every node that served it
-// (gastrolog-5vqx2r). An unparseable ID now renders as empty rather than
-// taking the settings endpoint down.
+// the HTTP handler on the next GetSettings, on every node that served it. An
+// unparseable ID now renders as empty rather than taking the settings endpoint
+// down.
 func lookupFileIDToProto(id string) []byte {
 	if id == "" {
 		return nil
@@ -1339,7 +1337,7 @@ func validateTokenDurations(auth system.AuthConfig) *connect.Error {
 // kind's requirements mirror the skip conditions in *LookupsFromProto exactly,
 // so what is accepted here is what gets stored — the point being that a client
 // learns which entry and which field, instead of a success response and a
-// missing lookup (gastrolog-7eu4nt).
+// missing lookup.
 //
 // Note MMDB and static lookups need only a name: an MMDB entry with no file ID
 // deliberately means "use the auto-downloaded database".
@@ -1400,8 +1398,8 @@ func errLookupName(kind string) *connect.Error {
 
 // validateFileLookup checks the requirements shared by every file-backed kind:
 // a name, and a file ID that can be rendered back out again. The second is not
-// pedantry — parseLookupFileID stores an unrecognised ID verbatim and the read
-// path then had nothing to return for it (gastrolog-5x40ki).
+// pedantry — parseLookupFileID stores an unrecognised ID verbatim, and the
+// read path has nothing to return for it but empty.
 func validateFileLookup(kind, name string, fileID []byte) *connect.Error {
 	if name == "" {
 		return errLookupName(kind)

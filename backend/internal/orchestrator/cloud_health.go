@@ -13,18 +13,18 @@ import (
 
 const (
 	// cloudHealthAndRateAlertsJobName is the shared periodic scheduler job that
-	// evaluates retention rate alerts and cloud-store health. It replaces the
-	// raw 5s time.Ticker (runRateAlertEvaluator) so the work is visible in the
-	// job inspector. See gastrolog-576bm.
+	// evaluates retention rate alerts and cloud-store health. Running it on the
+	// scheduler rather than a raw ticker keeps the work visible in the job
+	// inspector.
 	cloudHealthAndRateAlertsJobName = "cloud-health-rate-alerts"
 	cloudHealthAndRateAlertsPeriod  = 5 * time.Second
 )
 
 // startCloudHealthAndRateAlerts registers the periodic retention-rate + cloud-
 // health evaluation job on the shared scheduler. Legitimate periodic policy
-// work (rate-threshold evaluation and cloud-store reachability polling); the
-// cloud-upload backfill it used to drive every tick is now edge-triggered — see
-// evaluateVaultCloudHealth. gastrolog-576bm.
+// work (rate-threshold evaluation and cloud-store reachability polling);
+// cloud-upload backfill is edge-triggered instead — see
+// evaluateVaultCloudHealth.
 func (o *Orchestrator) startCloudHealthAndRateAlerts() error {
 	if err := o.scheduler.AddJob(cloudHealthAndRateAlertsJobName,
 		CronEvery(cloudHealthAndRateAlertsPeriod), o.rateAlertAndCloudHealthTick); err != nil {
@@ -48,14 +48,13 @@ type cloudHealthChecker interface {
 // only on an edge (first observation, degraded→healthy recovery, or a stuck
 // backfill entry) — see evaluateVaultCloudHealth. Runs as a periodic scheduler
 // job (cloudHealthAndRateAlertsJobName), so it is operator-visible in the job
-// inspector, unlike the raw ticker it replaced (gastrolog-576bm).
+// inspector.
 //
 // Also GCs cloud-backfill failure/backoff state the same way
 // retentionSweepAll GCs retention runners: a vault this node no longer runs
 // backfill for (leadership moved, placement changed, vault removed from
 // config) is never visited by backfillCloudUploads again, so nothing else
-// would ever clear its stranded backoff entries or alarms. See
-// gastrolog-4ryguo review follow-up.
+// would ever clear its stranded backoff entries or alarms.
 func (o *Orchestrator) evaluateCloudHealth() {
 	if o.alerts == nil {
 		return
@@ -87,7 +86,7 @@ func vaultInstanceHasCloudBacking(vi *VaultInstance) bool {
 // vaultInstCanUploadToCloud reports whether this node's vault instance can
 // perform S3 uploads (placement leader with CloudStore). Vault-ctl Raft
 // leadership alone is insufficient — followers keep CloudReadOnly even when
-// they are the ctl leader. See gastrolog-34azvz.
+// they are the ctl leader.
 func vaultInstCanUploadToCloud(vi *VaultInstance) bool {
 	if vi == nil || vi.Chunks == nil {
 		return false
@@ -101,8 +100,7 @@ func vaultInstCanUploadToCloud(vi *VaultInstance) bool {
 // edges that the live onSeal effect cannot cover. It is NOT the primary upload
 // mechanism (that is the seal effect → schedulePipelineCloudUpload, plus the
 // vault-ctl leadership-gain and snapshot-restore catch-up hooks). Steady-state
-// healthy ticks with nothing stuck do no sweep at all — the retired 5s backfill
-// tick was a compensator for missed seal effects (gastrolog-576bm).
+// healthy ticks with nothing stuck do no sweep at all.
 //
 // The catch-up sweep runs only when NOT degraded (uploading into an unreachable
 // store is futile) and one of:
@@ -221,7 +219,7 @@ func vaultInstRunsCloudBackfill(vi *VaultInstance) bool {
 // adopts and fires AnnounceUpload to update the FSM. If not, it uploads.
 //
 // The local CloudBacked flag from List() is intentionally ignored — only
-// the FSM decides whether a chunk needs work. See gastrolog-68fqk.
+// the FSM decides whether a chunk needs work.
 func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 	if !vaultInstRunsCloudBackfill(vaultInst) {
 		return
@@ -236,7 +234,7 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 		return
 	}
 	// Sealed manifest entries not yet lazily resolved by the manager
-	// (post-restart) still need upload backfill (gastrolog-2kmgj6).
+	// (post-restart) still need upload backfill.
 	metas = appendUnlistedManifestSealed(metas, vaultInst)
 
 	// A chunk that dropped out of this vault's raw candidate view since the
@@ -247,11 +245,11 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 
 	var backfilled int
 	for _, m := range metas {
-		// Phase 3 (gastrolog-1huz5): gate on FSM-Sealed, not local.
-		// During the Sealing window the leader has closed active-form
-		// files but data.glcb does not exist yet — uploading would
-		// fail with no-such-file. Overlaying through the FSM makes us
-		// wait for AnnounceSeal in PostSealProcess.
+		// Gate on FSM-Sealed, not local. During the Sealing window the
+		// leader has closed active-form files but data.glcb does not
+		// exist yet — uploading would fail with no-such-file.
+		// Overlaying through the FSM makes us wait for AnnounceSeal in
+		// PostSealProcess.
 		m = o.groundChunkMeta(vaultInst.VaultID, m)
 		if !m.Sealed {
 			continue
@@ -263,16 +261,14 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 			// markBackfillFailure/clearBackfillFailure, so without this the
 			// chunk's backoff entry and alarm would strand here forever:
 			// this continue is the only place backfillCloudUploads visits
-			// an already-resolved chunk again. See gastrolog-4ryguo review
-			// follow-up.
+			// an already-resolved chunk again.
 			o.clearBackfillFailure(m.ID)
 			continue
 		}
 		// A chunk with an unexpired backoff window from a prior failure is
 		// not due for retry yet. Skipping the schedule entirely — not just
 		// the upload — is what stops the schedule/complete INFO pair from
-		// flooding the job journal every 5s for a known-failing chunk
-		// (gastrolog-4ryguo).
+		// flooding the job journal every 5s for a known-failing chunk.
 		if !o.backfillDue(m.ID) {
 			continue
 		}
@@ -284,7 +280,6 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 		// check-then-act race: two concurrent sweeps (the periodic cloud-health
 		// evaluation and a leadership-gain / snapshot-restore catch-up) can both
 		// observe "nothing pending" and both enqueue an upload for one chunk.
-		// See gastrolog-3hwngy.
 		scheduled, err := o.scheduler.RunOnceIfAbsent(name, func(id chunk.ChunkID) error {
 			return o.runBackfillUpload(vaultInst, id, uploader)
 		}, m.ID)
@@ -305,22 +300,19 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 
 // runBackfillUpload performs one chunk's upload attempt — including
 // failure-track bookkeeping — as the scheduler job body. Extracted from
-// backfillCloudUploads to keep the sweep loop small; this is where the review
-// follow-up's build-lag gate lives: onDisk (GLCB verifiably present on disk)
-// is computed once and gates entry into the backoff/alarm track. A chunk
-// whose local build simply hasn't finished yet (onDisk false) fails the same
-// not-found error but is owned by the primary upload path
-// (schedulePipelineCloudUpload / onSeal) and resolves itself in seconds —
-// pushing it into the 5-minute backoff track would pollute it with build-lag
-// noise that was never actually stuck. See gastrolog-4ryguo review follow-up.
+// backfillCloudUploads to keep the sweep loop small; this is where the
+// build-lag gate lives: onDisk (GLCB verifiably present on disk) is computed
+// once and gates entry into the backoff/alarm track. A chunk whose local build
+// simply hasn't finished yet (onDisk false) fails the same not-found error but
+// is owned by the primary upload path (schedulePipelineCloudUpload / onSeal)
+// and resolves itself in seconds — pushing it into the 5-minute backoff track
+// would pollute it with build-lag noise that was never actually stuck.
 //
 // No registration-repair step: UploadToCloud self-resolves an on-disk
-// FSM-sealed external chunk through the lazy on-miss GLCB resolver
-// (gastrolog-34kmv retired the eager repair — the registration gap
-// gastrolog-4ryguo patched is now closed at the source in Manager.uploadToCloud,
-// which looks the chunk up via lookupMeta rather than a raw m.metas read). A
-// failure that survives here is a genuine cloud/transient error, not a missing
-// registration.
+// FSM-sealed external chunk through the lazy on-miss GLCB resolver —
+// Manager.uploadToCloud looks the chunk up via lookupMeta rather than a raw
+// m.metas read. A failure that survives here is a genuine cloud/transient
+// error, not a missing registration.
 func (o *Orchestrator) runBackfillUpload(vaultInst *VaultInstance, id chunk.ChunkID, uploader chunk.ChunkCloudUploader) error {
 	err := uploader.UploadToCloud(id)
 	if err != nil {
@@ -334,7 +326,7 @@ func (o *Orchestrator) runBackfillUpload(vaultInst *VaultInstance, id chunk.Chun
 		// the chunkIsCloudBacked cross-path once the primary upload lands, and
 		// a genuinely-deleted GLCB backs off to the cap without flooding the
 		// scheduler journal (backfillDue still gates it) or ever alarming for
-		// state the primary path owns. See gastrolog-4ryguo review follow-up.
+		// state the primary path owns.
 		o.logBackfillFailure(vaultInst.VaultID, id, err, onDisk)
 		o.markBackfillFailure(vaultInst.VaultID, id, err, onDisk)
 		return err
@@ -372,8 +364,7 @@ func (o *Orchestrator) backfillChunkOnDisk(vaultID glid.GLID, id chunk.ChunkID) 
 // by an os.Stat — backs off the same way but never alarms: build-lag
 // entries clear via the chunkIsCloudBacked cross-path once the primary
 // upload lands, and a permanently-missing GLCB backs off to the cap
-// without paging an operator for state the primary path owns. See
-// gastrolog-4ryguo review follow-up.
+// without paging an operator for state the primary path owns.
 type backfillFailureEntry struct {
 	vaultID       glid.GLID
 	failCount     int

@@ -134,9 +134,9 @@ func (t *Table) MatchRoute(attrs record.Attributes, src SourceContext) (*Route, 
 // srcOverlay is a zero-copy querylang.AttrSource layering the synthetic
 // source attributes over a record's own attrs for route matching. Replaces
 // a per-record make+maps.Copy of the whole attributes map — ~10GB of
-// garbage per soak run at pour rates (gastrolog-11y2iv). Set synthetic
-// keys win over record attrs of the same name, exactly as the map
-// overwrite did; All skips shadowed record attrs so no key yields twice.
+// garbage per soak run at pour rates. Set synthetic keys win over record
+// attrs of the same name; All skips shadowed record attrs so no key
+// yields twice.
 type srcOverlay struct {
 	attrs record.Attributes
 	// Precomputed synthetic values; empty string means absent.

@@ -231,8 +231,8 @@ func TestReleaseSegmentsPurgesHeadOnFSMCallback(t *testing.T) {
 
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalReleaseSegments([]glid.GLID{segID}))
 	// The ReleaseSegments callback is wake-only (purging on the Raft apply
-	// goroutine deadlocked teardown, gastrolog-38snf4); the worker's release
-	// branch performs the purge — poll instead of asserting synchronously.
+	// goroutine deadlocked teardown); the worker's release branch performs
+	// the purge — poll instead of asserting synchronously.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		if _, err := os.Stat(paths.HeadSegment(home, segID)); os.IsNotExist(err) {
@@ -262,7 +262,7 @@ func assertHeadPresent(t *testing.T, root string, id glid.GLID) {
 // Regression: vault-ctl leader CmdSealChunk can replicate before a follower
 // home finishes building. OnSealedManifestCleared must not consume the
 // post-seal slot until doneBuild, and finishBuildOnce must purge head/ once
-// the local GLCB lands (gastrolog-3vlse).
+// the local GLCB lands.
 func TestManagerPurgesHeadWhenPeerSealBeforeLocalBuild(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)

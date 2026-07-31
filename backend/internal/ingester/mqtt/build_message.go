@@ -11,7 +11,7 @@ import (
 // paho message types. Centralising the construction here keeps the
 // IngesterID + IngestTS invariant in a single seam — the MQTT
 // ingester is broker-only so we can't drive an end-to-end test, but
-// this helper is trivially unit-testable from gastrolog-44b9r tests.
+// this helper is trivially unit-testable.
 func buildMessage(topic string, qos byte, retained bool, msgID uint16, payload []byte, ingesterID string, now time.Time) ingestion.IngesterMessage {
 	return ingestion.IngesterMessage{
 		Attrs: map[string]string{

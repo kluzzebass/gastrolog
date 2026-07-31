@@ -14,9 +14,9 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
-// TestHolderPullSourcesExcludesSelfAndEmptyEntries pins gastrolog-2l918
-// review finding 1's fallback source list: every non-empty, non-self node
-// in e.Holders is a candidate; self and empty entries are excluded.
+// TestHolderPullSourcesExcludesSelfAndEmptyEntries pins the fallback source
+// list: every non-empty, non-self node in e.Holders is a candidate; self and
+// empty entries are excluded.
 func TestHolderPullSourcesExcludesSelfAndEmptyEntries(t *testing.T) {
 	t.Parallel()
 	o := &Orchestrator{localNodeID: "node-self"}

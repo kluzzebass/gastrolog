@@ -31,10 +31,6 @@ func applyCmd(t *testing.T, fsm *FSM, cmd *gastrologv1.SystemCommand) {
 
 func newID() glid.GLID { return glid.New() }
 
-// gastrolog-4kkoo (Phase 5): TestApplyPutFilter / TestApplyDeleteFilter
-// removed. FilterConfig is gone — match expressions live inline on
-// RouteConfig.Stages and the route apply/delete tests cover the dispatch.
-
 func TestApplyPutRotationPolicy(t *testing.T) {
 	t.Parallel()
 	fsm := New()
@@ -86,8 +82,8 @@ func TestApplyPutRetentionPolicy(t *testing.T) {
 	if got == nil || got.Name != "ret" || got.MaxAge == nil || *got.MaxAge != "720h" {
 		t.Fatalf("unexpected retention policy: %+v", got)
 	}
-	// gastrolog-33ul6h: max_size (the combined drain-and-refuse bound) must
-	// survive the FSM apply path too.
+	// max_size (the combined drain-and-refuse bound) must survive the FSM
+	// apply path too.
 	if got.MaxSize == nil || *got.MaxSize != "50GB" {
 		t.Fatalf("unexpected retention policy max size: %+v", got.MaxSize)
 	}
@@ -807,8 +803,8 @@ func TestSnapshotRestore(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	// Populate with various entities.
-	// gastrolog-4kkoo (Phase 5): no FilterConfig — match expressions live
-	// inline on routes; the route round-trip below covers the snapshot path.
+	// Match expressions live inline on routes; the route round-trip below
+	// covers the snapshot path.
 
 	maxAge := "1h"
 	rpID := newID()
@@ -927,9 +923,8 @@ func TestApplyAfterRestore(t *testing.T) {
 	fsm1 := New()
 	now := time.Now().UTC().Truncate(time.Second)
 
-	// gastrolog-4kkoo (Phase 5): exercise Apply via rotation policy instead
-	// of the deleted filter command — the assertion is about post-Restore
-	// Apply behavior, not about which entity is mutated.
+	// Any entity works here: the assertion is about post-Restore Apply
+	// behavior, not about which entity is mutated.
 	preMaxAge := "1h"
 	applyCmd(t, fsm1, command.NewPutRotationPolicy(system.RotationPolicyConfig{
 		ID: newID(), Name: "pre-snap", MaxAge: &preMaxAge,
@@ -1009,7 +1004,7 @@ func (s *bufSink) Close() error                      { return nil }
 func (s *bufSink) Cancel() error                     { return nil }
 func (s *bufSink) ID() string                        { return "test" }
 
-// --- Apply-wait tracker (gastrolog-3klg1) ---
+// --- Apply-wait tracker ---
 
 // TestApplyAdvancesApplyWait pins that every Apply advances the FSM's
 // apply-wait tracker to the entry's index — including entries whose

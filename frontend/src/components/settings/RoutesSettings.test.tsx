@@ -14,8 +14,8 @@ function testId(n: number): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-// gastrolog-4kkoo (Phase 5): match expressions live inline on routes via
-// Stages → MatchStage. The fixtures use the proto's oneof JSON shape.
+// Match expressions live inline on routes via Stages → MatchStage. The
+// fixtures use the proto's oneof JSON shape.
 const matchStage = (expression: string) => ({
   stage: { case: "match" as const, value: { expression } },
 });

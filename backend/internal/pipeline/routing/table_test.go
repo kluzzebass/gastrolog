@@ -323,8 +323,8 @@ func TestRetentionSource(t *testing.T) {
 	}
 }
 
-// TestOverlaySemantics: the zero-copy srcOverlay must reproduce the old
-// enrichAttrs map semantics exactly (gastrolog-11y2iv): set synthetic keys
+// TestOverlaySemantics: the zero-copy srcOverlay must layer synthetic
+// source attributes over a record's own attrs exactly: set synthetic keys
 // shadow record attrs of the same name, unset synthetics fall through,
 // and scan-based predicates (case-insensitive, glob keys, value-exists)
 // see both layers without duplicates.

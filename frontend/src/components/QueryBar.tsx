@@ -16,7 +16,7 @@ import {
 } from "./icons";
 import type { HistoryEntry } from "../hooks/useQueryHistory";
 import { useHelp } from "../hooks/useHelp";
-// eslint-disable-next-line no-restricted-imports -- no SavedQuery model yet (gastrolog-2e2qs follow-up)
+// eslint-disable-next-line no-restricted-imports -- no SavedQuery model yet
 import type { SavedQuery } from "../api/gen/gastrolog/v1/system_pb";
 import { useThemeClass } from "../hooks/useThemeClass";
 

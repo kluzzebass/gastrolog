@@ -84,10 +84,9 @@ describe("runningCount", () => {
     expect(i.runningCount(new Map(), liveNodes)).toBe(0);
   });
 
-  // gastrolog-485u1: defense-in-depth filter — alive flags for nodes
-  // that aren't in the cluster's current live-node set don't count.
-  // Pre-filter, a stale FSM IngesterAlive entry left over from a
-  // pre-fix backend would inflate the badge to "10/3".
+  // Defense-in-depth filter — alive flags for nodes that aren't in the
+  // cluster's current live-node set don't count. Stale FSM IngesterAlive
+  // entries left by a cluster scale-down inflated the badge to "10/3".
   test("ignores alive flags for nodes not in liveNodes", () => {
     const i = makeIngester({});
     const alive = new Map<EntityID, NodeStatusMap>([

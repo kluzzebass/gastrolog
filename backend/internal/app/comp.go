@@ -3,7 +3,6 @@ package app
 import "gastrolog/internal/logging/comp"
 
 // Component paths for the app package's wiring-time sub-systems.
-// See gastrolog-3flfp.
 var (
 	compCluster = comp.Root("cluster").Desc(
 		"Cluster server — peer connection management, broadcast/heartbeat tick, cross-node RPC forwarding.")

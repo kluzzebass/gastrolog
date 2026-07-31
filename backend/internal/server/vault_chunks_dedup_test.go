@@ -148,17 +148,13 @@ func TestDedupChunkReportsOrsRetentionPending(t *testing.T) {
 	}
 }
 
-// gastrolog-5sywa: TestDedupChunkReportsOrsTransitionStreamed deleted —
-// the receipt protocol it pinned was removed entirely. The neighboring
-// retention-pending dedup test (above) covers the surviving OR-across-
-// replicas pattern that this test was a parallel of.
-
 // TestDedupChunkReportsActiveChunkLeaderWinsRegardlessOfOrder is the
-// regression test for gastrolog-1bgvm. When the same active chunk is
-// reported by both the leader (authoritative RecordCount) and a follower
-// (stale or zero RecordCount because followers only replicate sealed
-// chunks), the merged result must reflect the leader's count regardless
-// of the order in which the two reports arrived in the dedup pass.
+// regression test for active-chunk record-count oscillation. When the same
+// active chunk is reported by both the leader (authoritative RecordCount)
+// and a follower (stale or zero RecordCount because followers only
+// replicate sealed chunks), the merged result must reflect the leader's
+// count regardless of the order in which the two reports arrived in the
+// dedup pass.
 //
 // Without the RecordCount tiebreaker in moreAuthoritative, whichever
 // report was inserted first wins. In the fan-out, parallel peer RTTs

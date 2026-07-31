@@ -13,13 +13,13 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
-// TestIndexReaderMetadataBoundaryTier covers the byte-free tier of the
-// FSM-grounded IndexReader (gastrolog-enfwd): a sealed monotonic chunk
+// TestIndexReaderMetadataBoundary covers the byte-free fallback of the
+// FSM-grounded IndexReader: a sealed monotonic chunk
 // answers rank/pos 0 for timestamps strictly before IngestStart from
 // replicated metadata alone — on any voter, with no local ITSI bytes.
 // Everything at or past IngestStart, non-monotonic chunks, empty chunks
 // and unsealed chunks stay unresolvable.
-func TestIndexReaderMetadataBoundaryTier(t *testing.T) {
+func TestIndexReaderMetadataBoundary(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
 	vaultID := glid.New()
@@ -98,16 +98,16 @@ func TestIndexReaderMetadataBoundaryTier(t *testing.T) {
 	}
 }
 
-// TestIndexReaderChunkRootTier covers the byte-local GLCB fallback of the
-// FSM-grounded IndexReader (gastrolog-nlepn): a sealed pipeline chunk whose
+// TestIndexReaderChunkRoot covers the byte-local GLCB fallback of the
+// FSM-grounded IndexReader: a sealed pipeline chunk whose
 // GLCB sits in this node's vault chunk root but is served by no chunk or
 // index manager must still resolve IngestTS rank/pos lookups — and must
 // report unresolvable (never fabricate) when the bytes are absent.
-func TestIndexReaderChunkRootTier(t *testing.T) {
+func TestIndexReaderChunkRoot(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	fx := buildSealedPipelineGLCB(t, ctx, 5, "rank-tier", nil)
+	fx := buildSealedPipelineGLCB(t, ctx, 5, "rank-fallback", nil)
 	if fx.sealed.IngestStart.IsZero() || fx.sealed.IngestEnd.IsZero() {
 		t.Fatalf("fixture sealed entry missing ingest bounds: %+v", fx.sealed)
 	}
@@ -118,7 +118,7 @@ func TestIndexReaderChunkRootTier(t *testing.T) {
 
 	// Instance carrying only the manifest callbacks (backed by the fixture
 	// FSM) — no chunk manager, no index manager. Ownership resolves through
-	// the manifest; only the chunk-root tier can serve bytes.
+	// the manifest; only the chunk-root fallback can serve bytes.
 	orch.RegisterVault(NewVault(fx.vaultID, &VaultInstance{
 		VaultID: fx.vaultID,
 		Type:    "file",
@@ -185,8 +185,8 @@ func TestIndexReaderChunkRootTier(t *testing.T) {
 		t.Error("FindIngestRank(unknown chunk) resolved")
 	}
 
-	// Bytes deleted (retention, eviction): unresolvable again — the
-	// FSM-estimate residual (gastrolog-1952x) is the caller's business.
+	// Bytes deleted (retention, eviction): unresolvable again — falling
+	// back to the FSM estimate is the caller's business.
 	if err := os.Remove(dst); err != nil {
 		t.Fatalf("remove GLCB: %v", err)
 	}

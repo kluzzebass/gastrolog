@@ -157,18 +157,17 @@ func TestApplyConfigNil(t *testing.T) {
 	}
 }
 
-// TestApplyConfigVaultWithNoLocalInstance is the regression test for
-// gastrolog-264pk. Before the fix, ApplyConfig (the startup path) would
-// silently skip registering any vault whose buildVaultInstances returned
-// zero local instances — which happens on a node that isn't a placement
-// target for any of the vault's instances (e.g. a node that joined
-// the cluster as a non-instance-member, or a snapshot-restored node where
-// placements are reapplied via post-snapshot log replay rather than the
-// initial ApplyConfig). The vault then never made it into the
-// orchestrator, and any subsequent notification firing handleInstancePut
-// would fail with "vault not found" — and since handleVaultPut never
-// fires for snapshot-restored vaults, the cluster ends up in a permanent
-// stuck state. AddVault (the runtime path) registers empty vaults
+// TestApplyConfigVaultWithNoLocalInstance is a regression test. ApplyConfig
+// (the startup path) used to silently skip registering any vault whose
+// buildVaultInstances returned zero local instances — which happens on a
+// node that isn't a placement target for any of the vault's instances (e.g.
+// a node that joined the cluster as a non-instance-member, or a
+// snapshot-restored node where placements are reapplied via post-snapshot
+// log replay rather than the initial ApplyConfig). The vault then never made
+// it into the orchestrator, and any subsequent notification firing
+// handleInstancePut failed with "vault not found" — and since handleVaultPut
+// never fires for snapshot-restored vaults, the cluster ended up in a
+// permanent stuck state. AddVault (the runtime path) registers empty vaults
 // correctly; initVault must do the same. This test asserts the parity.
 func TestApplyConfigVaultWithNoLocalInstance(t *testing.T) {
 	t.Parallel()
@@ -678,7 +677,7 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 	}
 }
 
-// --- gastrolog-292yi: all nodes in all instance Raft groups ---
+// --- all nodes in all instance Raft groups ---
 
 // TestBuildVaultRaftMembers_AllClusterNodes verifies that buildVaultRaftMembers
 // returns every cluster node as a Raft member, regardless of storage placement.
@@ -782,7 +781,7 @@ func TestBuildVaultRaftMembers_EmptyNodes(t *testing.T) {
 	}
 }
 
-// --- gastrolog-4zy8a: vault-ctl group membership must follow cluster growth ---
+// --- vault-ctl group membership must follow cluster growth ---
 
 // allResolveFactories returns a Factories whose NodeAddressResolver maps every
 // node ID to a deterministic "<id>:7946" address. Used by the

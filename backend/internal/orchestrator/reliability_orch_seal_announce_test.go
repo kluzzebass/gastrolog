@@ -1,8 +1,7 @@
 package orchestrator_test
 
-// Multi-node coverage for gastrolog-3ba5ei: a seal the manifest never learned
-// about must be driven back into agreement on EVERY voter, not just the node
-// that noticed.
+// Multi-node coverage: a seal the manifest never learned about must be driven
+// back into agreement on EVERY voter, not just the node that noticed.
 //
 // The single-node tests pin which entries the category selects and what values
 // it announces. This pins the part that only exists in a cluster: the recovery

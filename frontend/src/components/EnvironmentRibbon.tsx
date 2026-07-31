@@ -4,11 +4,10 @@ interface EnvironmentRibbonProps {
 }
 
 /**
- * Bottom-left corner ribbon stamped with the deployment name (gastrolog-4vr0l).
- * Fixed position so it sits above page content regardless of scroll. The
- * ribbon is `pointer-events-none` so it never intercepts clicks on the
- * underlying UI (helpful since it overlaps the bottom-left of the viewport
- * where the TanStack devtools button used to live).
+ * Bottom-left corner ribbon stamped with the deployment name. Fixed
+ * position so it sits above page content regardless of scroll. The ribbon
+ * is `pointer-events-none` so it never intercepts clicks on the underlying
+ * UI it overlaps in the bottom-left of the viewport.
  *
  * Color is a deploy-time CLI flag. Text color is auto-picked from the
  * background's perceived brightness (YIQ formula, threshold 0.5) so that

@@ -67,11 +67,10 @@ func catchUpScanDelta(t *testing.T, segmentCount int) uint64 {
 	return fsm.CompletedListScans() - before
 }
 
-// TestPlannerCatchUpScanCountIndependentOfBacklog pins the O(N^2)->O(N) fix
-// (gastrolog-36ba70): a catch-up pass must cost a CONSTANT number of registry
-// scans regardless of backlog depth. Before the fix, planCatchUp re-scanned the
-// registry per step (budget ∝ N steps), so scans grew with N; now the pass
-// snapshots once and threads the state.
+// TestPlannerCatchUpScanCountIndependentOfBacklog pins the O(N^2)->O(N)
+// planner cost: a catch-up pass must cost a CONSTANT number of registry
+// scans regardless of backlog depth. A per-step re-scan (budget ∝ N steps)
+// grows scans with N; the pass snapshots once and threads the state.
 func TestPlannerCatchUpScanCountIndependentOfBacklog(t *testing.T) {
 	t.Parallel()
 	small := catchUpScanDelta(t, 8)

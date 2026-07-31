@@ -1,8 +1,8 @@
 package server_test
 
-// Multi-node coverage for the standing-alarm surface (gastrolog-33d9n2):
-// alarms are raised per-node in an alert.Collector, converted to
-// NodeStats.alerts by the real cluster.StatsCollector, and served to any
+// Multi-node coverage for the standing-alarm surface: alarms are raised
+// per-node in an alert.Collector, converted to NodeStats.alerts by the
+// real cluster.StatsCollector, and served to any
 // node's clients through GetClusterStatus — the RPC both the CLI
 // (`gastrolog alerts`, `cluster status`) and the inspector's System Alerts
 // panel read. These tests drive that path through the harness coordinator,
@@ -45,8 +45,8 @@ func alertsByNode(t *testing.T, h *multiNodeHarness) map[string][]*gastrologv1.S
 
 // TestMultiNodeAlerts_PeerAlarmVisibleFromCoordinator raises an alarm on a
 // non-coordinator node and reads it from the coordinator's RPC surface —
-// the incident shape from gastrolog-5ct2av: the node with the standing
-// alarm is not the node the operator's shell is pointed at.
+// the incident shape being that the node with the standing alarm is not
+// the node the operator's shell is pointed at.
 func TestMultiNodeAlerts_PeerAlarmVisibleFromCoordinator(t *testing.T) {
 	h := setupMultiNode(t, []string{"coord", "data-1", "data-2", "data-3"}, WithClusterStats())
 
@@ -164,11 +164,11 @@ func TestMultiNodeAlerts_NothingSurvivesRestart(t *testing.T) {
 }
 
 // TestMultiNodeAlerts_DelayOnSuppressionIsPerNode drives the suppression
-// phase (gastrolog-4wvxqh) through the aggregation surface: suppression
-// state is per-node collector state, so a condition flapping on one node
-// must never chatter into the aggregated view, while the SAME condition
-// persisting on another node annunciates there — and only there. Every
-// collector runs on one deterministic harness clock; no sleeps.
+// phase through the aggregation surface: suppression state is per-node
+// collector state, so a condition flapping on one node must never chatter
+// into the aggregated view, while the SAME condition persisting on another
+// node annunciates there — and only there. Every collector runs on one
+// deterministic harness clock; no sleeps.
 func TestMultiNodeAlerts_DelayOnSuppressionIsPerNode(t *testing.T) {
 	leaderlessType, ok := alert.TypeByID("vault-leaderless")
 	if !ok || leaderlessType.DelayOn <= 0 {

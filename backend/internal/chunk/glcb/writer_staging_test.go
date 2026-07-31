@@ -100,13 +100,12 @@ func TestWriterCloseWithoutWriteToRemovesWorkFile(t *testing.T) {
 }
 
 // TestWriterAbandonedStagingFilePersists pins CURRENT behavior for a
-// writer that dies mid-stream (gastrolog-5do8sh gap 7): glcb-records-*.tmp
-// staging files are removed only by the in-process closeStaging (Close /
-// Finish / WriteTo). There is no startup or periodic sweep, so a staging
-// file orphaned by a crash persists in the chunk dir indefinitely — even
-// after a later writer builds a blob in the same directory. Adding a
-// sweep is a documented follow-up candidate; this test only documents the
-// orphan, it does not assert cleanup.
+// writer that dies mid-stream: glcb-records-*.tmp staging files are removed
+// only by the in-process closeStaging (Close / Finish / WriteTo). There is
+// no startup or periodic sweep, so a staging file orphaned by a crash
+// persists in the chunk dir indefinitely — even after a later writer builds
+// a blob in the same directory. This test only documents the orphan, it
+// does not assert cleanup.
 func TestWriterAbandonedStagingFilePersists(t *testing.T) {
 	t.Parallel()
 	workDir := t.TempDir()
