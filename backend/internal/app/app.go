@@ -532,8 +532,28 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		// intervention. Registered with the orchestrator's job scheduler
 		// so it shows up in the inspector's Scheduled view alongside the
 		// rest of the periodic work.
-		sweep := newUnreachableSweep(cfgStore, clusterSrv, peerState, nodeID, alertCollector, compPlacement.Apply(logger))
-		register("unreachable-sweep", startUnreachableSweep(ctx, orch.Scheduler(), sweep))
+		liveness := newNodeLiveness(cfgStore, clusterSrv.IsLeader, peerState, nodeID, alertCollector, compPlacement.Apply(logger))
+		register("unreachable-sweep", startUnreachableSweep(ctx, orch.Scheduler(), liveness))
+
+		// Auto-clear (Unreachable → Live) is event-driven, off the sweep.
+		// A returning node's own traffic is the event; leaving it on the 30s
+		// tick held a demonstrably-back node Unreachable for up to another
+		// interval, during which the placement guard refuses it leader
+		// rotation.
+		//
+		// BOTH evidence sources must trigger, because LastSeen is their max.
+		// Broadcast arrival alone is not enough: a broadcast reaches only its
+		// receivers, so a peer whose Raft lane recovers before its broadcast
+		// path would never be cleared in a cluster with no third node to hear
+		// from. Hence the contact hook alongside the subscription.
+		//
+		// Leader-gated inside autoClear, so a new cluster-ctl leader
+		// re-evaluates nodes it inherited as Unreachable from the previous
+		// epoch — the same reason the learner promoters observe leadership.
+		go liveness.Run(ctx)
+		clusterSrv.Subscribe(liveness.onBroadcast)
+		peerState.SetContactResumedHook(func(string) { liveness.trigger() })
+		observeLeadershipGain(ctx, clusterSrv, liveness)
 
 		// Cluster-ctl learner promoter — event-driven, no cron. Fresh nodes
 		// join as Nonvoter / Staging learners and are promoted to Voter
@@ -551,7 +571,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		ccPromoter := newClusterCtlLearnerPromoter(clusterSrv, peerState, compCluster.Apply(logger))
 		go ccPromoter.Run(ctx)
 		clusterSrv.Subscribe(ccPromoter.onBroadcast)
-		observeLearnerLeadershipGain(ctx, clusterSrv, ccPromoter)
+		observeLeadershipGain(ctx, clusterSrv, ccPromoter)
 
 		// Per-vault-ctl learner promoter — same engine, one promotionGroup
 		// per vault this node hosts; evaluate()'s per-group isLeader() gate

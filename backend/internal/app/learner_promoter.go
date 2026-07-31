@@ -181,13 +181,13 @@ func (p *learnerPromoter) evaluateGroup(g promotionGroup, leaderApplied uint64) 
 	}
 }
 
-// observeLearnerLeadershipGain triggers an evaluation pass whenever the
+// observeLeadershipGain triggers an evaluation pass whenever the
 // cluster-ctl node's Raft leadership changes. A node that gains leadership
 // inherits learners that may already have caught up under the previous
 // leader; without this it would wait for the next broadcast to notice.
 // Runs until ctx is cancelled. (vault-ctl leadership gain is wired
 // separately via the per-vault leader epoch — see app.go.)
-func observeLearnerLeadershipGain(ctx context.Context, clusterSrv *cluster.Server, p *learnerPromoter) {
+func observeLeadershipGain(ctx context.Context, clusterSrv *cluster.Server, p interface{ trigger() }) {
 	ch := make(chan hraft.Observation, 4)
 	clusterSrv.RegisterLeaderObserver(ch)
 	go func() {

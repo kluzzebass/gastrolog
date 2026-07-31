@@ -22,7 +22,7 @@ import (
 
 // newRaftSweepTest is newSweepTest with the Raft input enabled, so the sweep
 // sees a PeerState shaped the way production wires it.
-func newRaftSweepTest(t *testing.T, threshold, statsTTL, raftTTL time.Duration) (*unreachableSweep, *sysmem.Store, *cluster.PeerState, glid.GLID) {
+func newRaftSweepTest(t *testing.T, threshold, statsTTL, raftTTL time.Duration) (*nodeLiveness, *sysmem.Store, *cluster.PeerState, glid.GLID) {
 	t.Helper()
 	store := sysmem.NewStore()
 	peerState := cluster.NewPeerState(statsTTL, raftTTL)
@@ -39,7 +39,7 @@ func newRaftSweepTest(t *testing.T, threshold, statsTTL, raftTTL time.Duration) 
 		}
 	}
 
-	sweep := &unreachableSweep{
+	sweep := &nodeLiveness{
 		cfgStore:    store,
 		peerState:   peerState,
 		localNodeID: localID.String(),
@@ -63,7 +63,7 @@ func nodeState(t *testing.T, store *sysmem.Store, id glid.GLID) system.NodeState
 // silent for far longer than the unreachable threshold — a wedged collector, a
 // starved scheduler, a broadcast RPC that keeps timing out — must stay Live as
 // long as Raft is still reaching it, because it demonstrably is.
-func TestUnreachableSweep_RaftContactAloneKeepsNodeLive(t *testing.T) {
+func TestNodeLiveness_RaftContactAloneKeepsNodeLive(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	sweep, store, peerState, peerID := newRaftSweepTest(t, time.Minute, 15*time.Second, 4*time.Second)
@@ -74,7 +74,7 @@ func TestUnreachableSweep_RaftContactAloneKeepsNodeLive(t *testing.T) {
 	peerState.Update(peerID.String(), &gastrologv1.NodeStats{}, now.Add(-10*time.Minute))
 	peerState.RecordRaftContact(peerID.String(), "cluster-ctl", now.Add(-time.Second))
 
-	sweep.tick(ctx)
+	sweep.sweepUnreachable(ctx)
 
 	if got := nodeState(t, store, peerID); got != system.NodeStateLive {
 		t.Fatalf("state = %s, want Live — a stalled stats broadcast is not unreachability", got)
@@ -85,7 +85,7 @@ func TestUnreachableSweep_RaftContactAloneKeepsNodeLive(t *testing.T) {
 // Raft edge to it. This is the bootstrap and sparse-placement window, and it is
 // what stops a node being declared unreachable merely because no shared Raft
 // group exists yet.
-func TestUnreachableSweep_BroadcastAloneKeepsNodeLiveWithoutRaftEdge(t *testing.T) {
+func TestNodeLiveness_BroadcastAloneKeepsNodeLiveWithoutRaftEdge(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	sweep, store, peerState, peerID := newRaftSweepTest(t, time.Minute, 15*time.Second, 4*time.Second)
@@ -94,7 +94,7 @@ func TestUnreachableSweep_BroadcastAloneKeepsNodeLiveWithoutRaftEdge(t *testing.
 	sweep.now = func() time.Time { return now }
 	peerState.Update(peerID.String(), &gastrologv1.NodeStats{}, now.Add(-2*time.Second))
 
-	sweep.tick(ctx)
+	sweep.sweepUnreachable(ctx)
 
 	if got := nodeState(t, store, peerID); got != system.NodeStateLive {
 		t.Fatalf("state = %s, want Live", got)
@@ -104,7 +104,7 @@ func TestUnreachableSweep_BroadcastAloneKeepsNodeLiveWithoutRaftEdge(t *testing.
 // Both signals lapse — the node really is gone — and only then does the sweep
 // transition, anchoring StateSince to the newest evidence of either kind so the
 // inspector's "unreachable for X" starts when the node actually went silent.
-func TestUnreachableSweep_TransitionsWhenBothSignalsLapse(t *testing.T) {
+func TestNodeLiveness_TransitionsWhenBothSignalsLapse(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	sweep, store, peerState, peerID := newRaftSweepTest(t, time.Minute, 15*time.Second, 4*time.Second)
@@ -118,7 +118,7 @@ func TestUnreachableSweep_TransitionsWhenBothSignalsLapse(t *testing.T) {
 	// We have kept probing the whole time and heard nothing.
 	peerState.RecordRaftProbe(peerID.String(), "cluster-ctl", now)
 
-	sweep.tick(ctx)
+	sweep.sweepUnreachable(ctx)
 
 	if got := nodeState(t, store, peerID); got != system.NodeStateUnreachable {
 		t.Fatalf("state = %s, want Unreachable", got)
@@ -133,7 +133,7 @@ func TestUnreachableSweep_TransitionsWhenBothSignalsLapse(t *testing.T) {
 // Auto-clear on Raft contact resume alone. A node coming back is reachable over
 // Raft long before its next stats broadcast lands, and the sweep must not make
 // the operator wait for the slower signal.
-func TestUnreachableSweep_AutoClearsOnRaftContactResume(t *testing.T) {
+func TestNodeLiveness_AutoClearsOnRaftContactResume(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	sweep, store, peerState, peerID := newRaftSweepTest(t, time.Minute, 15*time.Second, 4*time.Second)
@@ -148,7 +148,7 @@ func TestUnreachableSweep_AutoClearsOnRaftContactResume(t *testing.T) {
 	peerState.Update(peerID.String(), &gastrologv1.NodeStats{}, now.Add(-10*time.Minute))
 	peerState.RecordRaftContact(peerID.String(), "vault/one/ctl", now.Add(-500*time.Millisecond))
 
-	sweep.tick(ctx)
+	sweep.autoClear(ctx)
 
 	if got := nodeState(t, store, peerID); got != system.NodeStateLive {
 		t.Fatalf("state = %s, want Live (auto-clear on Raft contact resume)", got)
@@ -158,7 +158,7 @@ func TestUnreachableSweep_AutoClearsOnRaftContactResume(t *testing.T) {
 // A node we have never had any evidence about stays Live: zero LastSeen is
 // "no positive evidence", never "dead". A cold-start node that has not yet
 // joined any group must not be auto-transitioned on the strength of silence.
-func TestUnreachableSweep_NeverContactedNodeIsNotTransitioned(t *testing.T) {
+func TestNodeLiveness_NeverContactedNodeIsNotTransitioned(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	sweep, store, peerState, peerID := newRaftSweepTest(t, time.Minute, 15*time.Second, 4*time.Second)
@@ -169,7 +169,7 @@ func TestUnreachableSweep_NeverContactedNodeIsNotTransitioned(t *testing.T) {
 	// but has never once answered.
 	peerState.RecordRaftProbe(peerID.String(), "cluster-ctl", now)
 
-	sweep.tick(ctx)
+	sweep.sweepUnreachable(ctx)
 
 	if got := nodeState(t, store, peerID); got != system.NodeStateLive {
 		t.Fatalf("state = %s, want Live — never-seen nodes are operator territory", got)
