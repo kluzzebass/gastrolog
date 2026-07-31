@@ -5203,7 +5203,9 @@ export class TestIngesterRequest extends Message<TestIngesterRequest> {
 
   /**
    * Optional ingester ID — when set, the trial-bind port check skips
-   * addresses held by this ingester (it's already running on them).
+   * addresses held by this ingester (it's already running on them). The
+   * running-ingester lookup is local, so this only suppresses the check on a
+   * node actually running it.
    *
    * @generated from field: bytes id = 3;
    */

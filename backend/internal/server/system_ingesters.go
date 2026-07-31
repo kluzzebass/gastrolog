@@ -456,6 +456,12 @@ func (s *SystemServer) GetIngesterDefaults(
 // TestIngester tests an ingester configuration without saving it.
 // For connection-based ingesters (kafka, mqtt, …) it tests connectivity.
 // For listener ingesters (syslog, otlp, …) it checks port availability.
+//
+// Both checks describe THIS node. Connectivity to a broker is near enough to a
+// cluster-wide fact to be useful from anywhere; port availability is not — a
+// port free here can be held by an unrelated process on another assigned node.
+// Callers must not treat success as clearance to bind cluster-wide. The request
+// carries no assignment, so there is nothing to fan out to even if it did.
 func (s *SystemServer) TestIngester(
 	ctx context.Context,
 	req *connect.Request[apiv1.TestIngesterRequest],

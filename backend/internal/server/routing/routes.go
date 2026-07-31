@@ -55,6 +55,13 @@ func DefaultRoutes() map[string]RPCRoute {
 		// node already resolves every storage's live state.
 		gastrologv1connect.SystemServiceListStoragesProcedure: {Strategy: RouteLocal},
 		// Node-local operations — run on whichever node received the request.
+		//
+		// TestIngester stays local by necessity, not by omission: it is a
+		// pre-save probe, so TestIngesterRequest carries no assignment and
+		// usually no ID, leaving RouteToResourceOwner nothing to resolve. A
+		// connectivity probe from any node is a fair proxy for a broker that
+		// should be reachable cluster-wide. Its limit is documented on the RPC:
+		// a per-node answer describes only the responding node.
 		gastrologv1connect.SystemServiceTestIngesterProcedure: {Strategy: RouteLocal},
 		// TriggerIngester is an imperative action on a specific ingester: it
 		// must run where that ingester runs. The backend resolves the owning

@@ -6159,7 +6159,9 @@ type TestIngesterRequest struct {
 	Type   string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
 	Params map[string]string      `protobuf:"bytes,2,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Optional ingester ID — when set, the trial-bind port check skips
-	// addresses held by this ingester (it's already running on them).
+	// addresses held by this ingester (it's already running on them). The
+	// running-ingester lookup is local, so this only suppresses the check on a
+	// node actually running it.
 	Id            []byte `protobuf:"bytes,3,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

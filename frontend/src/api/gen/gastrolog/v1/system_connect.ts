@@ -314,7 +314,19 @@ export const SystemService = {
       kind: MethodKind.Unary,
     },
     /**
-     * TestIngester tests connectivity for an ingester configuration without saving it.
+     * TestIngester tests connectivity for an ingester configuration without
+     * saving it.
+     *
+     * Deliberately answered by the RECEIVING node, not routed to the ingester's
+     * assignment. The request carries no assignment — and at test time the
+     * ingester usually does not exist yet — so there is no owner to route to.
+     * A connectivity probe from any node is a reasonable proxy for a broker
+     * reachable cluster-wide.
+     *
+     * The consequence is a real limit, not an oversight: for a per-node fact the
+     * answer describes the responding node only. Port availability is such a
+     * fact, so callers must not read a success here as clearance to bind on
+     * every assigned node. Save-time validation owns that check.
      *
      * @generated from rpc gastrolog.v1.SystemService.TestIngester
      */
