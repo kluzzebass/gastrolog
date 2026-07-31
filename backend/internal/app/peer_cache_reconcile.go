@@ -5,11 +5,24 @@ import (
 )
 
 // peer_cache_reconcile.go: scheduled periodic reconcile of every
-// per-peer cache against current Raft membership. Belt-and-suspenders
-// for the observer path (raft.go observePeerRemovals) — hraft does
-// not fire PeerObservation when a config change is delivered via
-// snapshot install (only on log apply), so a follower behind by a
-// snapshot can miss removal events.
+// per-peer cache against current Raft membership.
+//
+// On a FOLLOWER this is not a backstop — it is the only mechanism. The
+// observer path (raft.go observePeerRemovals) consumes hraft's
+// PeerObservation, which is the sole membership-bearing observation hraft
+// emits, and both of its emission sites are inside startStopReplication:
+// leader-only code managing leaderState.replState. A follower records
+// membership changes in processConfigurationLogEntry and on snapshot
+// restore, and emits nothing in either case. Verified against
+// hashicorp/raft v1.7.3, which emits exactly eight observations —
+// LeaderObservation, PeerObservation x2, RequestVote, RequestPreVote,
+// RaftState, and the two heartbeat ones, all leader-side or carrying no
+// membership.
+//
+// So there is no upstream event to fix and then retire this tick against.
+// Do not delete it on the strength of the observer existing: without it,
+// every follower keeps per-peer cache entries for removed nodes until
+// restart.
 //
 // Registered with the orchestrator's job scheduler so the operator
 // can see it in the inspector's Scheduled view alongside the other
