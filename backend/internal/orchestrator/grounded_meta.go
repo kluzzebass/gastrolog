@@ -88,11 +88,11 @@ func groundMetaFromEntry(m chunk.ChunkMeta, e vaultctlfsm.ManifestEntry) chunk.C
 //     node with an instance whose group-manager handle isn't reachable here —
 //     the same replicated FSM, read through the instance closure.
 //
-// Both tiers read the FSM only; the seam never re-derives cluster-wide fields
+// Both read the FSM only; the seam never re-derives cluster-wide fields
 // from the local chunk manager (memory-mode vaults have no FSM callback, so
 // they report false and their already-authoritative local truth passes through
 // unchanged — exactly the nil-OverlayFromFSM behavior this replaces). Reports
-// false when neither tier resolves; the meta is returned unchanged.
+// false when neither resolves; the meta is returned unchanged.
 func (o *Orchestrator) groundingEntry(vaultID glid.GLID, id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
 	if f := o.vaultCtlFSMForVault(vaultID); f != nil {
 		e := f.Get(id)

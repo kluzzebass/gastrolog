@@ -233,7 +233,7 @@ type ChunkMeta struct {
 	IngestTSMonotonic bool
 	CloudBacked       bool   // true = chunk lives in cloud storage, not local disk
 	Archived          bool   // true = chunk is in an offline storage class (Glacier, Azure Archive)
-	CloudStorageClass string // cloud archival tier (e.g. "GLACIER", "cold", "Archive"); empty = standard
+	CloudStorageClass string // cloud archival storage class (e.g. "GLACIER", "cold", "Archive"); empty = standard
 }
 
 // EventID uniquely identifies a record across the cluster. Composed of the

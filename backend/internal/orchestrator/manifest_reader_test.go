@@ -10,7 +10,7 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
-// TestManifestReaderMemoryModeProjection covers the local-projection tier of
+// TestManifestReaderMemoryModeProjection covers the local-projection fallback
 // the unified manifest read core: with no GroupManager and
 // no vault-ctl FSM, ManifestReader projects from the memory-mode chunk
 // manager, honoring the sealed-only contract of manifest.Reader.

@@ -281,7 +281,8 @@ func TestConfigImportReplaceRemovesStaleEntities(t *testing.T) {
 
 	// The archival chain must survive the round trip intact. An empty class
 	// here would read as "delete at this age" rather than "move to a colder
-	// tier" — the round trip losing this field is a data-destroying outcome,
+	// storage class" — losing this field on the round trip is a data-destroying
+	// outcome,
 	// not a cosmetic one.
 	if got := services[0].Transitions; len(got) != 2 {
 		t.Fatalf("archival transitions after round trip: %+v, want 2", got)
@@ -298,14 +299,14 @@ func TestConfigImportReplaceRemovesStaleEntities(t *testing.T) {
 		t.Fatalf("ListVaults: %v", err)
 	}
 	// Exactly the fixture's vaults, and nothing the target had before. The
-	// fixture seeds two: a memory vault and a file/cloud-tiered one whose
+	// fixture seeds two: a memory vault and a file-backed, cloud-backed one whose
 	// storage_class, replication_factor and cache_* fields a memory vault never
 	// exercises.
 	gotVaults := map[string]bool{}
 	for _, v := range vaults {
 		gotVaults[v.Name] = true
 	}
-	if len(vaults) != 2 || !gotVaults["logs"] || !gotVaults["tiered"] {
+	if len(vaults) != 2 || !gotVaults["logs"] || !gotVaults["cloud-backed"] {
 		t.Errorf("after --replace: vaults = %+v, want exactly the two imported ones", vaults)
 	}
 	if gotVaults["stale-vault"] {
@@ -549,15 +550,15 @@ func seedEveryConfigType(t *testing.T, ctx context.Context, addr string, store *
 		t.Fatalf("PutRetentionPolicy: %v", err)
 	}
 
-	// A file-backed, cloud-tiered vault with the fields a memory vault never
+	// A file-backed, cloud-backed vault with the fields a memory vault never
 	// exercises. The round trip is a byte-diff of export -> import -> export, so
 	// it can only detect the loss of fields the FIXTURE populated: a vault that
 	// only ever sets id/name/enabled/type/memory_budget leaves storage_class,
 	// replication_factor, cache_* and the retention disposition untested.
-	tieredID := glid.New()
+	cloudBackedID := glid.New()
 	if _, err := client.System.PutVault(ctx, connect.NewRequest(&v1.PutVaultRequest{
 		Config: &v1.VaultConfig{
-			Id: tieredID.ToProto(), Name: "tiered", Enabled: true,
+			Id: cloudBackedID.ToProto(), Name: "cloud-backed", Enabled: true,
 			Type:                 v1.VaultType_VAULT_TYPE_FILE,
 			StorageClass:         2,
 			ReplicationFactor:    3,
@@ -567,7 +568,7 @@ func seedEveryConfigType(t *testing.T, ctx context.Context, addr string, store *
 			RetentionDisposition: "delete",
 		},
 	})); err != nil {
-		t.Fatalf("PutVault tiered: %v", err)
+		t.Fatalf("PutVault cloud-backed: %v", err)
 	}
 
 	// Enrichment lookup tables. Every kind, with non-default fields set: these

@@ -195,8 +195,9 @@ type ManifestEntry struct {
 	IngestTSMonotonic bool
 
 	CloudBacked bool
-	// CloudStorageClass is the cloud archival tier this chunk currently sits
-	// in ("GLACIER", "cold"), as last announced by CmdArchiveChunk. Empty
+	// CloudStorageClass is the cloud archival storage class this chunk
+	// currently sits in ("GLACIER", "cold"), as last announced by
+	// CmdArchiveChunk. Empty
 	// means standard storage. Archived is derived from it rather than tracked
 	// separately, so the two can never disagree.
 	//

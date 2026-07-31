@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-func TestRecordCountsTiers(t *testing.T) {
+func TestRecordCountsThresholds(t *testing.T) {
 	t.Parallel()
 	w := New(slog.Default(), 0)
 
 	w.record(120 * time.Millisecond)  // note only
-	w.record(300 * time.Millisecond)  // debug tier
+	w.record(300 * time.Millisecond)  // debug threshold
 	w.record(1600 * time.Millisecond) // critical
 
 	n100, n250, n1500 := w.Counters()
@@ -27,11 +27,11 @@ func TestRecordCountsTiers(t *testing.T) {
 	}
 }
 
-// TestCriticalTierFollowsConfiguredLease: with a widened leader lease, gaps
-// past the 1.5s default but inside the lease stay sub-critical — no critical
-// count. Critical means lease-lethal, so it has to follow the configured
+// TestCriticalThresholdFollowsConfiguredLease: with a widened leader lease,
+// gaps past the 1.5s default but inside the lease stay sub-critical — no
+// critical count. Critical means lease-lethal, so it has to follow the configured
 // lease rather than a constant.
-func TestCriticalTierFollowsConfiguredLease(t *testing.T) {
+func TestCriticalThresholdFollowsConfiguredLease(t *testing.T) {
 	t.Parallel()
 	w := New(slog.Default(), 4*time.Second)
 
@@ -63,7 +63,7 @@ func TestRunMeasuresRealGaps(t *testing.T) {
 	if n1500 != 0 {
 		t.Fatalf("idle run recorded %d critical stalls", n1500)
 	}
-	// Allow a little CI jitter at the lowest tier, but a quiet run should
+	// Allow a little CI jitter at the lowest threshold, but a quiet run should
 	// stay near zero.
 	if n100 > 5 {
 		t.Fatalf("idle run recorded %d >=100ms stalls — watchdog misconfigured", n100)

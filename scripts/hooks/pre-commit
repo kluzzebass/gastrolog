@@ -45,6 +45,32 @@ if [ -n "$STAGED_SRC" ]; then
   fi
 fi
 
+# "Tier" must not enter the codebase in our own voice.
+#
+# Hot/cold storage layering is a rejected design, and the word is the vector:
+# it reads as a standing concept, so the next writer reaches for it and then
+# designs to it. See the banned row in docs/ubiquitous_language.md for the
+# canonical replacements — fallback, threshold, cloud storage class.
+#
+# Only provider API surface is exempt, and only where the identifier is theirs
+# and cannot be renamed. That is why the exclusion matches the SDK spellings
+# (AccessTier, SetTier, SetBlobTier, types.Tier, INTELLIGENT_TIERING) rather
+# than whole files: a blobstore adapter may call Azure's SetTier and still not
+# describe our own behaviour as tiered.
+if [ -n "$STAGED_SRC" ]; then
+  printf "Checking for banned 'tier' vocabulary... "
+  TIER=$(git grep -inE 'tier' -- $STAGED_SRC 2>/dev/null \
+    | grep -viE 'frontier|AccessTier|SetTier|SetBlobTier|types\.Tier|INTELLIGENT_TIERING' || true)
+  if [ -z "$TIER" ]; then
+    printf "${GREEN}ok${NC}\n"
+  else
+    printf "${RED}FAILED${NC}\n"
+    echo "  GastroLog has no tiers. Use fallback / threshold / cloud storage class:"
+    echo "$TIER" | sed 's/^/    /' | head -20
+    failed=1
+  fi
+fi
+
 # Proto: generated code must match the .proto it came from.
 #
 # A partial regeneration is invisible to every other gate: the stale generated

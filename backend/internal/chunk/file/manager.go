@@ -828,14 +828,14 @@ func (m *Manager) lookupMeta(id chunk.ChunkID) *chunkMeta {
 	return nil
 }
 
-// lookupCloudMetaLocked serves the cloud tier of lookupMeta: the cloudIdx
+// lookupCloudMetaLocked serves the cloud fallback of lookupMeta: the cloudIdx
 // entry when present, else a lazy FSM-grounded fill — the cloud index is a
 // cache of the replicated manifest's CloudBacked entries, populated on
 // miss. A successful resolve is memoized by the cloudIdx insert;
 // a failed resolve memoizes nothing, so an entry that appears in the FSM
-// later resolves then. hit=true means the cloud tier answered (meta may
+// later resolves then. hit=true means the cloud fallback answered (meta may
 // still be nil on a registration error, which ends the lookup — a chunk the
-// FSM says is cloud-backed must not fall through to the external-GLCB tier).
+// FSM says is cloud-backed must not fall through to externalResolver).
 // Caller holds m.mu.
 func (m *Manager) lookupCloudMetaLocked(id chunk.ChunkID) (*chunkMeta, bool) {
 	if m.cloudIdx == nil {

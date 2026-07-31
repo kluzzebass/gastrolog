@@ -8,7 +8,7 @@ package server_test
 // PeerState.FindStorageState, the same shortcut mnPeerVaultStats takes for
 // vault stats elsewhere in this package).
 //
-// Two tiers, matching this codebase's convention for a scheduler-driven
+// Two tests, matching this codebase's convention for a scheduler-driven
 // surface with no test-only trigger (see
 // retention_unenforceable_multinode_test.go's package comment for the
 // precedent this file follows): a fast config-only test that needs no

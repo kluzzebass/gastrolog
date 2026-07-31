@@ -379,9 +379,9 @@ func (r *orchestratorIndexReader) lookupVaultManagers(chunkID chunk.ChunkID) (ch
 // Timestamps at or after IngestStart need bytes and stay unresolvable here
 // (per-timestamp resolvability; consumers fall back to the FSM estimate).
 // Timestamps past IngestEnd already report unresolvable in
-// the byte tiers, matching the ITSI "past all entries" answer. Non-monotonic
-// chunks get no boundary answer: IngestStart is only the first APPENDED
-// record's timestamp there, not the minimum.
+// the byte-backed fallbacks, matching the ITSI "past all entries" answer.
+// Non-monotonic chunks get no boundary answer: IngestStart is only the first
+// APPENDED record's timestamp there, not the minimum.
 func (o *Orchestrator) manifestBoundaryIngestRank(chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
 	_, e, ok := o.manifestEntryByChunk(chunkID)
 	if !ok || !e.IsSealed() || !e.IngestTSMonotonic || e.RecordCount <= 0 {

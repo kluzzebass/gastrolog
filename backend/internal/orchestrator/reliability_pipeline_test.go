@@ -258,7 +258,7 @@ func (h *orchRelHarness) waitGLCBsOnHomes(v vaultSpec, homeIdxs []int, entries [
 // FSM) is not evidence the Raft entry has been applied anywhere else: each
 // voter applies the vault-ctl log independently, and under CPU contention the
 // followers trail the observation point. That matters for every grounded read,
-// because all of the IndexReader's tiers — chunk manager, index manager,
+// because all of the IndexReader's fallbacks — chunk manager, index manager,
 // chunk-root GLCB, and the byte-free metadata boundary — resolve chunk
 // ownership through the local FSM copy first (manifestEntryByChunk). Until the
 // sealed entry is applied on a node, that node answers "unresolvable"

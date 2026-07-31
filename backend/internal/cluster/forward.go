@@ -892,7 +892,7 @@ func pullManagedFileStreamHandler(srv any, stream grpc.ServerStream) error {
 // pullFrameSize is the Data payload per streamed pull frame when the serve
 // seam copies through ReadFrom (io.Copy from an *os.File lands there). Sized
 // just under 1MB so the marshaled frame (payload + a few bytes of proto
-// framing) still fits grpc-go's largest pooled marshal-buffer tier (1MB in
+// framing) still fits grpc-go's largest pooled marshal-buffer size (1MB in
 // mem.defaultBufferPoolSizes) instead of spilling to the fallback pool, and
 // stays far under the 4MB default client receive limit. Large frames
 // amortize per-frame SendMsg/flow-control/stats overhead ~32x versus the

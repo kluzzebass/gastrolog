@@ -36,7 +36,7 @@ func TestOrchRel_RankLookupsAcrossVoters(t *testing.T) {
 		t.Fatalf("expected 2 sealed chunks, got %d", len(sealed))
 	}
 	h.waitGLCBsOnHomes(v, homeIdxs, sealed)
-	// The sealed set above is one home's view of the FSM. Every tier of the
+	// The sealed set above is one home's view of the FSM. Every fallback of
 	// grounded read — local bytes included — first resolves the chunk's owning
 	// vault through the reading node's own FSM copy, so a node that has not
 	// applied the seal yet reports the lookup unresolvable no matter what it
@@ -45,8 +45,8 @@ func TestOrchRel_RankLookupsAcrossVoters(t *testing.T) {
 	h.waitSealedEntriesOnVoters(v, voterIdxs, sealed)
 
 	// Every home resolves exact ranks — the bytes are local (chunk manager
-	// registration or the chunk-root GLCB tier; either way the answer comes
-	// from the chunk's own ITSI section).
+	// registration or the chunk-root GLCB fallback; either way the answer
+	// comes from the chunk's own ITSI section).
 	for _, idx := range homeIdxs {
 		node := h.nodes[h.nodeIDs[idx]]
 		ir := node.orch.IndexReader()
@@ -106,7 +106,7 @@ func TestOrchRel_RankLookupsAcrossVoters(t *testing.T) {
 			t.Errorf("outsider: FindIngestPos(%s, before IngestStart) = (%d, %v), want (0, true) from FSM metadata", e.ID, pos, ok)
 		}
 		// The homes give the identical answer from real bytes — the
-		// metadata tier never diverges from the ITSI truth.
+		// metadata answer never diverges from the ITSI truth.
 		homeIR := h.nodes[h.nodeIDs[0]].orch.IndexReader()
 		if hRank, hOK := homeIR.FindIngestRank(e.ID, before); !hOK || hRank != rank {
 			t.Errorf("home vs voter rank divergence for %s: home=(%d,%v) voter=(%d,%v)", e.ID, hRank, hOK, rank, ok)
