@@ -255,10 +255,10 @@ type SystemServiceClient interface {
 	// A connectivity probe from any node is a reasonable proxy for a broker
 	// reachable cluster-wide.
 	//
-	// The consequence is a real limit, not an oversight: for a per-node fact the
-	// answer describes the responding node only. Port availability is such a
-	// fact, so callers must not read a success here as clearance to bind on
-	// every assigned node. Save-time validation owns that check.
+	// The consequence is a real limit: for a per-node fact the answer describes
+	// the responding node only. Port availability is such a fact, so a success
+	// here is not clearance to bind on every assigned node — the listener
+	// trial-bind path answers for one node, whichever received the call.
 	TestIngester(context.Context, *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error)
 	// GetIngesterDefaults returns default parameter values for each ingester type.
 	GetIngesterDefaults(context.Context, *connect.Request[v1.GetIngesterDefaultsRequest]) (*connect.Response[v1.GetIngesterDefaultsResponse], error)
@@ -1034,10 +1034,10 @@ type SystemServiceHandler interface {
 	// A connectivity probe from any node is a reasonable proxy for a broker
 	// reachable cluster-wide.
 	//
-	// The consequence is a real limit, not an oversight: for a per-node fact the
-	// answer describes the responding node only. Port availability is such a
-	// fact, so callers must not read a success here as clearance to bind on
-	// every assigned node. Save-time validation owns that check.
+	// The consequence is a real limit: for a per-node fact the answer describes
+	// the responding node only. Port availability is such a fact, so a success
+	// here is not clearance to bind on every assigned node — the listener
+	// trial-bind path answers for one node, whichever received the call.
 	TestIngester(context.Context, *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error)
 	// GetIngesterDefaults returns default parameter values for each ingester type.
 	GetIngesterDefaults(context.Context, *connect.Request[v1.GetIngesterDefaultsRequest]) (*connect.Response[v1.GetIngesterDefaultsResponse], error)

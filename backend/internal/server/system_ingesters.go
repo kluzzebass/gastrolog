@@ -462,6 +462,9 @@ func (s *SystemServer) GetIngesterDefaults(
 // port free here can be held by an unrelated process on another assigned node.
 // Callers must not treat success as clearance to bind cluster-wide. The request
 // carries no assignment, so there is nothing to fan out to even if it did.
+//
+// The listener branch is the settings UI's live per-keystroke port check, not a
+// button: it answers for one node while the ingester may be assigned to many.
 func (s *SystemServer) TestIngester(
 	ctx context.Context,
 	req *connect.Request[apiv1.TestIngesterRequest],
