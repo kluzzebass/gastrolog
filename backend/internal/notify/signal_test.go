@@ -92,21 +92,43 @@ func TestSignalConcurrentNotify(t *testing.T) {
 	const notifiesPerGoroutine = 1000
 
 	// Concurrent reader that re-calls C() on each wakeup.
+	//
+	// Two happens-before edges make the "at least one" assertion below mean
+	// something. Signal is edge-triggered — Notify closes and replaces the
+	// channel, keeping no pending state — so both are load-bearing:
+	//
+	//   holding: the reader must hold a channel reference BEFORE any notifier
+	//   runs. A notify that lands while the reader holds nothing closes a
+	//   channel nobody is watching and is legitimately lost.
+	//
+	//   counted: stop must not close until a receive has been counted. Once
+	//   both the held channel and stop are ready, select picks at random, so
+	//   closing stop early makes the assertion a coin flip.
+	//
+	// Without them this is an assertion about goroutine scheduling, not about
+	// Signal.
 	stop := make(chan struct{})
+	holding := make(chan struct{})
+	counted := make(chan struct{})
 	var received atomic.Int64
 	var readerDone sync.WaitGroup
 	readerDone.Add(1)
 	go func() {
 		defer readerDone.Done()
+		var holdOnce, countOnce sync.Once
 		for {
+			ch := s.C()
+			holdOnce.Do(func() { close(holding) })
 			select {
-			case <-s.C():
+			case <-ch:
 				received.Add(1)
+				countOnce.Do(func() { close(counted) })
 			case <-stop:
 				return
 			}
 		}
 	}()
+	<-holding
 
 	// Concurrent notifiers.
 	var wg sync.WaitGroup
@@ -121,12 +143,16 @@ func TestSignalConcurrentNotify(t *testing.T) {
 	}
 
 	wg.Wait()
+	// Terminates without a deadline: the channel the reader held before the
+	// notifiers started was closed by the first Notify, and stop is still
+	// open, so that receive is the only ready case.
+	<-counted
 	close(stop)
 	readerDone.Wait()
 
-	// The reader may not catch every notification (it can miss rapid
-	// back-to-back notifies while re-calling C()), but it must have
-	// received at least one.
+	// The reader may not catch every notification — it misses rapid
+	// back-to-back notifies while re-calling C() — but the notification it
+	// was already parked on cannot be lost.
 	if received.Load() == 0 {
 		t.Fatal("reader received zero notifications")
 	}

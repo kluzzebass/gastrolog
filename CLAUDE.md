@@ -94,7 +94,7 @@ When creating a **question** issue, always draft the title and description first
 4. Only run `dcat close` after user confirms
 5. **Upon closing:** commit (including tracker), **merge to the issue’s stack branch**, and **push that branch** — in that order after `dcat close`. Do not merge to the default branch or push the merge **before** the issue is closed.
 
-**When a closing epic retires architecture, a concept, or vocabulary:** sweep the open backlog (`dcat list --agent-only`) for issues predicated on what it just retired — titles, descriptions, and dependency edges go stale silently. The 2026-07 coherence sweep removed ~30 dead or duplicate issues that accumulated exactly this way (tier-era filings, pre-V3 pipeline bugs, twins of closed issues); don't let that rebuild.
+**When a closing epic retires architecture, a concept, or vocabulary:** sweep the open backlog (`dcat list --agent-only`) for issues predicated on what it just retired — titles, descriptions, and dependency edges go stale silently. The 2026-07 coherence sweep removed ~30 dead or duplicate issues that accumulated exactly this way (filings predicated on retired storage layering, pre-V3 pipeline bugs, twins of closed issues); don't let that rebuild.
 
 Do not open PRs for routine issue closes on a stack branch — merge the feature branch into its **stack branch** directly. PRs are **only** for landing work on **`main`**.
 
@@ -170,7 +170,7 @@ Every feature must have tests across ALL of these dimensions:
 
 Single-node happy-path tests are NOT sufficient. A feature is not done until all dimensions are covered. This applies to every new feature, every bug fix, every refactor that changes behavior.
 
-**Two test tiers, not one.** `just test` (backend: `go test -short ./...`) is the fast developer loop — multi-second convergence/stress/large-I/O tests are skipped via `testing.Short()`. `just backend test-full` (`go test ./...`, no `-short`) is the full acceptance gate and remains mandatory once before declaring work done or handing off — it is not optional just because the fast loop was green. New slow tests (multi-node raft convergence, WAL segment stress, restart-survival cycles) get a `testing.Short()` skip with a one-line reason, never deletion or weakened coverage.
+**Two test suites, not one.** `just test` (backend: `go test -short ./...`) is the fast developer loop — multi-second convergence/stress/large-I/O tests are skipped via `testing.Short()`. `just backend test-full` (`go test ./...`, no `-short`) is the full acceptance gate and remains mandatory once before declaring work done or handing off — it is not optional just because the fast loop was green. New slow tests (multi-node raft convergence, WAL segment stress, restart-survival cycles) get a `testing.Short()` skip with a one-line reason, never deletion or weakened coverage.
 
 ## Renaming: Always Rename Through the Entire Stack
 
