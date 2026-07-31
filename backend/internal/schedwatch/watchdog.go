@@ -44,9 +44,9 @@ const (
 
 	// stallCritical logs at Warn: gaps at or beyond the Raft leader lease
 	// manufacture elections. This is the fallback when New is given no
-	// lease; production passes the configured lease so the critical tier
-	// stays lease-lethal by definition. Critical stalls are a diagnostic —
-	// there is no operator action beyond knowing — so they surface as logs
+	// lease; production passes the configured lease so the critical threshold
+	// stays lease-lethal by definition. Critical stalls are a diagnostic — there
+	// is no operator action beyond knowing — so they surface as logs
 	// and health counters, never as alarms (EEMUA 191 actionability test).
 	stallCritical = 1500 * time.Millisecond
 )
@@ -67,7 +67,7 @@ type Watchdog struct {
 }
 
 // New creates a watchdog. logger must be non-nil. leaderLease sets the
-// critical (election-lethal) tier; zero falls back to the 1.5s default.
+// critical (election-lethal) threshold; zero falls back to the 1.5s default.
 func New(logger *slog.Logger, leaderLease time.Duration) *Watchdog {
 	if leaderLease <= 0 {
 		leaderLease = stallCritical
