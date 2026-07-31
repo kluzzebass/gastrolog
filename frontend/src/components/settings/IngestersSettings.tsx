@@ -127,7 +127,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
   const effectiveName = newName.trim() || namePlaceholder || newType;
   const nameConflict = existingNames.has(effectiveName);
   const newAddrConflict = listenAddrConflict("", newType, newParams, newNodeIds, ingesters, allDefaults);
-  const newPortCheck = useCheckListenAddrs(newType, newParams, "");
+  const newPortCheck = useCheckListenAddrs(newType, newParams, "", newNodeIds, newAllNodes);
   const newPortError = !newAddrConflict && newPortCheck.data && !newPortCheck.data.success ? newPortCheck.data.message : null;
   const newListenError = newAddrConflict ?? newPortError;
 
@@ -302,7 +302,7 @@ function IngesterCard({
   onOpenInspector?: (inspectorParam: string) => void;
 }>) {
   const addrConflict = listenAddrConflict(encode(ing.id), ing.type, edit.params, edit.nodeIds, allIngesters, allDefaults);
-  const portCheck = useCheckListenAddrs(ing.type, edit.params, encode(ing.id));
+  const portCheck = useCheckListenAddrs(ing.type, edit.params, encode(ing.id), edit.nodeIds, edit.allNodes);
   const portError = !addrConflict && portCheck.data && !portCheck.data.success ? portCheck.data.message : null;
   const listenError = addrConflict ?? portError;
 

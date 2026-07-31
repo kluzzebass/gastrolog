@@ -175,6 +175,9 @@ type Server struct {
 
 	// validateVaultExecutor validates a local vault for remote ValidateVault requests.
 	validateVaultExecutor ValidateVaultExecutor
+	// validateIngesterExecutor runs this node's ingester checks for remote
+	// ForwardValidateIngester requests.
+	validateIngesterExecutor ValidateIngesterExecutor
 
 	// explainExecutor returns explain plans for local vaults for remote Explain requests.
 	explainExecutor ExplainExecutor

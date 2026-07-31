@@ -93,7 +93,19 @@ service SystemService {
   // ResumeVault resumes ingestion for a vault.
   rpc ResumeVault(ResumeVaultRequest) returns (ResumeVaultResponse);
 
-  // TestIngester tests connectivity for an ingester configuration without saving it.
+  // TestIngester tests connectivity for an ingester configuration without
+  // saving it.
+  //
+  // Deliberately answered by the RECEIVING node, not routed to the ingester's
+  // assignment. The request carries no assignment — and at test time the
+  // ingester usually does not exist yet — so there is no owner to route to.
+  // A connectivity probe from any node is a reasonable proxy for a broker
+  // reachable cluster-wide.
+  //
+  // The consequence is a real limit: for a per-node fact the answer describes
+  // the responding node only. Port availability is such a fact, so a success
+  // here is not clearance to bind on every assigned node — the listener
+  // trial-bind path answers for one node, whichever received the call.
   rpc TestIngester(TestIngesterRequest) returns (TestIngesterResponse);
 
   // GetIngesterDefaults returns default parameter values for each ingester type.
@@ -919,13 +931,40 @@ message TestIngesterRequest {
   string type = 1;
   map<string, string> params = 2;
   // Optional ingester ID — when set, the trial-bind port check skips
-  // addresses held by this ingester (it's already running on them).
+  // addresses held by this ingester (it's already running on them). The
+  // running-ingester lookup is per-node, so it only suppresses the check on a
+  // node actually running it.
   bytes id = 3;
+  // The assignment the config would be saved with. Port availability is a
+  // per-node fact, so the check has to run where the ingester will run; at
+  // test time there is no stored config to read the assignment from, which is
+  // why the caller sends it. Empty node_ids with all_nodes false means "just
+  // the node answering" — the single-node case and the pre-assignment state of
+  // a form still being filled in.
+  repeated bytes node_ids = 4;
+  bool all_nodes = 5;
 }
 
 message TestIngesterResponse {
+  // success is the AND over node_checks: a config is only clear to save if
+  // every node it would run on can run it.
   bool success = 1;
+  // message summarizes; node_checks carries the detail. On a cluster "port in
+  // use" without a node is unactionable, so a caller rendering only this
+  // field is losing the part the operator needs.
   string message = 2;
+  repeated IngesterNodeCheck node_checks = 3;
+}
+
+// IngesterNodeCheck is one node's verdict on a candidate ingester config.
+message IngesterNodeCheck {
+  bytes node_id = 1;
+  bool success = 2;
+  string message = 3;
+  // unreachable distinguishes "this node says no" from "this node did not
+  // answer". They are different operator actions, and collapsing them into
+  // success=false would report a healthy node as a config error.
+  bool unreachable = 4;
 }
 
 message TriggerIngesterRequest {

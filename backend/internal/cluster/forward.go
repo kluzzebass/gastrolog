@@ -52,6 +52,12 @@ type PipelineBacklogDiskExecutor func(ctx context.Context, vaultID glid.GLID) (*
 // GetIndexesExecutor returns index status for a chunk in a local vault.
 type GetIndexesExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) (*gastrologv1.GetIndexesResponse, error)
 
+// ValidateIngesterExecutor validates a candidate ingester config against THIS
+// node — factory construction plus, for listener types, a trial bind. Both are
+// per-node facts, which is why this is asked of a specific node rather than
+// computed anywhere.
+type ValidateIngesterExecutor func(ctx context.Context, ingType string, params map[string]string, id []byte) (bool, string)
+
 // ValidateVaultExecutor validates a local vault and returns the result.
 type ValidateVaultExecutor func(ctx context.Context, vaultID glid.GLID) (*gastrologv1.ValidateVaultResponse, error)
 
@@ -178,6 +184,12 @@ func (s *Server) SetPipelineBacklogDiskExecutor(fn PipelineBacklogDiskExecutor) 
 // SetGetIndexesExecutor injects the callback for handling remote GetIndexes requests.
 func (s *Server) SetGetIndexesExecutor(fn GetIndexesExecutor) {
 	s.getIndexesExecutor = fn
+}
+
+// SetValidateIngesterExecutor injects the callback for handling remote
+// ForwardValidateIngester requests.
+func (s *Server) SetValidateIngesterExecutor(fn ValidateIngesterExecutor) {
+	s.validateIngesterExecutor = fn
 }
 
 // SetValidateVaultExecutor injects the callback for handling remote ValidateVault requests.
@@ -573,6 +585,18 @@ func (s *Server) forwardGetIndexes(ctx context.Context, req *gastrologv1.Forward
 		Sealed:  resp.GetSealed(),
 		Indexes: resp.GetIndexes(),
 	}, nil
+}
+
+// forwardValidateIngester handles the ForwardValidateIngester RPC: runs the
+// per-node ingester checks locally and reports the verdict. A failed check is
+// NOT an RPC error — it is a legitimate answer about this node's state, and
+// making it one would collapse "cannot bind here" into "this node is broken".
+func (s *Server) forwardValidateIngester(ctx context.Context, req *gastrologv1.ForwardValidateIngesterRequest) (*gastrologv1.ForwardValidateIngesterResponse, error) {
+	if s.validateIngesterExecutor == nil {
+		return nil, status.Error(codes.Unavailable, "validate ingester executor not configured")
+	}
+	ok, msg := s.validateIngesterExecutor(ctx, req.GetType(), req.GetParams(), req.GetId())
+	return &gastrologv1.ForwardValidateIngesterResponse{Success: ok, Message: msg}, nil
 }
 
 // forwardValidateVault handles the ForwardValidateVault RPC. Validates a
@@ -1102,6 +1126,10 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:    forwardValidateVaultHandler,
 		},
 		{
+			MethodName: "ForwardValidateIngester",
+			Handler:    forwardValidateIngesterHandler,
+		},
+		{
 			MethodName: "NotifyEviction",
 			Handler:    notifyEvictionHandler,
 		},
@@ -1212,6 +1240,7 @@ type clusterServiceServer interface {
 	forwardGetPipelineBacklog(context.Context, *gastrologv1.ForwardGetPipelineBacklogRequest) (*gastrologv1.ForwardGetPipelineBacklogResponse, error)
 	forwardGetIndexes(context.Context, *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error)
 	forwardValidateVault(context.Context, *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error)
+	forwardValidateIngester(context.Context, *gastrologv1.ForwardValidateIngesterRequest) (*gastrologv1.ForwardValidateIngesterResponse, error)
 	notifyEviction(context.Context, *gastrologv1.NotifyEvictionRequest) (*gastrologv1.NotifyEvictionResponse, error)
 	forwardRemoveNode(context.Context, *gastrologv1.ForwardRemoveNodeRequest) (*gastrologv1.ForwardRemoveNodeResponse, error)
 	forwardSetNodeSuffrage(context.Context, *gastrologv1.ForwardSetNodeSuffrageRequest) (*gastrologv1.ForwardSetNodeSuffrageResponse, error)
@@ -1372,6 +1401,25 @@ func forwardValidateVaultHandler(srv any, ctx context.Context, dec func(any) err
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardValidateVault(ctx, req.(*gastrologv1.ForwardValidateVaultRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardValidateIngesterHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardValidateIngesterRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardValidateIngester(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardValidateIngester",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardValidateIngester(ctx, req.(*gastrologv1.ForwardValidateIngesterRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

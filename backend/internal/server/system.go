@@ -57,15 +57,30 @@ type PeerRouteStatsProvider interface {
 	AggregateRouteRates() (routed, matched *apiv1.ThroughputRate)
 }
 
+// RemoteIngesterValidator asks a specific node to validate a candidate ingester
+// config against ITSELF. Implemented by *cluster.SearchForwarder; nil in
+// single-node mode, where the only assigned node is the local one.
+//
+// Exists because the checks are per-node facts: factory construction can depend
+// on node-local resources, and a listen address free here can be held by an
+// unrelated process elsewhere. No node can answer for another.
+type RemoteIngesterValidator interface {
+	ValidateIngester(ctx context.Context, nodeID string, req *apiv1.ForwardValidateIngesterRequest) (*apiv1.ForwardValidateIngesterResponse, error)
+}
+
 // SystemServerConfig holds all dependencies for SystemServer construction.
 type SystemServerConfig struct {
-	Orch                 *orchestrator.Orchestrator
-	CfgStore             system.Store
-	Factories            orchestrator.Factories
-	CertManager          CertManager
-	PeerStats            PeerIngesterStatsProvider
-	PeerRouteStats       PeerRouteStatsProvider
-	PeerStorageStats     PeerStorageStatsProvider
+	Orch                *orchestrator.Orchestrator
+	CfgStore            system.Store
+	Factories           orchestrator.Factories
+	CertManager         CertManager
+	PeerStats           PeerIngesterStatsProvider
+	PeerRouteStats      PeerRouteStatsProvider
+	PeerStorageStats    PeerStorageStatsProvider
+	RemoteIngesterCheck RemoteIngesterValidator
+	// ClusterTopology supplies node addresses, which is how co-located nodes are
+	// identified. Nil in single-node mode, where nothing can be co-located.
+	ClusterTopology      ClusterStatusProvider
 	LocalNodeID          string
 	AfterConfigApply     func(raftfsm.Notification)
 	ConfigSignal         *notify.Signal
@@ -99,6 +114,8 @@ type SystemServer struct {
 	peerStats            PeerIngesterStatsProvider
 	peerRouteStats       PeerRouteStatsProvider
 	peerStorageStats     PeerStorageStatsProvider
+	remoteIngesterCheck  RemoteIngesterValidator
+	clusterTopology      ClusterStatusProvider
 	localStats           func() *apiv1.NodeStats
 	clusterRouteRates    func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)
 	localNodeID          string
@@ -129,6 +146,8 @@ func NewSystemServer(cfg SystemServerConfig) *SystemServer {
 		peerStats:            cfg.PeerStats,
 		peerRouteStats:       cfg.PeerRouteStats,
 		peerStorageStats:     cfg.PeerStorageStats,
+		remoteIngesterCheck:  cfg.RemoteIngesterCheck,
+		clusterTopology:      cfg.ClusterTopology,
 		localStats:           cfg.LocalStats,
 		clusterRouteRates:    cfg.ClusterRouteRates,
 		localNodeID:          cfg.LocalNodeID,

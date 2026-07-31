@@ -91,6 +91,26 @@ type PeerState struct {
 	raft    map[string]raftEntry
 	ttl     time.Duration
 	raftTTL time.Duration
+
+	// onContactResumed fires when a peer's Raft contact goes from stale to
+	// fresh. Consumers that react to a peer RETURNING cannot use broadcast
+	// arrival alone: a broadcast is only delivered to its receivers, so a
+	// node has no event of its own to observe, and a peer whose Raft lane
+	// recovers before its broadcast path would go unnoticed in a cluster
+	// with no third node to hear from. Optional; nil disables the signal.
+	onContactResumed func(peerID string)
+}
+
+// SetContactResumedHook installs the stale→fresh Raft-contact callback. Not
+// safe to call concurrently with RecordRaftContact — wire it at construction
+// time, before the transport starts.
+//
+// The callback runs on the Raft receive path, so it must not block: signal a
+// worker and return.
+func (p *PeerState) SetContactResumedHook(fn func(peerID string)) {
+	p.mu.Lock()
+	p.onContactResumed = fn
+	p.mu.Unlock()
 }
 
 // MarkUnreachable immediately expires a peer so LivePeers() stops including
@@ -582,11 +602,22 @@ func (p *PeerState) RecordRaftContact(peerID, _ string, at time.Time) {
 	}
 	p.mu.Lock()
 	e := p.raft[peerID]
+	// A lapse longer than raftTTL means this peer was not live by Raft
+	// evidence (isLiveLocked's rule), so crossing back is a resumption edge
+	// rather than one of the several-per-second contacts that follow it.
+	resumed := p.onContactResumed != nil && p.raftTTL > 0 &&
+		!e.lastContact.IsZero() && at.Sub(e.lastContact) > p.raftTTL
 	if at.After(e.lastContact) {
 		e.lastContact = at
 		p.raft[peerID] = e
 	}
+	hook := p.onContactResumed
 	p.mu.Unlock()
+	// Outside the lock: the callback signals a worker, and holding p.mu
+	// across it would put a consumer between every Raft RPC and its record.
+	if resumed {
+		hook(peerID)
+	}
 }
 
 // RecordRaftProbe folds an outbound Raft RPC ATTEMPT for peerID into the

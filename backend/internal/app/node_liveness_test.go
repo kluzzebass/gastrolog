@@ -11,14 +11,17 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/notify"
 	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
 )
 
-// newSweepTest stands up an unreachableSweep talking to an in-process
-// memory Store and PeerState. The clusterSrv field is left nil because
-// the tests drive tick(ctx) directly, bypassing the IsLeader gate.
-func newSweepTest(t *testing.T, threshold, peerTTL time.Duration) (*unreachableSweep, *sysmem.Store, *cluster.PeerState, glid.GLID, glid.GLID) {
+// newSweepTest stands up a nodeLiveness talking to an in-process memory
+// Store and PeerState. isLeader is left nil because the tests drive the
+// phases (sweepUnreachable, autoClear, alertTick) directly, bypassing the
+// gate that tickOnce and autoClearIfLeader apply. Tests that need the gate
+// inject their own.
+func newSweepTest(t *testing.T, threshold, peerTTL time.Duration) (*nodeLiveness, *sysmem.Store, *cluster.PeerState, glid.GLID, glid.GLID) {
 	t.Helper()
 	store := sysmem.NewStore()
 	peerState := cluster.NewPeerState(peerTTL, 0)
@@ -37,13 +40,14 @@ func newSweepTest(t *testing.T, threshold, peerTTL time.Duration) (*unreachableS
 		t.Fatalf("PutNode peer: %v", err)
 	}
 
-	sweep := &unreachableSweep{
+	sweep := &nodeLiveness{
 		cfgStore:    store,
 		peerState:   peerState,
 		localNodeID: localID.String(),
 		threshold:   threshold,
 		logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 		now:         time.Now,
+		wake:        notify.NewSignal(),
 	}
 	return sweep, store, peerState, localID, peerID
 }
@@ -53,7 +57,7 @@ func setPeerLastSeen(t *testing.T, ps *cluster.PeerState, peerID string, lastSee
 	ps.Update(peerID, &gastrologv1.NodeStats{}, lastSeen)
 }
 
-func TestUnreachableSweep_LiveToUnreachable(t *testing.T) {
+func TestNodeLiveness_LiveToUnreachable(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	threshold := time.Minute
@@ -63,7 +67,7 @@ func TestUnreachableSweep_LiveToUnreachable(t *testing.T) {
 	sweep.now = func() time.Time { return time.Unix(2000, 0) }
 	setPeerLastSeen(t, peerState, peerID.String(), time.Unix(1000, 0))
 
-	sweep.tick(ctx)
+	sweep.sweepUnreachable(ctx)
 
 	n, err := store.GetNode(ctx, peerID)
 	if err != nil || n == nil {
@@ -80,13 +84,13 @@ func TestUnreachableSweep_LiveToUnreachable(t *testing.T) {
 	}
 }
 
-func TestUnreachableSweep_LiveToUnreachable_NeverSeen(t *testing.T) {
+func TestNodeLiveness_LiveToUnreachable_NeverSeen(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	sweep, store, _, _, peerID := newSweepTest(t, time.Minute, 10*time.Second)
 
 	// No PeerState entry for peer → zero LastSeen. Sweep must NOT transition.
-	sweep.tick(ctx)
+	sweep.sweepUnreachable(ctx)
 
 	n, _ := store.GetNode(ctx, peerID)
 	if n.EffectiveState() != system.NodeStateLive {
@@ -94,7 +98,7 @@ func TestUnreachableSweep_LiveToUnreachable_NeverSeen(t *testing.T) {
 	}
 }
 
-func TestUnreachableSweep_LiveToUnreachable_WithinThreshold(t *testing.T) {
+func TestNodeLiveness_LiveToUnreachable_WithinThreshold(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	threshold := time.Minute
@@ -104,7 +108,7 @@ func TestUnreachableSweep_LiveToUnreachable_WithinThreshold(t *testing.T) {
 	sweep.now = func() time.Time { return time.Unix(2000, 0) }
 	setPeerLastSeen(t, peerState, peerID.String(), time.Unix(1990, 0))
 
-	sweep.tick(ctx)
+	sweep.sweepUnreachable(ctx)
 
 	n, _ := store.GetNode(ctx, peerID)
 	if n.EffectiveState() != system.NodeStateLive {
@@ -112,7 +116,7 @@ func TestUnreachableSweep_LiveToUnreachable_WithinThreshold(t *testing.T) {
 	}
 }
 
-func TestUnreachableSweep_UnreachableToLive_AutoClear(t *testing.T) {
+func TestNodeLiveness_UnreachableToLive_AutoClear(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	threshold := time.Minute
@@ -127,7 +131,7 @@ func TestUnreachableSweep_UnreachableToLive_AutoClear(t *testing.T) {
 	sweep.now = func() time.Time { return time.Unix(2000, 0) }
 	setPeerLastSeen(t, peerState, peerID.String(), time.Unix(1990, 0))
 
-	sweep.tick(ctx)
+	sweep.autoClear(ctx)
 
 	n, _ := store.GetNode(ctx, peerID)
 	if n.EffectiveState() != system.NodeStateLive {
@@ -138,7 +142,7 @@ func TestUnreachableSweep_UnreachableToLive_AutoClear(t *testing.T) {
 	}
 }
 
-func TestUnreachableSweep_UnreachableToLive_StillStale(t *testing.T) {
+func TestNodeLiveness_UnreachableToLive_StillStale(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	threshold := time.Minute
@@ -152,7 +156,7 @@ func TestUnreachableSweep_UnreachableToLive_StillStale(t *testing.T) {
 	sweep.now = func() time.Time { return time.Unix(2000, 0) }
 	setPeerLastSeen(t, peerState, peerID.String(), time.Unix(1000, 0))
 
-	sweep.tick(ctx)
+	sweep.autoClear(ctx)
 
 	n, _ := store.GetNode(ctx, peerID)
 	if n.EffectiveState() != system.NodeStateUnreachable {
@@ -160,7 +164,7 @@ func TestUnreachableSweep_UnreachableToLive_StillStale(t *testing.T) {
 	}
 }
 
-func TestUnreachableSweep_OperatorStatesUntouched(t *testing.T) {
+func TestNodeLiveness_OperatorStatesUntouched(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	threshold := time.Minute
@@ -200,7 +204,8 @@ func TestUnreachableSweep_OperatorStatesUntouched(t *testing.T) {
 			sweep.now = func() time.Time { return time.Unix(3000, 0) }
 			setPeerLastSeen(t, peerState, peerID.String(), time.Unix(1000, 0))
 
-			sweep.tick(ctx)
+			sweep.sweepUnreachable(ctx)
+			sweep.autoClear(ctx)
 
 			n, _ := store.GetNode(ctx, peerID)
 			if n.EffectiveState() != tc.state {
@@ -228,7 +233,8 @@ func TestUnreachableSweep_OperatorStatesUntouched(t *testing.T) {
 			sweep.now = func() time.Time { return time.Unix(3000, 0) }
 			setPeerLastSeen(t, peerState, peerID.String(), time.Unix(2990, 0))
 
-			sweep.tick(ctx)
+			sweep.sweepUnreachable(ctx)
+			sweep.autoClear(ctx)
 
 			n, _ := store.GetNode(ctx, peerID)
 			if n.EffectiveState() != tc.state {
@@ -238,7 +244,7 @@ func TestUnreachableSweep_OperatorStatesUntouched(t *testing.T) {
 	}
 }
 
-func TestUnreachableSweep_SkipsLocalNode(t *testing.T) {
+func TestNodeLiveness_SkipsLocalNode(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	threshold := time.Minute
@@ -249,7 +255,7 @@ func TestUnreachableSweep_SkipsLocalNode(t *testing.T) {
 	sweep.now = func() time.Time { return time.Unix(2000, 0) }
 	setPeerLastSeen(t, peerState, localID.String(), time.Unix(1000, 0))
 
-	sweep.tick(ctx)
+	sweep.sweepUnreachable(ctx)
 
 	n, _ := store.GetNode(ctx, localID)
 	if n.EffectiveState() != system.NodeStateLive {
@@ -257,25 +263,25 @@ func TestUnreachableSweep_SkipsLocalNode(t *testing.T) {
 	}
 }
 
-func TestUnreachableSweep_EnvVarThresholdOverride(t *testing.T) {
+func TestNodeLiveness_EnvVarThresholdOverride(t *testing.T) {
 	// Not parallel: mutates the process environment.
 	t.Setenv("GLOG_UNREACHABLE_THRESHOLD", "2s")
 	store := sysmem.NewStore()
 	peerState := cluster.NewPeerState(10*time.Second, 0)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	sweep := newUnreachableSweep(store, nil, peerState, "local", nil, logger)
+	sweep := newNodeLiveness(store, nil, peerState, "local", nil, logger)
 	if sweep.threshold != 2*time.Second {
 		t.Fatalf("expected threshold=2s from env var, got %v", sweep.threshold)
 	}
 }
 
-func TestUnreachableSweep_EnvVarInvalidFallsBack(t *testing.T) {
+func TestNodeLiveness_EnvVarInvalidFallsBack(t *testing.T) {
 	// Not parallel: mutates the process environment.
 	t.Setenv("GLOG_UNREACHABLE_THRESHOLD", "not-a-duration")
 	store := sysmem.NewStore()
 	peerState := cluster.NewPeerState(10*time.Second, 0)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	sweep := newUnreachableSweep(store, nil, peerState, "local", nil, logger)
+	sweep := newNodeLiveness(store, nil, peerState, "local", nil, logger)
 	if sweep.threshold != defaultUnreachableThreshold {
 		t.Fatalf("expected default threshold on invalid env, got %v", sweep.threshold)
 	}
@@ -285,7 +291,7 @@ func TestUnreachableSweep_EnvVarInvalidFallsBack(t *testing.T) {
 // alert.Collector and a peer node that the test can directly mutate
 // via the store. The clusterSrv field stays nil — alertTick does not
 // touch it (the alert phase is not leader-gated).
-func newAlertSweepTest(t *testing.T, alertThreshold time.Duration) (*unreachableSweep, *sysmem.Store, *alert.Collector, glid.GLID) {
+func newAlertSweepTest(t *testing.T, alertThreshold time.Duration) (*nodeLiveness, *sysmem.Store, *alert.Collector, glid.GLID) {
 	t.Helper()
 	store := sysmem.NewStore()
 	peerState := cluster.NewPeerState(time.Hour, 0)
@@ -297,7 +303,7 @@ func newAlertSweepTest(t *testing.T, alertThreshold time.Duration) (*unreachable
 	}); err != nil {
 		t.Fatalf("PutNode peer: %v", err)
 	}
-	sweep := &unreachableSweep{
+	sweep := &nodeLiveness{
 		cfgStore:       store,
 		peerState:      peerState,
 		localNodeID:    glid.New().String(),
@@ -319,7 +325,7 @@ func findAlert(collector *alert.Collector, id string) *alert.Alarm {
 	return nil
 }
 
-func TestUnreachableSweep_AlertFiresAfterThreshold(t *testing.T) {
+func TestNodeLiveness_AlertFiresAfterThreshold(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	threshold := time.Minute
@@ -348,7 +354,7 @@ func TestUnreachableSweep_AlertFiresAfterThreshold(t *testing.T) {
 	}
 }
 
-func TestUnreachableSweep_AlertSuppressedWithinThreshold(t *testing.T) {
+func TestNodeLiveness_AlertSuppressedWithinThreshold(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	threshold := 5 * time.Minute
@@ -370,7 +376,7 @@ func TestUnreachableSweep_AlertSuppressedWithinThreshold(t *testing.T) {
 	}
 }
 
-func TestUnreachableSweep_AlertClearsOnRecovery(t *testing.T) {
+func TestNodeLiveness_AlertClearsOnRecovery(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	threshold := time.Minute
@@ -402,7 +408,7 @@ func TestUnreachableSweep_AlertClearsOnRecovery(t *testing.T) {
 	}
 }
 
-func TestUnreachableSweep_AlertSilentInMaintenance(t *testing.T) {
+func TestNodeLiveness_AlertSilentInMaintenance(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	threshold := time.Minute
@@ -435,7 +441,7 @@ func TestUnreachableSweep_AlertSilentInMaintenance(t *testing.T) {
 // because the placement manager's PeerState liveness check reads the
 // system clock directly — both clocks must agree on whether the peer
 // is currently reachable for the chained assertion to be meaningful.
-func TestUnreachableSweep_PlacementGuardChain(t *testing.T) {
+func TestNodeLiveness_PlacementGuardChain(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	threshold := 100 * time.Millisecond
@@ -452,7 +458,7 @@ func TestUnreachableSweep_PlacementGuardChain(t *testing.T) {
 	// --- Stage 1: peer's heartbeat is older than threshold. ---
 	setPeerLastSeen(t, peerState, peerID.String(), time.Now().Add(-5*threshold))
 
-	sweep.tick(ctx)
+	sweep.sweepUnreachable(ctx)
 
 	n, _ := store.GetNode(ctx, peerID)
 	if n.EffectiveState() != system.NodeStateUnreachable {
@@ -471,7 +477,7 @@ func TestUnreachableSweep_PlacementGuardChain(t *testing.T) {
 	// --- Stage 2: peer's heartbeat resumes (current wall-clock). ---
 	setPeerLastSeen(t, peerState, peerID.String(), time.Now())
 
-	sweep.tick(ctx)
+	sweep.autoClear(ctx)
 
 	n, _ = store.GetNode(ctx, peerID)
 	if n.EffectiveState() != system.NodeStateLive {
@@ -551,17 +557,15 @@ func TestStartUnreachableSweep_PropagatesAddJobError(t *testing.T) {
 	}
 }
 
-// TestTickOnce_LeaderRunsBothPhases verifies the integrated tick
-// runs the transition phase only when clusterSrv reports leadership,
-// and the alert phase unconditionally.
+// The integrated tick runs Live→Unreachable only on the cluster-ctl leader,
+// because it proposes Raft commands and every follower would duplicate them.
+// The alert phase runs everywhere: alerts live in each node's local collector,
+// so each node's UI needs its own copy.
 func TestTickOnce_NonLeaderRunsAlertPhaseOnly(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	sweep, store, _, _, peerID := newSweepTest(t, time.Minute, 10*time.Second)
-	// nil clusterSrv stands in for "not leader" — IsLeader can't be
-	// called, but tickOnce's `s.clusterSrv != nil` guard makes the
-	// transition phase a no-op in that case.
-	sweep.clusterSrv = nil
+	sweep.isLeader = func() bool { return false }
 	sweep.alerts = alert.New()
 	sweep.alertThreshold = time.Minute
 	stateSince := time.Unix(1000, 0)

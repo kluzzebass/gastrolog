@@ -130,22 +130,40 @@ export function useTestIngester() {
 /**
  * Auto-checks listen address availability for listener ingesters.
  * Calls TestIngester on the server with debounce whenever params change.
+ *
+ * The assignment is part of the question, not context: a port is free or taken
+ * per node, so the server has to know which nodes to ask. Omitting it asks only
+ * whichever node served the request, which is the whole node it happens to be
+ * connected to and no others.
+ *
+ * The assignment is also part of the query key — changing which nodes an
+ * ingester targets changes the answer, so a cached verdict for the previous
+ * assignment must not be reused.
  */
-export function useCheckListenAddrs(type: string, params: Record<string, string>, id: string) {
+export function useCheckListenAddrs(
+  type: string,
+  params: Record<string, string>,
+  id: string,
+  nodeIds: string[] = [],
+  allNodes = false,
+) {
   const LISTENER_TYPES = new Set(["syslog", "http", "fluentfwd", "otlp", "relp"]);
   const isListener = LISTENER_TYPES.has(type);
 
   // Build a stable key from the address-relevant params.
   const stripped = stripEmptyParams(params);
   const paramKey = isListener ? JSON.stringify(stripped) : "";
+  const assignmentKey = allNodes ? "all" : [...nodeIds].sort().join(",");
 
   return useQuery({
-    queryKey: ["checkListenAddrs", type, paramKey, id],
+    queryKey: ["checkListenAddrs", type, paramKey, id, assignmentKey],
     queryFn: async () => {
       const response = await systemClient.testIngester({
         type,
         params: stripped,
         id: id ? decode(id) : new Uint8Array(16),
+        nodeIds: nodeIds.map(decode),
+        allNodes,
       });
       return response;
     },
