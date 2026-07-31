@@ -30,10 +30,18 @@ failed=0
 # prefix, and a blobstore reachability probe key. Requiring a digit would be a
 # tempting shortcut but is wrong —
 # 55 real issue ids have none. Add to the list when a new code token collides.
-STAGED_SRC=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(go|ts|tsx)$' | grep -v '/gen/' || true)
-if [ -n "$STAGED_SRC" ]; then
+#
+# Both vocabulary checks scan the WHOLE tree, not just the staged diff. A
+# staged-only gate can only see files you are currently touching, so a file
+# that loses its fix — a bad `git checkout --`, a botched merge resolution, a
+# rebase dropping a hunk — has no staged change and passes unseen. That is not
+# hypothetical: it is how two `tier` comments reached main after the sweep that
+# removed them reported clean. Both counts are zero, so a whole-tree scan costs
+# one git grep and can never be satisfied by not touching the file.
+SRC_PATHS=$(printf "%s " '*.go' '*.ts' '*.tsx' ':!*/gen/*')
+if true; then
   printf "Checking for tracker IDs in source... "
-  HITS=$(git grep -nE 'gastrolog-[a-z0-9]{4,}' -- $STAGED_SRC 2>/dev/null \
+  HITS=$(git grep -nE 'gastrolog-[a-z0-9]{4,}' -- $SRC_PATHS 2>/dev/null \
     | grep -vE 'gastrolog-(raft|cluster|node|test|lifecycle|connection)\b' || true)
   if [ -z "$HITS" ]; then
     printf "${GREEN}ok${NC}\n"
@@ -57,9 +65,9 @@ fi
 # (AccessTier, SetTier, SetBlobTier, types.Tier, INTELLIGENT_TIERING) rather
 # than whole files: a blobstore adapter may call Azure's SetTier and still not
 # describe our own behaviour as tiered.
-if [ -n "$STAGED_SRC" ]; then
+if true; then
   printf "Checking for banned 'tier' vocabulary... "
-  TIER=$(git grep -inE 'tier' -- $STAGED_SRC 2>/dev/null \
+  TIER=$(git grep -inE 'tier' -- $SRC_PATHS 2>/dev/null \
     | grep -viE 'frontier|AccessTier|SetTier|SetBlobTier|types\.Tier|INTELLIGENT_TIERING' || true)
   if [ -z "$TIER" ]; then
     printf "${GREEN}ok${NC}\n"
