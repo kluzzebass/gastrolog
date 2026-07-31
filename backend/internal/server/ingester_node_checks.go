@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"net"
 	"sort"
 	"strings"
 	"sync"
@@ -113,6 +114,92 @@ func (s *SystemServer) ingesterCheckTargets(ctx context.Context, nodeIDs []strin
 	return out
 }
 
+// hostByNode maps node ID to the host part of its Raft address. Two nodes
+// sharing a host cannot both hold a listen address, whatever either of them
+// reports on its own.
+//
+// Empty when there is no cluster topology to read, which is single-node mode —
+// where nothing can be co-located anyway.
+func (s *SystemServer) hostByNode() map[string]string {
+	if s.clusterTopology == nil {
+		return nil
+	}
+	servers, err := s.clusterTopology.Servers()
+	if err != nil {
+		return nil
+	}
+	out := make(map[string]string, len(servers))
+	for _, srv := range servers {
+		host, _, splitErr := net.SplitHostPort(srv.Address)
+		if splitErr != nil {
+			host = srv.Address
+		}
+		out[srv.ID] = host
+	}
+	return out
+}
+
+// coLocatedListenerChecks decides, without probing, the nodes that cannot get
+// the address because they share a host with another assigned node.
+//
+// This has to be settled up front rather than discovered by binding. The probes
+// run concurrently, so co-located nodes collide with EACH OTHER: one wins the
+// race and the losers report "address already in use" against a holder that is
+// this very check. The verdict would be right — one host holds an address once
+// — but it would blame an arbitrary node, and differently on each run.
+//
+// Probing them sequentially instead would be worse and deterministically wrong:
+// each node would bind, release, and report the address available, and the
+// conflict would surface at runtime after the operator saved a config that
+// cannot work.
+//
+// Returns the settled checks plus the targets still worth asking.
+func (s *SystemServer) coLocatedListenerChecks(
+	ingType string, targets []string, nodeName func(string) string,
+) (settled []*apiv1.IngesterNodeCheck, remaining []string) {
+	reg, ok := s.factories.IngesterTypes[ingType]
+	if !ok || reg.ListenAddrs == nil || len(targets) < 2 {
+		return nil, targets
+	}
+	hosts := s.hostByNode()
+	if len(hosts) == 0 {
+		return nil, targets
+	}
+
+	byHost := map[string][]string{}
+	for _, id := range targets {
+		host, known := hosts[id]
+		if !known {
+			// No address for it: cannot reason about co-location, so let the
+			// probe answer.
+			byHost[""] = append(byHost[""], id)
+			continue
+		}
+		byHost[host] = append(byHost[host], id)
+	}
+
+	for host, ids := range byHost {
+		if host == "" || len(ids) < 2 {
+			remaining = append(remaining, ids...)
+			continue
+		}
+		names := make([]string, len(ids))
+		for i, id := range ids {
+			names[i] = nodeName(id)
+		}
+		sort.Strings(names)
+		msg := fmt.Sprintf("shares host %s with %s; a listen address can only be held by one node",
+			host, strings.Join(names, ", "))
+		for _, id := range ids {
+			settled = append(settled, &apiv1.IngesterNodeCheck{
+				NodeId: []byte(id), Success: false, Message: msg,
+			})
+		}
+	}
+	sort.Strings(remaining)
+	return settled, remaining
+}
+
 // checkIngesterOnNodes asks every target node for its verdict, concurrently.
 // The local node answers in-process; the rest are asked over the cluster
 // forward.
@@ -123,6 +210,8 @@ func (s *SystemServer) ingesterCheckTargets(ctx context.Context, nodeIDs []strin
 func (s *SystemServer) checkIngesterOnNodes(
 	ctx context.Context, ingType string, params map[string]string, rawID []byte, targets []string,
 ) []*apiv1.IngesterNodeCheck {
+	settled, targets := s.coLocatedListenerChecks(ingType, targets, s.ingesterNodeLabel(ctx))
+
 	results := make([]*apiv1.IngesterNodeCheck, len(targets))
 	var wg sync.WaitGroup
 	for i, nodeID := range targets {
@@ -160,7 +249,7 @@ func (s *SystemServer) checkIngesterOnNodes(
 		}(i, nodeID)
 	}
 	wg.Wait()
-	return results
+	return append(settled, results...)
 }
 
 // summarizeIngesterChecks folds per-node verdicts into the overall answer.

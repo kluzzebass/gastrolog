@@ -12,6 +12,7 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
 	indexmem "gastrolog/internal/index/memory"
@@ -56,7 +57,20 @@ type ingesterCheckCluster struct {
 
 // newIngesterCheckCluster stands up one real SystemServer per named node,
 // sharing a replicated-config stand-in, each able to ask the others.
-func newIngesterCheckCluster(t *testing.T, names ...string) *ingesterCheckCluster {
+// sameHost models the dev-cluster shape (several nodes on one machine);
+// distinctHosts models a normal multi-host cluster. The harness runs every node
+// in ONE process either way, so distinctHosts is a deliberate double: it is what
+// lets the trial-bind path be exercised at all. Its cost is that concurrent
+// probes of one address still contend in-process, which is why the free-port
+// case below assigns a single node.
+type topologyMode int
+
+const (
+	distinctHosts topologyMode = iota
+	sameHost
+)
+
+func newIngesterCheckCluster(t *testing.T, mode topologyMode, names ...string) *ingesterCheckCluster {
 	t.Helper()
 	ctx := context.Background()
 	cfgStore := sysmem.NewStore()
@@ -80,6 +94,12 @@ func newIngesterCheckCluster(t *testing.T, names ...string) *ingesterCheckCluste
 		},
 	}
 
+	ordered := make([]glid.GLID, len(names))
+	for i, name := range names {
+		ordered[i] = idByName[name]
+	}
+	topo := &mnTopology{ids: ordered, mode: mode}
+
 	checkers := &mnIngesterCheckers{byNode: map[string]func(context.Context, string, map[string]string, []byte) (bool, string){}}
 	serverByNode := make(map[string]*server.SystemServer, len(names))
 	for _, name := range names {
@@ -93,6 +113,7 @@ func newIngesterCheckCluster(t *testing.T, names ...string) *ingesterCheckCluste
 			Factories:           factories,
 			LocalNodeID:         idByName[name].String(),
 			RemoteIngesterCheck: checkers,
+			ClusterTopology:     topo,
 		})
 		serverByNode[name] = s
 		checkers.byNode[idByName[name].String()] = s.LocalIngesterCheck
@@ -132,7 +153,7 @@ func testIngesterOn(ctx context.Context, s *server.SystemServer, params map[stri
 // ever looked at whoever picked up.
 func TestMultiNode_PortHeldOnAnAssignedNodeIsRejected(t *testing.T) {
 	t.Parallel()
-	c := newIngesterCheckCluster(t, "coord", "data-1", "data-2")
+	c := newIngesterCheckCluster(t, distinctHosts, "coord", "data-1", "data-2")
 	ctx := context.Background()
 
 	// Bound in this process, which is every node's process in this harness —
@@ -182,7 +203,7 @@ func TestMultiNode_PortHeldOnAnAssignedNodeIsRejected(t *testing.T) {
 // for the case it exists to cover.
 func TestMultiNode_FreePortIsAvailableThroughTheFanOut(t *testing.T) {
 	t.Parallel()
-	c := newIngesterCheckCluster(t, "coord", "data-1", "data-2")
+	c := newIngesterCheckCluster(t, distinctHosts, "coord", "data-1", "data-2")
 	ctx := context.Background()
 
 	// Bind, read the assigned port, release: a port that was free a moment ago
@@ -212,7 +233,7 @@ func TestMultiNode_FreePortIsAvailableThroughTheFanOut(t *testing.T) {
 // AllNodes must ask every member, including the one serving the request.
 func TestMultiNode_AllNodesAsksEveryMemberIncludingTheResponder(t *testing.T) {
 	t.Parallel()
-	c := newIngesterCheckCluster(t, "coord", "data-1", "data-2")
+	c := newIngesterCheckCluster(t, distinctHosts, "coord", "data-1", "data-2")
 	ctx := context.Background()
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -248,7 +269,7 @@ func TestMultiNode_AllNodesAsksEveryMemberIncludingTheResponder(t *testing.T) {
 // assignment and a node outside it must agree.
 func TestMultiNode_VerdictIsIndependentOfWhichNodeAnswers(t *testing.T) {
 	t.Parallel()
-	c := newIngesterCheckCluster(t, "coord", "data-1", "data-2")
+	c := newIngesterCheckCluster(t, distinctHosts, "coord", "data-1", "data-2")
 	ctx := context.Background()
 
 	addr := holdPort(t, "127.0.0.1:0")
@@ -277,5 +298,75 @@ func TestMultiNode_VerdictIsIndependentOfWhichNodeAnswers(t *testing.T) {
 	if len(fromOutside.GetNodeChecks()) != len(fromInside.GetNodeChecks()) {
 		t.Errorf("node-check count differs by responder: %d vs %d",
 			len(fromOutside.GetNodeChecks()), len(fromInside.GetNodeChecks()))
+	}
+}
+
+// mnTopology reports node addresses. Under sameHost every node shares one — the
+// literal truth in this harness, and a real deployment shape besides: the dev
+// cluster runs four nodes on one machine.
+type mnTopology struct {
+	ids  []glid.GLID
+	mode topologyMode
+}
+
+func (m *mnTopology) Servers() ([]cluster.RaftServer, error) {
+	out := make([]cluster.RaftServer, len(m.ids))
+	for i, id := range m.ids {
+		host := fmt.Sprintf("10.0.0.%d", i+1)
+		if m.mode == sameHost {
+			host = "10.0.0.1"
+		}
+		out[i] = cluster.RaftServer{ID: id.String(), Address: fmt.Sprintf("%s:%d", host, 8300+i)}
+	}
+	return out, nil
+}
+func (m *mnTopology) LeaderInfo() (string, string)  { return "", "" }
+func (m *mnTopology) LocalStats() map[string]string { return nil }
+func (m *mnTopology) IsLeader() bool                { return false }
+func (m *mnTopology) LeadershipTransfer() error     { return nil }
+
+// The dev-cluster shape: several assigned nodes on one host. A listen address
+// can only be held once there, so the config is impossible — and the answer
+// must say that, the same way every time.
+//
+// Before this was decided from topology, the concurrent probes collided with
+// each other: the verdict was right, but it blamed whichever node lost the
+// race, and a rerun could blame a different one.
+func TestMultiNode_CoLocatedNodesRejectListenerWithoutBlamingARaceLoser(t *testing.T) {
+	t.Parallel()
+	c := newIngesterCheckCluster(t, sameHost, "coord", "data-1", "data-2")
+	ctx := context.Background()
+
+	// A genuinely free port: the rejection must come from co-location, not from
+	// anything being held.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("cannot bind: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	var messages []string
+	for range 5 {
+		resp, respErr := testIngesterOn(ctx, c.serverByNode["coord"], map[string]string{"tcp_addr": addr},
+			[]glid.GLID{c.idByName["data-1"], c.idByName["data-2"]}, false)
+		if respErr != nil {
+			t.Fatalf("TestIngester: %v", respErr)
+		}
+		if resp.GetSuccess() {
+			t.Fatal("accepted a listener for two nodes on one host; only one of them can hold the address")
+		}
+		if !strings.Contains(resp.GetMessage(), "10.0.0.1") {
+			t.Errorf("message %q does not explain that the nodes share a host", resp.GetMessage())
+		}
+		if strings.Contains(resp.GetMessage(), "already in use") {
+			t.Errorf("message %q still reports a bind conflict; the address is free, the assignment is the problem", resp.GetMessage())
+		}
+		messages = append(messages, resp.GetMessage())
+	}
+	for i, m := range messages {
+		if m != messages[0] {
+			t.Fatalf("verdict varies between runs:\n  run 0: %q\n  run %d: %q", messages[0], i, m)
+		}
 	}
 }

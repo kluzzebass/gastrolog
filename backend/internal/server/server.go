@@ -630,6 +630,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		PeerRouteStats:      s.peerRouteStats,
 		PeerStorageStats:    s.peerStorageStats,
 		RemoteIngesterCheck: s.remoteIngesterCheck,
+		ClusterTopology:     s.cluster,
 		LocalStats:          s.localStatsFn,
 		ClusterRouteRates:   s.clusterRouteRatesFn,
 		LocalNodeID:         s.localNodeID,

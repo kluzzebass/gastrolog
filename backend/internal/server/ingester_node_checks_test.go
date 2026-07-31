@@ -8,7 +8,10 @@ import (
 	"testing"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
 )
@@ -255,5 +258,134 @@ func TestSummarizeIngesterChecks_FailureWinsOverUnreachable(t *testing.T) {
 	}
 	if !strings.Contains(msg, "n3") {
 		t.Errorf("message %q does not lead with the actionable failure", msg)
+	}
+}
+
+// fakeTopology reports node addresses so co-location can be decided without a
+// cluster.
+type fakeTopology struct{ addrs map[string]string }
+
+func (f *fakeTopology) Servers() ([]cluster.RaftServer, error) {
+	out := make([]cluster.RaftServer, 0, len(f.addrs))
+	for id, addr := range f.addrs {
+		out = append(out, cluster.RaftServer{ID: id, Address: addr})
+	}
+	return out, nil
+}
+func (f *fakeTopology) LeaderInfo() (string, string)  { return "", "" }
+func (f *fakeTopology) LocalStats() map[string]string { return nil }
+func (f *fakeTopology) IsLeader() bool                { return false }
+func (f *fakeTopology) LeadershipTransfer() error     { return nil }
+
+func listenerFactories() orchestrator.Factories {
+	return orchestrator.Factories{
+		IngesterTypes: map[string]orchestrator.IngesterRegistration{
+			"syslog": {ListenAddrs: func(map[string]string) []ingestion.ListenAddr { return nil }},
+			"kafka":  {}, // no ListenAddrs: not a listener
+		},
+	}
+}
+
+// Two assigned nodes on one host cannot both hold a listen address. Deciding it
+// from topology rather than from a bind race is what makes the answer the same
+// on every run — previously the losers of the race were blamed, and which nodes
+// those were varied.
+func TestCoLocatedListenerChecks_SharedHostIsSettledWithoutProbing(t *testing.T) {
+	t.Parallel()
+	s := &SystemServer{
+		localNodeID: "n1",
+		factories:   listenerFactories(),
+		clusterTopology: &fakeTopology{addrs: map[string]string{
+			"n1": "10.0.0.1:8300",
+			"n2": "10.0.0.1:8301", // same host as n1
+			"n3": "10.0.0.2:8300",
+		}},
+	}
+
+	settled, remaining := s.coLocatedListenerChecks("syslog", []string{"n1", "n2", "n3"}, func(id string) string { return id })
+	if len(settled) != 2 {
+		t.Fatalf("settled %d, want both co-located nodes decided up front", len(settled))
+	}
+	for _, c := range settled {
+		if c.GetSuccess() {
+			t.Errorf("node %s reported success despite sharing a host", c.GetNodeId())
+		}
+		if !strings.Contains(c.GetMessage(), "10.0.0.1") {
+			t.Errorf("message %q does not name the shared host", c.GetMessage())
+		}
+	}
+	if len(remaining) != 1 || remaining[0] != "n3" {
+		t.Fatalf("remaining = %v, want only the node that has its host to itself", remaining)
+	}
+}
+
+// Determinism is the point: the same inputs must produce the same verdict and
+// the same blame, run after run. The old behaviour depended on which concurrent
+// bind happened to win.
+func TestCoLocatedListenerChecks_IsDeterministic(t *testing.T) {
+	t.Parallel()
+	s := &SystemServer{
+		localNodeID: "n1",
+		factories:   listenerFactories(),
+		clusterTopology: &fakeTopology{addrs: map[string]string{
+			"n1": "10.0.0.1:8300", "n2": "10.0.0.1:8301", "n3": "10.0.0.1:8302",
+		}},
+	}
+	var first string
+	for range 20 {
+		settled, _ := s.coLocatedListenerChecks("syslog", []string{"n1", "n2", "n3"}, func(id string) string { return id })
+		_, msg := summarizeIngesterChecks(settled, func(id string) string { return id })
+		if first == "" {
+			first = msg
+			continue
+		}
+		if msg != first {
+			t.Fatalf("verdict varies between runs:\n  %q\n  %q", first, msg)
+		}
+	}
+}
+
+func TestCoLocatedListenerChecks_DistinctHostsAreAllProbed(t *testing.T) {
+	t.Parallel()
+	s := &SystemServer{
+		localNodeID: "n1",
+		factories:   listenerFactories(),
+		clusterTopology: &fakeTopology{addrs: map[string]string{
+			"n1": "10.0.0.1:8300", "n2": "10.0.0.2:8300", "n3": "10.0.0.3:8300",
+		}},
+	}
+	settled, remaining := s.coLocatedListenerChecks("syslog", []string{"n1", "n2", "n3"}, func(id string) string { return id })
+	if len(settled) != 0 {
+		t.Errorf("settled %d without probing; nothing is co-located here", len(settled))
+	}
+	if len(remaining) != 3 {
+		t.Errorf("remaining = %v, want all three probed", remaining)
+	}
+}
+
+// A non-listener binds nothing, so sharing a host is irrelevant to it.
+func TestCoLocatedListenerChecks_NonListenerIsUnaffected(t *testing.T) {
+	t.Parallel()
+	s := &SystemServer{
+		localNodeID: "n1",
+		factories:   listenerFactories(),
+		clusterTopology: &fakeTopology{addrs: map[string]string{
+			"n1": "10.0.0.1:8300", "n2": "10.0.0.1:8301",
+		}},
+	}
+	settled, remaining := s.coLocatedListenerChecks("kafka", []string{"n1", "n2"}, func(id string) string { return id })
+	if len(settled) != 0 || len(remaining) != 2 {
+		t.Errorf("settled=%d remaining=%v; a non-listener must still be asked", len(settled), remaining)
+	}
+}
+
+// Without topology there is nothing to decide from, so every node is probed
+// rather than guessed about.
+func TestCoLocatedListenerChecks_NoTopologyProbesEveryone(t *testing.T) {
+	t.Parallel()
+	s := &SystemServer{localNodeID: "n1", factories: listenerFactories()}
+	settled, remaining := s.coLocatedListenerChecks("syslog", []string{"n1", "n2"}, func(id string) string { return id })
+	if len(settled) != 0 || len(remaining) != 2 {
+		t.Errorf("settled=%d remaining=%v; with no addresses, probe rather than assume", len(settled), remaining)
 	}
 }
