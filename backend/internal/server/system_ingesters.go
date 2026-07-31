@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/ingestion"
-	"maps"
 	"net"
 	"slices"
 	"strings"
@@ -251,38 +250,26 @@ func (s *SystemServer) validateIngester(ingCfg system.IngesterConfig, existing [
 	if !ok {
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unknown ingester type: %s", ingCfg.Type))
 	}
-	// Skip construction test only when this node isn't in the eligible set.
-	// AllNodes=true makes every node eligible regardless of NodeIDs, so honor
-	// that first; otherwise we'd skip validation on nodes that will run the
-	// ingester after a restart.
-	if !ingCfg.AllNodes && len(ingCfg.NodeIDs) > 0 && !slices.Contains(ingCfg.NodeIDs, s.localNodeID) {
-		return nil
-	}
-	params := ingCfg.Params
-	if s.factories.HomeDir != "" {
-		params = make(map[string]string, len(ingCfg.Params)+1)
-		maps.Copy(params, ingCfg.Params)
-		params["_state_dir"] = s.factories.HomeDir
-	}
-	if _, err := reg.Factory(ingCfg.ID, params, s.factories.Logger); err != nil {
-		return errInvalidArg(err)
-	}
-
-	// For listener ingesters: (1) reject config-level address collisions
-	// with other gastrolog ingesters, then (2) trial-bind to catch ports
-	// held by external processes. Skip the trial bind when this ingester
-	// is already running — it legitimately holds its own ports.
+	// Config-level address collisions are cluster-wide truth read from
+	// replicated config, so any node can decide them. Do it before spending
+	// round-trips.
 	if reg.ListenAddrs != nil {
 		if err := s.checkListenAddrConflicts(ingCfg, existing); err != nil {
 			return err
 		}
-		if s.orch.GetIngesterStats(ingCfg.ID) == nil {
-			if err := checkListenAddrs(reg.ListenAddrs(ingCfg.Params)); err != nil {
-				return errInvalidArg(err)
-			}
-		}
 	}
 
+	// Everything else — factory construction and the trial bind — is a
+	// per-node fact, so ask every node the ingester will run on. This handler
+	// is RouteLeader, so validating locally would mean validating whichever
+	// node happens to hold leadership, and skipping when the leader is not in
+	// the assignment would mean not validating at all.
+	ctx := context.Background()
+	targets := s.ingesterCheckTargets(ctx, ingCfg.NodeIDs, ingCfg.AllNodes)
+	checks := s.checkIngesterOnNodes(ctx, ingCfg.Type, ingCfg.Params, ingCfg.ID.ToProto(), targets)
+	if ok, msg := summarizeIngesterChecks(checks, s.ingesterNodeLabel(ctx)); !ok {
+		return errInvalidArg(errors.New(msg))
+	}
 	return nil
 }
 
@@ -469,16 +456,17 @@ func (s *SystemServer) TestIngester(
 	ctx context.Context,
 	req *connect.Request[apiv1.TestIngesterRequest],
 ) (*connect.Response[apiv1.TestIngesterResponse], error) {
-	reg, ok := s.factories.IngesterTypes[req.Msg.Type]
-	if !ok {
+	if _, ok := s.factories.IngesterTypes[req.Msg.Type]; !ok {
 		return connect.NewResponse(&apiv1.TestIngesterResponse{
 			Success: false,
 			Message: fmt.Sprintf("unknown ingester type %q", req.Msg.Type),
 		}), nil
 	}
 
-	// Connection-based ingesters: delegate to the registered tester.
-	if reg.Tester != nil {
+	// Connection-based types probe an external endpoint, which is not a
+	// per-node fact worth N calls: any node reaching the broker is the answer
+	// the operator wants. Handled here rather than fanned out.
+	if reg := s.factories.IngesterTypes[req.Msg.Type]; reg.Tester != nil {
 		msg, err := reg.Tester(ctx, req.Msg.Params)
 		if err != nil {
 			return connect.NewResponse(&apiv1.TestIngesterResponse{ //nolint:nilerr // test failure is reported in the response body, not as an RPC error
@@ -486,39 +474,20 @@ func (s *SystemServer) TestIngester(
 				Message: err.Error(),
 			}), nil
 		}
-		return connect.NewResponse(&apiv1.TestIngesterResponse{
-			Success: true,
-			Message: msg,
-		}), nil
+		return connect.NewResponse(&apiv1.TestIngesterResponse{Success: true, Message: msg}), nil
 	}
 
-	// Listener ingesters: check port availability.
-	if reg.ListenAddrs != nil {
-		addrs := reg.ListenAddrs(req.Msg.Params)
-		// Skip trial bind if this ingester is already running (it holds its ports).
-		if len(req.Msg.Id) != 0 {
-			if id, connErr := parseProtoID(req.Msg.Id); connErr == nil && s.orch.GetIngesterStats(id) != nil {
-				return connect.NewResponse(&apiv1.TestIngesterResponse{
-					Success: true,
-					Message: "ports held by running ingester",
-				}), nil
-			}
-		}
-		if err := checkListenAddrs(addrs); err != nil {
-			return connect.NewResponse(&apiv1.TestIngesterResponse{ //nolint:nilerr // port conflict is reported in the response body
-				Success: false,
-				Message: err.Error(),
-			}), nil
-		}
-		return connect.NewResponse(&apiv1.TestIngesterResponse{
-			Success: true,
-			Message: "listen addresses available",
-		}), nil
+	nodeIDs := make([]string, len(req.Msg.NodeIds))
+	for i, nid := range req.Msg.NodeIds {
+		nodeIDs[i] = string(nid)
 	}
-
+	targets := s.ingesterCheckTargets(ctx, nodeIDs, req.Msg.AllNodes)
+	checks := s.checkIngesterOnNodes(ctx, req.Msg.Type, req.Msg.Params, req.Msg.Id, targets)
+	ok, msg := summarizeIngesterChecks(checks, s.ingesterNodeLabel(ctx))
 	return connect.NewResponse(&apiv1.TestIngesterResponse{
-		Success: true,
-		Message: "no checks available",
+		Success:    ok,
+		Message:    msg,
+		NodeChecks: checks,
 	}), nil
 }
 

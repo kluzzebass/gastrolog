@@ -245,6 +245,14 @@ func (sf *SearchForwarder) ValidateVault(ctx context.Context, nodeID string, req
 	return resp, nil
 }
 
+func (sf *SearchForwarder) ValidateIngester(ctx context.Context, nodeID string, req *gastrologv1.ForwardValidateIngesterRequest) (*gastrologv1.ForwardValidateIngesterResponse, error) {
+	resp := &gastrologv1.ForwardValidateIngesterResponse{}
+	if err := sf.invoke(ctx, nodeID, "/gastrolog.v1.ClusterService/ForwardValidateIngester", req, resp, "forward validate ingester"); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
 func (sf *SearchForwarder) SealVault(ctx context.Context, nodeID string, req *gastrologv1.ForwardSealVaultRequest) (*gastrologv1.ForwardSealVaultResponse, error) {
 	resp := &gastrologv1.ForwardSealVaultResponse{}
 	if err := sf.invoke(ctx, nodeID, "/gastrolog.v1.ClusterService/ForwardSealVault", req, resp, "forward seal vault"); err != nil {

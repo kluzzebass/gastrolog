@@ -5204,12 +5204,29 @@ export class TestIngesterRequest extends Message<TestIngesterRequest> {
   /**
    * Optional ingester ID — when set, the trial-bind port check skips
    * addresses held by this ingester (it's already running on them). The
-   * running-ingester lookup is local, so this only suppresses the check on a
+   * running-ingester lookup is per-node, so it only suppresses the check on a
    * node actually running it.
    *
    * @generated from field: bytes id = 3;
    */
   id = new Uint8Array(0);
+
+  /**
+   * The assignment the config would be saved with. Port availability is a
+   * per-node fact, so the check has to run where the ingester will run; at
+   * test time there is no stored config to read the assignment from, which is
+   * why the caller sends it. Empty node_ids with all_nodes false means "just
+   * the node answering" — the single-node case and the pre-assignment state of
+   * a form still being filled in.
+   *
+   * @generated from field: repeated bytes node_ids = 4;
+   */
+  nodeIds: Uint8Array[] = [];
+
+  /**
+   * @generated from field: bool all_nodes = 5;
+   */
+  allNodes = false;
 
   constructor(data?: PartialMessage<TestIngesterRequest>) {
     super();
@@ -5222,6 +5239,8 @@ export class TestIngesterRequest extends Message<TestIngesterRequest> {
     { no: 1, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
     { no: 3, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 4, name: "node_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 5, name: "all_nodes", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TestIngesterRequest {
@@ -5246,14 +5265,26 @@ export class TestIngesterRequest extends Message<TestIngesterRequest> {
  */
 export class TestIngesterResponse extends Message<TestIngesterResponse> {
   /**
+   * success is the AND over node_checks: a config is only clear to save if
+   * every node it would run on can run it.
+   *
    * @generated from field: bool success = 1;
    */
   success = false;
 
   /**
+   * message summarizes; node_checks carries the detail. On a cluster "port in
+   * use" without a node is unactionable, so a caller rendering only this
+   * field is losing the part the operator needs.
+   *
    * @generated from field: string message = 2;
    */
   message = "";
+
+  /**
+   * @generated from field: repeated gastrolog.v1.IngesterNodeCheck node_checks = 3;
+   */
+  nodeChecks: IngesterNodeCheck[] = [];
 
   constructor(data?: PartialMessage<TestIngesterResponse>) {
     super();
@@ -5265,6 +5296,7 @@ export class TestIngesterResponse extends Message<TestIngesterResponse> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "success", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 2, name: "message", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "node_checks", kind: "message", T: IngesterNodeCheck, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TestIngesterResponse {
@@ -5281,6 +5313,67 @@ export class TestIngesterResponse extends Message<TestIngesterResponse> {
 
   static equals(a: TestIngesterResponse | PlainMessage<TestIngesterResponse> | undefined, b: TestIngesterResponse | PlainMessage<TestIngesterResponse> | undefined): boolean {
     return proto3.util.equals(TestIngesterResponse, a, b);
+  }
+}
+
+/**
+ * IngesterNodeCheck is one node's verdict on a candidate ingester config.
+ *
+ * @generated from message gastrolog.v1.IngesterNodeCheck
+ */
+export class IngesterNodeCheck extends Message<IngesterNodeCheck> {
+  /**
+   * @generated from field: bytes node_id = 1;
+   */
+  nodeId = new Uint8Array(0);
+
+  /**
+   * @generated from field: bool success = 2;
+   */
+  success = false;
+
+  /**
+   * @generated from field: string message = 3;
+   */
+  message = "";
+
+  /**
+   * unreachable distinguishes "this node says no" from "this node did not
+   * answer". They are different operator actions, and collapsing them into
+   * success=false would report a healthy node as a config error.
+   *
+   * @generated from field: bool unreachable = 4;
+   */
+  unreachable = false;
+
+  constructor(data?: PartialMessage<IngesterNodeCheck>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.IngesterNodeCheck";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "success", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 3, name: "message", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "unreachable", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterNodeCheck {
+    return new IngesterNodeCheck().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): IngesterNodeCheck {
+    return new IngesterNodeCheck().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): IngesterNodeCheck {
+    return new IngesterNodeCheck().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: IngesterNodeCheck | PlainMessage<IngesterNodeCheck> | undefined, b: IngesterNodeCheck | PlainMessage<IngesterNodeCheck> | undefined): boolean {
+    return proto3.util.equals(IngesterNodeCheck, a, b);
   }
 }
 

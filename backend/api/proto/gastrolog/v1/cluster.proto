@@ -514,6 +514,27 @@ message ForwardValidateVaultResponse {
   repeated ChunkValidation chunks = 2;
 }
 
+// ForwardValidateIngesterRequest asks a remote node to validate a candidate
+// ingester config against ITSELF: factory construction, plus a trial bind of
+// the listen addresses for listener types. Both are per-node facts — a port
+// free on one node can be held by an unrelated process on another — so the
+// answer is only meaningful from a node that would run the ingester.
+//
+// Carries the candidate config rather than an ID because the common caller is
+// a pre-save check, where nothing is stored yet.
+message ForwardValidateIngesterRequest {
+  string type = 1;
+  map<string, string> params = 2;
+  // Optional ID of the ingester being edited; lets the responding node skip
+  // the trial bind for addresses it is already holding for that ingester.
+  bytes id = 3;
+}
+
+message ForwardValidateIngesterResponse {
+  bool success = 1;
+  string message = 2;
+}
+
 // ForwardGetChunkRequest asks a remote node to return details for a specific
 // chunk in one of its local vaults.
 message ForwardGetChunkRequest {

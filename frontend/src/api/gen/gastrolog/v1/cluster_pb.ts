@@ -2556,6 +2556,110 @@ export class ForwardValidateVaultResponse extends Message<ForwardValidateVaultRe
 }
 
 /**
+ * ForwardValidateIngesterRequest asks a remote node to validate a candidate
+ * ingester config against ITSELF: factory construction, plus a trial bind of
+ * the listen addresses for listener types. Both are per-node facts — a port
+ * free on one node can be held by an unrelated process on another — so the
+ * answer is only meaningful from a node that would run the ingester.
+ *
+ * Carries the candidate config rather than an ID because the common caller is
+ * a pre-save check, where nothing is stored yet.
+ *
+ * @generated from message gastrolog.v1.ForwardValidateIngesterRequest
+ */
+export class ForwardValidateIngesterRequest extends Message<ForwardValidateIngesterRequest> {
+  /**
+   * @generated from field: string type = 1;
+   */
+  type = "";
+
+  /**
+   * @generated from field: map<string, string> params = 2;
+   */
+  params: { [key: string]: string } = {};
+
+  /**
+   * Optional ID of the ingester being edited; lets the responding node skip
+   * the trial bind for addresses it is already holding for that ingester.
+   *
+   * @generated from field: bytes id = 3;
+   */
+  id = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<ForwardValidateIngesterRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardValidateIngesterRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+    { no: 3, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardValidateIngesterRequest {
+    return new ForwardValidateIngesterRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardValidateIngesterRequest {
+    return new ForwardValidateIngesterRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardValidateIngesterRequest {
+    return new ForwardValidateIngesterRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardValidateIngesterRequest | PlainMessage<ForwardValidateIngesterRequest> | undefined, b: ForwardValidateIngesterRequest | PlainMessage<ForwardValidateIngesterRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardValidateIngesterRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardValidateIngesterResponse
+ */
+export class ForwardValidateIngesterResponse extends Message<ForwardValidateIngesterResponse> {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success = false;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message = "";
+
+  constructor(data?: PartialMessage<ForwardValidateIngesterResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardValidateIngesterResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "success", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "message", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardValidateIngesterResponse {
+    return new ForwardValidateIngesterResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardValidateIngesterResponse {
+    return new ForwardValidateIngesterResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardValidateIngesterResponse {
+    return new ForwardValidateIngesterResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardValidateIngesterResponse | PlainMessage<ForwardValidateIngesterResponse> | undefined, b: ForwardValidateIngesterResponse | PlainMessage<ForwardValidateIngesterResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardValidateIngesterResponse, a, b);
+  }
+}
+
+/**
  * ForwardGetChunkRequest asks a remote node to return details for a specific
  * chunk in one of its local vaults.
  *

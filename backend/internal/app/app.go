@@ -1537,7 +1537,13 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			RemotePipelineBacklog: deps.SearchForwarder,
 			RemoteChunkWatcher:    deps.SearchForwarder,
 			RemoteIndexer:         deps.SearchForwarder,
-			RoutingForwarder:      deps.RoutingForwarder, ClusterAddress: deps.ClusterAddr,
+			RemoteIngesterCheck:   deps.SearchForwarder,
+			RegisterIngesterChecker: func(fn func(context.Context, string, map[string]string, []byte) (bool, string)) {
+				if deps.ClusterSrv != nil {
+					deps.ClusterSrv.SetValidateIngesterExecutor(fn)
+				}
+			},
+			RoutingForwarder: deps.RoutingForwarder, ClusterAddress: deps.ClusterAddr,
 			JoinClusterFunc: deps.JoinClusterFunc, RemoveNodeFunc: deps.RemoveNodeFunc,
 			SetNodeSuffrageFunc: deps.SetNodeSuffrageFunc,
 			CloudTesters: map[string]server.CloudServiceTester{

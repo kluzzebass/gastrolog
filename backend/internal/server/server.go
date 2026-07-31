@@ -152,6 +152,17 @@ type Config struct {
 	// CloudTesters maps cloud service types to connection test functions.
 	CloudTesters map[string]CloudServiceTester
 
+	// RemoteIngesterCheck asks a specific node to validate a candidate ingester
+	// config against itself. Nil in single-node mode.
+	RemoteIngesterCheck RemoteIngesterValidator
+
+	// RegisterIngesterChecker, when set, is handed this node's ingester
+	// validation so the cluster layer can serve it for peers. The checks are
+	// per-node facts — factory construction and a listen-address trial bind —
+	// so a peer has to be able to ask this node directly rather than compute
+	// the answer itself.
+	RegisterIngesterChecker func(func(context.Context, string, map[string]string, []byte) (bool, string))
+
 	// RoutingForwarder forwards requests to remote nodes via ForwardRPC.
 	// Nil in single-node mode. Satisfies routing.UnaryForwarder.
 	RoutingForwarder routing.UnaryForwarder
@@ -210,6 +221,8 @@ type Server struct {
 	peerRouteStats        PeerRouteStatsProvider
 	peerPipelineDisk      PeerPipelineDiskProvider
 	peerStorageStats      PeerStorageStatsProvider
+	remoteIngesterCheck   RemoteIngesterValidator
+	registerIngesterCheck func(func(context.Context, string, map[string]string, []byte) (bool, string))
 	remoteSearcher        RemoteSearcher
 	remoteChunkLister     RemoteChunkLister
 	remotePipelineBacklog RemotePipelineBacklogGetter
@@ -288,6 +301,8 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		peerRouteStats:            cfg.PeerRouteStats,
 		peerPipelineDisk:          cfg.PeerPipelineDisk,
 		peerStorageStats:          cfg.PeerStorageStats,
+		remoteIngesterCheck:       cfg.RemoteIngesterCheck,
+		registerIngesterCheck:     cfg.RegisterIngesterChecker,
 		remoteSearcher:            cfg.RemoteSearcher,
 		remoteChunkLister:         cfg.RemoteChunkLister,
 		remotePipelineBacklog:     cfg.RemotePipelineBacklog,
@@ -606,25 +621,26 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	s.queryServer = queryServer
 	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteChunkLister, s.remotePipelineBacklog, s.remoteChunkWatcher, s.remoteIndexer, s.localNodeID, s.logger)
 	configServer := NewSystemServer(SystemServerConfig{
-		Logger:             compServer.Apply(s.logger),
-		Orch:               s.orch,
-		CfgStore:           s.cfgStore,
-		Factories:          s.factories,
-		CertManager:        s.certManager,
-		PeerStats:          s.peerIngesterStats,
-		PeerRouteStats:     s.peerRouteStats,
-		PeerStorageStats:   s.peerStorageStats,
-		LocalStats:         s.localStatsFn,
-		ClusterRouteRates:  s.clusterRouteRatesFn,
-		LocalNodeID:        s.localNodeID,
-		AfterConfigApply:   s.afterConfigApply,
-		ConfigSignal:       s.configSignal,
-		StatsSignal:        s.statsSignal,
-		ResolveManagedFile: s.ResolveManagedFileByID,
-		CloudTesters:       s.cloudTesters,
-		Tokens:             s.tokens,
-		PlacementReconcile: s.placementReconcile,
-		OnTLSConfigChange:  s.reconfigureTLS,
+		Logger:              compServer.Apply(s.logger),
+		Orch:                s.orch,
+		CfgStore:            s.cfgStore,
+		Factories:           s.factories,
+		CertManager:         s.certManager,
+		PeerStats:           s.peerIngesterStats,
+		PeerRouteStats:      s.peerRouteStats,
+		PeerStorageStats:    s.peerStorageStats,
+		RemoteIngesterCheck: s.remoteIngesterCheck,
+		LocalStats:          s.localStatsFn,
+		ClusterRouteRates:   s.clusterRouteRatesFn,
+		LocalNodeID:         s.localNodeID,
+		AfterConfigApply:    s.afterConfigApply,
+		ConfigSignal:        s.configSignal,
+		StatsSignal:         s.statsSignal,
+		ResolveManagedFile:  s.ResolveManagedFileByID,
+		CloudTesters:        s.cloudTesters,
+		Tokens:              s.tokens,
+		PlacementReconcile:  s.placementReconcile,
+		OnTLSConfigChange:   s.reconfigureTLS,
 		OnLookupConfigChange: func(cfg system.LookupConfig, mm system.MaxMindConfig) {
 			s.applyLookupConfig(cfg, mm, lookupRegistry)
 		},
@@ -666,6 +682,12 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 
 	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer, handlerOpts...))
 	mux.Handle(gastrologv1connect.NewVaultServiceHandler(vaultServer, handlerOpts...))
+	// Hand the node-local ingester check to the cluster layer so peers can ask
+	// this node for its own verdict.
+	if s.registerIngesterCheck != nil {
+		s.registerIngesterCheck(configServer.LocalIngesterCheck)
+	}
+
 	mux.Handle(gastrologv1connect.NewSystemServiceHandler(configServer, handlerOpts...))
 	mux.Handle(gastrologv1connect.NewLifecycleServiceHandler(lifecycleServer, handlerOpts...))
 	mux.Handle(gastrologv1connect.NewAuthServiceHandler(authServer, handlerOpts...))
