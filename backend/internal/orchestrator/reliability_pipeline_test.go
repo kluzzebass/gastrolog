@@ -648,8 +648,8 @@ func TestOrchPipeline_SustainedIngestManifestKeepsPace(t *testing.T) {
 	// working and sealed nothing". Counting seconds instead would trip on a
 	// soak that is merely starved of CPU, where the sealing sweeps are delayed
 	// too.
-	sealTicks := newClusterTickWatcher(h)
-	ticksAtLastSeal := 0
+	sealSweeps := newClusterSweepCounter(h)
+	sweepsAtLastSeal := 0
 
 	for time.Now().Before(deadline) {
 		health := pipelinePlannerHealthFromFSM(h.vaultCtlSubFSM(v, leaderNode))
@@ -661,24 +661,24 @@ func TestOrchPipeline_SustainedIngestManifestKeepsPace(t *testing.T) {
 		// stall-based, not calibrated to how fast a healthy soak "should" seal:
 		// every sealed-chunk increment resets the stall clock, so slow-under-
 		// contention sealing never trips this — only a genuine sealing wedge
-		// (no new sealed chunk across a full stall budget of cluster ticks while
+		// (no new sealed chunk across a full stall budget of observed sweeps while
 		// ~all registry records stay pending) does. The end-of-soak
 		// waitSealedRecordsAtLeast below catches the same wedge when the soak
 		// ends before the budget is spent.
 		if health.SealedChunks != lastSealedChunks {
 			lastSealedChunks = health.SealedChunks
 			lastSealProgress = time.Now()
-			ticksAtLastSeal = sealTicks.observe()
+			sweepsAtLastSeal = sealSweeps.observe()
 		}
 		if health.RegistryRecords >= minRegistryForRatio &&
-			sealTicks.observe()-ticksAtLastSeal >= orchHarnessStallRounds*sealTicks.pairs() {
+			sealSweeps.observe()-sweepsAtLastSeal >= orchHarnessStallSweepsPerJob*sealSweeps.pairs() {
 			pendingPct := health.PendingRecords * 100 / health.RegistryRecords
 			if pendingPct >= maxPendingRegistryFrac {
 				h.dumpPipelineState(v)
-				t.Fatalf("vault %s: sealing stalled for %s / %d cluster ticks with %d%% of registry records pending (%d/%d, sealed chunks stuck at %d); "+
+				t.Fatalf("vault %s: sealing stalled for %s / %d observed sweeps with %d%% of registry records pending (%d/%d, sealed chunks stuck at %d); "+
 					"open_records=%d open_refs=%d",
 					v.label, time.Since(lastSealProgress).Round(time.Millisecond),
-					sealTicks.observe()-ticksAtLastSeal, pendingPct,
+					sealSweeps.observe()-sweepsAtLastSeal, pendingPct,
 					health.PendingRecords, health.RegistryRecords, health.SealedChunks,
 					health.OpenRecords, health.OpenRefs)
 			}
