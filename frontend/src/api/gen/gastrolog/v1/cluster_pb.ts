@@ -6,7 +6,7 @@
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { Job } from "./job_pb.js";
-import { ChunkAnalysis, ChunkChangeOp, ChunkMeta, ChunkValidation, CloudIndexAudit, ExportRecord, IndexInfo, ThroughputRate, VaultStats } from "./vault_pb.js";
+import { ChunkAnalysis, ChunkChangeOp, ChunkMeta, ChunkValidation, CloudIndexAudit, CloudIndexRepair, ExportRecord, IndexInfo, ThroughputRate, VaultStats } from "./vault_pb.js";
 import { PerRouteStats, VaultRouteStats } from "./system_pb.js";
 import { StorageState } from "./storage_pb.js";
 import { ChunkPlan, HistogramBucket, TableResult } from "./query_pb.js";
@@ -2561,6 +2561,83 @@ export class ForwardValidateVaultResponse extends Message<ForwardValidateVaultRe
 
   static equals(a: ForwardValidateVaultResponse | PlainMessage<ForwardValidateVaultResponse> | undefined, b: ForwardValidateVaultResponse | PlainMessage<ForwardValidateVaultResponse> | undefined): boolean {
     return proto3.util.equals(ForwardValidateVaultResponse, a, b);
+  }
+}
+
+/**
+ * ForwardReconcileCloudIndexRequest asks a remote node to rebuild its own
+ * cloud index from the blob store.
+ *
+ * @generated from message gastrolog.v1.ForwardReconcileCloudIndexRequest
+ */
+export class ForwardReconcileCloudIndexRequest extends Message<ForwardReconcileCloudIndexRequest> {
+  /**
+   * @generated from field: bytes vault_id = 1;
+   */
+  vaultId = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<ForwardReconcileCloudIndexRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardReconcileCloudIndexRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardReconcileCloudIndexRequest {
+    return new ForwardReconcileCloudIndexRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardReconcileCloudIndexRequest {
+    return new ForwardReconcileCloudIndexRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardReconcileCloudIndexRequest {
+    return new ForwardReconcileCloudIndexRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardReconcileCloudIndexRequest | PlainMessage<ForwardReconcileCloudIndexRequest> | undefined, b: ForwardReconcileCloudIndexRequest | PlainMessage<ForwardReconcileCloudIndexRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardReconcileCloudIndexRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardReconcileCloudIndexResponse
+ */
+export class ForwardReconcileCloudIndexResponse extends Message<ForwardReconcileCloudIndexResponse> {
+  /**
+   * @generated from field: gastrolog.v1.CloudIndexRepair repair = 1;
+   */
+  repair?: CloudIndexRepair;
+
+  constructor(data?: PartialMessage<ForwardReconcileCloudIndexResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardReconcileCloudIndexResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "repair", kind: "message", T: CloudIndexRepair },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardReconcileCloudIndexResponse {
+    return new ForwardReconcileCloudIndexResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardReconcileCloudIndexResponse {
+    return new ForwardReconcileCloudIndexResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardReconcileCloudIndexResponse {
+    return new ForwardReconcileCloudIndexResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardReconcileCloudIndexResponse | PlainMessage<ForwardReconcileCloudIndexResponse> | undefined, b: ForwardReconcileCloudIndexResponse | PlainMessage<ForwardReconcileCloudIndexResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardReconcileCloudIndexResponse, a, b);
   }
 }
 

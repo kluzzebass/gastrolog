@@ -54,6 +54,9 @@ const (
 	// VaultServiceValidateVaultProcedure is the fully-qualified name of the VaultService's
 	// ValidateVault RPC.
 	VaultServiceValidateVaultProcedure = "/gastrolog.v1.VaultService/ValidateVault"
+	// VaultServiceReconcileCloudIndexProcedure is the fully-qualified name of the VaultService's
+	// ReconcileCloudIndex RPC.
+	VaultServiceReconcileCloudIndexProcedure = "/gastrolog.v1.VaultService/ReconcileCloudIndex"
 	// VaultServiceExportVaultProcedure is the fully-qualified name of the VaultService's ExportVault
 	// RPC.
 	VaultServiceExportVaultProcedure = "/gastrolog.v1.VaultService/ExportVault"
@@ -102,6 +105,9 @@ type VaultServiceClient interface {
 	ReindexVault(context.Context, *connect.Request[v1.ReindexVaultRequest]) (*connect.Response[v1.ReindexVaultResponse], error)
 	// ValidateVault checks chunk and index integrity for a vault.
 	ValidateVault(context.Context, *connect.Request[v1.ValidateVaultRequest]) (*connect.Response[v1.ValidateVaultResponse], error)
+	// ReconcileCloudIndex rebuilds each node's cloud index from the blob store.
+	// Repairs a cache: never deletes an object, never touches cluster state.
+	ReconcileCloudIndex(context.Context, *connect.Request[v1.ReconcileCloudIndexRequest]) (*connect.Response[v1.ReconcileCloudIndexResponse], error)
 	// ExportVault streams all records from a vault for backup.
 	ExportVault(context.Context, *connect.Request[v1.ExportVaultRequest]) (*connect.ServerStreamForClient[v1.ExportVaultResponse], error)
 	// ImportRecords appends a batch of records to a vault.
@@ -206,6 +212,12 @@ func NewVaultServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(vaultServiceMethods.ByName("ValidateVault")),
 			connect.WithClientOptions(opts...),
 		),
+		reconcileCloudIndex: connect.NewClient[v1.ReconcileCloudIndexRequest, v1.ReconcileCloudIndexResponse](
+			httpClient,
+			baseURL+VaultServiceReconcileCloudIndexProcedure,
+			connect.WithSchema(vaultServiceMethods.ByName("ReconcileCloudIndex")),
+			connect.WithClientOptions(opts...),
+		),
 		exportVault: connect.NewClient[v1.ExportVaultRequest, v1.ExportVaultResponse](
 			httpClient,
 			baseURL+VaultServiceExportVaultProcedure,
@@ -274,6 +286,7 @@ type vaultServiceClient struct {
 	getStats              *connect.Client[v1.GetStatsRequest, v1.GetStatsResponse]
 	reindexVault          *connect.Client[v1.ReindexVaultRequest, v1.ReindexVaultResponse]
 	validateVault         *connect.Client[v1.ValidateVaultRequest, v1.ValidateVaultResponse]
+	reconcileCloudIndex   *connect.Client[v1.ReconcileCloudIndexRequest, v1.ReconcileCloudIndexResponse]
 	exportVault           *connect.Client[v1.ExportVaultRequest, v1.ExportVaultResponse]
 	importRecords         *connect.Client[v1.ImportRecordsRequest, v1.ImportRecordsResponse]
 	sealVault             *connect.Client[v1.SealVaultRequest, v1.SealVaultResponse]
@@ -328,6 +341,11 @@ func (c *vaultServiceClient) ReindexVault(ctx context.Context, req *connect.Requ
 // ValidateVault calls gastrolog.v1.VaultService.ValidateVault.
 func (c *vaultServiceClient) ValidateVault(ctx context.Context, req *connect.Request[v1.ValidateVaultRequest]) (*connect.Response[v1.ValidateVaultResponse], error) {
 	return c.validateVault.CallUnary(ctx, req)
+}
+
+// ReconcileCloudIndex calls gastrolog.v1.VaultService.ReconcileCloudIndex.
+func (c *vaultServiceClient) ReconcileCloudIndex(ctx context.Context, req *connect.Request[v1.ReconcileCloudIndexRequest]) (*connect.Response[v1.ReconcileCloudIndexResponse], error) {
+	return c.reconcileCloudIndex.CallUnary(ctx, req)
 }
 
 // ExportVault calls gastrolog.v1.VaultService.ExportVault.
@@ -395,6 +413,9 @@ type VaultServiceHandler interface {
 	ReindexVault(context.Context, *connect.Request[v1.ReindexVaultRequest]) (*connect.Response[v1.ReindexVaultResponse], error)
 	// ValidateVault checks chunk and index integrity for a vault.
 	ValidateVault(context.Context, *connect.Request[v1.ValidateVaultRequest]) (*connect.Response[v1.ValidateVaultResponse], error)
+	// ReconcileCloudIndex rebuilds each node's cloud index from the blob store.
+	// Repairs a cache: never deletes an object, never touches cluster state.
+	ReconcileCloudIndex(context.Context, *connect.Request[v1.ReconcileCloudIndexRequest]) (*connect.Response[v1.ReconcileCloudIndexResponse], error)
 	// ExportVault streams all records from a vault for backup.
 	ExportVault(context.Context, *connect.Request[v1.ExportVaultRequest], *connect.ServerStream[v1.ExportVaultResponse]) error
 	// ImportRecords appends a batch of records to a vault.
@@ -495,6 +516,12 @@ func NewVaultServiceHandler(svc VaultServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(vaultServiceMethods.ByName("ValidateVault")),
 		connect.WithHandlerOptions(opts...),
 	)
+	vaultServiceReconcileCloudIndexHandler := connect.NewUnaryHandler(
+		VaultServiceReconcileCloudIndexProcedure,
+		svc.ReconcileCloudIndex,
+		connect.WithSchema(vaultServiceMethods.ByName("ReconcileCloudIndex")),
+		connect.WithHandlerOptions(opts...),
+	)
 	vaultServiceExportVaultHandler := connect.NewServerStreamHandler(
 		VaultServiceExportVaultProcedure,
 		svc.ExportVault,
@@ -569,6 +596,8 @@ func NewVaultServiceHandler(svc VaultServiceHandler, opts ...connect.HandlerOpti
 			vaultServiceReindexVaultHandler.ServeHTTP(w, r)
 		case VaultServiceValidateVaultProcedure:
 			vaultServiceValidateVaultHandler.ServeHTTP(w, r)
+		case VaultServiceReconcileCloudIndexProcedure:
+			vaultServiceReconcileCloudIndexHandler.ServeHTTP(w, r)
 		case VaultServiceExportVaultProcedure:
 			vaultServiceExportVaultHandler.ServeHTTP(w, r)
 		case VaultServiceImportRecordsProcedure:
@@ -630,6 +659,10 @@ func (UnimplementedVaultServiceHandler) ReindexVault(context.Context, *connect.R
 
 func (UnimplementedVaultServiceHandler) ValidateVault(context.Context, *connect.Request[v1.ValidateVaultRequest]) (*connect.Response[v1.ValidateVaultResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.ValidateVault is not implemented"))
+}
+
+func (UnimplementedVaultServiceHandler) ReconcileCloudIndex(context.Context, *connect.Request[v1.ReconcileCloudIndexRequest]) (*connect.Response[v1.ReconcileCloudIndexResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.ReconcileCloudIndex is not implemented"))
 }
 
 func (UnimplementedVaultServiceHandler) ExportVault(context.Context, *connect.Request[v1.ExportVaultRequest], *connect.ServerStream[v1.ExportVaultResponse]) error {

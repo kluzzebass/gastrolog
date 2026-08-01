@@ -518,6 +518,16 @@ message ForwardValidateVaultResponse {
   CloudIndexAudit cloud_index_audit = 3;
 }
 
+// ForwardReconcileCloudIndexRequest asks a remote node to rebuild its own
+// cloud index from the blob store.
+message ForwardReconcileCloudIndexRequest {
+  bytes vault_id = 1;
+}
+
+message ForwardReconcileCloudIndexResponse {
+  CloudIndexRepair repair = 1;
+}
+
 // ForwardValidateIngesterRequest asks a remote node to validate a candidate
 // ingester config against ITSELF: factory construction, plus a trial bind of
 // the listen addresses for listener types. Both are per-node facts — a port

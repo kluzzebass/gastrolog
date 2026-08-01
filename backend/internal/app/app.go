@@ -748,6 +748,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetPipelineBacklogDiskExecutor(newPipelineBacklogDiskExecutor(orch))
 	clusterSrv.SetGetIndexesExecutor(newGetIndexesExecutor(orch))
 	clusterSrv.SetValidateVaultExecutor(newValidateVaultExecutor(orch))
+	clusterSrv.SetReconcileCloudIndexExecutor(newReconcileCloudIndexExecutor(orch))
 	clusterSrv.SetGetChunkExecutor(newGetChunkExecutor(orch))
 	clusterSrv.SetAnalyzeChunkExecutor(newAnalyzeChunkExecutor(orch))
 	clusterSrv.SetChunkEventSubscriber(newChunkEventSubscriber(orch))
@@ -1545,7 +1546,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			PeerVaultStats: deps.PeerState, PeerIngesterStats: deps.PeerState, PeerRouteStats: deps.PeerState,
 			PeerPipelineDisk: deps.PeerState, PeerStorageStats: deps.PeerState,
 			PeerJobs:   deps.PeerJobState,
-			LocalStats: deps.LocalStats, ClusterRouteRates: deps.ClusterRouteRates, RemoteSearcher: deps.SearchForwarder, RemoteChunkLister: deps.SearchForwarder, RemoteVaultValidator: deps.SearchForwarder,
+			LocalStats: deps.LocalStats, ClusterRouteRates: deps.ClusterRouteRates, RemoteSearcher: deps.SearchForwarder, RemoteChunkLister: deps.SearchForwarder, RemoteVaultValidator: deps.SearchForwarder, RemoteCloudIndexReconciler: deps.SearchForwarder,
 			RemotePipelineBacklog: deps.SearchForwarder,
 			RemoteChunkWatcher:    deps.SearchForwarder,
 			RemoteIndexer:         deps.SearchForwarder,

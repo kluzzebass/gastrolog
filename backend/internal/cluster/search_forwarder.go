@@ -205,6 +205,14 @@ func (sf *SearchForwarder) ListChunks(ctx context.Context, nodeID string, req *g
 	return resp, nil
 }
 
+func (sf *SearchForwarder) ReconcileCloudIndex(ctx context.Context, nodeID string, req *gastrologv1.ForwardReconcileCloudIndexRequest) (*gastrologv1.ForwardReconcileCloudIndexResponse, error) {
+	resp := &gastrologv1.ForwardReconcileCloudIndexResponse{}
+	if err := sf.invoke(ctx, nodeID, "/gastrolog.v1.ClusterService/ForwardReconcileCloudIndex", req, resp, "forward reconcile cloud index"); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
 func (sf *SearchForwarder) GetPipelineBacklogDisk(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetPipelineBacklogRequest) (*gastrologv1.ForwardGetPipelineBacklogResponse, error) {
 	resp := &gastrologv1.ForwardGetPipelineBacklogResponse{}
 	if err := sf.invoke(ctx, nodeID, "/gastrolog.v1.ClusterService/ForwardGetPipelineBacklog", req, resp, "forward pipeline backlog"); err != nil {

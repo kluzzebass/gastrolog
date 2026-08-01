@@ -70,6 +70,36 @@ func (a CloudIndexAudit) Clean() bool {
 		len(a.UnindexedBlobs) == 0
 }
 
+// ReconcileVaultCloudIndex rebuilds this node's cloud index for one vault from
+// the blob store. Repairs a node-local cache: it never deletes an object and
+// never proposes cluster state, so it cannot lose data no matter how wrong the
+// local view was.
+//
+// Returns chunk.ErrCloudStoreNotConfigured for a local-only vault.
+func (o *Orchestrator) ReconcileVaultCloudIndex(ctx context.Context, vaultID glid.GLID) (chunk.CloudIndexRepair, error) {
+	vaultInst := o.FindLocalVaultInstance(vaultID)
+	if vaultInst == nil || vaultInst.Chunks == nil {
+		return chunk.CloudIndexRepair{}, fmt.Errorf("reconcile cloud index: vault %s is not homed on this node", vaultID)
+	}
+	repairer, ok := vaultInst.Chunks.(chunk.CloudIndexRepairer)
+	if !ok {
+		return chunk.CloudIndexRepair{}, fmt.Errorf("reconcile cloud index: vault %s: %w", vaultID, chunk.ErrCloudStoreNotConfigured)
+	}
+	repair, err := repairer.RepairCloudIndex(ctx)
+	if err != nil {
+		return repair, fmt.Errorf("reconcile cloud index: vault %s: %w", vaultID, err)
+	}
+	if !repair.Clean() {
+		o.logger.Info("cloud index reconciled",
+			"vault", vaultID,
+			"removed", repair.RemovedEntries,
+			"corrected", repair.CorrectedSizes,
+			"indexed", repair.IndexedBlobs)
+		o.NotifyChunkChange()
+	}
+	return repair, nil
+}
+
 // AuditVaultCloudIndex compares one cloud-backed vault's blob store against the
 // FSM manifest and this node's cloud index. Read-only: it never inserts,
 // deletes or corrects anything, so it is safe to run against a live vault and

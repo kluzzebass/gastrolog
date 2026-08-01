@@ -250,6 +250,28 @@ type CloudIndexAuditor interface {
 	CloudIndexEntries() []ChunkMeta
 }
 
+// CloudIndexRepair counts what a repair pass changed in the node's cloud index.
+type CloudIndexRepair struct {
+	RemovedEntries int // cached entries dropped because the object is gone
+	CorrectedSizes int // cached transport sizes reset to what the store holds
+	IndexedBlobs   int // objects added to the cache
+}
+
+// Clean reports whether the repair found nothing to change.
+func (r CloudIndexRepair) Clean() bool {
+	return r.RemovedEntries == 0 && r.CorrectedSizes == 0 && r.IndexedBlobs == 0
+}
+
+// CloudIndexRepairer rebuilds a node's cloud index from the blob store.
+//
+// It repairs a CACHE and nothing else: it never deletes an object and never
+// proposes cluster state. An object the local view cannot explain is exactly
+// the case where the local view is the thing that is wrong, so removing it
+// could destroy the only copy of ingested records.
+type CloudIndexRepairer interface {
+	RepairCloudIndex(ctx context.Context) (CloudIndexRepair, error)
+}
+
 // ChunkPostSealProcessor extends ChunkManager with a unified post-seal pipeline.
 // The pipeline handles compression, index building, and cloud upload in order.
 // Callers should type-assert to check availability.

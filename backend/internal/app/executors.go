@@ -507,6 +507,16 @@ func newValidateVaultExecutor(o *orchestrator.Orchestrator) cluster.ValidateVaul
 	}
 }
 
+func newReconcileCloudIndexExecutor(o *orchestrator.Orchestrator) cluster.ReconcileCloudIndexExecutor {
+	return func(ctx context.Context, vaultID glid.GLID) (*gastrologv1.CloudIndexRepair, error) {
+		repair, err := o.ReconcileVaultCloudIndex(ctx, vaultID)
+		if err != nil {
+			return nil, err
+		}
+		return server.CloudIndexRepairToProto(repair), nil
+	}
+}
+
 func newGetChunkExecutor(o *orchestrator.Orchestrator) cluster.GetChunkExecutor {
 	return func(_ context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) (*gastrologv1.ChunkMeta, error) {
 		meta, err := o.GetChunkMeta(vaultID, chunkID)

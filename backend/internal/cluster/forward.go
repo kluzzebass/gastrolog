@@ -58,6 +58,9 @@ type GetIndexesExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chu
 // computed anywhere.
 type ValidateIngesterExecutor func(ctx context.Context, ingType string, params map[string]string, id []byte) (bool, string)
 
+// ReconcileCloudIndexExecutor rebuilds the node's own cloud index for a vault.
+type ReconcileCloudIndexExecutor func(ctx context.Context, vaultID glid.GLID) (*gastrologv1.CloudIndexRepair, error)
+
 // ValidateVaultExecutor validates a local vault and returns the result.
 type ValidateVaultExecutor func(ctx context.Context, vaultID glid.GLID) (*gastrologv1.ValidateVaultResponse, error)
 
@@ -190,6 +193,12 @@ func (s *Server) SetGetIndexesExecutor(fn GetIndexesExecutor) {
 // ForwardValidateIngester requests.
 func (s *Server) SetValidateIngesterExecutor(fn ValidateIngesterExecutor) {
 	s.validateIngesterExecutor = fn
+}
+
+// SetReconcileCloudIndexExecutor injects the callback for handling remote
+// ForwardReconcileCloudIndex requests.
+func (s *Server) SetReconcileCloudIndexExecutor(fn ReconcileCloudIndexExecutor) {
+	s.reconcileCloudIndexExecutor = fn
 }
 
 // SetValidateVaultExecutor injects the callback for handling remote ValidateVault requests.
@@ -625,6 +634,23 @@ func (s *Server) forwardValidateVault(ctx context.Context, req *gastrologv1.Forw
 		Chunks:          resp.GetChunks(),
 		CloudIndexAudit: audit,
 	}, nil
+}
+
+// forwardReconcileCloudIndex handles the ForwardReconcileCloudIndex RPC. Rebuilds
+// this node's own cloud index for the named vault from the blob store.
+func (s *Server) forwardReconcileCloudIndex(ctx context.Context, req *gastrologv1.ForwardReconcileCloudIndexRequest) (*gastrologv1.ForwardReconcileCloudIndexResponse, error) {
+	if s.reconcileCloudIndexExecutor == nil {
+		return nil, status.Error(codes.Unavailable, "reconcile cloud index executor not configured")
+	}
+	vaultID, err := parseVaultID(req.GetVaultId())
+	if err != nil {
+		return nil, err
+	}
+	repair, err := s.reconcileCloudIndexExecutor(ctx, vaultID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "reconcile cloud index: %v", err)
+	}
+	return &gastrologv1.ForwardReconcileCloudIndexResponse{Repair: repair}, nil
 }
 
 // forwardGetChunk handles the ForwardGetChunk RPC. Returns details for a
@@ -1134,6 +1160,10 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:    forwardValidateVaultHandler,
 		},
 		{
+			MethodName: "ForwardReconcileCloudIndex",
+			Handler:    forwardReconcileCloudIndexHandler,
+		},
+		{
 			MethodName: "ForwardValidateIngester",
 			Handler:    forwardValidateIngesterHandler,
 		},
@@ -1248,6 +1278,7 @@ type clusterServiceServer interface {
 	forwardGetPipelineBacklog(context.Context, *gastrologv1.ForwardGetPipelineBacklogRequest) (*gastrologv1.ForwardGetPipelineBacklogResponse, error)
 	forwardGetIndexes(context.Context, *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error)
 	forwardValidateVault(context.Context, *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error)
+	forwardReconcileCloudIndex(context.Context, *gastrologv1.ForwardReconcileCloudIndexRequest) (*gastrologv1.ForwardReconcileCloudIndexResponse, error)
 	forwardValidateIngester(context.Context, *gastrologv1.ForwardValidateIngesterRequest) (*gastrologv1.ForwardValidateIngesterResponse, error)
 	notifyEviction(context.Context, *gastrologv1.NotifyEvictionRequest) (*gastrologv1.NotifyEvictionResponse, error)
 	forwardRemoveNode(context.Context, *gastrologv1.ForwardRemoveNodeRequest) (*gastrologv1.ForwardRemoveNodeResponse, error)
@@ -1390,6 +1421,25 @@ func forwardGetIndexesHandler(srv any, ctx context.Context, dec func(any) error,
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardGetIndexes(ctx, req.(*gastrologv1.ForwardGetIndexesRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardReconcileCloudIndexHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardReconcileCloudIndexRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardReconcileCloudIndex(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardReconcileCloudIndex",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardReconcileCloudIndex(ctx, req.(*gastrologv1.ForwardReconcileCloudIndexRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

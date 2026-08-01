@@ -35,6 +35,10 @@ service VaultService {
   // ValidateVault checks chunk and index integrity for a vault.
   rpc ValidateVault(ValidateVaultRequest) returns (ValidateVaultResponse);
 
+  // ReconcileCloudIndex rebuilds each node's cloud index from the blob store.
+  // Repairs a cache: never deletes an object, never touches cluster state.
+  rpc ReconcileCloudIndex(ReconcileCloudIndexRequest) returns (ReconcileCloudIndexResponse);
+
   // ExportVault streams all records from a vault for backup.
   rpc ExportVault(ExportVaultRequest) returns (stream ExportVaultResponse);
 
@@ -522,6 +526,27 @@ message CloudIndexSizeMismatch {
   bytes chunk_id = 1;
   int64 expected_bytes = 2; // what the manifest recorded at upload time
   int64 store_bytes = 3;    // what the store reports now
+}
+
+message ReconcileCloudIndexRequest {
+  string vault = 1;
+}
+
+message ReconcileCloudIndexResponse {
+  // One result per node that homes the vault. Each node caches the cloud index
+  // separately, so each repairs its own.
+  repeated CloudIndexRepair repairs = 1;
+
+  // Set when a peer could not be reached, so its cloud index is still
+  // unrepaired — a silent partial repair would read as done.
+  ContributionReport contribution_report = 2;
+}
+
+message CloudIndexRepair {
+  string node_id = 1;
+  int64 removed_entries = 2; // cached entries dropped because the object is gone
+  int64 corrected_sizes = 3; // cached sizes reset to what the store holds
+  int64 indexed_blobs = 4;   // objects added to the cache
 }
 
 // ExportVault streams all records from a vault.

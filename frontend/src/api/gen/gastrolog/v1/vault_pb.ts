@@ -2334,6 +2334,153 @@ export class CloudIndexSizeMismatch extends Message<CloudIndexSizeMismatch> {
 }
 
 /**
+ * @generated from message gastrolog.v1.ReconcileCloudIndexRequest
+ */
+export class ReconcileCloudIndexRequest extends Message<ReconcileCloudIndexRequest> {
+  /**
+   * @generated from field: string vault = 1;
+   */
+  vault = "";
+
+  constructor(data?: PartialMessage<ReconcileCloudIndexRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ReconcileCloudIndexRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ReconcileCloudIndexRequest {
+    return new ReconcileCloudIndexRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ReconcileCloudIndexRequest {
+    return new ReconcileCloudIndexRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ReconcileCloudIndexRequest {
+    return new ReconcileCloudIndexRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ReconcileCloudIndexRequest | PlainMessage<ReconcileCloudIndexRequest> | undefined, b: ReconcileCloudIndexRequest | PlainMessage<ReconcileCloudIndexRequest> | undefined): boolean {
+    return proto3.util.equals(ReconcileCloudIndexRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ReconcileCloudIndexResponse
+ */
+export class ReconcileCloudIndexResponse extends Message<ReconcileCloudIndexResponse> {
+  /**
+   * One result per node that homes the vault. Each node caches the cloud index
+   * separately, so each repairs its own.
+   *
+   * @generated from field: repeated gastrolog.v1.CloudIndexRepair repairs = 1;
+   */
+  repairs: CloudIndexRepair[] = [];
+
+  /**
+   * Set when a peer could not be reached, so its cloud index is still
+   * unrepaired — a silent partial repair would read as done.
+   *
+   * @generated from field: gastrolog.v1.ContributionReport contribution_report = 2;
+   */
+  contributionReport?: ContributionReport;
+
+  constructor(data?: PartialMessage<ReconcileCloudIndexResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ReconcileCloudIndexResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "repairs", kind: "message", T: CloudIndexRepair, repeated: true },
+    { no: 2, name: "contribution_report", kind: "message", T: ContributionReport },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ReconcileCloudIndexResponse {
+    return new ReconcileCloudIndexResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ReconcileCloudIndexResponse {
+    return new ReconcileCloudIndexResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ReconcileCloudIndexResponse {
+    return new ReconcileCloudIndexResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ReconcileCloudIndexResponse | PlainMessage<ReconcileCloudIndexResponse> | undefined, b: ReconcileCloudIndexResponse | PlainMessage<ReconcileCloudIndexResponse> | undefined): boolean {
+    return proto3.util.equals(ReconcileCloudIndexResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.CloudIndexRepair
+ */
+export class CloudIndexRepair extends Message<CloudIndexRepair> {
+  /**
+   * @generated from field: string node_id = 1;
+   */
+  nodeId = "";
+
+  /**
+   * cached entries dropped because the object is gone
+   *
+   * @generated from field: int64 removed_entries = 2;
+   */
+  removedEntries = protoInt64.zero;
+
+  /**
+   * cached sizes reset to what the store holds
+   *
+   * @generated from field: int64 corrected_sizes = 3;
+   */
+  correctedSizes = protoInt64.zero;
+
+  /**
+   * objects added to the cache
+   *
+   * @generated from field: int64 indexed_blobs = 4;
+   */
+  indexedBlobs = protoInt64.zero;
+
+  constructor(data?: PartialMessage<CloudIndexRepair>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.CloudIndexRepair";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "removed_entries", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "corrected_sizes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 4, name: "indexed_blobs", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CloudIndexRepair {
+    return new CloudIndexRepair().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CloudIndexRepair {
+    return new CloudIndexRepair().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CloudIndexRepair {
+    return new CloudIndexRepair().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CloudIndexRepair | PlainMessage<CloudIndexRepair> | undefined, b: CloudIndexRepair | PlainMessage<CloudIndexRepair> | undefined): boolean {
+    return proto3.util.equals(CloudIndexRepair, a, b);
+  }
+}
+
+/**
  * ExportVault streams all records from a vault.
  *
  * @generated from message gastrolog.v1.ExportVaultRequest
