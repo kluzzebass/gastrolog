@@ -173,18 +173,36 @@ func withMatchAllRoute(vaultIdx int) orchRelOption {
 }
 
 const (
-	// Harness convergence waits are progress-based (see waitProgress), not
-	// wall-clock-bounded: the awaited work is CPU-bound in-process cluster
-	// activity, so under multi-suite contention a fixed wall-clock budget buys
-	// an arbitrary fraction of the compute. A wait fails only when its
-	// observed progress metric has not changed for this stall window. The
-	// window sits well above the slowest legitimate quiet period between
-	// progress events, which is a reconcile-sweep period: the test profile
-	// runs those every second (testprofile_test.go), so this is twenty
-	// periods of headroom for contention stretching a tick. Shrinking it does
-	// not make a passing run faster; it makes a WEDGED one report in a third
-	// of the time, which is the whole point of the feedback loop.
-	orchHarnessStallWindow = 20 * time.Second
+	// A wait fails only when its progress metric has not changed while the
+	// cluster demonstrably KEPT WORKING — see waitProgress. The budget is
+	// counted in observed scheduler ticks, not seconds, because the awaited
+	// work is CPU-bound in-process cluster activity: under multi-suite
+	// contention the sweeps that would produce progress are themselves
+	// delayed, so a wall-clock budget buys fewer of them exactly when it needs
+	// to buy more.
+	//
+	// Counted in ROUNDS, where one round is every registered (node, job) pair
+	// having ticked once. Raw tick totals are the wrong unit: the test profile
+	// runs every sweep at one second on every node (testprofile_test.go), so a
+	// four-node harness emits tens of ticks per second and a raw budget of
+	// twenty would expire in about one. Dividing by the number of registered
+	// pairs makes the budget self-calibrating — twenty rounds is roughly twenty
+	// seconds on an idle machine, the headroom the old wall-clock window
+	// intended, and stretches automatically when the cluster is starved.
+	orchHarnessStallRounds = 20
+	// orchHarnessStallFloor bounds how long a stall can go unreported when the
+	// cluster produces no scheduler ticks at all. Without it, a harness whose
+	// schedulers never start would wait out the hard backstop with no
+	// diagnostics; with it, a genuinely dead cluster still fails on the stall
+	// path and reports its trajectory.
+	orchHarnessStallFloor = 90 * time.Second
+	// orchHarnessEventTimeout bounds a wait for ONE event that either arrives
+	// or does not — a durability ack, an append+seal returning. Convergence
+	// waits watch a metric and can tell slow from stuck; these cannot, so
+	// wall-clock is the only bound available. Set generously on purpose: what
+	// it catches is an INDEFINITE block, and a tighter value would only buy
+	// false failures under load.
+	orchHarnessEventTimeout = 60 * time.Second
 	// orchHarnessHardBackstop bounds total wait time even while progress
 	// trickles, so a livelocked metric (one that keeps changing without ever
 	// converging — election churn, oscillating counts) still fails with
@@ -204,6 +222,78 @@ const (
 // time and with non-harness tests) and keep running in `go test ./...`.
 var orchRelHarnessSlots = make(chan struct{}, 2)
 
+// clusterTickWatcher counts scheduler job executions across every node, using
+// them as the cluster's own clock.
+//
+// This is the denominator for stall detection. A wait is only entitled to fail
+// when the cluster was RUNNING and still made no progress; if this count is not
+// moving, the harness is starved of CPU rather than wedged, and failing it would
+// report a scheduling artifact as a convergence bug.
+//
+// The scheduler exposes LastRun rather than a run counter, so executions are
+// accumulated by whoever polls — which the wait loop does anyway. Keyed by node
+// and job because two nodes running the same job are two ticks.
+type clusterTickWatcher struct {
+	// sample returns the current LastRun per (node, job). Injected rather than
+	// reached out of the harness so the counting rule can be exercised
+	// directly, without standing up nodes to drive it.
+	sample func() map[string]time.Time
+	last   map[string]time.Time
+	n      int
+}
+
+func newClusterTickWatcher(h *orchRelHarness) *clusterTickWatcher {
+	return newTickWatcher(func() map[string]time.Time {
+		out := map[string]time.Time{}
+		for id, n := range h.nodes {
+			if n == nil || n.orch == nil {
+				continue
+			}
+			for _, info := range n.orch.Scheduler().ListJobs() {
+				if info.LastRun.IsZero() {
+					continue
+				}
+				out[id+"\x00"+info.Name] = info.LastRun
+			}
+		}
+		return out
+	})
+}
+
+func newTickWatcher(sample func() map[string]time.Time) *clusterTickWatcher {
+	w := &clusterTickWatcher{sample: sample, last: map[string]time.Time{}}
+	w.observe() // anchor: runs before this wait started are not ours
+	return w
+}
+
+// pairs is the number of (node, job) pairs seen so far — the width of one
+// round. Read after observe so a newly registered job is counted.
+func (w *clusterTickWatcher) pairs() int {
+	if len(w.last) == 0 {
+		return 1
+	}
+	return len(w.last)
+}
+
+// observe folds in any job whose LastRun advanced since the previous call and
+// returns the running total.
+//
+// A tick is an ADVANCE that this watcher saw, so the caller must poll faster
+// than the cluster ticks or executions are missed. The wait loop does: its poll
+// interval is tens of milliseconds against a one-second sweep cadence. Missing
+// ticks would only ever make the budget more generous, never less.
+func (w *clusterTickWatcher) observe() int {
+	for key, lastRun := range w.sample() {
+		if prev, seen := w.last[key]; !seen || lastRun.After(prev) {
+			if seen {
+				w.n++
+			}
+			w.last[key] = lastRun
+		}
+	}
+	return w.n
+}
+
 // progressPoint is one observed change of a wait's progress metric, kept for
 // the trajectory report on failure.
 type progressPoint struct {
@@ -213,7 +303,7 @@ type progressPoint struct {
 
 // waitProgress is the harness's convergence-wait primitive. It polls sample
 // every interval until sample reports done. The wait fails on STALL — the
-// progress string unchanged for orchHarnessStallWindow — never on total
+// progress string unchanged across orchHarnessStallRounds cluster rounds — never on total
 // elapsed time alone, so steady progress is never killed mid-convergence
 // under CPU contention. A generous hard backstop (orchHarnessHardBackstop)
 // still bounds the total, catching livelocks where the metric keeps changing
@@ -233,27 +323,36 @@ func (h *orchRelHarness) waitProgress(what string, interval time.Duration, sampl
 	}
 	trajectory := []progressPoint{{0, progress}}
 	lastChange := start
+	ticks := newClusterTickWatcher(h)
+	ticksAtLastChange := 0
 	for {
 		time.Sleep(interval)
 		next, done := sample()
 		now := time.Now()
 		if done {
-			// Slow-but-successful waits log their trajectory so a wait that
-			// nearly stalled (legitimate quiet period approaching the window)
-			// is visible without failing.
-			if now.Sub(start) >= orchHarnessStallWindow/2 {
-				h.t.Logf("%s: converged after %s (%d progress changes)\n%s",
-					what, now.Sub(start).Round(time.Millisecond), len(trajectory), formatTrajectory(trajectory))
+			// Slow-but-successful waits log their trajectory so one that nearly
+			// stalled (a legitimate quiet period approaching the budget) is
+			// visible without failing.
+			if idle := ticks.observe() - ticksAtLastChange; idle >= orchHarnessStallRounds*ticks.pairs()/2 {
+				h.t.Logf("%s: converged after %s (%d progress changes, %d cluster ticks since last change)\n%s",
+					what, now.Sub(start).Round(time.Millisecond), len(trajectory), idle, formatTrajectory(trajectory))
 			}
 			return
 		}
 		if next != progress {
 			progress = next
 			lastChange = now
+			ticksAtLastChange = ticks.observe()
 			trajectory = append(trajectory, progressPoint{now.Sub(start), next})
 		}
 		stalledFor := now.Sub(lastChange)
-		stalled := stalledFor >= orchHarnessStallWindow
+		idleTicks := ticks.observe() - ticksAtLastChange
+		// Stalled means the cluster kept working and produced nothing. The
+		// wall-clock floor is the second way in: a cluster that emits no ticks
+		// at all is dead rather than slow, and would otherwise wait out the
+		// hard backstop with no stall diagnostics.
+		budget := orchHarnessStallRounds * ticks.pairs()
+		stalled := idleTicks >= budget || stalledFor >= orchHarnessStallFloor
 		backstopped := now.Sub(start) >= orchHarnessHardBackstop
 		if !stalled && !backstopped {
 			continue
@@ -262,12 +361,16 @@ func (h *orchRelHarness) waitProgress(what string, interval time.Duration, sampl
 			onFail()
 		}
 		reason := "progress stalled"
-		if backstopped && !stalled {
+		switch {
+		case backstopped && !stalled:
 			reason = "hit hard backstop while still changing (livelock?)"
+		case idleTicks < budget:
+			reason = "progress stalled AND the cluster stopped ticking (starved or dead, not wedged)"
 		}
-		h.t.Fatalf("%s: %s after %s (no progress for %s; stall window %s, hard backstop %s)\nprogress trajectory (%d changes):\n%s",
+		h.t.Fatalf("%s: %s after %s (no progress for %s / %d cluster ticks; budget %d ticks = %d rounds x %d jobs, floor %s, hard backstop %s)\nprogress trajectory (%d changes):\n%s",
 			what, reason, now.Sub(start).Round(time.Millisecond), stalledFor.Round(time.Millisecond),
-			orchHarnessStallWindow, orchHarnessHardBackstop, len(trajectory), formatTrajectory(trajectory))
+			idleTicks, budget, orchHarnessStallRounds, ticks.pairs(), orchHarnessStallFloor, orchHarnessHardBackstop,
+			len(trajectory), formatTrajectory(trajectory))
 	}
 }
 

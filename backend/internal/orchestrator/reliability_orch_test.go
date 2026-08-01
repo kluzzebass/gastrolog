@@ -842,16 +842,16 @@ func TestOrchRel_MultiVault_IsolatedFromPausedPeer(t *testing.T) {
 	// Vault B bound: the structural isolation property is that vault B's
 	// append+seal path never blocks on the paused peer — a regression
 	// (the paused-peer stall class: orchestrator-wide lock held while
-	// waiting on node2) blocks INDEFINITELY, so the shared stall window
+	// waiting on node2) blocks INDEFINITELY, so a generous wall-clock bound
 	// catches it.
 	// A fine-grained "milliseconds, not seconds" latency assertion is not
 	// contention-robust: under multi-suite CPU load the same phase
 	// (including vault-ctl leader waits) legitimately takes >10s with no
 	// paused-peer involvement, as vault A's fast appends right after prove.
 	// Latency is logged above for humans; only an indefinite block fails.
-	if bElapsed > orchHarnessStallWindow {
-		t.Errorf("vault B took %v (> stall window %v) — append+seal path blocked on the paused peer",
-			bElapsed, orchHarnessStallWindow)
+	if bElapsed > orchHarnessEventTimeout {
+		t.Errorf("vault B took %v (> %v) — append+seal path blocked on the paused peer",
+			bElapsed, orchHarnessEventTimeout)
 	}
 
 	// Exercise vault A. This MAY be slower (first record hits

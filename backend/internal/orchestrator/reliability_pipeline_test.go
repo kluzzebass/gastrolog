@@ -339,10 +339,11 @@ func (h *orchRelHarness) submitIngestRecords(nodeID string, count int, prefix st
 			if err != nil {
 				h.t.Fatalf("SubmitIngest %d on %s: ack: %v", i, n.label, err)
 			}
-		case <-time.After(orchHarnessStallWindow):
-			// A durability ack is a single progress event; waiting the shared
-			// stall window on it is the degenerate form of waitProgress.
-			h.t.Fatalf("SubmitIngest %d on %s: no ack within stall window %s", i, n.label, orchHarnessStallWindow)
+		case <-time.After(orchHarnessEventTimeout):
+			// A durability ack either arrives or does not — there is no partial
+			// progress to watch, so this is the single-event bound rather than
+			// a convergence wait.
+			h.t.Fatalf("SubmitIngest %d on %s: no ack within %s", i, n.label, orchHarnessEventTimeout)
 		}
 		bodies[body] = true
 	}
@@ -643,6 +644,12 @@ func TestOrchPipeline_SustainedIngestManifestKeepsPace(t *testing.T) {
 	deadline := time.Now().Add(warmupDuration + soakDuration)
 	lastSealedChunks := initialSealedChunks
 	lastSealProgress := time.Now()
+	// Same denominator as waitProgress: a sealing wedge is "the cluster kept
+	// working and sealed nothing". Counting seconds instead would trip on a
+	// soak that is merely starved of CPU, where the sealing sweeps are delayed
+	// too.
+	sealTicks := newClusterTickWatcher(h)
+	ticksAtLastSeal := 0
 
 	for time.Now().Before(deadline) {
 		health := pipelinePlannerHealthFromFSM(h.vaultCtlSubFSM(v, leaderNode))
@@ -654,22 +661,24 @@ func TestOrchPipeline_SustainedIngestManifestKeepsPace(t *testing.T) {
 		// stall-based, not calibrated to how fast a healthy soak "should" seal:
 		// every sealed-chunk increment resets the stall clock, so slow-under-
 		// contention sealing never trips this — only a genuine sealing wedge
-		// (no new sealed chunk for the shared stall window while ~all registry
-		// records stay pending) does. The end-of-soak waitSealedRecordsAtLeast
-		// below catches the same wedge when the soak is shorter than the
-		// stall window.
+		// (no new sealed chunk across a full stall budget of cluster ticks while
+		// ~all registry records stay pending) does. The end-of-soak
+		// waitSealedRecordsAtLeast below catches the same wedge when the soak
+		// ends before the budget is spent.
 		if health.SealedChunks != lastSealedChunks {
 			lastSealedChunks = health.SealedChunks
 			lastSealProgress = time.Now()
+			ticksAtLastSeal = sealTicks.observe()
 		}
 		if health.RegistryRecords >= minRegistryForRatio &&
-			time.Since(lastSealProgress) >= orchHarnessStallWindow {
+			sealTicks.observe()-ticksAtLastSeal >= orchHarnessStallRounds*sealTicks.pairs() {
 			pendingPct := health.PendingRecords * 100 / health.RegistryRecords
 			if pendingPct >= maxPendingRegistryFrac {
 				h.dumpPipelineState(v)
-				t.Fatalf("vault %s: sealing stalled for %s with %d%% of registry records pending (%d/%d, sealed chunks stuck at %d); "+
+				t.Fatalf("vault %s: sealing stalled for %s / %d cluster ticks with %d%% of registry records pending (%d/%d, sealed chunks stuck at %d); "+
 					"open_records=%d open_refs=%d",
-					v.label, time.Since(lastSealProgress).Round(time.Millisecond), pendingPct,
+					v.label, time.Since(lastSealProgress).Round(time.Millisecond),
+					sealTicks.observe()-ticksAtLastSeal, pendingPct,
 					health.PendingRecords, health.RegistryRecords, health.SealedChunks,
 					health.OpenRecords, health.OpenRefs)
 			}
