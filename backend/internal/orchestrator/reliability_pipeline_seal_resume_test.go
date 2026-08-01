@@ -36,7 +36,17 @@ func TestOrchRel_PipelineVault_RestartResumesStrandWithoutTouchingManifests(t *t
 	// Left in place rather than deleted because the setup is the hard part and
 	// the premise checks are what make it trustworthy. Unskip it when the
 	// downstream blocker is found; if it passes then, the gap is closed.
-	t.Skip("pipeline-vault strand does not reach Sealed after restore; blocker not yet identified")
+	// SKIPPED: FAILING, and the acceptance is what it disproves. Every premise
+	// holds — the strand reaches the FSM in Sealing, AwaitingBuild correctly
+	// says it is not a pipeline chunk, the resume is ungated, and the scheduler
+	// shows post-seal:<vault>:<strand> reaching status=completed on the leader.
+	// The entry still never leaves Sealing. So the failure is downstream of a
+	// SUCCESSFUL post-seal: either the announce inside it does not fire, or the
+	// CmdSealChunk it produces never applies.
+	//
+	// Kept because the setup and the premise checks are the expensive part.
+	// Unskip when the announce path is understood.
+	t.Skip("post-seal completes for the strand yet the entry stays Sealing; blocker is downstream of post-seal")
 	t.Parallel()
 	h := newOrchRelHarness(t, 3,
 		withExtraVault([]int{0, 1, 2}),
@@ -133,6 +143,9 @@ func TestOrchRel_PipelineVault_RestartResumesStrandWithoutTouchingManifests(t *t
 				for cid, st := range h.chunkStatesOnNode(id) {
 					t.Logf("%s: chunk %s state=%s", h.nodes[id].label, cid, st)
 				}
+			}
+			for _, id := range h.nodeIDs {
+				h.logPostSealJobs(id)
 			}
 			h.dumpPipelineState(v)
 		})
