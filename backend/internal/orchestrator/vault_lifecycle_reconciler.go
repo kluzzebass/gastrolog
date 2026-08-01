@@ -352,7 +352,13 @@ func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *vaultctlfsm.FSM) {
 					"error", err)
 			}
 		}
-		return
+		// Falls through rather than returning. A pipeline vault can also hold a
+		// chunk-manager chunk stranded between BeginSeal and the seal
+		// completing — a legacy active, or one recovered into the manager — and
+		// that chunk is unrecoverable by any other path. It used to be skipped
+		// because both populations wear ChunkStateSealing and nothing told them
+		// apart; fsm.AwaitingBuild does, so the resume below can take one and
+		// leave the other.
 	}
 	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
@@ -372,7 +378,7 @@ func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *vaultctlfsm.FSM) {
 			"error", err)
 		return
 	}
-	r.resumeSealingEntries(fsm.List(), localMetas, schedule, "reconcile-from-snapshot", true)
+	r.resumeSealingEntries(fsm.List(), localMetas, schedule, "reconcile-from-snapshot", true, fsm.AwaitingBuild)
 }
 
 // resumeSealingEntries schedules PostSealProcess for every Sealing entry whose
@@ -397,6 +403,7 @@ func (r *VaultLifecycleReconciler) resumeSealingEntries(
 	schedule func(glid.GLID, chunk.ChunkManager, chunk.ChunkID),
 	reason string,
 	warnAnomalies bool,
+	awaitingBuild func(chunk.ChunkID) bool,
 ) int {
 	localByID := make(map[chunk.ChunkID]chunk.ChunkMeta, len(localMetas))
 	for _, m := range localMetas {
@@ -406,6 +413,14 @@ func (r *VaultLifecycleReconciler) resumeSealingEntries(
 	resumed := 0
 	for _, e := range entries {
 		if e.State != chunk.ChunkStateSealing {
+			continue
+		}
+		// Two populations share this state. A pipeline chunk whose manifest is
+		// sealed but whose GLCB is not built yet is NOT stranded — it is work in
+		// flight, and sealToGLCB over it would rebuild a blob the pipeline is
+		// already producing. Only the other population, a chunk-manager chunk
+		// caught between BeginSeal and the seal completing, is resumable here.
+		if awaitingBuild != nil && awaitingBuild(e.ID) {
 			continue
 		}
 		local, ok := localByID[e.ID]
@@ -489,7 +504,14 @@ func (r *VaultLifecycleReconciler) reconcileSealingResume(v *reconcileView) {
 		schedule = r.orch.schedulePostSeal
 	}
 	r.forgetSettledSealResumes(v.entries)
-	r.resumeSealingEntries(v.entries, v.localMetas, r.budgetedResume(schedule), "seal-resume", false)
+	r.resumeSealingEntries(v.entries, v.localMetas, r.budgetedResume(schedule), "seal-resume", false, r.awaitingBuild)
+}
+
+// awaitingBuild reports whether a Sealing entry is a pipeline chunk waiting for
+// its GLCB rather than a chunk-manager chunk stranded mid-seal. Nil-safe so a
+// reconciler without an FSM behaves as it did before the distinction existed.
+func (r *VaultLifecycleReconciler) awaitingBuild(id chunk.ChunkID) bool {
+	return r.fsm != nil && r.fsm.AwaitingBuild(id)
 }
 
 // maxSealResumeAttempts bounds how many times the steady-state pass re-drives

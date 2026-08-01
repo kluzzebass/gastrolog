@@ -128,6 +128,24 @@ func (f *FSM) sealedManifestHeadLocked() *OpenChunkManifest {
 	return f.sealedManifests[0]
 }
 
+// AwaitingBuild reports whether a chunk still has a sealed open-chunk manifest,
+// which is what separates the two populations that share ChunkStateSealing:
+//
+//   - true — a PIPELINE chunk whose manifest is sealed but whose GLCB has not
+//     been built yet. Re-sealing it would run sealToGLCB over an already-built
+//     or in-flight blob.
+//   - false — a chunk-manager chunk stranded between BeginSeal and the seal
+//     completing. This one needs resuming.
+//
+// The distinction is exact rather than heuristic: applySeal pops the sealed
+// manifest in the same step it moves the entry to Sealed, so the manifest is
+// present for precisely the window the entry sits in Sealing awaiting a build.
+func (f *FSM) AwaitingBuild(id chunk.ChunkID) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.sealedManifestByIDLocked(id) != nil
+}
+
 func (f *FSM) sealedManifestByIDLocked(id chunk.ChunkID) *OpenChunkManifest {
 	for _, m := range f.sealedManifests {
 		if m != nil && m.ChunkID == id {

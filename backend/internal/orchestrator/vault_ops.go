@@ -459,18 +459,26 @@ func (o *Orchestrator) findLocalVaultInstance(vaultID glid.GLID) *VaultInstance 
 // Retries if a concurrent Append reopens the active chunk between seal and
 // delete.
 //
-// Uses DeleteNoAnnounce: this is a LOCAL cleanup operation on a single
-// follower. It must NOT propagate the delete via vault-ctl Raft — the canonical
-// sealed chunk is about to replace it locally via ImportRecords, which will
-// fire its own AnnounceCreate/AnnounceSeal for the replacement.
+// Uses the NoAnnounce primitives throughout: this is a LOCAL cleanup operation
+// on a single follower. It must NOT propagate via vault-ctl Raft — the
+// canonical sealed chunk is about to replace it locally via ImportRecords,
+// which fires its own AnnounceCreate/AnnounceSeal for the replacement.
+//
+// The seal matters as much as the delete. Seal() announces BeginSeal and leaves
+// the matching AnnounceSeal to a post-seal pass this path never runs, so it can
+// park the cluster-wide entry in Sealing — the same stranding this file's
+// resume logic exists to repair. It does not strand today only because
+// ImportRecords re-announces Create then Seal for the same chunk ID
+// immediately, and ImportToInstanceStorage refuses pipeline vaults up front;
+// depending on that coincidence is what this avoids.
 func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActive bool) error {
 	if isActive {
-		if err := cm.Seal(); err != nil {
+		if err := chunk.SealNoAnnounce(cm, chunkID); err != nil {
 			return fmt.Errorf("seal forwarded chunk %s: %w", chunkID, err)
 		}
 	}
 	if err := chunk.DeleteNoAnnounce(cm, chunkID); errors.Is(err, chunk.ErrActiveChunk) {
-		if sealErr := cm.Seal(); sealErr != nil {
+		if sealErr := chunk.SealNoAnnounce(cm, chunkID); sealErr != nil {
 			return fmt.Errorf("re-seal forwarded chunk %s: %w", chunkID, sealErr)
 		}
 		if err = chunk.DeleteNoAnnounce(cm, chunkID); err != nil {
