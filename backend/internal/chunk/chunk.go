@@ -19,6 +19,10 @@ var (
 	ErrActiveChunk    = errors.New("cannot delete active chunk")
 	ErrChunkArchived  = errors.New("chunk is archived and not immediately readable")
 	ErrChunkSuspect   = errors.New("chunk blob not found in cloud storage — may be transient")
+	// ErrCloudStoreNotConfigured distinguishes "this vault has no cloud store"
+	// from "the cloud store holds nothing", which are the same empty result
+	// otherwise.
+	ErrCloudStoreNotConfigured = errors.New("cloud store not configured for this vault")
 	// ErrChunkSealed signals that an Append targeted a chunk the
 	// cluster (via vault-ctl Raft FSM) considers sealed. Returned by
 	// the Manager's append-side gate so the caller can rotate to a
@@ -213,6 +217,37 @@ type ChunkIndexBuilder interface {
 // for transient problems.
 type CloudBlobChecker interface {
 	HeadCloudBlob(id ChunkID) error
+}
+
+// CloudBlobInfo describes one object the blob store holds for a vault.
+// Size and StorageClass come from the store's own listing, so they are the
+// authoritative bytes-on-the-provider facts — not what any local record claims.
+type CloudBlobInfo struct {
+	ID           ChunkID
+	Size         int64
+	StorageClass string
+	Archived     bool
+}
+
+// CloudIndexAuditor exposes the two node-local views an audit compares against
+// cluster truth: what the blob store actually holds for the vault, and what the
+// node's cloud index believes it holds.
+//
+// They are separate reads because the index is a CACHE — the FSM manifest owns
+// which chunks are cloud-backed. An audit that compared the cache against the
+// store could only ever find cache bugs, never the case that matters: a chunk
+// the cluster believes is durable whose bytes are gone.
+//
+// Implemented by managers configured with a cloud store; callers type-assert.
+type CloudIndexAuditor interface {
+	// ListCloudBlobs enumerates every object under the vault's prefix.
+	// Returns ErrCloudStoreNotConfigured on a local-only vault rather than an
+	// empty slice, which a caller would read as "the vault has no objects".
+	ListCloudBlobs(ctx context.Context) ([]CloudBlobInfo, error)
+
+	// CloudIndexEntries returns the node's cached cloud-backed metadata.
+	// Never mutates the cache.
+	CloudIndexEntries() []ChunkMeta
 }
 
 // ChunkPostSealProcessor extends ChunkManager with a unified post-seal pipeline.
