@@ -8,30 +8,21 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/raftgroup"
-	"gastrolog/internal/vaultraft"
 )
 
-// chunkStatesOnNode returns the lifecycle state of every manifest entry in the
-// default vault's vault-ctl FSM on a node. Complements chunkIDsOnNode, which
-// only reports presence — an entry stranded in Sealing is present but never
-// promoted, so presence alone cannot catch a half-finished seal.
-func (h *orchRelHarness) chunkStatesOnNode(id string) map[chunk.ChunkID]chunk.ChunkState {
-	n := h.nodes[id]
-	if n == nil || n.groupMgr == nil {
-		return nil
-	}
-	g := n.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(h.vaultID))
-	if g == nil {
-		return nil
-	}
-	vfsm, ok := g.FSM.(*vaultraft.FSM)
-	if !ok || vfsm == nil {
-		return nil
-	}
-	sub := vfsm.VaultFSM(h.vaultID)
+// chunkStatesOnNodeForVault returns the lifecycle state of every manifest
+// entry in one vault's vault-ctl FSM on a node. Complements
+// chunkIDsOnNodeForVault, which only reports presence — an entry stranded in
+// Sealing is present but never promoted, so presence alone cannot catch a
+// half-finished seal.
+//
+// Multi-vault scenarios MUST pass the vault the chunk under test belongs to: a
+// lookup against the wrong vault's FSM reports the chunk as absent, which reads
+// identically to a chunk that never advanced.
+func (h *orchRelHarness) chunkStatesOnNodeForVault(v vaultSpec, nodeID string) map[chunk.ChunkID]chunk.ChunkState {
+	sub := h.vaultCtlSubFSM(v, nodeID)
 	if sub == nil {
-		return map[chunk.ChunkID]chunk.ChunkState{}
+		return nil
 	}
 	entries := sub.List()
 	out := make(map[chunk.ChunkID]chunk.ChunkState, len(entries))
@@ -39,6 +30,12 @@ func (h *orchRelHarness) chunkStatesOnNode(id string) map[chunk.ChunkID]chunk.Ch
 		out[e.ID] = e.State
 	}
 	return out
+}
+
+// chunkStatesOnNode is chunkStatesOnNodeForVault against the default vault,
+// for the single-vault harness.
+func (h *orchRelHarness) chunkStatesOnNode(id string) map[chunk.ChunkID]chunk.ChunkState {
+	return h.chunkStatesOnNodeForVault(h.vaults[0], id)
 }
 
 // Sealing the chunk manager's active chunk must drive the vault-ctl manifest
@@ -96,6 +93,53 @@ func TestOrchRel_SealActive_PromotesEveryNodeToSealed(t *testing.T) {
 			h.logPostSealJobs(id)
 		}
 	})
+}
+
+// stopVaultCatchupSweep removes the periodic vault-catchup sweep from every
+// node's scheduler. It runs every second in this binary and drives the
+// steady-state reconcile categories, so a test that drives one reconcile path
+// explicitly cannot otherwise tell its own pass from the sweep's.
+//
+// Fails the test when there is no such job on a node: losing the isolation
+// silently would let a control case pass against broken code.
+func (h *orchRelHarness) stopVaultCatchupSweep() {
+	h.t.Helper()
+	for _, id := range h.nodeIDs {
+		n := h.nodes[id]
+		if n == nil || n.orch == nil {
+			continue
+		}
+		removed := 0
+		for _, j := range n.orch.Scheduler().ListJobs() {
+			if strings.Contains(j.Name, "catchup-sweep") {
+				n.orch.Scheduler().RemoveJob(j.Name)
+				removed++
+			}
+		}
+		if removed == 0 {
+			h.t.Fatalf("%s: no vault-catchup sweep job to stop; the steady-state reconcile cannot be isolated", n.label)
+		}
+	}
+}
+
+// postSealScheduledFor reports whether a node's scheduler holds a post-seal job
+// for one chunk. The job name is the claim, and the registry keeps the entry
+// after the job completes, so this observes "a post-seal was scheduled for this
+// chunk" rather than only "one is in flight".
+//
+// Matched on the chunk ID within the name instead of rebuilding the full job
+// name, which lives unexported in the orchestrator package.
+func (h *orchRelHarness) postSealScheduledFor(nodeID string, id chunk.ChunkID) bool {
+	n := h.nodes[nodeID]
+	if n == nil || n.orch == nil {
+		return false
+	}
+	for _, j := range n.orch.Scheduler().ListJobs() {
+		if strings.HasPrefix(j.Name, "post-seal:") && strings.HasSuffix(j.Name, id.String()) {
+			return true
+		}
+	}
+	return false
 }
 
 // logPostSealJobs reports what the node's scheduler thinks of the post-seal

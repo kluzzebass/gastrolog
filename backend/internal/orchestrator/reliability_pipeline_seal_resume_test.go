@@ -10,43 +10,21 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
-// Multi-node restart-survival for the seal-resume gap on PIPELINE vaults.
+// Multi-node restart-survival for seal resumption on PIPELINE vaults.
 //
-// ReconcileFromSnapshot is what runs after a node's vault-ctl FSM is restored —
-// the restart path, and the one that carried the pipeline guard. The
-// steady-state category never had one, so driving ReconcileTick here would
-// exercise code that was never broken. An earlier draft of this test did
-// exactly that, failed for an unrelated reason, and was thrown away.
+// ReconcileFromSnapshot is the path under test: it runs once a node's vault-ctl
+// FSM has been restored, and it is where a pipeline vault's Sealing entries have
+// to be told apart. Three real nodes, a real pipeline vault with traffic through
+// it, and a real chunk-manager chunk stranded mid-seal beside the pipeline's own
+// chunks — the coexistence that makes the discrimination necessary.
 //
-// Three real nodes, a real pipeline vault with traffic through it, and a real
-// chunk-manager chunk stranded mid-seal beside the pipeline's own manifests —
-// the coexistence the old guard could not serve.
+// The steady-state category is a different test (see
+// TestOrchRel_StrandedSeal_ResumesWithoutRestart) and is switched off here, or
+// it would recover the strand on its own and this test would assert nothing.
 func TestOrchRel_PipelineVault_RestartResumesStrandWithoutTouchingManifests(t *testing.T) {
 	if testing.Short() {
 		t.Skip("multi-node reliability test")
 	}
-	// SKIPPED: currently FAILING, and it is the acceptance rather than the test
-	// that is wrong to trust. Its premises all hold — the strand reaches the FSM
-	// in Sealing, AwaitingBuild correctly reports it is not a pipeline chunk, and
-	// the resume is no longer gated — yet the chunk never reaches Sealed on a
-	// pipeline vault after a restore pass. So removing the guard is necessary
-	// and not sufficient: something downstream of scheduling the post-seal does
-	// not complete for a chunk-manager chunk on a pipeline vault.
-	//
-	// Left in place rather than deleted because the setup is the hard part and
-	// the premise checks are what make it trustworthy. Unskip it when the
-	// downstream blocker is found; if it passes then, the gap is closed.
-	// SKIPPED: FAILING, and the acceptance is what it disproves. Every premise
-	// holds — the strand reaches the FSM in Sealing, AwaitingBuild correctly
-	// says it is not a pipeline chunk, the resume is ungated, and the scheduler
-	// shows post-seal:<vault>:<strand> reaching status=completed on the leader.
-	// The entry still never leaves Sealing. So the failure is downstream of a
-	// SUCCESSFUL post-seal: either the announce inside it does not fire, or the
-	// CmdSealChunk it produces never applies.
-	//
-	// Kept because the setup and the premise checks are the expensive part.
-	// Unskip when the announce path is understood.
-	t.Skip("post-seal completes for the strand yet the entry stays Sealing; blocker is downstream of post-seal")
 	t.Parallel()
 	h := newOrchRelHarness(t, 3,
 		withExtraVault([]int{0, 1, 2}),
@@ -60,7 +38,14 @@ func TestOrchRel_PipelineVault_RestartResumesStrandWithoutTouchingManifests(t *t
 	// strand below is recovered. Without it this would pass on a vault that is
 	// only nominally a pipeline vault.
 	h.submitIngestRecords(h.nodeIDs[0], pipelineChunkMaxRecords, "restart-resume")
-	h.waitSealedRecords(v, h.nodeIDs[0], pipelineChunkMaxRecords)
+	// Captured while the strand below does not exist yet, so this set is the
+	// pipeline population by construction rather than by filtering.
+	pipelineChunks := h.waitSealedRecords(v, h.nodeIDs[0], pipelineChunkMaxRecords)
+
+	// Isolate the restart path. The steady-state seal-resume category rides the
+	// vault-catchup sweep and recovers the same strand within a sweep or two, so
+	// with it running this test passes whether or not the restart path works.
+	h.stopVaultCatchupSweep()
 
 	// A chunk-manager chunk on the SAME vault. AppendToVault writes through the
 	// chunk manager, which is how a legacy active comes to sit beside pipeline
@@ -131,7 +116,7 @@ func TestOrchRel_PipelineVault_RestartResumesStrandWithoutTouchingManifests(t *t
 			var views []string
 			allSealed := true
 			for _, id := range h.nodeIDs {
-				st, ok := h.chunkStatesOnNode(id)[strandedID]
+				st, ok := h.chunkStatesOnNodeForVault(v, id)[strandedID]
 				if !ok || st != chunk.ChunkStateSealed {
 					allSealed = false
 				}
@@ -140,7 +125,7 @@ func TestOrchRel_PipelineVault_RestartResumesStrandWithoutTouchingManifests(t *t
 			return fmt.Sprintf("%v", views), allSealed
 		}, func() {
 			for _, id := range h.nodeIDs {
-				for cid, st := range h.chunkStatesOnNode(id) {
+				for cid, st := range h.chunkStatesOnNodeForVault(v, id) {
 					t.Logf("%s: chunk %s state=%s", h.nodes[id].label, cid, st)
 				}
 			}
@@ -150,17 +135,33 @@ func TestOrchRel_PipelineVault_RestartResumesStrandWithoutTouchingManifests(t *t
 			h.dumpPipelineState(v)
 		})
 
-	// The other half. The pipeline's chunks were sealed by the pipeline before
-	// the restore and must still be Sealed — a resume that grabbed them would
-	// have driven them through sealToGLCB over blobs the pipeline had already
-	// built.
-	sealed := h.sealedPipelineChunks(v, h.nodeIDs[0])
-	if len(sealed) == 0 {
-		t.Fatal("pipeline chunks vanished across the restore pass")
+	// The resume is what recovered the strand, not some other path: the leader
+	// must hold a post-seal job for it. This is also the control for the
+	// pipeline-side assertion below, which is a negative on the same observable
+	// and would pass against a scheduler that never records anything.
+	if !h.postSealScheduledFor(leader.id, strandedID) {
+		t.Errorf("no post-seal job for the strand on the vault-ctl leader; the strand reached Sealed by some other path")
 	}
-	for _, e := range sealed {
-		if e.ID == strandedID {
-			t.Errorf("the strand was counted as a pipeline chunk; the populations are conflated")
+
+	// The other half. The pipeline's chunks must survive the restore untouched:
+	// still Sealed, and never handed to a post-seal. A resume that grabbed one
+	// would drive it through sealToGLCB over a GLCB the pipeline had already
+	// built, and a post-seal job under its ID is what that looks like.
+	//
+	// The sealed-but-unbuilt window itself is not held open here — it closes as
+	// soon as a home builds the GLCB, and holding it open would mean racing the
+	// build. The FSM-level tests cover that population directly.
+	for _, id := range h.nodeIDs {
+		states := h.chunkStatesOnNodeForVault(v, id)
+		for _, e := range pipelineChunks {
+			if st := states[e.ID]; st != chunk.ChunkStateSealed {
+				t.Errorf("%s: pipeline chunk %s is %s after the restore pass, want Sealed",
+					h.nodes[id].label, e.ID, st)
+			}
+			if h.postSealScheduledFor(id, e.ID) {
+				t.Errorf("%s: pipeline chunk %s was handed to a post-seal; the resume took a chunk awaiting its build",
+					h.nodes[id].label, e.ID)
+			}
 		}
 	}
 }
