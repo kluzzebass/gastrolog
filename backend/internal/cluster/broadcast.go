@@ -66,6 +66,19 @@ func (s *Server) Subscribe(fn func(*gastrologv1.BroadcastMessage)) func() {
 	return s.subscribers.subscribe(fn)
 }
 
+// DispatchLocal delivers a locally-originated broadcast to this node's
+// subscribers, the same path an inbound one takes.
+//
+// Exported so the Broadcaster can close the loop: a producer then publishes
+// once and every interested party — here and on peers — is notified through
+// one mechanism.
+func (s *Server) DispatchLocal(msg *gastrologv1.BroadcastMessage) {
+	if msg == nil {
+		return
+	}
+	s.subscribers.dispatch(msg)
+}
+
 // broadcast handles the Broadcast RPC — dispatches the message to all
 // local subscribers.
 func (s *Server) broadcast(_ context.Context, req *gastrologv1.BroadcastRequest) (*gastrologv1.BroadcastResponse, error) {

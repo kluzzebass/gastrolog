@@ -92,6 +92,20 @@ type PeerState struct {
 	ttl     time.Duration
 	raftTTL time.Duration
 
+	// localNodeID is this node, so PeerState can refuse to record itself.
+	//
+	// The "no entry for the local node" invariant used to hold by accident:
+	// Peers() excludes self, so a self-broadcast never arrived. Local broadcasts
+	// now reach local subscribers, and this is a subscriber — so the invariant
+	// has to be owned here instead of inferred from the transport.
+	//
+	// It is load-bearing. placement.go reads len(LivePeers()) == 0 as "PeerState
+	// has not warmed up yet" and falls back to treating every Raft member alive,
+	// which is what stops it reassigning vaults away from nodes it simply has
+	// not heard from yet during startup. Self in that list makes it never empty
+	// and kills the fallback silently.
+	localNodeID string
+
 	// onContactResumed fires when a peer's Raft contact goes from stale to
 	// fresh. Consumers that react to a peer RETURNING cannot use broadcast
 	// arrival alone: a broadcast is only delivered to its receivers, so a
@@ -99,6 +113,24 @@ type PeerState struct {
 	// recovers before its broadcast path would go unnoticed in a cluster
 	// with no third node to hear from. Optional; nil disables the signal.
 	onContactResumed func(peerID string)
+}
+
+// SetLocalNodeID tells PeerState which node it is running on, so it can refuse
+// to record itself. Wire at construction, before any broadcast is handled.
+//
+// Empty means "no self known", which keeps the pre-loopback behaviour: nothing
+// is filtered. Callers that deliver local broadcasts MUST set it.
+func (p *PeerState) SetLocalNodeID(id string) {
+	p.mu.Lock()
+	p.localNodeID = id
+	p.mu.Unlock()
+}
+
+// isSelf reports whether an inbound broadcast originated on this node.
+func (p *PeerState) isSelf(nodeID string) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.localNodeID != "" && nodeID == p.localNodeID
 }
 
 // SetContactResumedHook installs the stale→fresh Raft-contact callback. Not
@@ -748,6 +780,12 @@ func (p *PeerState) LivePeers() []string {
 func (p *PeerState) HandleBroadcast(msg *gastrologv1.BroadcastMessage) {
 	ns := msg.GetNodeStats()
 	if ns == nil {
+		return
+	}
+	// This node's own broadcast reaches this subscriber now. PeerState holds
+	// PEERS: recording self would put it in LivePeers and break placement's
+	// warmed-up sentinel. Local stats are read from their live owner.
+	if p.isSelf(string(msg.SenderId)) {
 		return
 	}
 	received := time.Now()

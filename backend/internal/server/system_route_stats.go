@@ -2,11 +2,13 @@ package server
 
 import (
 	"context"
+	"sort"
 
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/orchestrator"
 )
 
 // GetRouteStats returns live routing statistics aggregated across the cluster.
@@ -17,42 +19,7 @@ func (s *SystemServer) GetRouteStats(
 	_ *connect.Request[apiv1.GetRouteStatsRequest],
 ) (*connect.Response[apiv1.GetRouteStatsResponse], error) {
 	// Start with local node stats.
-	rs := s.orch.GetRouteStats()
-	totalRouted := rs.Routed
-	totalUnmatched := rs.Unmatched
-	totalMatched := rs.Matched
-	routeTableActive := s.orch.IsRouteTableActive()
-
-	// Merge per-vault stats into a map for dedup across nodes.
-	vaultMap := make(map[string]*apiv1.VaultRouteStats)
-	for vaultID, vs := range s.orch.VaultRouteStatsList() {
-		vaultMap[vaultID.String()] = &apiv1.VaultRouteStats{
-			VaultId:        vaultID.ToProto(),
-			RecordsMatched: vs.Matched,
-		}
-	}
-
-	// Merge per-route stats into a map for dedup across nodes.
-	routeMap := make(map[string]*apiv1.PerRouteStats)
-	for routeID, ps := range s.orch.PerRouteStatsList() {
-		routeMap[routeID.String()] = &apiv1.PerRouteStats{
-			RouteId:        routeID.ToProto(),
-			RecordsMatched: ps.Matched,
-		}
-	}
-
-	// Add peer stats if in cluster mode.
-	if s.peerRouteStats != nil {
-		pRouted, pUnmatched, pMatched, pRouteTableActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
-		totalRouted += pRouted
-		totalUnmatched += pUnmatched
-		totalMatched += pMatched
-		if pRouteTableActive {
-			routeTableActive = true
-		}
-		mergeVaultRouteStats(vaultMap, pVaultStats)
-		mergePerRouteStats(routeMap, pRouteStats)
-	}
+	totals := clusterRouteStats(s.orch, s.peerRouteStats)
 
 	// Cluster-total throughput. Preferred source: the stats collector's
 	// window over SUMMED cluster counters — one server-side series carrying
@@ -66,22 +33,110 @@ func (s *SystemServer) GetRouteStats(
 		routedRate, matchedRate = clusterRouteRates(s.localStats, s.peerRouteStats)
 	}
 
-	resp := &apiv1.GetRouteStatsResponse{
-		TotalRouted:      totalRouted,
-		TotalUnmatched:   totalUnmatched,
-		TotalMatched:     totalMatched,
-		RouteTableActive: routeTableActive,
+	return connect.NewResponse(&apiv1.GetRouteStatsResponse{
+		TotalRouted:      totals.Routed,
+		TotalUnmatched:   totals.Unmatched,
+		TotalMatched:     totals.Matched,
+		RouteTableActive: totals.RouteTableActive,
 		RoutedRate:       routedRate,
 		MatchedRate:      matchedRate,
-	}
-	for _, vs := range vaultMap {
-		resp.VaultStats = append(resp.VaultStats, vs)
-	}
-	for _, rs := range routeMap {
-		resp.RouteStats = append(resp.RouteStats, rs)
-	}
+		VaultStats:       totals.VaultStats(),
+		RouteStats:       totals.RouteStats(),
+	}), nil
+}
 
-	return connect.NewResponse(resp), nil
+// clusterRouteStats is the whole-cluster route picture: this node's counters
+// summed with every live peer's, and the per-vault and per-route breakdowns
+// merged across nodes.
+//
+// A free function over both halves, matching clusterRouteRates below, because
+// the two halves come from different owners — the local orchestrator holds live
+// truth, PeerState caches what peers broadcast — and assembling them at each
+// call site is how the local half gets left out. That omission is quiet: the
+// total is wrong by exactly one node, and it is the node the operator is
+// connected to, so it is the one they are least likely to cross-check.
+func clusterRouteStats(orch routeStatsSource, peers PeerRouteStatsProvider) clusterRouteTotals {
+	rs := orch.GetRouteStats()
+	out := clusterRouteTotals{
+		Routed:           rs.Routed,
+		Unmatched:        rs.Unmatched,
+		Matched:          rs.Matched,
+		RouteTableActive: orch.IsRouteTableActive(),
+		vaults:           map[string]*apiv1.VaultRouteStats{},
+		routes:           map[string]*apiv1.PerRouteStats{},
+	}
+	for vaultID, vs := range orch.VaultRouteStatsList() {
+		out.vaults[vaultID.String()] = &apiv1.VaultRouteStats{
+			VaultId:        vaultID.ToProto(),
+			RecordsMatched: vs.Matched,
+		}
+	}
+	for routeID, ps := range orch.PerRouteStatsList() {
+		out.routes[routeID.String()] = &apiv1.PerRouteStats{
+			RouteId:        routeID.ToProto(),
+			RecordsMatched: ps.Matched,
+		}
+	}
+	if peers == nil {
+		return out
+	}
+	pRouted, pUnmatched, pMatched, pActive, pVaultStats, pRouteStats := peers.AggregateRouteStats()
+	out.Routed += pRouted
+	out.Unmatched += pUnmatched
+	out.Matched += pMatched
+	if pActive {
+		out.RouteTableActive = true
+	}
+	mergeVaultRouteStats(out.vaults, pVaultStats)
+	mergePerRouteStats(out.routes, pRouteStats)
+	return out
+}
+
+// clusterRouteTotals carries the merged result. The per-vault and per-route
+// maps stay unexported and are read through VaultStats/RouteStats so callers
+// cannot accidentally consume a half-merged map.
+type clusterRouteTotals struct {
+	Routed           int64
+	Unmatched        int64
+	Matched          int64
+	RouteTableActive bool
+
+	vaults map[string]*apiv1.VaultRouteStats
+	routes map[string]*apiv1.PerRouteStats
+}
+
+// VaultStats returns the merged per-vault breakdown, ordered by vault ID so
+// two calls over the same data produce the same response.
+func (c clusterRouteTotals) VaultStats() []*apiv1.VaultRouteStats {
+	out := make([]*apiv1.VaultRouteStats, 0, len(c.vaults))
+	for _, vs := range c.vaults {
+		out = append(out, vs)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return glid.FromBytes(out[i].VaultId).String() < glid.FromBytes(out[j].VaultId).String()
+	})
+	return out
+}
+
+// RouteStats returns the merged per-route breakdown, ordered by route ID.
+func (c clusterRouteTotals) RouteStats() []*apiv1.PerRouteStats {
+	out := make([]*apiv1.PerRouteStats, 0, len(c.routes))
+	for _, rs := range c.routes {
+		out = append(out, rs)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return glid.FromBytes(out[i].RouteId).String() < glid.FromBytes(out[j].RouteId).String()
+	})
+	return out
+}
+
+// routeStatsSource is the local half: the orchestrator's own counters. Narrow
+// so the merge can be exercised without standing one up.
+type routeStatsSource interface {
+	GetRouteStats() *orchestrator.RouteStats
+	IsRouteTableActive() bool
+	VaultRouteStatsList() map[glid.GLID]*orchestrator.VaultRouteStats
+	PerRouteStatsList() map[glid.GLID]*orchestrator.PerRouteStats
 }
 
 func mergeVaultRouteStats(m map[string]*apiv1.VaultRouteStats, stats []*apiv1.VaultRouteStats) {

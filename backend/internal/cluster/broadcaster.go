@@ -30,6 +30,13 @@ type Broadcaster struct {
 	// ctx carries a tighter deadline, that deadline wins.
 	perPeerTimeout time.Duration
 
+	// deliverLocal hands a broadcast to THIS node's subscribers. Without it a
+	// producer has to publish every event twice — Send for peers, plus some
+	// separate local mechanism — and every new payload repeats the split. Nil
+	// leaves Send peer-only, which is what a Broadcaster with no server
+	// attached (tests) wants.
+	deliverLocal func(*gastrologv1.BroadcastMessage)
+
 	mu     sync.Mutex
 	failed map[string]bool // true = peer is unreachable (suppress repeated logs)
 }
@@ -37,6 +44,22 @@ type Broadcaster struct {
 // NewBroadcaster creates a Broadcaster that uses the shared PeerConns pool.
 func NewBroadcaster(peers *PeerConnManager, logger *slog.Logger) *Broadcaster {
 	return newBroadcaster(peers, logger, ForwardingTimeout)
+}
+
+// SetLocalDelivery wires the local subscriber dispatch. Call before the first
+// Send; it is not safe against concurrent broadcasts.
+//
+// Delivery is to SUBSCRIBERS, not to the peer caches: PeerState and
+// PeerJobState still ignore this node, so "peer" keeps meaning peer and
+// consumers keep reading local state from its live owner. What is unified is
+// who gets woken, not where state is read from.
+//
+// Delivery is synchronous and in-line, so a subscriber must NOT broadcast in
+// response to a broadcast: that recurses through Send until the stack gives
+// out. Subscribers signal a worker and return; none of the current ones
+// publishes anything.
+func (b *Broadcaster) SetLocalDelivery(fn func(*gastrologv1.BroadcastMessage)) {
+	b.deliverLocal = fn
 }
 
 // newBroadcaster is the internal constructor used by production and tests.
@@ -62,6 +85,14 @@ func newBroadcaster(peers broadcastPeerSource, logger *slog.Logger, perPeerTimeo
 // paused peer's goroutine runs to its per-peer timeout asynchronously;
 // meanwhile, the caller and other peers are unaffected.
 func (b *Broadcaster) Send(ctx context.Context, msg *gastrologv1.BroadcastMessage) {
+	// Local first, and synchronously: this node needs no network and should not
+	// learn about its own event later than its peers do. Also means a
+	// single-node deployment — where Peers() is empty and the fan-out below
+	// returns early — still sees its own broadcasts.
+	if b.deliverLocal != nil {
+		b.deliverLocal(msg)
+	}
+
 	peers, err := b.peers.Peers()
 	if err != nil {
 		b.logger.Debug("broadcast: get peers", "error", err)

@@ -636,40 +636,13 @@ func (s *LifecycleServer) listLiveNodes(ctx context.Context) map[string]struct{}
 }
 
 // buildRouteStats aggregates route statistics from local + peer sources.
+//
+// Shares clusterRouteStats with the GetRouteStats RPC rather than assembling
+// the same merge again: this stream and that RPC feed the same UI, so two
+// implementations of "the cluster total" would eventually disagree and the
+// stream would overwrite the RPC's answer.
 func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
-	rs := s.orch.GetRouteStats()
-	totalRouted := rs.Routed
-	totalUnmatched := rs.Unmatched
-	totalMatched := rs.Matched
-	routeTableActive := s.orch.IsRouteTableActive()
-
-	vaultMap := make(map[string]*apiv1.VaultRouteStats)
-	for vaultID, vs := range s.orch.VaultRouteStatsList() {
-		vaultMap[vaultID.String()] = &apiv1.VaultRouteStats{
-			VaultId:        vaultID.ToProto(),
-			RecordsMatched: vs.Matched,
-		}
-	}
-
-	routeMap := make(map[string]*apiv1.PerRouteStats)
-	for routeID, ps := range s.orch.PerRouteStatsList() {
-		routeMap[routeID.String()] = &apiv1.PerRouteStats{
-			RouteId:        routeID.ToProto(),
-			RecordsMatched: ps.Matched,
-		}
-	}
-
-	if s.peerRouteStats != nil {
-		pRouted, pUnmatched, pMatched, pRouteTableActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
-		totalRouted += pRouted
-		totalUnmatched += pUnmatched
-		totalMatched += pMatched
-		if pRouteTableActive {
-			routeTableActive = true
-		}
-		mergeVaultRouteStats(vaultMap, pVaultStats)
-		mergePerRouteStats(routeMap, pRouteStats)
-	}
+	totals := clusterRouteStats(s.orch, s.peerRouteStats)
 
 	var routedRate, matchedRate *apiv1.ThroughputRate
 	if s.clusterRouteRates != nil {
@@ -678,19 +651,14 @@ func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 		routedRate, matchedRate = clusterRouteRates(s.localStats, s.peerRouteStats)
 	}
 
-	resp := &apiv1.GetRouteStatsResponse{
-		TotalRouted:      totalRouted,
-		TotalUnmatched:   totalUnmatched,
-		TotalMatched:     totalMatched,
-		RouteTableActive: routeTableActive,
+	return &apiv1.GetRouteStatsResponse{
+		TotalRouted:      totals.Routed,
+		TotalUnmatched:   totals.Unmatched,
+		TotalMatched:     totals.Matched,
+		RouteTableActive: totals.RouteTableActive,
 		RoutedRate:       routedRate,
 		MatchedRate:      matchedRate,
+		VaultStats:       totals.VaultStats(),
+		RouteStats:       totals.RouteStats(),
 	}
-	for _, vs := range vaultMap {
-		resp.VaultStats = append(resp.VaultStats, vs)
-	}
-	for _, rs := range routeMap {
-		resp.RouteStats = append(resp.RouteStats, rs)
-	}
-	return resp
 }

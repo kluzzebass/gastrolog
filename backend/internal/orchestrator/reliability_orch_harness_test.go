@@ -173,18 +173,35 @@ func withMatchAllRoute(vaultIdx int) orchRelOption {
 }
 
 const (
-	// Harness convergence waits are progress-based (see waitProgress), not
-	// wall-clock-bounded: the awaited work is CPU-bound in-process cluster
-	// activity, so under multi-suite contention a fixed wall-clock budget buys
-	// an arbitrary fraction of the compute. A wait fails only when its
-	// observed progress metric has not changed for this stall window. The
-	// window sits well above the slowest legitimate quiet period between
-	// progress events, which is a reconcile-sweep period: the test profile
-	// runs those every second (testprofile_test.go), so this is twenty
-	// periods of headroom for contention stretching a tick. Shrinking it does
-	// not make a passing run faster; it makes a WEDGED one report in a third
-	// of the time, which is the whole point of the feedback loop.
-	orchHarnessStallWindow = 20 * time.Second
+	// A wait fails only when its progress metric has not changed while the
+	// cluster demonstrably KEPT WORKING — see waitProgress. The budget is
+	// counted in observed scheduler ticks, not seconds, because the awaited
+	// work is CPU-bound in-process cluster activity: under multi-suite
+	// contention the sweeps that would produce progress are themselves
+	// delayed, so a wall-clock budget buys fewer of them exactly when it needs
+	// to buy more.
+	//
+	// Counted PER JOB rather than as a raw total: the test profile runs every
+	// sweep at one second on every node (testprofile_test.go), so a four-node
+	// harness observes tens of sweeps per second and a flat budget of twenty
+	// would expire in about one. Multiplying by the number of registered
+	// (node, job) pairs makes it self-calibrating — twenty sweeps per job is
+	// roughly the twenty seconds the old wall-clock window intended on an idle
+	// machine, and stretches automatically when the cluster is starved.
+	orchHarnessStallSweepsPerJob = 20
+	// orchHarnessStallFloor bounds how long a stall can go unreported when the
+	// cluster runs no sweeps at all. Without it, a harness whose
+	// schedulers never start would wait out the hard backstop with no
+	// diagnostics; with it, a genuinely dead cluster still fails on the stall
+	// path and reports its trajectory.
+	orchHarnessStallFloor = 90 * time.Second
+	// orchHarnessEventTimeout bounds a wait for ONE event that either arrives
+	// or does not — a durability ack, an append+seal returning. Convergence
+	// waits watch a metric and can tell slow from stuck; these cannot, so
+	// wall-clock is the only bound available. Set generously on purpose: what
+	// it catches is an INDEFINITE block, and a tighter value would only buy
+	// false failures under load.
+	orchHarnessEventTimeout = 60 * time.Second
 	// orchHarnessHardBackstop bounds total wait time even while progress
 	// trickles, so a livelocked metric (one that keeps changing without ever
 	// converging — election churn, oscillating counts) still fails with
@@ -204,6 +221,78 @@ const (
 // time and with non-harness tests) and keep running in `go test ./...`.
 var orchRelHarnessSlots = make(chan struct{}, 2)
 
+// sweepCounter counts scheduler job executions across every node, using
+// them as the cluster's own clock.
+//
+// This is the denominator for stall detection. A wait is only entitled to fail
+// when the cluster was RUNNING and still made no progress; if this count is not
+// moving, the harness is starved of CPU rather than wedged, and failing it would
+// report a scheduling artifact as a convergence bug.
+//
+// The scheduler exposes LastRun rather than a run counter, so executions are
+// accumulated by whoever polls — which the wait loop does anyway. Keyed by node
+// and job because two nodes running the same job are two sweeps.
+type sweepCounter struct {
+	// sample returns the current LastRun per (node, job). Injected rather than
+	// reached out of the harness so the counting rule can be exercised
+	// directly, without standing up nodes to drive it.
+	sample func() map[string]time.Time
+	last   map[string]time.Time
+	n      int
+}
+
+func newClusterSweepCounter(h *orchRelHarness) *sweepCounter {
+	return newSweepCounter(func() map[string]time.Time {
+		out := map[string]time.Time{}
+		for id, n := range h.nodes {
+			if n == nil || n.orch == nil {
+				continue
+			}
+			for _, info := range n.orch.Scheduler().ListJobs() {
+				if info.LastRun.IsZero() {
+					continue
+				}
+				out[id+"\x00"+info.Name] = info.LastRun
+			}
+		}
+		return out
+	})
+}
+
+func newSweepCounter(sample func() map[string]time.Time) *sweepCounter {
+	w := &sweepCounter{sample: sample, last: map[string]time.Time{}}
+	w.observe() // anchor: runs before this wait started are not ours
+	return w
+}
+
+// pairs is the number of (node, job) pairs seen so far, which scales the
+// budget. Read after observe so a newly registered job is counted.
+func (w *sweepCounter) pairs() int {
+	if len(w.last) == 0 {
+		return 1
+	}
+	return len(w.last)
+}
+
+// observe folds in any job whose LastRun advanced since the previous call and
+// returns the running total.
+//
+// A sweep counts as an ADVANCE this counter saw, so the caller must poll faster
+// than the observed sweeps or executions are missed. The wait loop does: its poll
+// interval is tens of milliseconds against a one-second sweep cadence. Missing
+// sweeps would only ever make the budget more generous, never less.
+func (w *sweepCounter) observe() int {
+	for key, lastRun := range w.sample() {
+		if prev, seen := w.last[key]; !seen || lastRun.After(prev) {
+			if seen {
+				w.n++
+			}
+			w.last[key] = lastRun
+		}
+	}
+	return w.n
+}
+
 // progressPoint is one observed change of a wait's progress metric, kept for
 // the trajectory report on failure.
 type progressPoint struct {
@@ -213,7 +302,7 @@ type progressPoint struct {
 
 // waitProgress is the harness's convergence-wait primitive. It polls sample
 // every interval until sample reports done. The wait fails on STALL — the
-// progress string unchanged for orchHarnessStallWindow — never on total
+// progress string unchanged across the sweep budget — never on total
 // elapsed time alone, so steady progress is never killed mid-convergence
 // under CPU contention. A generous hard backstop (orchHarnessHardBackstop)
 // still bounds the total, catching livelocks where the metric keeps changing
@@ -233,27 +322,36 @@ func (h *orchRelHarness) waitProgress(what string, interval time.Duration, sampl
 	}
 	trajectory := []progressPoint{{0, progress}}
 	lastChange := start
+	sweeps := newClusterSweepCounter(h)
+	sweepsAtLastChange := 0
 	for {
 		time.Sleep(interval)
 		next, done := sample()
 		now := time.Now()
 		if done {
-			// Slow-but-successful waits log their trajectory so a wait that
-			// nearly stalled (legitimate quiet period approaching the window)
-			// is visible without failing.
-			if now.Sub(start) >= orchHarnessStallWindow/2 {
-				h.t.Logf("%s: converged after %s (%d progress changes)\n%s",
-					what, now.Sub(start).Round(time.Millisecond), len(trajectory), formatTrajectory(trajectory))
+			// Slow-but-successful waits log their trajectory so one that nearly
+			// stalled (a legitimate quiet period approaching the budget) is
+			// visible without failing.
+			if idle := sweeps.observe() - sweepsAtLastChange; idle >= orchHarnessStallSweepsPerJob*sweeps.pairs()/2 {
+				h.t.Logf("%s: converged after %s (%d progress changes, %d observed sweeps since last change)\n%s",
+					what, now.Sub(start).Round(time.Millisecond), len(trajectory), idle, formatTrajectory(trajectory))
 			}
 			return
 		}
 		if next != progress {
 			progress = next
 			lastChange = now
+			sweepsAtLastChange = sweeps.observe()
 			trajectory = append(trajectory, progressPoint{now.Sub(start), next})
 		}
 		stalledFor := now.Sub(lastChange)
-		stalled := stalledFor >= orchHarnessStallWindow
+		idleSweeps := sweeps.observe() - sweepsAtLastChange
+		// Stalled means the cluster kept working and produced nothing. The
+		// wall-clock floor is the second way in: a cluster that emits no ticks
+		// at all is dead rather than slow, and would otherwise wait out the
+		// hard backstop with no stall diagnostics.
+		budget := orchHarnessStallSweepsPerJob * sweeps.pairs()
+		stalled := idleSweeps >= budget || stalledFor >= orchHarnessStallFloor
 		backstopped := now.Sub(start) >= orchHarnessHardBackstop
 		if !stalled && !backstopped {
 			continue
@@ -262,12 +360,16 @@ func (h *orchRelHarness) waitProgress(what string, interval time.Duration, sampl
 			onFail()
 		}
 		reason := "progress stalled"
-		if backstopped && !stalled {
+		switch {
+		case backstopped && !stalled:
 			reason = "hit hard backstop while still changing (livelock?)"
+		case idleSweeps < budget:
+			reason = "progress stalled AND the cluster stopped ticking (starved or dead, not wedged)"
 		}
-		h.t.Fatalf("%s: %s after %s (no progress for %s; stall window %s, hard backstop %s)\nprogress trajectory (%d changes):\n%s",
+		h.t.Fatalf("%s: %s after %s (no progress for %s / %d observed sweeps; budget %d sweeps = %d per job x %d jobs, floor %s, hard backstop %s)\nprogress trajectory (%d changes):\n%s",
 			what, reason, now.Sub(start).Round(time.Millisecond), stalledFor.Round(time.Millisecond),
-			orchHarnessStallWindow, orchHarnessHardBackstop, len(trajectory), formatTrajectory(trajectory))
+			idleSweeps, budget, orchHarnessStallSweepsPerJob, sweeps.pairs(), orchHarnessStallFloor, orchHarnessHardBackstop,
+			len(trajectory), formatTrajectory(trajectory))
 	}
 }
 
