@@ -6,7 +6,7 @@
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { Job } from "./job_pb.js";
-import { ChunkAnalysis, ChunkChangeOp, ChunkMeta, ChunkValidation, ExportRecord, IndexInfo, ThroughputRate, VaultStats } from "./vault_pb.js";
+import { ChunkAnalysis, ChunkChangeOp, ChunkMeta, ChunkValidation, CloudIndexAudit, ExportRecord, IndexInfo, ThroughputRate, VaultStats } from "./vault_pb.js";
 import { PerRouteStats, VaultRouteStats } from "./system_pb.js";
 import { StorageState } from "./storage_pb.js";
 import { ChunkPlan, HistogramBucket, TableResult } from "./query_pb.js";
@@ -2526,6 +2526,14 @@ export class ForwardValidateVaultResponse extends Message<ForwardValidateVaultRe
    */
   chunks: ChunkValidation[] = [];
 
+  /**
+   * The responding node's own cloud-index audit. Absent when the vault has no
+   * cloud store on that node.
+   *
+   * @generated from field: gastrolog.v1.CloudIndexAudit cloud_index_audit = 3;
+   */
+  cloudIndexAudit?: CloudIndexAudit;
+
   constructor(data?: PartialMessage<ForwardValidateVaultResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2536,6 +2544,7 @@ export class ForwardValidateVaultResponse extends Message<ForwardValidateVaultRe
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "valid", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 2, name: "chunks", kind: "message", T: ChunkValidation, repeated: true },
+    { no: 3, name: "cloud_index_audit", kind: "message", T: CloudIndexAudit },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardValidateVaultResponse {

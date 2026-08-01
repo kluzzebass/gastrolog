@@ -3021,11 +3021,14 @@ func (x *ForwardValidateVaultRequest) GetVaultId() []byte {
 }
 
 type ForwardValidateVaultResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Valid         bool                   `protobuf:"varint,1,opt,name=valid,proto3" json:"valid,omitempty"`
-	Chunks        []*ChunkValidation     `protobuf:"bytes,2,rep,name=chunks,proto3" json:"chunks,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Valid  bool                   `protobuf:"varint,1,opt,name=valid,proto3" json:"valid,omitempty"`
+	Chunks []*ChunkValidation     `protobuf:"bytes,2,rep,name=chunks,proto3" json:"chunks,omitempty"`
+	// The responding node's own cloud-index audit. Absent when the vault has no
+	// cloud store on that node.
+	CloudIndexAudit *CloudIndexAudit `protobuf:"bytes,3,opt,name=cloud_index_audit,json=cloudIndexAudit,proto3" json:"cloud_index_audit,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ForwardValidateVaultResponse) Reset() {
@@ -3068,6 +3071,13 @@ func (x *ForwardValidateVaultResponse) GetValid() bool {
 func (x *ForwardValidateVaultResponse) GetChunks() []*ChunkValidation {
 	if x != nil {
 		return x.Chunks
+	}
+	return nil
+}
+
+func (x *ForwardValidateVaultResponse) GetCloudIndexAudit() *CloudIndexAudit {
+	if x != nil {
+		return x.CloudIndexAudit
 	}
 	return nil
 }
@@ -4948,10 +4958,11 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x06sealed\x18\x01 \x01(\bR\x06sealed\x121\n" +
 	"\aindexes\x18\x02 \x03(\v2\x17.gastrolog.v1.IndexInfoR\aindexes\"8\n" +
 	"\x1bForwardValidateVaultRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\fR\avaultId\"k\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\xb6\x01\n" +
 	"\x1cForwardValidateVaultResponse\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x125\n" +
-	"\x06chunks\x18\x02 \x03(\v2\x1d.gastrolog.v1.ChunkValidationR\x06chunks\"\xd1\x01\n" +
+	"\x06chunks\x18\x02 \x03(\v2\x1d.gastrolog.v1.ChunkValidationR\x06chunks\x12I\n" +
+	"\x11cloud_index_audit\x18\x03 \x01(\v2\x1d.gastrolog.v1.CloudIndexAuditR\x0fcloudIndexAudit\"\xd1\x01\n" +
 	"\x1eForwardValidateIngesterRequest\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12P\n" +
 	"\x06params\x18\x02 \x03(\v28.gastrolog.v1.ForwardValidateIngesterRequest.ParamsEntryR\x06params\x12\x0e\n" +
@@ -5150,8 +5161,9 @@ var file_gastrolog_v1_cluster_proto_goTypes = []any{
 	(ChunkChangeOp)(0),                        // 85: gastrolog.v1.ChunkChangeOp
 	(*IndexInfo)(nil),                         // 86: gastrolog.v1.IndexInfo
 	(*ChunkValidation)(nil),                   // 87: gastrolog.v1.ChunkValidation
-	(*ChunkAnalysis)(nil),                     // 88: gastrolog.v1.ChunkAnalysis
-	(*ChunkPlan)(nil),                         // 89: gastrolog.v1.ChunkPlan
+	(*CloudIndexAudit)(nil),                   // 88: gastrolog.v1.CloudIndexAudit
+	(*ChunkAnalysis)(nil),                     // 89: gastrolog.v1.ChunkAnalysis
+	(*ChunkPlan)(nil),                         // 90: gastrolog.v1.ChunkPlan
 }
 var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
 	7,  // 0: gastrolog.v1.BroadcastRequest.message:type_name -> gastrolog.v1.BroadcastMessage
@@ -5188,17 +5200,18 @@ var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
 	84, // 31: gastrolog.v1.ForwardWatchChunksResponse.meta:type_name -> gastrolog.v1.ChunkMeta
 	86, // 32: gastrolog.v1.ForwardGetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
 	87, // 33: gastrolog.v1.ForwardValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
-	73, // 34: gastrolog.v1.ForwardValidateIngesterRequest.params:type_name -> gastrolog.v1.ForwardValidateIngesterRequest.ParamsEntry
-	84, // 35: gastrolog.v1.ForwardGetChunkResponse.chunk:type_name -> gastrolog.v1.ChunkMeta
-	88, // 36: gastrolog.v1.ForwardAnalyzeChunkResponse.analyses:type_name -> gastrolog.v1.ChunkAnalysis
-	89, // 37: gastrolog.v1.ForwardExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
-	81, // 38: gastrolog.v1.ForwardFollowResponse.records:type_name -> gastrolog.v1.ExportRecord
-	81, // 39: gastrolog.v1.ImportRecordMessage.record:type_name -> gastrolog.v1.ExportRecord
-	40, // [40:40] is the sub-list for method output_type
-	40, // [40:40] is the sub-list for method input_type
-	40, // [40:40] is the sub-list for extension type_name
-	40, // [40:40] is the sub-list for extension extendee
-	0,  // [0:40] is the sub-list for field type_name
+	88, // 34: gastrolog.v1.ForwardValidateVaultResponse.cloud_index_audit:type_name -> gastrolog.v1.CloudIndexAudit
+	73, // 35: gastrolog.v1.ForwardValidateIngesterRequest.params:type_name -> gastrolog.v1.ForwardValidateIngesterRequest.ParamsEntry
+	84, // 36: gastrolog.v1.ForwardGetChunkResponse.chunk:type_name -> gastrolog.v1.ChunkMeta
+	89, // 37: gastrolog.v1.ForwardAnalyzeChunkResponse.analyses:type_name -> gastrolog.v1.ChunkAnalysis
+	90, // 38: gastrolog.v1.ForwardExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
+	81, // 39: gastrolog.v1.ForwardFollowResponse.records:type_name -> gastrolog.v1.ExportRecord
+	81, // 40: gastrolog.v1.ImportRecordMessage.record:type_name -> gastrolog.v1.ExportRecord
+	41, // [41:41] is the sub-list for method output_type
+	41, // [41:41] is the sub-list for method input_type
+	41, // [41:41] is the sub-list for extension type_name
+	41, // [41:41] is the sub-list for extension extendee
+	0,  // [0:41] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_cluster_proto_init() }

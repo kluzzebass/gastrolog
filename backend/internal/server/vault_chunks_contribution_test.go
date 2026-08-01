@@ -108,9 +108,10 @@ func (s *stubExplainSearcher) ExportToVault(_ context.Context, _ string, _ *gast
 // contributionDeps holds the remote fan-out stubs a contribution test
 // wants wired; any may be nil.
 type contributionDeps struct {
-	lister   server.RemoteChunkLister
-	indexer  server.RemoteIndexer
-	pipeline server.RemotePipelineBacklogGetter
+	lister    server.RemoteChunkLister
+	indexer   server.RemoteIndexer
+	pipeline  server.RemotePipelineBacklogGetter
+	validator server.RemoteVaultValidator
 }
 
 // newContributionVaultServer builds a single real orchestrator hosting a
@@ -173,7 +174,7 @@ func newContributionVaultServer(t *testing.T, localID string, remoteIDs []string
 	}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	vs := server.NewVaultServer(orch, cfgStore, orchestrator.Factories{}, nil, deps.lister, deps.pipeline, nil, deps.indexer, localID, logger)
+	vs := server.NewVaultServer(orch, cfgStore, orchestrator.Factories{}, nil, deps.lister, deps.pipeline, nil, deps.indexer, deps.validator, localID, logger)
 	return vs, vaultID.String()
 }
 

@@ -2045,6 +2045,24 @@ export class ValidateVaultResponse extends Message<ValidateVaultResponse> {
    */
   chunks: ChunkValidation[] = [];
 
+  /**
+   * One audit per node that homes the vault. Empty for a local-only vault:
+   * there is no cloud store to audit, which is a different answer from an
+   * audit that found nothing wrong.
+   *
+   * @generated from field: repeated gastrolog.v1.CloudIndexAudit cloud_index_audits = 3;
+   */
+  cloudIndexAudits: CloudIndexAudit[] = [];
+
+  /**
+   * Set only when the cross-node fan-out could not reach every peer that
+   * hosts this vault, so `valid` describes a partial view. Absent on the
+   * happy path.
+   *
+   * @generated from field: gastrolog.v1.ContributionReport contribution_report = 4;
+   */
+  contributionReport?: ContributionReport;
+
   constructor(data?: PartialMessage<ValidateVaultResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2055,6 +2073,8 @@ export class ValidateVaultResponse extends Message<ValidateVaultResponse> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "valid", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 2, name: "chunks", kind: "message", T: ChunkValidation, repeated: true },
+    { no: 3, name: "cloud_index_audits", kind: "message", T: CloudIndexAudit, repeated: true },
+    { no: 4, name: "contribution_report", kind: "message", T: ContributionReport },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ValidateVaultResponse {
@@ -2093,6 +2113,15 @@ export class ChunkValidation extends Message<ChunkValidation> {
    */
   issues: string[] = [];
 
+  /**
+   * Which node's copy this describes. Chunk bytes are per-node, so one
+   * replica can be unreadable while another is fine; without this the merged
+   * result cannot say where to look.
+   *
+   * @generated from field: string node_id = 4;
+   */
+  nodeId = "";
+
   constructor(data?: PartialMessage<ChunkValidation>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2104,6 +2133,7 @@ export class ChunkValidation extends Message<ChunkValidation> {
     { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "valid", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 3, name: "issues", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 4, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkValidation {
@@ -2120,6 +2150,186 @@ export class ChunkValidation extends Message<ChunkValidation> {
 
   static equals(a: ChunkValidation | PlainMessage<ChunkValidation> | undefined, b: ChunkValidation | PlainMessage<ChunkValidation> | undefined): boolean {
     return proto3.util.equals(ChunkValidation, a, b);
+  }
+}
+
+/**
+ * CloudIndexAudit is one node's comparison of a cloud-backed vault's objects
+ * against what the cluster expects and what that node's cloud index caches.
+ *
+ * The expectation is the FSM manifest, not the cloud index — the index is a
+ * per-node cache. An audit grounded in the cache could only find cache bugs,
+ * never the case that matters: a chunk the cluster believes is durable whose
+ * bytes are gone.
+ *
+ * @generated from message gastrolog.v1.CloudIndexAudit
+ */
+export class CloudIndexAudit extends Message<CloudIndexAudit> {
+  /**
+   * @generated from field: string node_id = 1;
+   */
+  nodeId = "";
+
+  /**
+   * manifest entries marked cloud-backed
+   *
+   * @generated from field: int64 expected_chunks = 2;
+   */
+  expectedChunks = protoInt64.zero;
+
+  /**
+   * objects under the vault's prefix
+   *
+   * @generated from field: int64 store_objects = 3;
+   */
+  storeObjects = protoInt64.zero;
+
+  /**
+   * this node's cached entries
+   *
+   * @generated from field: int64 index_entries = 4;
+   */
+  indexEntries = protoInt64.zero;
+
+  /**
+   * store objects in an offline storage class
+   *
+   * @generated from field: int64 archived_objects = 5;
+   */
+  archivedObjects = protoInt64.zero;
+
+  /**
+   * Durability: the cluster expects these chunks and the store has no object.
+   * Nothing else detects this — an object removed by a provider lifecycle
+   * rule or an operator emits no event.
+   *
+   * @generated from field: repeated bytes missing_blobs = 6;
+   */
+  missingBlobs: Uint8Array[] = [];
+
+  /**
+   * An object exists but its size is not what the manifest recorded.
+   *
+   * @generated from field: repeated gastrolog.v1.CloudIndexSizeMismatch size_mismatches = 7;
+   */
+  sizeMismatches: CloudIndexSizeMismatch[] = [];
+
+  /**
+   * Objects no manifest entry claims: bytes being paid for that nothing reads.
+   *
+   * @generated from field: repeated bytes untracked_blobs = 8;
+   */
+  untrackedBlobs: Uint8Array[] = [];
+
+  /**
+   * Objects whose chunk the cluster has deleted — explainable rather than
+   * leaked, since the delete may still be propagating.
+   *
+   * @generated from field: repeated bytes tombstoned_blobs = 9;
+   */
+  tombstonedBlobs: Uint8Array[] = [];
+
+  /**
+   * Node-local cache drift, both directions: a cached entry with no object,
+   * and a cluster-known object the cache never recorded.
+   *
+   * @generated from field: repeated bytes stale_index_entries = 10;
+   */
+  staleIndexEntries: Uint8Array[] = [];
+
+  /**
+   * @generated from field: repeated bytes unindexed_blobs = 11;
+   */
+  unindexedBlobs: Uint8Array[] = [];
+
+  constructor(data?: PartialMessage<CloudIndexAudit>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.CloudIndexAudit";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "expected_chunks", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "store_objects", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 4, name: "index_entries", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 5, name: "archived_objects", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 6, name: "missing_blobs", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 7, name: "size_mismatches", kind: "message", T: CloudIndexSizeMismatch, repeated: true },
+    { no: 8, name: "untracked_blobs", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 9, name: "tombstoned_blobs", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 10, name: "stale_index_entries", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 11, name: "unindexed_blobs", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CloudIndexAudit {
+    return new CloudIndexAudit().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CloudIndexAudit {
+    return new CloudIndexAudit().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CloudIndexAudit {
+    return new CloudIndexAudit().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CloudIndexAudit | PlainMessage<CloudIndexAudit> | undefined, b: CloudIndexAudit | PlainMessage<CloudIndexAudit> | undefined): boolean {
+    return proto3.util.equals(CloudIndexAudit, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.CloudIndexSizeMismatch
+ */
+export class CloudIndexSizeMismatch extends Message<CloudIndexSizeMismatch> {
+  /**
+   * @generated from field: bytes chunk_id = 1;
+   */
+  chunkId = new Uint8Array(0);
+
+  /**
+   * what the manifest recorded at upload time
+   *
+   * @generated from field: int64 expected_bytes = 2;
+   */
+  expectedBytes = protoInt64.zero;
+
+  /**
+   * what the store reports now
+   *
+   * @generated from field: int64 store_bytes = 3;
+   */
+  storeBytes = protoInt64.zero;
+
+  constructor(data?: PartialMessage<CloudIndexSizeMismatch>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.CloudIndexSizeMismatch";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "expected_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "store_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CloudIndexSizeMismatch {
+    return new CloudIndexSizeMismatch().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CloudIndexSizeMismatch {
+    return new CloudIndexSizeMismatch().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CloudIndexSizeMismatch {
+    return new CloudIndexSizeMismatch().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CloudIndexSizeMismatch | PlainMessage<CloudIndexSizeMismatch> | undefined, b: CloudIndexSizeMismatch | PlainMessage<CloudIndexSizeMismatch> | undefined): boolean {
+    return proto3.util.equals(CloudIndexSizeMismatch, a, b);
   }
 }
 

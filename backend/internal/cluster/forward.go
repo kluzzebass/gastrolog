@@ -600,7 +600,7 @@ func (s *Server) forwardValidateIngester(ctx context.Context, req *gastrologv1.F
 }
 
 // forwardValidateVault handles the ForwardValidateVault RPC. Validates a
-// local vault's chunk and index integrity.
+// local vault's chunk, index and cloud-object integrity.
 func (s *Server) forwardValidateVault(ctx context.Context, req *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error) {
 	if s.validateVaultExecutor == nil {
 		return nil, status.Error(codes.Unavailable, "validate vault executor not configured")
@@ -613,9 +613,17 @@ func (s *Server) forwardValidateVault(ctx context.Context, req *gastrologv1.Forw
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "validate vault: %v", err)
 	}
+	// A node audits exactly one cloud index — its own — so the local response's
+	// single audit is what crosses back. Taking the first entry rather than the
+	// slice keeps the forward payload honest about that.
+	var audit *gastrologv1.CloudIndexAudit
+	if audits := resp.GetCloudIndexAudits(); len(audits) > 0 {
+		audit = audits[0]
+	}
 	return &gastrologv1.ForwardValidateVaultResponse{
-		Valid:  resp.GetValid(),
-		Chunks: resp.GetChunks(),
+		Valid:           resp.GetValid(),
+		Chunks:          resp.GetChunks(),
+		CloudIndexAudit: audit,
 	}, nil
 }
 

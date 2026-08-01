@@ -459,12 +459,69 @@ message ValidateVaultRequest {
 message ValidateVaultResponse {
   bool valid = 1;
   repeated ChunkValidation chunks = 2;
+
+  // One audit per node that homes the vault. Empty for a local-only vault:
+  // there is no cloud store to audit, which is a different answer from an
+  // audit that found nothing wrong.
+  repeated CloudIndexAudit cloud_index_audits = 3;
+
+  // Set only when the cross-node fan-out could not reach every peer that
+  // hosts this vault, so `valid` describes a partial view. Absent on the
+  // happy path.
+  ContributionReport contribution_report = 4;
 }
 
 message ChunkValidation {
   bytes chunk_id = 1;
   bool valid = 2;
   repeated string issues = 3;
+
+  // Which node's copy this describes. Chunk bytes are per-node, so one
+  // replica can be unreadable while another is fine; without this the merged
+  // result cannot say where to look.
+  string node_id = 4;
+}
+
+// CloudIndexAudit is one node's comparison of a cloud-backed vault's objects
+// against what the cluster expects and what that node's cloud index caches.
+//
+// The expectation is the FSM manifest, not the cloud index — the index is a
+// per-node cache. An audit grounded in the cache could only find cache bugs,
+// never the case that matters: a chunk the cluster believes is durable whose
+// bytes are gone.
+message CloudIndexAudit {
+  string node_id = 1;
+
+  int64 expected_chunks = 2;  // manifest entries marked cloud-backed
+  int64 store_objects = 3;    // objects under the vault's prefix
+  int64 index_entries = 4;    // this node's cached entries
+  int64 archived_objects = 5; // store objects in an offline storage class
+
+  // Durability: the cluster expects these chunks and the store has no object.
+  // Nothing else detects this — an object removed by a provider lifecycle
+  // rule or an operator emits no event.
+  repeated bytes missing_blobs = 6;
+
+  // An object exists but its size is not what the manifest recorded.
+  repeated CloudIndexSizeMismatch size_mismatches = 7;
+
+  // Objects no manifest entry claims: bytes being paid for that nothing reads.
+  repeated bytes untracked_blobs = 8;
+
+  // Objects whose chunk the cluster has deleted — explainable rather than
+  // leaked, since the delete may still be propagating.
+  repeated bytes tombstoned_blobs = 9;
+
+  // Node-local cache drift, both directions: a cached entry with no object,
+  // and a cluster-known object the cache never recorded.
+  repeated bytes stale_index_entries = 10;
+  repeated bytes unindexed_blobs = 11;
+}
+
+message CloudIndexSizeMismatch {
+  bytes chunk_id = 1;
+  int64 expected_bytes = 2; // what the manifest recorded at upload time
+  int64 store_bytes = 3;    // what the store reports now
 }
 
 // ExportVault streams all records from a vault.

@@ -28,9 +28,9 @@ type auditFixture struct {
 	store   *blobstoreMemory
 	// entries is what the FSM seam reports; tests mutate it to model cluster
 	// state diverging from the store.
-	entries     []vaultctlfsm.ManifestEntry
-	tombstoned  map[chunk.ChunkID]bool
-	blobKeyOf   func(chunk.ChunkID) string
+	entries      []vaultctlfsm.ManifestEntry
+	tombstoned   map[chunk.ChunkID]bool
+	blobKeyOf    func(chunk.ChunkID) string
 	cloudBytesOf map[chunk.ChunkID]int64
 }
 

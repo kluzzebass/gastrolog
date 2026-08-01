@@ -108,6 +108,7 @@ type Config struct {
 	// Nil in single-node mode.
 	RemoteSearcher        RemoteSearcher
 	RemoteChunkLister     RemoteChunkLister
+	RemoteVaultValidator  RemoteVaultValidator
 	RemotePipelineBacklog RemotePipelineBacklogGetter
 	RemoteChunkWatcher    RemoteChunkWatcher
 	RemoteIndexer         RemoteIndexer
@@ -225,6 +226,7 @@ type Server struct {
 	registerIngesterCheck func(func(context.Context, string, map[string]string, []byte) (bool, string))
 	remoteSearcher        RemoteSearcher
 	remoteChunkLister     RemoteChunkLister
+	remoteVaultValidator  RemoteVaultValidator
 	remotePipelineBacklog RemotePipelineBacklogGetter
 	remoteChunkWatcher    RemoteChunkWatcher
 	remoteIndexer         RemoteIndexer
@@ -305,6 +307,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		registerIngesterCheck:     cfg.RegisterIngesterChecker,
 		remoteSearcher:            cfg.RemoteSearcher,
 		remoteChunkLister:         cfg.RemoteChunkLister,
+		remoteVaultValidator:      cfg.RemoteVaultValidator,
 		remotePipelineBacklog:     cfg.RemotePipelineBacklog,
 		remoteChunkWatcher:        cfg.RemoteChunkWatcher,
 		remoteIndexer:             cfg.RemoteIndexer,
@@ -619,7 +622,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 
 	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, compQuery.Apply(s.logger))
 	s.queryServer = queryServer
-	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteChunkLister, s.remotePipelineBacklog, s.remoteChunkWatcher, s.remoteIndexer, s.localNodeID, s.logger)
+	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteChunkLister, s.remotePipelineBacklog, s.remoteChunkWatcher, s.remoteIndexer, s.remoteVaultValidator, s.localNodeID, s.logger)
 	configServer := NewSystemServer(SystemServerConfig{
 		Logger:              compServer.Apply(s.logger),
 		Orch:                s.orch,

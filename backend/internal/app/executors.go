@@ -496,12 +496,14 @@ func newGetIndexesExecutor(o *orchestrator.Orchestrator) cluster.GetIndexesExecu
 }
 
 func newValidateVaultExecutor(o *orchestrator.Orchestrator) cluster.ValidateVaultExecutor {
-	return func(_ context.Context, vaultID glid.GLID) (*gastrologv1.ValidateVaultResponse, error) {
+	return func(ctx context.Context, vaultID glid.GLID) (*gastrologv1.ValidateVaultResponse, error) {
 		metas, err := o.ListLocalChunkMetas(vaultID)
 		if err != nil {
 			return nil, err
 		}
-		return server.ValidateVaultLocal(o, vaultID, metas), nil
+		// Node attribution is stamped by the requesting node from the peer it
+		// asked, so this side does not need to name itself.
+		return server.ValidateVaultLocal(ctx, o, vaultID, metas, ""), nil
 	}
 }
 

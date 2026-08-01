@@ -242,6 +242,7 @@ func main() {
 		cli.NewRepatriateCommand(),
 		cli.NewSealCommand(),
 		cli.NewReindexCommand(),
+		cli.NewValidateCommand(),
 		cli.NewPauseCommand(),
 		cli.NewResumeCommand(),
 	)

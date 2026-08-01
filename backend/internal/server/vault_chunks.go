@@ -590,23 +590,97 @@ func (s *VaultServer) ValidateVault(
 		return nil, mapVaultError(err)
 	}
 
-	resp := ValidateVaultLocal(s.orch, vaultID, metas)
+	resp := ValidateVaultLocal(ctx, s.orch, vaultID, metas, s.localNodeID)
+
+	// Chunk readability and cloud-index contents are per-node facts: a replica
+	// can be unreadable on one node and fine on another, and each node caches
+	// the cloud index separately. Validating only where the request landed
+	// would report a healthy vault while another node holds the broken copy.
+	if s.remoteVaultValidator != nil {
+		s.mergeRemoteValidations(ctx, vaultID, resp)
+	}
 	return connect.NewResponse(resp), nil
 }
 
-// ValidateVaultLocal runs chunk and index integrity checks on a local vault.
-// Exported so both the VaultServer RPC handler and the cluster executor can
-// share the same validation logic.
-func ValidateVaultLocal(orch *orchestrator.Orchestrator, vaultID glid.GLID, metas []chunk.ChunkMeta) *apiv1.ValidateVaultResponse {
+// mergeRemoteValidations folds every peer's validation into resp, attributing
+// each finding to the peer that produced it.
+func (s *VaultServer) mergeRemoteValidations(ctx context.Context, vaultID glid.GLID, resp *apiv1.ValidateVaultResponse) {
+	remoteNodes := s.remoteVaultNodes(ctx, vaultID)
+	results, ok, report := peerFanOut(ctx, s.logger, "ValidateVault", remoteNodes,
+		func(peerCtx context.Context, nodeID string) (*apiv1.ForwardValidateVaultResponse, error) {
+			return s.remoteVaultValidator.ValidateVault(peerCtx, nodeID, &apiv1.ForwardValidateVaultRequest{
+				VaultId: vaultID.ToProto(),
+			})
+		})
+	resp.ContributionReport = report
+	for i, remote := range results {
+		if !ok[i] || remote == nil {
+			continue
+		}
+		mergeOneValidation(resp, remote, remoteNodes[i])
+	}
+}
+
+// mergeOneValidation appends one peer's findings. A peer does not name itself —
+// it has no need to — so the node ID is stamped here from the peer that was
+// asked; without it every remote finding would read as local.
+func mergeOneValidation(resp *apiv1.ValidateVaultResponse, remote *apiv1.ForwardValidateVaultResponse, nodeID string) {
+	if !remote.GetValid() {
+		resp.Valid = false
+	}
+	for _, cv := range remote.GetChunks() {
+		if cv.GetNodeId() == "" {
+			cv.NodeId = nodeID
+		}
+		resp.Chunks = append(resp.Chunks, cv)
+	}
+	audit := remote.GetCloudIndexAudit()
+	if audit == nil {
+		return
+	}
+	if audit.GetNodeId() == "" {
+		audit.NodeId = nodeID
+	}
+	resp.CloudIndexAudits = append(resp.CloudIndexAudits, audit)
+}
+
+// ValidateVaultLocal runs chunk, index and cloud-object integrity checks
+// against this node's copy of a vault. Exported so both the VaultServer RPC
+// handler and the cluster executor share one validation implementation.
+//
+// nodeID stamps every finding, so a merged cross-node result says WHERE the
+// problem is rather than only that one exists.
+func ValidateVaultLocal(ctx context.Context, orch *orchestrator.Orchestrator, vaultID glid.GLID, metas []chunk.ChunkMeta, nodeID string) *apiv1.ValidateVaultResponse {
 	resp := &apiv1.ValidateVaultResponse{Valid: true}
 	for _, meta := range metas {
 		cv := validateChunk(orch, vaultID, meta)
+		cv.NodeId = nodeID
 		if !cv.Valid {
 			resp.Valid = false
 		}
 		resp.Chunks = append(resp.Chunks, cv)
 	}
+	if audit := validateCloudIndexLocal(ctx, orch, vaultID); audit != nil {
+		resp.CloudIndexAudits = append(resp.CloudIndexAudits, audit)
+		if len(audit.MissingBlobs) > 0 || len(audit.SizeMismatches) > 0 {
+			// Only the durability categories invalidate the vault. Untracked
+			// bytes and cache drift are worth reporting and worth repairing,
+			// but they are not a reason to tell an operator their data is bad.
+			resp.Valid = false
+		}
+	}
 	return resp
+}
+
+// validateCloudIndexLocal audits the vault's cloud objects, or returns nil when
+// the vault has no cloud store — an absent audit and an empty one mean
+// different things to an operator.
+func validateCloudIndexLocal(ctx context.Context, orch *orchestrator.Orchestrator, vaultID glid.GLID) *apiv1.CloudIndexAudit {
+	audit, err := orch.AuditVaultCloudIndex(ctx, vaultID)
+	if err != nil {
+		return nil
+	}
+	return CloudIndexAuditToProto(audit)
 }
 
 // validateChunk checks a single chunk's cursor readability and index completeness.

@@ -24,6 +24,13 @@ type PeerVaultStatsProvider interface {
 	FindVaultStats(vaultID string) *apiv1.VaultStats
 }
 
+// RemoteVaultValidator validates a vault on a remote node. Chunk readability
+// and cloud-index contents are per-node, so a validate that skipped peers would
+// pass while another node holds the unreadable copy.
+type RemoteVaultValidator interface {
+	ValidateVault(ctx context.Context, nodeID string, req *apiv1.ForwardValidateVaultRequest) (*apiv1.ForwardValidateVaultResponse, error)
+}
+
 // RemoteChunkLister lists chunks from a remote node's vault.
 type RemoteChunkLister interface {
 	ListChunks(ctx context.Context, nodeID string, req *apiv1.ForwardListChunksRequest) (*apiv1.ForwardListChunksResponse, error)
@@ -55,6 +62,7 @@ type VaultServer struct {
 	remotePipelineBacklog RemotePipelineBacklogGetter
 	remoteChunkWatcher    RemoteChunkWatcher
 	remoteIndexer         RemoteIndexer
+	remoteVaultValidator  RemoteVaultValidator
 	localNodeID           string
 	logger                *slog.Logger
 }
@@ -62,7 +70,7 @@ type VaultServer struct {
 var _ gastrologv1connect.VaultServiceHandler = (*VaultServer)(nil)
 
 // NewVaultServer creates a new VaultServer.
-func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, remoteChunkLister RemoteChunkLister, remotePipelineBacklog RemotePipelineBacklogGetter, remoteChunkWatcher RemoteChunkWatcher, remoteIndexer RemoteIndexer, localNodeID string, logger *slog.Logger) *VaultServer {
+func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, remoteChunkLister RemoteChunkLister, remotePipelineBacklog RemotePipelineBacklogGetter, remoteChunkWatcher RemoteChunkWatcher, remoteIndexer RemoteIndexer, remoteVaultValidator RemoteVaultValidator, localNodeID string, logger *slog.Logger) *VaultServer {
 	return &VaultServer{
 		orch:                  orch,
 		cfgStore:              cfgStore,
@@ -72,6 +80,7 @@ func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore system.Store, fact
 		remotePipelineBacklog: remotePipelineBacklog,
 		remoteChunkWatcher:    remoteChunkWatcher,
 		remoteIndexer:         remoteIndexer,
+		remoteVaultValidator:  remoteVaultValidator,
 		localNodeID:           localNodeID,
 		logger:                compVaultServer.Apply(logging.Default(logger)),
 	}
