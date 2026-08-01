@@ -880,10 +880,22 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 	peerState := cluster.NewPeerState(peerTTLMultiplier(logger)*broadcastInterval, raftContactTTL())
 
 	wireRaftContactRecorder(clusterSrv.MultiRaftTransport(), peerState)
+	peerState.SetLocalNodeID(nodeID)
 	clusterSrv.Subscribe(peerState.HandleBroadcast)
 
 	peerJobState := cluster.NewPeerJobState(20 * time.Second)
+	peerJobState.SetLocalNodeID(nodeID)
 	clusterSrv.Subscribe(peerJobState.HandleBroadcast)
+
+	// A broadcast is one event, so it gets one publication path: Send now
+	// reaches this node's subscribers as well as its peers. Without this every
+	// producer wires its own local notification beside the broadcast, and each
+	// new payload repeats the split.
+	//
+	// The peer CACHES above still ignore this node — they hold peers, and
+	// consumers read local state from its live owner. What is unified is who
+	// gets woken.
+	broadcaster.SetLocalDelivery(clusterSrv.DispatchLocal)
 
 	// Write a placeholder NodeConfig for every newly admitted peer so
 	// fresh joiners never display as raw GLIDs in the UI while their

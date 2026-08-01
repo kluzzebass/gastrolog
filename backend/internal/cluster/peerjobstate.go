@@ -16,6 +16,11 @@ type peerJobEntry struct {
 // PeerJobState stores the most recent job list from each cluster peer.
 // Entries expire after a configurable TTL (typically 3× the broadcast interval).
 type PeerJobState struct {
+	// localNodeID is this node, so its own broadcast is not folded into the
+	// peer half. Empty means "no self known", preserving pre-loopback
+	// behaviour; callers that deliver local broadcasts must set it.
+	localNodeID string
+
 	mu      sync.RWMutex
 	entries map[string]peerJobEntry
 	ttl     time.Duration
@@ -90,9 +95,24 @@ func (p *PeerJobState) GetAll() map[string][]*gastrologv1.Job {
 	return result
 }
 
+// SetLocalNodeID tells PeerJobState which node it runs on, so it can ignore
+// its own broadcasts. Wire at construction, before any broadcast is handled.
+func (p *PeerJobState) SetLocalNodeID(id string) {
+	p.mu.Lock()
+	p.localNodeID = id
+	p.mu.Unlock()
+}
+
 // HandleBroadcast is a subscriber callback for the cluster broadcast system.
 // It extracts NodeJobs from the broadcast message and stores them.
 func (p *PeerJobState) HandleBroadcast(msg *gastrologv1.BroadcastMessage) {
+	// Own broadcasts reach this subscriber now, but this cache is the PEER
+	// half: JobServer reads local jobs straight from the scheduler, which is
+	// live, and merging a broadcast-delayed copy of them in here would both
+	// duplicate rows and make this node's own jobs the stalest in the list.
+	if p.localNodeID != "" && string(msg.SenderId) == p.localNodeID {
+		return
+	}
 	if nj := msg.GetNodeJobs(); nj != nil {
 		received := time.Now()
 		if msg.Timestamp != nil {
