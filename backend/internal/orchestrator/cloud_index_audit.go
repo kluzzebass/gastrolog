@@ -148,6 +148,14 @@ func (o *Orchestrator) AuditVaultCloudIndex(ctx context.Context, vaultID glid.GL
 		if !e.CloudBacked {
 			continue
 		}
+		// A tombstoned chunk is one the cluster has deleted. Its object being
+		// gone is the delete succeeding, not data loss, and reporting it would
+		// raise a durability alarm for work GastroLog did on purpose. Its object
+		// still being present lands in TombstonedBlobs via the loop below, which
+		// only considers objects nothing expects.
+		if vaultInst.IsTombstoned != nil && vaultInst.IsTombstoned(e.ID) {
+			continue
+		}
 		expected[e.ID] = struct{}{}
 		audit.ExpectedChunks++
 

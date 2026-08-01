@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,6 +96,16 @@ func newAuditFixture(t *testing.T, n int) *auditFixture {
 		t.Fatalf("fixture: uploaded %d chunks, want %d", len(f.ids), n)
 	}
 	return f
+}
+
+// reuploadBlob puts an object back under a chunk's key, modelling a re-upload
+// or a provider restore completing after the sweep saw the chunk as missing.
+func (f *auditFixture) reuploadBlob(t *testing.T, id chunk.ChunkID) {
+	t.Helper()
+	if err := f.store.Upload(context.Background(), f.blobKeyOf(id),
+		strings.NewReader("the object is back"), nil); err != nil {
+		t.Fatalf("reupload blob %s: %v", id, err)
+	}
 }
 
 // archiveAll transitions every object in the store to an offline class, the

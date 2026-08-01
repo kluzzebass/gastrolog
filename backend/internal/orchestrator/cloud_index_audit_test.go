@@ -157,6 +157,31 @@ func TestAuditCloudIndexReportsUnindexedBlob(t *testing.T) {
 	}
 }
 
+// A chunk the cluster deleted must never be reported as data loss. Its object
+// being gone IS the delete succeeding, and calling that a missing blob would
+// raise a durability alarm for work GastroLog did on purpose — the exact false
+// alarm the reconcile sweep's tombstone exemption existed to prevent.
+func TestAuditCloudIndexDoesNotReportTombstonedChunkAsMissing(t *testing.T) {
+	t.Parallel()
+	f := newAuditFixture(t, 2)
+	deleted := f.ids[0]
+
+	// Retention's shape: the object is gone and the cluster has tombstoned the
+	// chunk, while the manifest entry has not been finalized away yet.
+	f.deleteBlob(t, deleted)
+	f.tombstoned[deleted] = true
+
+	audit := f.audit(t)
+	for _, id := range audit.MissingBlobs {
+		if id == deleted {
+			t.Errorf("tombstoned chunk %s reported as a missing blob", deleted)
+		}
+	}
+	if audit.ExpectedChunks != 1 {
+		t.Errorf("ExpectedChunks = %d, want 1 — a deleted chunk is not expected to exist", audit.ExpectedChunks)
+	}
+}
+
 // A local-only vault must be distinguishable from a cloud vault with nothing in
 // it; "0 objects, all clean" would be a lie an operator could act on.
 func TestAuditCloudIndexOnLocalOnlyVault(t *testing.T) {
