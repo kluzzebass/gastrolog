@@ -248,8 +248,12 @@ type Manager struct {
 	cloudIdxMu     sync.Mutex                // serializes cloudIdx Insert/Delete/Sync (B+ tree is not thread-safe)
 	indexBuilders  []chunk.ChunkIndexBuilder // injected post-construction via SetIndexBuilders
 	cloudListCache []chunk.ChunkMeta         // cached List() result for cloud-backed chunks; nil = stale
-	storageClasses map[chunk.ChunkID]string  // in-memory cache of cloud storage class per chunk
-	nextChunkID    *chunk.ChunkID            // if set, used instead of NewChunkID() on next open
+
+	remoteTS       map[chunk.ChunkID]remoteTSView // fetched-ITSI views for cold rank lookups (cold_rank.go)
+	remoteTSBytes  int64                          // raw bytes held by remoteTS, bounded by remoteTSViewBudget
+	remoteTSMu     sync.Mutex
+	storageClasses map[chunk.ChunkID]string // in-memory cache of cloud storage class per chunk
+	nextChunkID    *chunk.ChunkID           // if set, used instead of NewChunkID() on next open
 
 	postSealActive sync.Map       // chunk.ChunkID → chan struct{} — closed when PostSealProcess finishes
 	postSealWg     sync.WaitGroup // tracks in-flight PostSealProcess calls (for Close only)
@@ -2937,6 +2941,12 @@ func (m *Manager) FindIngestEntryIndex(id chunk.ChunkID, ts time.Time) (uint64, 
 	m.mu.Unlock()
 
 	if active == nil || active.meta.id != id {
+		// Cold cloud-backed chunks resolve via ranged reads of the object's
+		// ITSI (cold_rank.go). Warm and local sealed chunks stay a miss here:
+		// the index manager serves them from the local GLCB's mmap.
+		if rank, ok := m.coldIngestRank(id, ts); ok {
+			return rank, true, nil
+		}
 		return 0, false, nil
 	}
 	it, err := active.ingestBT.FindGE(ts.UnixNano())
@@ -3180,6 +3190,9 @@ func (m *Manager) DeleteSilent(id chunk.ChunkID) error {
 }
 
 func (m *Manager) deleteInternal(id chunk.ChunkID) error {
+	// A removed chunk must not keep answering cold rank lookups from the
+	// fetched-ITSI cache.
+	m.dropRemoteTSView(id)
 	// Wait for any in-flight PostSealProcess on this chunk to finish
 	// BEFORE acquiring the per-chunk write lock. PostSealProcess
 	// internally calls CompressChunk (which takes chunkLock) and
