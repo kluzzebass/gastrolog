@@ -9,6 +9,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/record"
+	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -622,8 +623,8 @@ func (v *vaultChunking) noteUnderReplicated(gated int, oldest time.Duration) {
 			"gated", gated, "oldest", oldest.Round(time.Second))
 		if v.cfg.Alerts != nil {
 			v.cfg.Alerts.Raise(underReplicatedAlarmType, v.cfg.VaultID.String(),
-				fmt.Sprintf("vault %s: %d segment(s) have been below the replication minimum for %s — chunking waits until a second node holds a copy",
-					v.cfg.VaultID, gated, oldest.Round(time.Second)))
+				fmt.Sprintf("Vault %s: %d segment(s) have had fewer than two copies in the cluster for %s. Chunking will not chunk a segment until a second node holds a copy of it, so these records stay unchunked.",
+					v.vaultLabel(), gated, system.FormatDuration(oldest.Round(time.Second))))
 		}
 		return
 	}
@@ -747,8 +748,8 @@ func (v *vaultChunking) updateUnplannableAlert() {
 	}
 	if stuck {
 		v.cfg.Alerts.Raise(unplannableAlarmType, v.cfg.VaultID.String(),
-			fmt.Sprintf("vault %s: %d segment(s) have unreadable on-disk indexes and cannot be planned into sealed manifests (e.g. %s) — their records stay unchunked and their head copies cannot be purged",
-				v.cfg.VaultID, repeated, example))
+			fmt.Sprintf("Vault %s: %d segment(s) have unreadable indexes on this node (e.g. %s) and can never be chunked. Their records are stranded — and if this vault has a delete-disposition retention policy, they are discarded when it expires.",
+				v.vaultLabel(), repeated, example))
 		return
 	}
 	v.cfg.Alerts.Clear(unplannableAlarmType, v.cfg.VaultID.String())

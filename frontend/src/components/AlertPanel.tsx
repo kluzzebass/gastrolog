@@ -63,8 +63,9 @@ function PriorityIcon({ alarm }: Readonly<{ alarm: NodeAlert }>) {
   );
 }
 
-/** A flat, priority-sorted list of the cluster's standing alarms. Each row
- *  expands to the catalog cause and response. */
+/** A flat, priority-sorted list of the cluster's standing alarms. A row reads
+ *  top-down as what happened (detail) then why (cause); the catalog response
+ *  is one click away. */
 export function AlertPanel({ alerts, dark, onClose }: Readonly<AlertPanelProps>) {
   const c = useThemeClass(dark);
 
@@ -132,17 +133,22 @@ function AlertRow({ alarm: a, dark }: Readonly<{ alarm: NodeAlert; dark: boolean
         <button
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
+          disabled={!a.response}
           className="w-full text-left"
-          title={expanded ? "Hide cause and response" : "Show cause and response"}
         >
           <p className={`text-sm ${c("text-text-normal", "text-light-text-normal")}`}>{a.detail}</p>
+          {a.cause && (
+            <p className={`mt-1 text-xs ${c("text-text-muted", "text-light-text-muted")}`}>
+              {a.cause}
+            </p>
+          )}
+          {a.response && (
+            <span className="mt-1 inline-block text-xs font-mono text-copper">
+              {expanded ? "hide what to do" : "what to do"}
+            </span>
+          )}
         </button>
-        {expanded && a.cause && (
-          <p className={`mt-1 text-xs ${c("text-text-muted", "text-light-text-muted")}`}>
-            {a.cause}
-          </p>
-        )}
-        {a.response && (
+        {expanded && a.response && (
           <p className={`mt-1 text-xs ${c("text-text-muted", "text-light-text-muted")}`}>
             {a.response}
           </p>

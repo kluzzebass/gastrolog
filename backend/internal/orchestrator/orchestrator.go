@@ -690,6 +690,13 @@ func (o *Orchestrator) vaultLabel(vaultID glid.GLID) string {
 	return ""
 }
 
+// VaultAlarmLabel names a vault for alarm text: the quoted configured name, or
+// the bare ID when the config does not resolve. Alarm raisers that hold only an
+// ID go through this so no alarm ever announces a vault as a raw GLID.
+func (o *Orchestrator) VaultAlarmLabel(vaultID glid.GLID) string {
+	return alert.Label(o.vaultLabel(vaultID), vaultID.String())
+}
+
 // nodeLabel returns the operator-friendly name for a cluster node ID, or ""
 // when unknown. Safe to call from any goroutine.
 func (o *Orchestrator) nodeLabel(nodeID string) string {

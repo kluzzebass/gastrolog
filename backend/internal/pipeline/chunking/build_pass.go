@@ -401,8 +401,8 @@ func (v *vaultChunking) proposeDiscardIfGhostRefs(manifest SealedManifest, missi
 		"vault", v.cfg.VaultID, "chunk", manifest.ChunkID, "ghost_segment", ghost)
 	if v.cfg.Alerts != nil {
 		v.cfg.Alerts.Raise(buildBlockedAlarmType, v.cfg.VaultID.String(),
-			fmt.Sprintf("vault %s: sealed manifest %s referenced a released segment and could never build; the wedged seal queue was discarded and its records re-plan into fresh chunks. No records were lost, but investigate how the ghost reference was admitted.",
-				v.cfg.VaultID, manifest.ChunkID))
+			fmt.Sprintf("Vault %s: chunk %s referenced a segment that had already been released, so it could never be built. It was discarded and its records are being chunked again — no records were lost. A chunk should never reference a released segment; please report this.",
+				v.vaultLabel(), manifest.ChunkID))
 	}
 	if err := v.applier().Apply(vaultctlfsm.MarshalDiscardUnbuildableManifests(manifest.ChunkID)); err != nil {
 		v.logger().Warn("discard of unbuildable manifest failed; will retry on next build wake",
@@ -431,8 +431,8 @@ func (v *vaultChunking) noteBuildBlocked(chunkID chunk.ChunkID, missing []glid.G
 		return
 	}
 	v.cfg.Alerts.Raise(buildBlockedAlarmType, v.cfg.VaultID.String(),
-		fmt.Sprintf("vault %s: chunk %s blocked in Sealing — %d referenced segment(s) missing on this node (e.g. %s); later chunks cannot seal until this resolves",
-			v.cfg.VaultID, chunkID, len(missing), missing[0]))
+		fmt.Sprintf("Vault %s: chunk %s is stuck in Sealing — %d of the segments it references are missing on this node (e.g. %s). No later chunk in this vault can seal until it clears.",
+			v.vaultLabel(), chunkID, len(missing), missing[0]))
 }
 
 // clearBuildBlocked drops the blocked-build condition. Called when every
