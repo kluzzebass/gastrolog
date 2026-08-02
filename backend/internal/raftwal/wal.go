@@ -9,8 +9,8 @@
 //
 // The WAL is segmented: when a segment exceeds the target size, a new segment
 // is started. After DeleteRange batches, when at least CompactionMinSegments
-// files exist, the WAL may compact: rewrite live state into new segments,
-// fsync, then remove older segment files (replay-safe).
+// segments hold data, the WAL may compact: rewrite live state into new
+// segments, fsync, then remove older segment files (replay-safe).
 package raftwal
 
 import (
@@ -93,9 +93,10 @@ type Config struct {
 	// before fsyncing. Default: 1ms.
 	SyncBatchWindow time.Duration
 
-	// CompactionMinSegments is the minimum number of WAL segment files required
-	// before automatic compaction is attempted after DeleteRange writes.
-	// Default: 2.
+	// CompactionMinSegments is the minimum number of data-bearing WAL segments
+	// required before automatic compaction is attempted after DeleteRange
+	// writes. The reserved spare is preallocated and logically empty, so it
+	// never counts toward this floor. Default: 2.
 	CompactionMinSegments int
 
 	// LogCacheBudgetBytes is the per-group heap budget for recently appended
@@ -122,6 +123,13 @@ type Config struct {
 	// full volume can panic Raft) or restored. Invoked from the batch-writer
 	// goroutine: must not block. err is nil when lost is false.
 	OnReserveState func(lost bool, err error)
+
+	// OnCompaction, if non-nil, is invoked after each automatic compaction
+	// completes, with that run's result. Compaction rewrites every live entry
+	// and blocks the batch writer for its whole duration, so an unreported run
+	// surfaces only as unexplained append latency in every group at once.
+	// Invoked from the batch-writer goroutine: must not block.
+	OnCompaction func(CompactionStats)
 }
 
 func (c Config) withDefaults() Config {
@@ -146,6 +154,10 @@ type CompactionStats struct {
 	ReclaimedBytes    int64
 	RetainedSegments  int
 	RetainedBytes     int64
+
+	// Duration is how long the run held the batch writer. Every group's
+	// appends queue behind it, so this is the blast radius of one compaction.
+	Duration time.Duration
 }
 
 // WAL is the shared write-ahead log. Create one per node; all Raft
@@ -886,7 +898,17 @@ func (w *WAL) compactSegments() error {
 	if err != nil {
 		return err
 	}
-	if len(segments) < w.cfg.CompactionMinSegments {
+	// Count only segments that hold data. The reserved spare is a
+	// preallocated, logically empty next segment that always exists, so
+	// counting files would satisfy any floor of 2 from the first write
+	// onward and rewrite the whole live log on every DeleteRange.
+	segmentsWithData := 0
+	for _, s := range segments {
+		if s.size > 0 {
+			segmentsWithData++
+		}
+	}
+	if segmentsWithData < w.cfg.CompactionMinSegments {
 		return nil
 	}
 
@@ -895,6 +917,7 @@ func (w *WAL) compactSegments() error {
 	if oldMaxSeq <= 0 {
 		return nil
 	}
+	start := time.Now()
 
 	if w.seg != nil {
 		if err := w.syncActiveSegment(); err != nil {
@@ -959,14 +982,19 @@ func (w *WAL) compactSegments() error {
 	for _, seg := range remaining {
 		retainedBytes += seg.size
 	}
-	w.stateMu.Lock()
-	w.lastCompaction = CompactionStats{
+	stats := CompactionStats{
 		ReclaimedSegments: reclaimedSegments,
 		ReclaimedBytes:    reclaimedBytes,
 		RetainedSegments:  len(remaining),
 		RetainedBytes:     retainedBytes,
+		Duration:          time.Since(start),
 	}
+	w.stateMu.Lock()
+	w.lastCompaction = stats
 	w.stateMu.Unlock()
+	if w.cfg.OnCompaction != nil {
+		w.cfg.OnCompaction(stats)
+	}
 	return nil
 }
 
