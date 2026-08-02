@@ -56,6 +56,18 @@ func (s *suspectTracker) suspectSince(id chunk.ChunkID) (time.Time, bool) {
 	return t, ok
 }
 
+// ids snapshots the tracked chunks so a caller can iterate without holding the
+// lock across the clear it may decide to do.
+func (s *suspectTracker) ids() []chunk.ChunkID {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]chunk.ChunkID, 0, len(s.entries))
+	for id := range s.entries {
+		out = append(out, id)
+	}
+	return out
+}
+
 // startArchivalSweep registers the hourly archival sweep job.
 //
 // This is a *genuine time-based policy evaluation*, not a compensator for a
@@ -298,6 +310,13 @@ func resolveTransitionTarget(transitions []system.CloudStorageTransition, age ti
 }
 
 // startReconcileSweep registers the daily cloud reconciliation job.
+//
+// This schedule cannot be replaced by event-driven verification. Every other
+// way a cloud object disappears emits something — an upload records its own
+// index entry, a delete propagates through the manifest — but an object removed
+// by a provider lifecycle rule, a bucket policy, or an operator with a console
+// emits nothing at all. A periodic probe is the only thing that ever notices,
+// and noticing is what the grace period below is measured from.
 func (o *Orchestrator) startReconcileSweep() error {
 	if err := o.scheduler.AddJob(reconcileSweepJobName, defaultReconcileSchedule, o.reconcileSweepAll); err != nil {
 		return err
@@ -341,9 +360,21 @@ func (o *Orchestrator) reconcileSweepAll() {
 }
 
 // reconcileVault checks one vault's cloud-backed chunks against the blob store.
+//
+// Detection is AuditVaultCloudIndex — the same comparison `gastrolog validate`
+// runs, so the two can never disagree about what "missing" means. What stays
+// here is the part only a schedule can own: how long a chunk has been missing,
+// and what to do once that exceeds the grace period.
+//
+// One store listing replaces the former HEAD-per-chunk loop. The tombstone
+// exemption that loop carried moved into the audit rather than disappearing: a
+// chunk the cluster has deleted must not read as data loss anywhere, including
+// in `gastrolog validate`.
 func (o *Orchestrator) reconcileVault(vaultInst *VaultInstance, cs *system.CloudService, now time.Time) {
-	metas, err := vaultInst.Chunks.List()
+	audit, err := o.AuditVaultCloudIndex(context.Background(), vaultInst.VaultID)
 	if err != nil {
+		// A local-only vault or one this node no longer homes: nothing to probe.
+		o.retentionLogger.Debug("reconcile: skipping vault", "vault", vaultInst.VaultID, "reason", err)
 		return
 	}
 
@@ -352,56 +383,34 @@ func (o *Orchestrator) reconcileVault(vaultInst *VaultInstance, cs *system.Cloud
 		graceDays = defaultSuspectGraceDays
 	}
 
-	for _, m := range metas {
-		if !m.CloudBacked {
-			continue
+	missing := make(map[chunk.ChunkID]struct{}, len(audit.MissingBlobs))
+	for _, id := range audit.MissingBlobs {
+		missing[id] = struct{}{}
+		o.advanceSuspect(vaultInst, id, graceDays, now)
+	}
+
+	// Anything the cluster expects that the store DOES hold is proof the chunk
+	// is fine, including one that was suspect on an earlier pass. Without this
+	// a transient 404 would leave the alert raised forever.
+	for _, id := range o.suspects.ids() {
+		if _, stillMissing := missing[id]; !stillMissing {
+			o.clearSuspect(id)
 		}
-		// Skip chunks our own retention just deleted. The blob is gone by
-		// design — reading it would 404, we'd mark it suspect, and the
-		// operator would see a flood of alerts for a chunk WE deleted.
-		// Tombstone propagation is faster than local cloud-index purge,
-		// so checking the tombstone here catches the gap.
-		if vaultInst.IsTombstoned != nil && vaultInst.IsTombstoned(m.ID) {
-			continue
-		}
-		o.reconcileCloudBackedChunk(vaultInst, m.ID, graceDays, now)
 	}
 }
 
-// reconcileCloudBackedChunk probes one cloud-backed chunk against the blob store and
-// advances its suspect-tracking state. Uses HeadCloudBlob so the probe hits
-// the authoritative copy in S3 — OpenCursor would happily serve from the
-// in-tree warm cache and miss out-of-band lifecycle deletions. Falls back to
-// OpenCursor for managers that don't implement CloudBlobChecker (no cloud
-// store configured / non-file backends).
-func (o *Orchestrator) reconcileCloudBackedChunk(vaultInst *VaultInstance, id chunk.ChunkID, graceDays uint32, now time.Time) {
-	var readErr error
-	if checker, ok := vaultInst.Chunks.(chunk.CloudBlobChecker); ok {
-		readErr = checker.HeadCloudBlob(id)
-	} else {
-		cursor, err := vaultInst.Chunks.OpenCursor(id)
-		if err == nil {
-			_ = cursor.Close()
-		}
-		readErr = err
-	}
-	if readErr == nil {
-		o.clearSuspect(id)
-		return
-	}
-	if !isChunkSuspect(readErr) {
-		return // transient error or archived — not a missing blob
-	}
+// advanceSuspect moves one missing chunk along the suspect timeline: first
+// sighting starts the clock, and only a chunk missing for longer than the grace
+// period is removed from the manifest.
+func (o *Orchestrator) advanceSuspect(vaultInst *VaultInstance, id chunk.ChunkID, graceDays uint32, now time.Time) {
 	if o.suspects == nil {
 		return
 	}
-
 	since, wasSuspect := o.suspects.suspectSince(id)
 	if !wasSuspect {
 		o.markSuspect(vaultInst, id, now)
 		return
 	}
-
 	suspectDays := uint32(now.Sub(since).Hours() / 24)
 	if suspectDays < graceDays {
 		o.retentionLogger.Info("reconcile: chunk still suspect",

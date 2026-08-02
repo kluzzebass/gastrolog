@@ -175,6 +175,9 @@ type Server struct {
 
 	// validateVaultExecutor validates a local vault for remote ValidateVault requests.
 	validateVaultExecutor ValidateVaultExecutor
+	// reconcileCloudIndexExecutor rebuilds this node's cloud index for remote
+	// ForwardReconcileCloudIndex requests.
+	reconcileCloudIndexExecutor ReconcileCloudIndexExecutor
 	// validateIngesterExecutor runs this node's ingester checks for remote
 	// ForwardValidateIngester requests.
 	validateIngesterExecutor ValidateIngesterExecutor

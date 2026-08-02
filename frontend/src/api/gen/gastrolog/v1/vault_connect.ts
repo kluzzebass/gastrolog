@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AnalyzeChunkRequest, AnalyzeChunkResponse, ArchiveChunkRequest, ArchiveChunkResponse, ExportVaultRequest, ExportVaultResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetPipelineBacklogRequest, GetPipelineBacklogResponse, GetStatsRequest, GetStatsResponse, GetVaultRequest, GetVaultResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListVaultsRequest, ListVaultsResponse, ReindexVaultRequest, ReindexVaultResponse, RepatriateOrphanRequest, RepatriateOrphanResponse, RestoreChunkRequest, RestoreChunkResponse, RetryUnreadableChunksRequest, RetryUnreadableChunksResponse, SealVaultRequest, SealVaultResponse, ValidateVaultRequest, ValidateVaultResponse, WatchChunksRequest, WatchChunksResponse } from "./vault_pb.js";
+import { AnalyzeChunkRequest, AnalyzeChunkResponse, ArchiveChunkRequest, ArchiveChunkResponse, ExportVaultRequest, ExportVaultResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetPipelineBacklogRequest, GetPipelineBacklogResponse, GetStatsRequest, GetStatsResponse, GetVaultRequest, GetVaultResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListVaultsRequest, ListVaultsResponse, ReconcileCloudIndexRequest, ReconcileCloudIndexResponse, ReindexVaultRequest, ReindexVaultResponse, RepatriateOrphanRequest, RepatriateOrphanResponse, RestoreChunkRequest, RestoreChunkResponse, RetryUnreadableChunksRequest, RetryUnreadableChunksResponse, SealVaultRequest, SealVaultResponse, ValidateVaultRequest, ValidateVaultResponse, WatchChunksRequest, WatchChunksResponse } from "./vault_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -111,6 +111,18 @@ export const VaultService = {
       name: "ValidateVault",
       I: ValidateVaultRequest,
       O: ValidateVaultResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * ReconcileCloudIndex rebuilds each node's cloud index from the blob store.
+     * Repairs a cache: never deletes an object, never touches cluster state.
+     *
+     * @generated from rpc gastrolog.v1.VaultService.ReconcileCloudIndex
+     */
+    reconcileCloudIndex: {
+      name: "ReconcileCloudIndex",
+      I: ReconcileCloudIndexRequest,
+      O: ReconcileCloudIndexResponse,
       kind: MethodKind.Unary,
     },
     /**

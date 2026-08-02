@@ -24,6 +24,20 @@ type PeerVaultStatsProvider interface {
 	FindVaultStats(vaultID string) *apiv1.VaultStats
 }
 
+// RemoteVaultValidator validates a vault on a remote node. Chunk readability
+// and cloud-index contents are per-node, so a validate that skipped peers would
+// pass while another node holds the unreadable copy.
+type RemoteVaultValidator interface {
+	ValidateVault(ctx context.Context, nodeID string, req *apiv1.ForwardValidateVaultRequest) (*apiv1.ForwardValidateVaultResponse, error)
+}
+
+// RemoteCloudIndexReconciler asks a remote node to rebuild its own cloud index.
+// Each node caches the index separately, so a repair that skipped peers would
+// leave their caches wrong while reporting success.
+type RemoteCloudIndexReconciler interface {
+	ReconcileCloudIndex(ctx context.Context, nodeID string, req *apiv1.ForwardReconcileCloudIndexRequest) (*apiv1.ForwardReconcileCloudIndexResponse, error)
+}
+
 // RemoteChunkLister lists chunks from a remote node's vault.
 type RemoteChunkLister interface {
 	ListChunks(ctx context.Context, nodeID string, req *apiv1.ForwardListChunksRequest) (*apiv1.ForwardListChunksResponse, error)
@@ -47,33 +61,37 @@ type RemoteIndexer interface {
 
 // VaultServer implements the VaultService.
 type VaultServer struct {
-	orch                  *orchestrator.Orchestrator
-	cfgStore              system.Store
-	factories             orchestrator.Factories
-	peerStats             PeerVaultStatsProvider
-	remoteChunkLister     RemoteChunkLister
-	remotePipelineBacklog RemotePipelineBacklogGetter
-	remoteChunkWatcher    RemoteChunkWatcher
-	remoteIndexer         RemoteIndexer
-	localNodeID           string
-	logger                *slog.Logger
+	orch                       *orchestrator.Orchestrator
+	cfgStore                   system.Store
+	factories                  orchestrator.Factories
+	peerStats                  PeerVaultStatsProvider
+	remoteChunkLister          RemoteChunkLister
+	remotePipelineBacklog      RemotePipelineBacklogGetter
+	remoteChunkWatcher         RemoteChunkWatcher
+	remoteIndexer              RemoteIndexer
+	remoteVaultValidator       RemoteVaultValidator
+	remoteCloudIndexReconciler RemoteCloudIndexReconciler
+	localNodeID                string
+	logger                     *slog.Logger
 }
 
 var _ gastrologv1connect.VaultServiceHandler = (*VaultServer)(nil)
 
 // NewVaultServer creates a new VaultServer.
-func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, remoteChunkLister RemoteChunkLister, remotePipelineBacklog RemotePipelineBacklogGetter, remoteChunkWatcher RemoteChunkWatcher, remoteIndexer RemoteIndexer, localNodeID string, logger *slog.Logger) *VaultServer {
+func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, remoteChunkLister RemoteChunkLister, remotePipelineBacklog RemotePipelineBacklogGetter, remoteChunkWatcher RemoteChunkWatcher, remoteIndexer RemoteIndexer, remoteVaultValidator RemoteVaultValidator, remoteCloudIndexReconciler RemoteCloudIndexReconciler, localNodeID string, logger *slog.Logger) *VaultServer {
 	return &VaultServer{
-		orch:                  orch,
-		cfgStore:              cfgStore,
-		factories:             factories,
-		peerStats:             peerStats,
-		remoteChunkLister:     remoteChunkLister,
-		remotePipelineBacklog: remotePipelineBacklog,
-		remoteChunkWatcher:    remoteChunkWatcher,
-		remoteIndexer:         remoteIndexer,
-		localNodeID:           localNodeID,
-		logger:                compVaultServer.Apply(logging.Default(logger)),
+		orch:                       orch,
+		cfgStore:                   cfgStore,
+		factories:                  factories,
+		peerStats:                  peerStats,
+		remoteChunkLister:          remoteChunkLister,
+		remotePipelineBacklog:      remotePipelineBacklog,
+		remoteChunkWatcher:         remoteChunkWatcher,
+		remoteIndexer:              remoteIndexer,
+		remoteVaultValidator:       remoteVaultValidator,
+		remoteCloudIndexReconciler: remoteCloudIndexReconciler,
+		localNodeID:                localNodeID,
+		logger:                     compVaultServer.Apply(logging.Default(logger)),
 	}
 }
 

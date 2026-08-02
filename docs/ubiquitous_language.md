@@ -741,6 +741,25 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   delete sealed chunks on disk that aren't in the manifest (orphan
   cleanup) and replicate manifest chunks that are missing locally.
 
+- **Cloud-index audit** — compare a cloud-backed vault's **objects in the
+  blob store** against the FSM manifest (which chunks the cluster expects)
+  and against the node's **cloud index** (its local cache of that). Read-only.
+  Six findings, and they call for different responses: a *missing object* is a
+  durability incident, a *size mismatch* likewise, an *untracked object* is
+  bytes being paid for that nothing reads, a *tombstoned object* is a delete
+  still propagating, and *stale / unindexed cloud-index entries* are node-local
+  cache drift. Surfaced by `ValidateVault` (CLI: `gastrolog validate`).
+  Distinct from **Reconcile** above, which is manifest-vs-disk.
+
+- **Cloud-index rebuild** — repair the node's cloud index from the blob store:
+  drop cached entries whose object is gone, reset drifted sizes, index objects
+  the cache never recorded. Repairs a **cache** only — it never deletes an
+  object and never changes cluster state, because an object the cache cannot
+  explain is the case where the cache is what is wrong. CLI:
+  `gastrolog reconcile`. A missing object stays reported as missing afterwards;
+  removing a chunk the store lost is a separate, grace-period-gated decision
+  owned by the nightly cloud-reconcile sweep.
+
 - **Drain** — move all of a vault's chunks off this node, then remove the
   local instance. Used for decommission.
 

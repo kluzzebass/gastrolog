@@ -512,6 +512,20 @@ message ForwardValidateVaultRequest {
 message ForwardValidateVaultResponse {
   bool valid = 1;
   repeated ChunkValidation chunks = 2;
+
+  // The responding node's own cloud-index audit. Absent when the vault has no
+  // cloud store on that node.
+  CloudIndexAudit cloud_index_audit = 3;
+}
+
+// ForwardReconcileCloudIndexRequest asks a remote node to rebuild its own
+// cloud index from the blob store.
+message ForwardReconcileCloudIndexRequest {
+  bytes vault_id = 1;
+}
+
+message ForwardReconcileCloudIndexResponse {
+  CloudIndexRepair repair = 1;
 }
 
 // ForwardValidateIngesterRequest asks a remote node to validate a candidate
