@@ -195,7 +195,7 @@ flowchart TD
 | Active (unsealed) | `stdioCursor` | `pread` on raw.log, idx.log, attr.log |
 | Sealing (local) | `stdioCursor` (no GLCB yet) or `mmapCursor` (GLCB committed) | Read path adapts to whichever artifacts are present; `OpenCursor` prefers `data.glcb` when it exists |
 | Sealed (local) | `mmapCursor` | Memory-mapped GLCB, random access via record-index offsets |
-| Cloud-backed | `glcbCursor` (after warm-cache fill) | One whole-blob download → unwrap zstd → mmap GLCB; reads are local from then on |
+| Cloud-backed | `glcbCursor` (after warm-cache fill) | One whole-object download → reassemble GLCB → mmap; reads are local from then on. Histogram rank lookups on cold chunks skip the fill: the ITSI section arrives via KB-scale range GETs |
 
 For Phase 3 (gastrolog-1huz5) Sealing chunks, the query engine branches on the **local** `meta.Sealed` (active-form closed?) rather than the cluster `State == Sealed` (GLCB committed?). This is the one place where local truth is the right truth — the chunk is locally readable as soon as the active-form files are closed; whether the cluster has finished publishing its GLCB digest is irrelevant to the read path. If `PostSealProcess` hasn't built the embedded indexes yet, TS-ordered scanning has no rank view for the chunk (the B+ tree rank view serves only the live active chunk) and the query fails with `TS index required` — no buffer-and-sort fallback exists.
 
@@ -225,7 +225,7 @@ sequenceDiagram
 
     QE->>CM: OpenCursor(chunkID)
     CM->>S3: Download(chunk.glcb.zst)
-    S3-->>CM: zstd-wrapped GLCB stream
+    S3-->>CM: transport-framed GLCB object
     CM->>Cache: DownloadAndUnwrap → data.glcb
     CM->>CM: VerifyDownloadedBlob (TOC digest vs FSM)
     CM-->>QE: glcbCursor over mmap'd data.glcb
