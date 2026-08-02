@@ -186,6 +186,25 @@ func walReserveAlarm(alerts *alert.Collector, logger *slog.Logger, walName strin
 	}
 }
 
+// walCompactionLog reports each WAL compaction run. Compaction holds the shared
+// batch writer for its whole duration, so every group's appends queue behind it;
+// without this line that cost is only visible as unexplained append latency, and
+// the WAL-latency diagnostic points at bulk I/O instead.
+func walCompactionLog(logger *slog.Logger, walName string) func(raftwal.CompactionStats) {
+	if logger == nil {
+		return nil
+	}
+	return func(s raftwal.CompactionStats) {
+		logger.Info("raft WAL compacted",
+			"wal", walName,
+			"duration", s.Duration,
+			"reclaimed_segments", s.ReclaimedSegments,
+			"reclaimed_bytes", s.ReclaimedBytes,
+			"retained_segments", s.RetainedSegments,
+			"retained_bytes", s.RetainedBytes)
+	}
+}
+
 // openRaftClusterCtlStore creates a raft-backed system store with WAL persistence.
 func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 	raftDir := opts.Home.RaftDir()
@@ -196,6 +215,7 @@ func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 	walDir := opts.Home.ClusterCtlWALDir()
 	wal, err := raftwal.Open(walDir, raftwal.Config{
 		OnReserveState: walReserveAlarm(opts.Alerts, opts.Logger, "cluster-ctl"),
+		OnCompaction:   walCompactionLog(opts.Logger, "cluster-ctl"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open cluster-ctl raft WAL: %w", err)
