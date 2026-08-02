@@ -4489,29 +4489,15 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 
 	glcbPath := m.glcbPath(id)
 
-	uploadFile, err := os.Open(filepath.Clean(glcbPath))
-	if err != nil {
-		return fmt.Errorf("open data.glcb for upload: %w", err)
-	}
-
-	// Wrap the uncompressed GLCB with zstd as a transport-only layer.
+	// Frame the uncompressed GLCB for transport: per-section zstd frames
+	// plus a raw tail directory, so readers can range-GET individual
+	// sections of the object (glcb.WrapForTransport documents the layout).
 	// The format itself stays uncompressed on local disk; cloud transport
-	// applies the wrapper here and DownloadAndUnwrap removes it on read.
+	// applies the framing here and DownloadAndUnwrap removes it on read.
 	pr, pw := io.Pipe()
 	go func() {
-		defer func() { _ = uploadFile.Close() }()
-		zw, zerr := zstd.NewWriter(pw)
-		if zerr != nil {
-			_ = pw.CloseWithError(fmt.Errorf("zstd writer: %w", zerr))
-			return
-		}
-		if _, copyErr := io.Copy(zw, uploadFile); copyErr != nil {
-			_ = zw.Close()
-			_ = pw.CloseWithError(copyErr)
-			return
-		}
-		if closeErr := zw.Close(); closeErr != nil {
-			_ = pw.CloseWithError(closeErr)
+		if _, wrapErr := glcb.WrapForTransport(pw, glcbPath); wrapErr != nil {
+			_ = pw.CloseWithError(wrapErr)
 			return
 		}
 		_ = pw.Close()

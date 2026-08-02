@@ -1,9 +1,10 @@
 package glcb
 
 // DownloadAndUnwrap tests: the canonical download-side unwrap against
-// the in-memory blob store — happy path, both blob-store sentinel
-// translations, and corrupt zstd transport payloads. No network, no
-// timing.
+// the in-memory blob store — the caller contract (byte-identical
+// reassembly, dst rewound) and both blob-store sentinel translations.
+// Malformed-object handling (truncation, corruption, foreign bytes) is
+// covered format-side in transport_test.go. No network, no timing.
 
 import (
 	"bytes"
@@ -11,31 +12,52 @@ import (
 	"errors"
 	"io"
 	"os"
-	"strings"
 	"testing"
-
-	"github.com/klauspost/compress/zstd"
+	"time"
 
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 )
 
-// zstdWrap compresses payload the way the upload pipeline wraps a GLCB
-// for cloud transport.
-func zstdWrap(t *testing.T, payload []byte) []byte {
+// wrappedBlobBytes builds a real blob with the writer and frames it for
+// transport, returning both forms.
+func wrappedBlobBytes(t *testing.T) (blob []byte, object []byte) {
 	t.Helper()
-	var buf bytes.Buffer
-	enc, err := zstd.NewWriter(&buf)
+	dir := t.TempDir()
+	w, err := NewWriter(chunk.NewChunkID(), glid.New(), dir)
 	if err != nil {
-		t.Fatalf("zstd writer: %v", err)
+		t.Fatalf("NewWriter: %v", err)
 	}
-	if _, err := enc.Write(payload); err != nil {
-		t.Fatalf("compress payload: %v", err)
+	base := time.Date(2026, 4, 1, 8, 0, 0, 0, time.UTC)
+	for i := range 25 {
+		ts := base.Add(time.Duration(i) * time.Second)
+		if err := w.Add(chunk.Record{
+			SourceTS: ts, IngestTS: ts, WriteTS: ts,
+			Raw: []byte("remote-reader-payload"),
+		}); err != nil {
+			t.Fatalf("Add: %v", err)
+		}
 	}
-	if err := enc.Close(); err != nil {
-		t.Fatalf("close zstd writer: %v", err)
+	f, err := os.CreateTemp(dir, "blob-*.glcb")
+	if err != nil {
+		t.Fatal(err)
 	}
-	return buf.Bytes()
+	if _, err := w.WriteTo(f); err != nil {
+		t.Fatalf("WriteTo: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	blob, err = os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if _, err := WrapForTransport(&buf, f.Name()); err != nil {
+		t.Fatalf("WrapForTransport: %v", err)
+	}
+	return blob, buf.Bytes()
 }
 
 // downloadDst returns a destination temp file for DownloadAndUnwrap, the
@@ -50,16 +72,16 @@ func downloadDst(t *testing.T) *os.File {
 	return f
 }
 
-// TestDownloadAndUnwrap_HappyPath uploads a zstd-wrapped payload,
+// TestDownloadAndUnwrap_HappyPath uploads a transport-framed blob,
 // downloads + unwraps it, and verifies the bytes and that dst is left
 // rewound to offset 0 for the caller's promote step.
 func TestDownloadAndUnwrap_HappyPath(t *testing.T) {
 	t.Parallel()
 
-	payload := bytes.Repeat([]byte("glcb payload bytes "), 64)
+	blob, object := wrappedBlobBytes(t)
 	store := blobstore.NewMemory()
 	const key = "vault/chunk/data.glcb.zst"
-	if err := store.Upload(context.Background(), key, bytes.NewReader(zstdWrap(t, payload)), nil); err != nil {
+	if err := store.Upload(context.Background(), key, bytes.NewReader(object), nil); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
 
@@ -79,8 +101,8 @@ func TestDownloadAndUnwrap_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read dst: %v", err)
 	}
-	if !bytes.Equal(got, payload) {
-		t.Fatalf("unwrapped payload = %d bytes, want %d matching bytes", len(got), len(payload))
+	if !bytes.Equal(got, blob) {
+		t.Fatalf("unwrapped blob = %d bytes, want %d matching bytes", len(got), len(blob))
 	}
 }
 
@@ -108,9 +130,10 @@ func TestDownloadAndUnwrap_NotFoundMapsToChunkSuspect(t *testing.T) {
 func TestDownloadAndUnwrap_ArchivedMapsToChunkArchived(t *testing.T) {
 	t.Parallel()
 
+	_, object := wrappedBlobBytes(t)
 	store := blobstore.NewMemory()
 	const key = "vault/chunk/data.glcb.zst"
-	if err := store.Upload(context.Background(), key, bytes.NewReader(zstdWrap(t, []byte("payload"))), nil); err != nil {
+	if err := store.Upload(context.Background(), key, bytes.NewReader(object), nil); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
 	if err := store.Archive(context.Background(), key, "GLACIER"); err != nil {
@@ -123,48 +146,5 @@ func TestDownloadAndUnwrap_ArchivedMapsToChunkArchived(t *testing.T) {
 	}
 	if !errors.Is(err, blobstore.ErrBlobArchived) {
 		t.Fatalf("error = %v, want wrapped blobstore.ErrBlobArchived", err)
-	}
-}
-
-// TestDownloadAndUnwrap_TruncatedZstd uploads a valid zstd stream cut in
-// half: the frame header still parses, so the failure surfaces from the
-// decompress copy loop.
-func TestDownloadAndUnwrap_TruncatedZstd(t *testing.T) {
-	t.Parallel()
-
-	payload := bytes.Repeat([]byte("truncated transport payload "), 4096)
-	wrapped := zstdWrap(t, payload)
-	if len(wrapped) < 32 {
-		t.Fatalf("compressed stream unexpectedly small (%d bytes); enlarge the payload", len(wrapped))
-	}
-	store := blobstore.NewMemory()
-	const key = "vault/chunk/data.glcb.zst"
-	if err := store.Upload(context.Background(), key, bytes.NewReader(wrapped[:len(wrapped)/2]), nil); err != nil {
-		t.Fatalf("upload: %v", err)
-	}
-
-	err := DownloadAndUnwrap(context.Background(), store, key, downloadDst(t))
-	if err == nil {
-		t.Fatal("DownloadAndUnwrap on truncated zstd: expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "decompress cloud blob") {
-		t.Fatalf("error = %q, want mention of decompress cloud blob", err)
-	}
-}
-
-// TestDownloadAndUnwrap_GarbagePayload uploads bytes that are not a zstd
-// stream at all; the unwrap must fail (whichever zstd stage detects it),
-// never silently produce an empty GLCB.
-func TestDownloadAndUnwrap_GarbagePayload(t *testing.T) {
-	t.Parallel()
-
-	store := blobstore.NewMemory()
-	const key = "vault/chunk/data.glcb.zst"
-	if err := store.Upload(context.Background(), key, strings.NewReader("this is not a zstd stream"), nil); err != nil {
-		t.Fatalf("upload: %v", err)
-	}
-
-	if err := DownloadAndUnwrap(context.Background(), store, key, downloadDst(t)); err == nil {
-		t.Fatal("DownloadAndUnwrap on garbage payload: expected error, got nil")
 	}
 }
