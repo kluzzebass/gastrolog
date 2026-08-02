@@ -172,6 +172,14 @@ func DefaultRoutes() map[string]RPCRoute {
 			Resource:     OwnerOf(ResourceVault, (*apiv1.ValidateVaultRequest).GetVault),
 			WrapResponse: NewRespWrapper[apiv1.ValidateVaultResponse](),
 		},
+		// Owner-routed like ValidateVault, and the handler fans out from there,
+		// so every homing node's cloud index gets rebuilt however the operator
+		// reached the cluster.
+		gastrologv1connect.VaultServiceReconcileCloudIndexProcedure: {
+			Strategy:     RouteToResourceOwner,
+			Resource:     OwnerOf(ResourceVault, (*apiv1.ReconcileCloudIndexRequest).GetVault),
+			WrapResponse: NewRespWrapper[apiv1.ReconcileCloudIndexResponse](),
+		},
 		gastrologv1connect.VaultServiceSealVaultProcedure: {
 			Strategy:     RouteToResourceOwner,
 			Resource:     OwnerOf(ResourceVault, (*apiv1.SealVaultRequest).GetVault),
