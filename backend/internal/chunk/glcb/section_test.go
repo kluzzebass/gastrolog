@@ -37,10 +37,16 @@ func TestLoadSection_ReadsITSIAndSTSI(t *testing.T) {
 	}
 
 	for _, ty := range []byte{glcb.SectionIngestTSIndex, glcb.SectionSourceTSIndex} {
-		gotHash, err := glcb.LoadSection(tmp.Name(), ty,
-			func(data []byte) ([32]byte, error) { return sha256.Sum256(data), nil })
+		mapped, data, closer, err := glcb.MapSection(tmp.Name(), ty)
 		if err != nil {
-			t.Fatalf("LoadSection 0x%02x: %v", ty, err)
+			t.Fatalf("MapSection 0x%02x: %v", ty, err)
+		}
+		gotHash := sha256.Sum256(data)
+		if err := closer(); err != nil {
+			t.Fatalf("close mapping: %v", err)
+		}
+		if mapped.Type != ty {
+			t.Fatalf("MapSection returned entry for type 0x%02x, want 0x%02x", mapped.Type, ty)
 		}
 
 		// Re-read the same byte range via the file handle and compare hashes.
@@ -87,10 +93,9 @@ func TestLoadSection_NotFound(t *testing.T) {
 	defer func() { _ = tmp.Close() }()
 
 	// Token index isn't emitted by the writer yet — its TOC entry doesn't
-	// exist in this blob, so LoadSection must report ErrSectionNotFound.
-	_, err := glcb.LoadSection(tmp.Name(), glcb.SectionTokenIndex,
-		func(data []byte) (int, error) { return len(data), nil })
+	// exist in this blob, so MapSection must report ErrSectionNotFound.
+	_, _, _, err := glcb.MapSection(tmp.Name(), glcb.SectionTokenIndex)
 	if !errors.Is(err, glcb.ErrSectionNotFound) {
-		t.Fatalf("LoadSection: err = %v, want ErrSectionNotFound", err)
+		t.Fatalf("MapSection: err = %v, want ErrSectionNotFound", err)
 	}
 }

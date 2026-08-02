@@ -3,7 +3,6 @@ package tsidx
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 
@@ -12,8 +11,6 @@ import (
 	"gastrolog/internal/format"
 	"gastrolog/internal/tsindex"
 )
-
-const currentVersion = 0x01
 
 var (
 	ErrIndexTooSmall   = errors.New("timestamp index too small")
@@ -28,24 +25,6 @@ type Entry = tsindex.Entry
 // blobPath returns the GLCB blob path for the given chunk under dir.
 func blobPath(dir string, chunkID chunk.ChunkID) string {
 	return filepath.Join(dir, chunkID.String(), glcb.BlobFilename)
-}
-
-// decodeRawEntries decodes a raw tail of `[ts:i64][pos:u32] × N`
-// entries — the layout used by the embedded ITSI/STSI sections in the
-// GLCB. There is no header: the section's type is recorded in the TOC
-// entry, and the count derives from the section size. Byte layout is
-// owned by tsindex; this only validates section size and builds the
-// slice.
-func decodeRawEntries(data []byte) ([]Entry, error) {
-	if len(data)%tsindex.EntrySize != 0 {
-		return nil, fmt.Errorf("tsidx: section length %d not a multiple of %d", len(data), tsindex.EntrySize)
-	}
-	n := len(data) / tsindex.EntrySize
-	entries := make([]Entry, n)
-	for i := range n {
-		entries[i] = tsindex.Decode(data[i*tsindex.EntrySize : (i+1)*tsindex.EntrySize])
-	}
-	return entries, nil
 }
 
 // FindStartRank returns the rank (index in the IngestTS-sorted slice) of
@@ -76,39 +55,13 @@ func FindStartPosition(entries []Entry, ts int64) (uint64, bool) {
 	return uint64(entries[rank].Pos), true
 }
 
-// LoadIngestIndex loads the ingest TS index for a sealed chunk by reading
-// the embedded ITSI section from the chunk's data.glcb blob. Returns
-// ErrIndexNotFound-equivalent (glcb.ErrSectionNotFound or os.IsNotExist)
-// when the chunk has no embedded ITSI section.
-func LoadIngestIndex(dir string, chunkID chunk.ChunkID) ([]Entry, error) {
-	return loadFromBlob(blobPath(dir, chunkID), format.TypeIngestIndex)
-}
-
-// LoadSourceIndex is the source-TS counterpart to LoadIngestIndex.
-func LoadSourceIndex(dir string, chunkID chunk.ChunkID) ([]Entry, error) {
-	return loadFromBlob(blobPath(dir, chunkID), format.TypeSourceIndex)
-}
-
-func loadFromBlob(path string, sectionType byte) ([]Entry, error) {
-	entries, err := glcb.LoadSection(path, sectionType, decodeRawEntries)
-	if err != nil {
-		return nil, err
-	}
-	if len(entries) == 0 {
-		return nil, ErrIndexTooSmall
-	}
-	return entries, nil
-}
-
-// MmapView holds a long-lived mmap of an embedded TS index section
-// inside a chunk's GLCB blob. data points at the section's raw entry
-// bytes only — no header prefix. Binary search reads 12-byte entries
-// directly from the mmap region, no heap-allocated entry slice. The
-// mapping is released via Close (called from the manager's evictTSMmap
-// on DeleteIndexes).
+// MmapView is a TS-index section view plus the lifetime of the bytes it
+// reads from. The view itself comes from the GLCB section registry, so the
+// section's recorded format version picks the decode — this wrapper only
+// owns releasing the underlying mapping (Close is a no-op for views that
+// alias a parent whole-file mapping, which the parent MappedBlob owns).
 type MmapView struct {
-	data  []byte // section bytes only (raw entries, no header)
-	n     uint32
+	view  tsindex.View
 	close func() error
 }
 
@@ -128,8 +81,8 @@ func OpenSourceMmapAt(glcbPath string) (MmapView, error) {
 }
 
 // OpenIngestMmap opens the chunk's ingest TS index section inside
-// data.glcb, validates the section size, and returns a MmapView for
-// repeated lookups. Returns ErrIndexTooSmall if the section is empty.
+// data.glcb, resolves its view through the section registry, and returns
+// it for repeated lookups. Returns ErrIndexTooSmall if the section is empty.
 func OpenIngestMmap(dir string, chunkID chunk.ChunkID) (MmapView, error) {
 	return openSectionMmap(blobPath(dir, chunkID), format.TypeIngestIndex)
 }
@@ -139,42 +92,51 @@ func OpenSourceMmap(dir string, chunkID chunk.ChunkID) (MmapView, error) {
 	return openSectionMmap(blobPath(dir, chunkID), format.TypeSourceIndex)
 }
 
-// ViewFromSection wraps raw ITSI/STSI section bytes that alias a parent
-// whole-file GLCB mapping. Close is a no-op — the parent MappedBlob owns
-// the munmap.
-func ViewFromSection(data []byte) (MmapView, error) {
-	if len(data)%tsindex.EntrySize != 0 {
-		return MmapView{}, fmt.Errorf("tsidx: section length %d not a multiple of %d", len(data), tsindex.EntrySize)
-	}
-	n := len(data) / tsindex.EntrySize
-	if n == 0 {
-		return MmapView{}, ErrIndexTooSmall
-	}
-	return MmapView{
-		data: data,
-		n:    uint32(n), //nolint:gosec // G115: entry count bounded by chunk record count
-	}, nil
-}
-
-func openSectionMmap(path string, sectionType byte) (MmapView, error) {
-	data, closer, err := glcb.MapSection(path, sectionType)
+// ViewFromSection wraps raw TS-index section bytes that alias a parent
+// whole-file GLCB mapping, dispatching decode on the section's recorded
+// type and version. Close is a no-op — the parent MappedBlob owns the
+// munmap.
+func ViewFromSection(sectionType byte, version uint8, data []byte) (MmapView, error) {
+	view, err := registryView(sectionType, version, data)
 	if err != nil {
 		return MmapView{}, err
 	}
-	if len(data)%tsindex.EntrySize != 0 {
-		_ = closer()
-		return MmapView{}, fmt.Errorf("tsidx: section length %d not a multiple of %d", len(data), tsindex.EntrySize)
+	if view.Len() == 0 {
+		return MmapView{}, ErrIndexTooSmall
 	}
-	n := len(data) / tsindex.EntrySize
-	if n == 0 {
+	return MmapView{view: view}, nil
+}
+
+func openSectionMmap(path string, sectionType byte) (MmapView, error) {
+	entry, data, closer, err := glcb.MapSection(path, sectionType)
+	if err != nil {
+		return MmapView{}, err
+	}
+	view, err := registryView(entry.Type, entry.Version, data)
+	if err != nil {
+		_ = closer()
+		return MmapView{}, err
+	}
+	if view.Len() == 0 {
 		_ = closer()
 		return MmapView{}, ErrIndexTooSmall
 	}
-	return MmapView{
-		data:  data,
-		n:     uint32(n), //nolint:gosec // G115: entry count bounded by chunk record count
-		close: closer,
-	}, nil
+	return MmapView{view: view, close: closer}, nil
+}
+
+// registryView narrows the section registry's decode to the TS-index view
+// interface — the one place tsidx asserts what kind of view a TS section
+// yields.
+func registryView(sectionType byte, version uint8, data []byte) (tsindex.View, error) {
+	v, err := glcb.DefaultRegistry().NewView(glcb.TOCEntry{Type: sectionType, Version: version}, data)
+	if err != nil {
+		return nil, err
+	}
+	view, ok := v.(tsindex.View)
+	if !ok {
+		return nil, fmt.Errorf("tsidx: section type 0x%02x version %d decoded to %T, not a TS-index view", sectionType, version, v)
+	}
+	return view, nil
 }
 
 // Close releases the underlying mmap region.
@@ -185,48 +147,23 @@ func (v MmapView) Close() error {
 	return v.close()
 }
 
-// SearchTS binary-searches the mmap'd index for the first entry with TS >=
+// SearchTS binary-searches the section for the first entry with TS >=
 // tsNano. Returns (rank, pos, true) if found, (0, 0, false) if past all
-// entries. Operates directly on the mmap'd bytes via tsindex.Decode — no
-// heap-allocated entry slice. This mirrors tsindex.FindStart's search
-// shape but also returns rank (the index in the sorted region), which
-// FindStart does not expose; that is reader-side machinery specific to
-// tsidx's mmap views and stays local.
+// entries.
 func (v MmapView) SearchTS(tsNano int64) (rank uint32, pos uint32, ok bool) {
-	if v.n == 0 {
+	if v.view == nil {
 		return 0, 0, false
 	}
-	last := v.entryAt(v.n - 1)
-	if tsNano > last.TS {
-		return 0, 0, false
-	}
-	lo, hi := uint32(0), v.n
-	for lo < hi {
-		mid := lo + (hi-lo)/2
-		if v.entryTS(mid) < tsNano {
-			lo = mid + 1
-		} else {
-			hi = mid
-		}
-	}
-	e := v.entryAt(lo)
-	return lo, e.Pos, true
+	return v.view.SearchTS(tsNano)
 }
 
-// Len returns the number of (timestamp, position) entries in the mmap'd index.
-func (v MmapView) Len() uint32 { return v.n }
+// Len returns the number of (timestamp, position) entries in the section.
+func (v MmapView) Len() uint32 {
+	if v.view == nil {
+		return 0
+	}
+	return v.view.Len()
+}
 
 // EntryAt returns the entry at rank i. Caller must ensure i < Len().
-func (v MmapView) EntryAt(i uint32) Entry { return v.entryAt(i) }
-
-func (v MmapView) entryAt(i uint32) Entry {
-	off := int(i) * tsindex.EntrySize
-	return tsindex.Decode(v.data[off : off+tsindex.EntrySize])
-}
-
-func (v MmapView) entryTS(i uint32) int64 {
-	return v.entryAt(i).TS
-}
-
-// Suppress unused-import warning when this file is the only consumer of os.
-var _ = os.ErrNotExist
+func (v MmapView) EntryAt(i uint32) Entry { return v.view.EntryAt(i) }

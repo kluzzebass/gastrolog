@@ -10,6 +10,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/tsindex"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -57,14 +58,18 @@ func TestDecodeRawEntries(t *testing.T) {
 		200, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0,
 		44, 1, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, // 300 = 0x012C → 44, 1
 	}
-	entries, err := decodeRawEntries(raw)
+	view, err := tsindex.NewRawView(raw)
 	if err != nil {
-		t.Fatalf("decodeRawEntries: %v", err)
+		t.Fatalf("NewRawView: %v", err)
 	}
 	want := []Entry{
 		{TS: 100, Pos: 5},
 		{TS: 200, Pos: 2},
 		{TS: 300, Pos: 9},
+	}
+	entries := make([]Entry, view.Len())
+	for i := range entries {
+		entries[i] = view.EntryAt(uint32(i)) //nolint:gosec // G115: test fixture
 	}
 	if len(entries) != len(want) {
 		t.Fatalf("len = %d, want %d", len(entries), len(want))
@@ -121,12 +126,17 @@ func TestLoadIngestIndexFromGLCB(t *testing.T) {
 	chunkID := chunk.NewChunkID()
 	writeTestGLCB(t, dir, chunkID)
 
-	entries, err := LoadIngestIndex(dir, chunkID)
+	mv, err := OpenIngestMmap(dir, chunkID)
 	if err != nil {
-		t.Fatalf("LoadIngestIndex: %v", err)
+		t.Fatalf("OpenIngestMmap: %v", err)
 	}
-	if len(entries) != 3 {
-		t.Fatalf("len = %d, want 3", len(entries))
+	defer func() { _ = mv.Close() }()
+	if mv.Len() != 3 {
+		t.Fatalf("len = %d, want 3", mv.Len())
+	}
+	entries := make([]Entry, mv.Len())
+	for i := range entries {
+		entries[i] = mv.EntryAt(uint32(i)) //nolint:gosec // G115: test fixture
 	}
 	// Sorted by TS ascending; positions match insertion order (0,1,2).
 	for i, want := range []int64{100, 200, 300} {

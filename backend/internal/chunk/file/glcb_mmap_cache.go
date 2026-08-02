@@ -54,7 +54,7 @@ func (m *Manager) closeMappedGLCB(id chunk.ChunkID) {
 }
 
 // WithGLCBSection implements chunk.GLCBSectionReader.
-func (m *Manager) WithGLCBSection(id chunk.ChunkID, sectionType byte, fn func([]byte) error) error {
+func (m *Manager) WithGLCBSection(id chunk.ChunkID, sectionType byte, fn func(version uint8, section []byte) error) error {
 	chunkLock := m.chunkLockFor(id)
 	chunkLock.RLock()
 	defer chunkLock.RUnlock()
@@ -66,9 +66,9 @@ func (m *Manager) WithGLCBSection(id chunk.ChunkID, sectionType byte, fn func([]
 	blob.Retain()
 	defer blob.Release()
 
-	section, ok := blob.Section(sectionType)
+	entry, section, ok := blob.Section(sectionType)
 	if !ok || len(section) == 0 {
 		return fmt.Errorf("%w: type=0x%02x in %s", glcb.ErrSectionNotFound, sectionType, blob.Path())
 	}
-	return fn(section)
+	return fn(entry.Version, section)
 }

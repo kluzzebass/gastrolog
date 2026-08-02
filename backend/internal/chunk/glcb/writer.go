@@ -484,12 +484,12 @@ func (w *Writer) emitTail(cw *countWriter, tailBase int64, dictBuf, indexBuf, la
 	}
 
 	tsindex.Sort(w.ingestEntries)
-	ingestEntry, err := writeSectionAt(cw, tailBase, SectionIngestTSIndex, 1, tsindex.EncodeAll(w.ingestEntries))
+	ingestEntry, err := writeSectionAt(cw, tailBase, SectionIngestTSIndex, tsIndexSectionVersion, tsindex.EncodeAll(w.ingestEntries))
 	if err != nil {
 		return err
 	}
 	tsindex.Sort(w.sourceEntries)
-	sourceEntry, err := writeSectionAt(cw, tailBase, SectionSourceTSIndex, 1, tsindex.EncodeAll(w.sourceEntries))
+	sourceEntry, err := writeSectionAt(cw, tailBase, SectionSourceTSIndex, tsIndexSectionVersion, tsindex.EncodeAll(w.sourceEntries))
 	if err != nil {
 		return err
 	}

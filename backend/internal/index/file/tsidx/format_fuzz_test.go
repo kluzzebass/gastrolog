@@ -36,6 +36,14 @@ func FuzzDecodeRawEntries(f *testing.F) {
 	f.Add([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = decodeRawEntries(data)
+		v, err := tsindex.NewRawView(data)
+		if err != nil {
+			return
+		}
+		// A constructed view must stay in bounds for every entry it claims.
+		for i := uint32(0); i < v.Len(); i++ {
+			_ = v.EntryAt(i)
+		}
+		_, _, _ = v.SearchTS(0)
 	})
 }

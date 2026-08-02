@@ -87,8 +87,8 @@ func (m *Manager) loadIngestTSMmap(chunkID chunk.ChunkID) (filetsidx.MmapView, e
 func (m *Manager) withIngestTSView(chunkID chunk.ChunkID, fn func(filetsidx.MmapView) error) error {
 	if m.cm != nil {
 		if sr, ok := m.cm.(chunk.GLCBSectionReader); ok {
-			return sr.WithGLCBSection(chunkID, format.TypeIngestIndex, func(section []byte) error {
-				mv, err := filetsidx.ViewFromSection(section)
+			return sr.WithGLCBSection(chunkID, format.TypeIngestIndex, func(version uint8, section []byte) error {
+				mv, err := filetsidx.ViewFromSection(format.TypeIngestIndex, version, section)
 				if err != nil {
 					return err
 				}
@@ -106,8 +106,8 @@ func (m *Manager) withIngestTSView(chunkID chunk.ChunkID, fn func(filetsidx.Mmap
 func (m *Manager) withSourceTSView(chunkID chunk.ChunkID, fn func(filetsidx.MmapView) error) error {
 	if m.cm != nil {
 		if sr, ok := m.cm.(chunk.GLCBSectionReader); ok {
-			return sr.WithGLCBSection(chunkID, format.TypeSourceIndex, func(section []byte) error {
-				mv, err := filetsidx.ViewFromSection(section)
+			return sr.WithGLCBSection(chunkID, format.TypeSourceIndex, func(version uint8, section []byte) error {
+				mv, err := filetsidx.ViewFromSection(format.TypeSourceIndex, version, section)
 				if err != nil {
 					return err
 				}

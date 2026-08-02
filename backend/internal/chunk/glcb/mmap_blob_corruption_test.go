@@ -166,11 +166,11 @@ func TestOpenMappedBlob_TOCEntryPastEOF(t *testing.T) {
 	defer func() { _ = blob.Close() }()
 
 	// The out-of-range section degrades to a lookup miss...
-	if data, ok := blob.Section(SectionIngestTSIndex); ok || data != nil {
+	if _, data, ok := blob.Section(SectionIngestTSIndex); ok || data != nil {
 		t.Fatalf("Section(ITSI) = (%d bytes, %v), want (nil, false)", len(data), ok)
 	}
 	// ...while an in-range section from the same TOC still resolves.
-	if data, ok := blob.Section(SectionBlobLayout); !ok || len(data) != layoutMetaSize {
+	if _, data, ok := blob.Section(SectionBlobLayout); !ok || len(data) != layoutMetaSize {
 		t.Fatalf("Section(layout) = (%d bytes, %v), want (%d bytes, true)", len(data), ok, layoutMetaSize)
 	}
 }
