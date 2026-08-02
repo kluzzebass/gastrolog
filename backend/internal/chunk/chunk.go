@@ -159,9 +159,15 @@ type GLCBBlobPathProvider interface {
 // access into a sealed chunk's data.glcb. WithGLCBSection holds the chunk
 // lifetime read lock and a mapping pin for the duration of fn; section bytes
 // are only valid inside fn.
+//
+// fn receives the section's format version from its TOC entry alongside the
+// bytes, so decode dispatch can honor it — bytes without their version are
+// only decodable by assuming a layout. Just the byte crosses this seam (not
+// the TOC entry type): this package must stay import-free of the glcb format
+// package, which imports it.
 type GLCBSectionReader interface {
 	GLCBBlobPathProvider
-	WithGLCBSection(id ChunkID, sectionType byte, fn func(section []byte) error) error
+	WithGLCBSection(id ChunkID, sectionType byte, fn func(version uint8, section []byte) error) error
 }
 
 // ErrIngestTSRankIndex is returned when an ingest TS rank index is unavailable.

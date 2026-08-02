@@ -481,9 +481,9 @@ Duplicate keys are allowed; entries with equal keys are secondarily ordered by v
 
 Single-file, self-describing format for sealed chunks. Used universally:
 local-only vaults store one `data.glcb` per sealed chunk; cloud-backed
-vaults upload the same bytes to object storage (zstd-wrapped only as a
-transport layer) and keep a local cache copy with the same `data.glcb`
-name (gastrolog-69fd5; see [`docs/obsoleted/vault_redesign.md`](./obsoleted/vault_redesign.md)
+vaults upload the same bytes to object storage (re-framed per section as a
+transport layer — see "Cloud transport framing" below) and keep a local
+cache copy with the same `data.glcb` name (gastrolog-69fd5; see [`docs/obsoleted/vault_redesign.md`](./obsoleted/vault_redesign.md)
 decisions 6 and 9). The on-disk format is unconditionally **uncompressed**:
 every section is directly readable without a decompression step.
 
@@ -583,7 +583,7 @@ Each record is written as `[frameLen:u32][frame body]`, frame after frame, with 
 
 The on-disk format is uncompressed. Cloud-backed vaults wrap the entire blob with a single zstd stream **only on transport** (uploaded as `chunk.glcb.zst`); the local cache, after `DownloadAndUnwrap`, is a plain `data.glcb` byte-for-byte equivalent to a freshly-sealed local chunk. See [`docs/obsoleted/vault_redesign.md`](./obsoleted/vault_redesign.md) decisions 6 and 9.
 
-Pre-Phase-6 layouts used per-record seekable zstd (~256 KiB frames) for byte-range S3 fetches. That mechanism is gone (gastrolog-69fd5): cloud reads now download the whole blob (decompressed once), populate the warm cache, and serve subsequent reads via the local-cursor fast path.
+Content reads on cloud-backed chunks download the whole object (reassembled once), populate the warm cache, and serve subsequent reads via the local-cursor fast path. Index sections are the exception: the transport framing (below) lets a reader fetch one section — footer, directory, one frame — in KB-scale range GETs, which is how cold chunks answer histogram rank lookups exactly without a warm-cache fill.
 
 ### Embedded TS Indexes
 
@@ -639,7 +639,28 @@ When uploaded, the following user-defined metadata is set on the cloud object fo
 | `start_ts`     | RFC 3339 timestamp                 |
 | `end_ts`       | RFC 3339 timestamp                 |
 
-The cloud object key is `vault-<vault>/<chunk>.glcb`; the bytes are zstd-wrapped on transport and unwrapped into a plain `data.glcb` on download.
+The cloud object key is `vault-<vault>/<chunk>.glcb`; the bytes carry the transport framing below and reassemble into a byte-identical plain `data.glcb` on download.
+
+### Cloud transport framing
+
+The object is the local blob re-framed so byte ranges of the object are
+meaningful (`backend/internal/chunk/glcb/transport.go`):
+
+```
+object := bodyFrame sectionFrame* tailFrame directory footer
+
+bodyFrame     zstd(preamble + layout + records + dict + record-index)
+sectionFrame  zstd(one tail TOC section)          ITSI, STSI, future index sections
+tailFrame     zstd(original TOC + footer)         verbatim tail bytes
+directory     raw, 60 B per frame                 kind, type, version, offsets, sizes, SHA-256
+footer        raw, 20 B                           directory offset, entry count, version, "GXFR" magic
+```
+
+Every frame is separately zstd'd, so the bulk — and any future index
+section that rivals the records in size — stays compressed, while a
+ranged reader fetches the footer + directory (one tail GET) and one
+section frame. Frame hashes are verified on both the ranged path and the
+full reassembly, so a truncated or corrupt object fails loudly.
 
 ---
 

@@ -231,7 +231,7 @@ Land v1 of the codec with: per-field FST term dict (Vellum), per-term Roaring po
 
 The current GLCB blob carries:
 - A header with format version + flags
-- The uncompressed body (records + record index; cloud objects are zstd-wrapped whole-blob on transport only — gastrolog-69fd5)
+- The uncompressed body (records + record index; cloud objects carry per-section transport frames with a raw tail directory — gastrolog-67uqn4 — so individual sections are range-readable)
 - Embedded TS indexes (per gastrolog-2n697)
 
 The proposed extension:

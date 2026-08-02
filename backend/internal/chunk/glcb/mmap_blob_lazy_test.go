@@ -55,7 +55,7 @@ func TestMappedBlobSectionSkipsRecordTables(t *testing.T) {
 	}
 	defer blob.Close()
 
-	section, ok := blob.Section(SectionIngestTSIndex)
+	_, section, ok := blob.Section(SectionIngestTSIndex)
 	if !ok || len(section) == 0 {
 		t.Fatal("expected non-empty ingest TS section")
 	}

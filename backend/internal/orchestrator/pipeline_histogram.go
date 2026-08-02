@@ -48,11 +48,11 @@ func (o *Orchestrator) withPipelineChunkIngestIndex(vaultID glid.GLID, chunkID c
 	blob.Retain()
 	defer blob.Release()
 
-	section, ok := blob.Section(glcb.SectionIngestTSIndex)
+	entry, section, ok := blob.Section(glcb.SectionIngestTSIndex)
 	if !ok || len(section) == 0 {
 		return os.ErrNotExist
 	}
-	mv, err := filetsidx.ViewFromSection(section)
+	mv, err := filetsidx.ViewFromSection(entry.Type, entry.Version, section)
 	if err != nil {
 		return err
 	}

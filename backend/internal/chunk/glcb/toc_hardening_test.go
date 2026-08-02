@@ -267,12 +267,7 @@ func TestReadTOC_OutOfRangeSection(t *testing.T) {
 		t.Fatalf("ReadTOC error = %q, want mention of exceeding blob size", err)
 	}
 
-	if _, err := LoadSection(path, SectionIngestTSIndex,
-		func(data []byte) (int, error) { return len(data), nil }); err == nil {
-		t.Fatal("LoadSection with out-of-range section: expected error, got nil")
-	}
-
-	if data, closer, err := MapSection(path, SectionIngestTSIndex); err == nil {
+	if _, data, closer, err := MapSection(path, SectionIngestTSIndex); err == nil {
 		_ = data[0] // would SIGBUS without the guard
 		_ = closer()
 		t.Fatal("MapSection with out-of-range section: expected error, got nil")

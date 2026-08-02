@@ -52,7 +52,7 @@ func TestMappedBlobRoundTrip(t *testing.T) {
 		assertRecord(t, i, got, records[i])
 	}
 
-	ingest, ok := blob.Section(glcb.SectionIngestTSIndex)
+	_, ingest, ok := blob.Section(glcb.SectionIngestTSIndex)
 	if !ok || len(ingest) == 0 {
 		t.Fatal("expected non-empty ingest TS section")
 	}
@@ -198,12 +198,12 @@ func TestMappedBlobRetainDefersUnmap(t *testing.T) {
 	if err := blob.Close(); err != nil {
 		t.Fatal(err)
 	}
-	section, ok := blob.Section(glcb.SectionIngestTSIndex)
+	_, section, ok := blob.Section(glcb.SectionIngestTSIndex)
 	if !ok || len(section) == 0 {
 		t.Fatal("expected section to remain readable while retained")
 	}
 	blob.Release()
-	section, ok = blob.Section(glcb.SectionIngestTSIndex)
+	_, section, ok = blob.Section(glcb.SectionIngestTSIndex)
 	if ok && len(section) > 0 {
 		t.Fatal("expected section unavailable after release following eviction")
 	}

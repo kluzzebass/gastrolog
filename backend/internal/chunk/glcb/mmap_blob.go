@@ -137,19 +137,21 @@ func (b *MappedBlob) Path() string { return b.path }
 // Meta returns parsed blob metadata.
 func (b *MappedBlob) Meta() BlobMeta { return b.meta }
 
-// Section returns a sub-slice of the mapping for a TOC section type.
-// The slice aliases b.data and is invalid after Close.
-func (b *MappedBlob) Section(sectionType byte) ([]byte, bool) {
+// Section returns the TOC entry and a sub-slice of the mapping for a TOC
+// section type. The entry carries the section's recorded version so decode
+// dispatch (Registry.NewView) can honor it. The slice aliases b.data and is
+// invalid after Close.
+func (b *MappedBlob) Section(sectionType byte) (TOCEntry, []byte, bool) {
 	entry, ok := b.toc.Find(sectionType)
 	if !ok || entry.Size <= 0 {
-		return nil, false
+		return TOCEntry{}, nil, false
 	}
 	start := entry.Offset
 	end := start + entry.Size
 	if start < 0 || end > int64(len(b.data)) {
-		return nil, false
+		return TOCEntry{}, nil, false
 	}
-	return b.data[start:end], true
+	return entry, b.data[start:end], true
 }
 
 // Reader returns a record cursor backend that reads frames from this mapping.

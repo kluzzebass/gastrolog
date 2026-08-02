@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/tsindex"
 )
 
@@ -57,26 +58,26 @@ func TestGoldenBytesPinFormat(t *testing.T) {
 		}
 	}
 
-	// tsidx.decodeRawEntries (the ported GLCB section decoder) must
-	// reproduce goldenEntries too — this is the layout-unification seam:
-	// tsidx no longer parses bytes itself, it delegates to tsindex.Decode.
-	decoded, err := decodeRawEntries(goldenBytes)
+	// tsindex.RawView (the registry's v1 section view) must reproduce
+	// goldenEntries too — this is the layout-unification seam: tsidx no
+	// longer parses bytes itself, decode lives with the layout's owner.
+	raw, err := tsindex.NewRawView(goldenBytes)
 	if err != nil {
-		t.Fatalf("decodeRawEntries: %v", err)
+		t.Fatalf("NewRawView: %v", err)
 	}
-	if len(decoded) != len(goldenEntries) {
-		t.Fatalf("decodeRawEntries len = %d, want %d", len(decoded), len(goldenEntries))
+	if int(raw.Len()) != len(goldenEntries) {
+		t.Fatalf("RawView len = %d, want %d", raw.Len(), len(goldenEntries))
 	}
 	for i, want := range goldenEntries {
-		if decoded[i] != want {
-			t.Errorf("decodeRawEntries entry %d = %+v, want %+v", i, decoded[i], want)
+		if got := raw.EntryAt(uint32(i)); got != want { //nolint:gosec // G115: test fixture, small constant
+			t.Errorf("RawView entry %d = %+v, want %+v", i, got, want)
 		}
 	}
 
 	// tsidx.MmapView (via ViewFromSection, the in-process equivalent of an
 	// mmap'd GLCB section) must read the same golden bytes identically to
 	// tsindex.Decode / tsindex.EncodeAll above — no heap-allocated slice.
-	mv, err := ViewFromSection(goldenBytes)
+	mv, err := ViewFromSection(glcb.SectionIngestTSIndex, 1, goldenBytes)
 	if err != nil {
 		t.Fatalf("ViewFromSection: %v", err)
 	}
@@ -99,11 +100,15 @@ func TestGoldenBytesPinFormat(t *testing.T) {
 func TestSearchAgreesWithTsindexFindStart(t *testing.T) {
 	t.Parallel()
 
-	decoded, err := decodeRawEntries(goldenBytes)
+	raw, err := tsindex.NewRawView(goldenBytes)
 	if err != nil {
-		t.Fatalf("decodeRawEntries: %v", err)
+		t.Fatalf("NewRawView: %v", err)
 	}
-	mv, err := ViewFromSection(goldenBytes)
+	decoded := make([]Entry, raw.Len())
+	for i := range decoded {
+		decoded[i] = raw.EntryAt(uint32(i)) //nolint:gosec // G115: test fixture, small constant
+	}
+	mv, err := ViewFromSection(glcb.SectionIngestTSIndex, 1, goldenBytes)
 	if err != nil {
 		t.Fatalf("ViewFromSection: %v", err)
 	}
