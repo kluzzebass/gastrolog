@@ -60,6 +60,14 @@ type rateAlerterConfig struct {
 // name from config) and is invoked under no locks so it must be safe to call
 // concurrently.
 func newRateAlerter(cfg rateAlerterConfig) *RateAlerter {
+	// The type ID is built from Kind, so it is invisible to the catalog
+	// coverage test that scans for literal Raise arguments. Fail at
+	// construction instead of annunciating as an uncataloged software fault
+	// the first time the threshold trips — same stance as the catalog's own
+	// duplicate-entry panic.
+	if _, ok := alert.TypeByID(cfg.Kind + "-rate"); !ok {
+		panic("orchestrator: rate alerter kind " + cfg.Kind + " has no " + cfg.Kind + "-rate entry in the alarm catalog")
+	}
 	return &RateAlerter{
 		windows:   make(map[glid.GLID]*RateWindow),
 		active:    make(map[glid.GLID]bool),
@@ -139,12 +147,11 @@ func (r *RateAlerter) alarmTypeID() string {
 }
 
 func (r *RateAlerter) message(vaultID glid.GLID, rate float64, count int64) string {
-	label := vaultID.String()
+	var name string
 	if r.vaultName != nil {
-		if name := r.vaultName(vaultID); name != "" {
-			label = fmt.Sprintf("%s (%s)", name, vaultID.String()[:8])
-		}
+		name = r.vaultName(vaultID)
 	}
+	label := alert.Label(name, vaultID.String())
 	return fmt.Sprintf(
 		"Vault %s: %s rate %.2f/s (%d events in last %s) — review policy",
 		label, r.kind, rate, count, r.window,

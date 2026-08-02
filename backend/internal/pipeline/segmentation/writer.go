@@ -54,12 +54,13 @@ type encodedWork struct {
 }
 
 type vaultWriter struct {
-	vaultID glid.GLID
-	root    string
-	cfg     Config
-	log     *slog.Logger
-	alerts  alert.Sink
-	dropped *atomic.Uint64 // manager-wide dropped-records counter
+	vaultID   glid.GLID
+	vaultName func() string
+	root      string
+	cfg       Config
+	log       *slog.Logger
+	alerts    alert.Sink
+	dropped   *atomic.Uint64 // manager-wide dropped-records counter
 
 	// Cumulative throughput counters for the stats broadcast; the collector's
 	// rolling windows turn them into per-second rates.
@@ -124,6 +125,7 @@ func newVaultWriter(vaultID glid.GLID, root string, cfg Config, vc VaultConfig, 
 	}
 	w := &vaultWriter{
 		vaultID:            vaultID,
+		vaultName:          vc.VaultName,
 		root:               root,
 		cfg:                cfg,
 		log:                compSegmentation.Apply(logging.Default(cfg.Logger)).With("vault", vaultID),
@@ -209,6 +211,15 @@ func recoverWorkingSegments(root string, vaultID glid.GLID, completed chan<- Com
 		}
 	}
 	return nil
+}
+
+// vaultLabel names this vault the way an operator knows it, for alarm text.
+func (w *vaultWriter) vaultLabel() string {
+	var name string
+	if w.vaultName != nil {
+		name = w.vaultName()
+	}
+	return alert.Label(name, w.vaultID.String())
 }
 
 func (w *vaultWriter) input() chan<- Input {
@@ -392,7 +403,8 @@ func (w *vaultWriter) enterDegraded(b *commitBatch, cause error) {
 		"segment", segID, "path", path, "error", cause)
 	if w.alerts != nil {
 		w.alerts.Raise(segmentationWriterAlarmType, w.vaultID.String(),
-			"vault "+w.vaultID.String()+" segment commit failed: "+cause.Error())
+			"Vault "+w.vaultLabel()+" could not write accepted records to disk on this node: "+cause.Error()+
+				". The partly-written segment was set aside for crash recovery and ingest is failing here.")
 	}
 	w.tryReopen(b)
 }

@@ -959,6 +959,20 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   choose a priority — the collector stamps it from the catalog. The catalog
   and the table in `docs/alarm-management-design.md` must agree.
 
+- **Alarm register** — alarm text (`detail`, `Cause`, `Response`) is read by
+  an operator mid-incident, which makes it a different register from code and
+  logs even when it names the same concepts. Three rules: name entities the
+  way the operator knows them (a vault by name, never a bare GLID); never
+  print source notation (`min(2, placement)` is `plannerMinHolders` spelled
+  as Go — say "a second node must hold a copy"), and never
+  `time.Duration.String()` (use `system.FormatDuration`, which drops the zero
+  components that make "3m0s"); and lead a Critical alarm with the
+  consequence, not the mechanism, since Critical *means* records are being
+  lost. Domain nouns the UI already teaches — chunk, segment, seal, home,
+  holder, GLCB — stay; they are what the inspector labels its own counters.
+  The three fields do not restate each other: `detail` is what happened here,
+  `Cause` is why this condition exists, `Response` is what to do.
+
 - **Chattering suppression** — the collector-enforced remedies for a
   flapping condition producing a flapping alarm (EEMUA 191 principle 3):
   **delay-on** (the condition must persist that long before the alarm
@@ -1212,6 +1226,15 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
   after its records survive in a replicated chunk — a returning node gets
   those records via chunk replication, never a segment re-pull.
 
+- **Retention give-up bound** — the delete-disposition retention window after
+  which a segment still sitting in the registry is **released unchunked**: its
+  records are discarded without ever reaching a chunk
+  (`VaultConfig.RetentionGiveUpTTL`, `scanGiveUpExpired`). The one path that
+  breaks release's normal ordering, and the only one that destroys records the
+  system accepted — so it is counted and alarmed
+  (`chunking-retention-giveup`), never silent. Say "released unchunked"; do
+  not coin "shed", "never-chunked", or "gave up" as nouns for it.
+
 ### Chunk build
 
 - **GLCB** — GastroLog Chunk Blob: the sealed-chunk container format
@@ -1300,6 +1323,7 @@ Canonical milestone verbs (reuse these names; do not coin synonyms):
 | cloud-backed     | cloud chunk       | Cloud-backed describes storage; "cloud chunk" conflates with archival state. |
 | alarm            | alert             | An alarm requires an operator action; "alert" was applied indiscriminately to alarms, events, and metrics alike, which is what let non-actionable diagnostics into the alarm list. The phase 2 registry landed the alarm vocabulary in new identifiers (`AlarmType`, `Raise`, `Priority`); remaining `alert`-named identifiers (package `alert`, `SystemAlert`, `AlertCollector`) phase out with the lifecycle/UI phases. |
 | archived         | cold              | "Archived" is the canonical flag; cloud storage class is orthogonal. |
+| released unchunked | shed, shedding, never-chunked, gave up | The retention give-up path is a **release** — the canonical verb for dropping a segment's registry entry — that happens before the records are safe in a chunk. "Shedding" reads like load-shedding (a deliberate throughput tradeoff) rather than what it is: records the system accepted being destroyed. |
 | — (banned)       | tier, tiered, tiering | **GastroLog has no tiers.** Hot/cold storage layering is a rejected design, and the word is what brings it back: it reads as a standing concept, so the next writer reaches for it and then designs to it. Do not use it in our voice for ANYTHING — not storage, not a step in a fallback chain, not a severity band. Canonical replacements: a step in an ordered lookup is a **fallback** (`fallback` already outnumbers `tier` 231-to-19 in the same files); a severity band is a **threshold**; a cloud archival class is a **cloud storage class**; the mechanism for moving data by age is **late-bound retention routing**. The ONLY permitted use is quoting a provider's own API surface where the identifier is theirs and cannot be renamed: Azure `AccessTier` / `SetTier` / `SetBlobTier`, AWS `types.Tier`, the S3 class literal `"INTELLIGENT_TIERING"`. Describing their behaviour in our prose still uses our words. Enforced by `scripts/hooks/pre-commit`. |
 | storage class    |                   | The **uint32** local class on `FileStorage`, `CloudService` and `VaultConfig` that selects WHICH DISK a vault may live on. Numeric, and it owns the unqualified name. |
 | cloud storage class | storage class (for cloud archival), archival tier | The **string** cloud archival storage class — `"GLACIER"`, `"DEEP_ARCHIVE"`, `"cold"`; empty means standard storage. Always carries the `cloud` qualifier in identifiers (`CloudStorageClass`, `cloud_storage_class`), because `CloudService` holds both meanings one field apart and an unqualified `StorageClass` there reads as the numeric one (gastrolog-108bcg). The exception is the `blobstore` adapters, where `BlobInfo.StorageClass` deliberately mirrors the provider's own field name (S3 StorageClass, GCS StorageClass, Azure AccessTier). |

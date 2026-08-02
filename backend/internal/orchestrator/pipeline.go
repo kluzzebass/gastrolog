@@ -179,6 +179,7 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 	}
 	spec := pipeline.VaultSpec{
 		VaultID:    vaultID,
+		VaultName:  func() string { return o.vaultLabel(vaultID) },
 		Origin:     true,
 		OriginRoot: root,
 		Publisher:  noHandlePublisher{},

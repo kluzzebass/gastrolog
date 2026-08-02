@@ -131,6 +131,9 @@ type Config struct {
 // publishers/appliers/FSM; this slice only wires whatever the caller provides.
 type VaultSpec struct {
 	VaultID glid.GLID
+	// VaultName returns the vault's operator-facing display name, resolved on
+	// each call. Optional; alarm text falls back to the vault ID when unset.
+	VaultName func() string
 
 	// Origin enables the write/distribute side for this vault on this node.
 	Origin bool
@@ -707,7 +710,9 @@ func (s *Supervisor) RegisterVault(spec VaultSpec) error {
 }
 
 func (s *Supervisor) registerOrigin(spec VaultSpec) error {
-	in, err := s.seg.RegisterVault(spec.VaultID, spec.OriginRoot, spec.Commit)
+	commit := spec.Commit
+	commit.VaultName = spec.VaultName
+	in, err := s.seg.RegisterVault(spec.VaultID, spec.OriginRoot, commit)
 	if err != nil {
 		return fmt.Errorf("segmentation register: %w", err)
 	}
@@ -761,6 +766,7 @@ func (s *Supervisor) registerHome(spec VaultSpec) error {
 	// independent of the peer collector.
 	if spec.Locate != nil {
 		if err := s.chunk.RegisterVault(spec.VaultID, chunking.VaultConfig{
+			VaultName:          spec.VaultName,
 			VaultRoot:          spec.HomeRoot,
 			ChunkRoot:          spec.ChunkRoot,
 			FSM:                spec.FSM,

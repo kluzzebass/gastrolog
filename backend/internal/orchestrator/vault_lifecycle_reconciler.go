@@ -89,6 +89,9 @@ type reconcilerHost interface {
 
 	// Collaborator accessors (nil when the collaborator is unwired).
 	alertSink() alert.Sink
+	// VaultAlarmLabel names a vault for alarm text: quoted configured name,
+	// or the bare ID when the config does not resolve.
+	VaultAlarmLabel(vaultID glid.GLID) string
 	chunkReplicatorForReconcile() ChunkReplicator
 }
 
@@ -562,6 +565,16 @@ func (r *VaultLifecycleReconciler) budgetedResume(
 	}
 }
 
+// vaultLabel names a vault the way the operator knows it, for alarm text.
+// A reconciler built without a host (memory mode, unit tests) has no config to
+// resolve against and falls back to the ID.
+func (r *VaultLifecycleReconciler) vaultLabel(vaultID glid.GLID) string {
+	if r.orch == nil {
+		return vaultID.String()
+	}
+	return r.orch.VaultAlarmLabel(vaultID)
+}
+
 // reportSealResumeGaveUp records that a chunk has exhausted its resume budget:
 // a warn line for the log, and a standing alarm because the chunk is left
 // neither writable nor durable-complete and nothing else surfaces that.
@@ -576,9 +589,8 @@ func (r *VaultLifecycleReconciler) reportSealResumeGaveUp(vaultID glid.GLID, id 
 		return
 	}
 	sink.Raise("seal-stranded", id.String(),
-		fmt.Sprintf("Chunk %s in vault %s is stuck in Sealing: post-seal did not complete in %d attempts. "+
-			"The chunk is neither writable nor durable-complete.",
-			id, vaultID, maxSealResumeAttempts))
+		fmt.Sprintf("Vault %s: chunk %s is stuck in Sealing after %d attempts to finish it. The chunk is neither writable nor durable-complete, so its records are not queryable and not safe.",
+			r.vaultLabel(vaultID), id, maxSealResumeAttempts))
 }
 
 // forgetSettledSealResumes drops retry state for chunks that are no longer
@@ -1262,8 +1274,8 @@ func (r *VaultLifecycleReconciler) alertUnknownOrphan(meta chunk.ChunkMeta) {
 		return
 	}
 	sink.Raise("unknown-orphan", fmt.Sprintf("%s:%s", r.vaultID, meta.ID),
-		fmt.Sprintf("Vault %s: chunk %s on disk with %d records but not recognized by FSM; preserved for recovery",
-			r.vaultID, meta.ID, meta.RecordCount))
+		fmt.Sprintf("Vault %s: chunk %s holds %d records on this node but the cluster does not know it exists. It is being kept, not deleted — the cluster has no other copy of those records.",
+			r.vaultLabel(r.vaultID), meta.ID, meta.RecordCount))
 }
 
 // SweepStagingOrphans is the pipeline-staging counterpart of

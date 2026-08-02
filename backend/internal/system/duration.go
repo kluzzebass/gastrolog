@@ -93,28 +93,42 @@ func ParseDuration(s string) (time.Duration, error) {
 	return total, nil
 }
 
-// FormatDuration formats a duration using the largest applicable unit.
-// Produces human-readable output like "7d", "2w3d", "12h30m".
+// formatUnits are the units FormatDuration emits, largest first.
+var formatUnits = []struct {
+	size   time.Duration
+	suffix string
+}{
+	{7 * 24 * time.Hour, "w"},
+	{24 * time.Hour, "d"},
+	{time.Hour, "h"},
+	{time.Minute, "m"},
+	{time.Second, "s"},
+}
+
+// FormatDuration formats a duration using the largest applicable units,
+// omitting every component that is zero. Produces human-readable output like
+// "7d", "2w3d", "12h30m", "3m". This is the operator-facing spelling of a
+// duration — time.Duration's own String pads with zero components ("3m0s",
+// "12h0m0s"), which no human writes.
 func FormatDuration(d time.Duration) string {
 	if d == 0 {
 		return "0s"
 	}
 
-	var result string
+	var b strings.Builder
 	remaining := d
-
-	if weeks := remaining / (7 * 24 * time.Hour); weeks > 0 {
-		result += fmt.Sprintf("%dw", weeks)
-		remaining -= weeks * 7 * 24 * time.Hour
-	}
-	if days := remaining / (24 * time.Hour); days > 0 {
-		result += fmt.Sprintf("%dd", days)
-		remaining -= days * 24 * time.Hour
+	for _, unit := range formatUnits {
+		n := remaining / unit.size
+		if n == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "%d%s", n, unit.suffix)
+		remaining -= n * unit.size
 	}
 	if remaining > 0 {
-		// Let time.Duration handle sub-day formatting.
-		result += remaining.String()
+		// Sub-second remainder: time.Duration picks the right small unit.
+		b.WriteString(remaining.String())
 	}
 
-	return result
+	return b.String()
 }

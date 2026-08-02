@@ -1757,8 +1757,7 @@ func (o *Orchestrator) announceResultHook(vaultID glid.GLID) func(string, chunk.
 			return
 		}
 		o.alerts.Raise("vault-announce-failing", vaultID.String(),
-			fmt.Sprintf("Vault %s cannot commit chunk metadata announces (last: %s for chunk %s: %v). "+
-				"Seals and uploads complete locally while the replicated manifest does not learn about them.",
-				vaultID, op, id, err))
+			fmt.Sprintf("Vault %s cannot record what this node has sealed — the cluster's view of the vault is falling behind what is actually on disk here (last failure: %s for chunk %s: %v).",
+				o.VaultAlarmLabel(vaultID), op, id, err))
 	}
 }

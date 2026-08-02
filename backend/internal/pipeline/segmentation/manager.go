@@ -96,6 +96,10 @@ type VaultConfig struct {
 	SyncBatchWindow time.Duration
 	MaxCommitDelay  time.Duration
 	DisableFsync    bool
+	// VaultName returns the vault's operator-facing display name, resolved on
+	// each call so a renamed vault is never announced under a stale name.
+	// Optional: alarm text falls back to the vault ID when unset or empty.
+	VaultName func() string
 }
 
 // Input is one record entering a vault's segmentation queue, with an optional

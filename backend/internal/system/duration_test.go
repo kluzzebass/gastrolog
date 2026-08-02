@@ -63,8 +63,17 @@ func TestFormatDuration(t *testing.T) {
 		{24 * time.Hour, "1d"},
 		{7 * 24 * time.Hour, "1w"},
 		{9 * 24 * time.Hour, "1w2d"},
-		{9*24*time.Hour + 12*time.Hour, "1w2d12h0m0s"},
+		{9*24*time.Hour + 12*time.Hour, "1w2d12h"},
 		{360 * 24 * time.Hour, "51w3d"},
+		// Zero components are omitted, not padded: time.Duration's own String
+		// renders these "3m0s" / "12h0m0s" / "1h0m30s", which is what leaks
+		// Go formatting into operator-facing text.
+		{3 * time.Minute, "3m"},
+		{12 * time.Hour, "12h"},
+		{time.Hour + 30*time.Second, "1h30s"},
+		{time.Hour + 30*time.Minute, "1h30m"},
+		{90 * time.Second, "1m30s"},
+		{500 * time.Millisecond, "500ms"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {

@@ -1,6 +1,21 @@
 package alert
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
+
+// Label names an entity in alarm text the way the operator knows it: the
+// quoted display name, or the bare ID when no name resolves. Raisers hold an
+// ID and look the name up, and that lookup can miss — an entity that has left
+// this node's registry still has to be nameable in the alarm that outlives it,
+// and must never be announced as an empty pair of quotes.
+func Label(name, id string) string {
+	if name == "" {
+		return id
+	}
+	return strconv.Quote(name)
+}
 
 // AlarmType is one row of the static alarm catalog: the documented
 // consequence × urgency verdict (Priority) plus operator guidance for a
@@ -63,8 +78,8 @@ var catalog = []AlarmType{
 		IDPrefix: "chunking-unplannable-segment",
 		Priority: Critical,
 		Source:   "chunking",
-		Cause:    "A segment's on-disk indexes are unreadable, so its records stay unchunked and their head copies cannot be purged.",
-		Response: "Investigate segment file corruption on the named node. If the vault has a delete-disposition retention TTL these records are released unchunked at expiry — the loss is scheduled, not hypothetical.",
+		Cause:    "A segment's index file cannot be read on this node. Chunking reads that index to build chunks from, so the records in those segments can never reach a chunk from here.",
+		Response: "Check disk health and segment file integrity on the named node. If this vault's retention disposition is delete, these records are discarded when their retention expires — that loss is scheduled, not hypothetical, so act before then.",
 	},
 	{
 		IDPrefix: "chunking-retention-giveup",
@@ -77,8 +92,8 @@ var catalog = []AlarmType{
 		// annunciates instead of hiding inside the vault's routine
 		// retention-noise WARNs.
 		DelayOn:  2 * time.Minute,
-		Cause:    "A vault is repeatedly releasing never-chunked segments at its retention give-up TTL: records are aging out of the completed-segment registry before chunking ever references them, so they are dropped without reaching a chunk — even though the planner is actively running. On a cloud-backed vault the dropped records never reach cloud.",
-		Response: "The pipeline is not chunking this vault's segments within the retention TTL. The planner needs min(2, placement) holders before it can chunk a segment; check that segment collection is delivering copies to the vault's homes and that replication is progressing. Clears once the vault seals a chunk again.",
+		Cause:    "Records are reaching this vault but leaving it without ever being written into a chunk. A published segment has a limited window to get chunked; when that window expires the segment is released and its records are discarded. This vault keeps hitting the window, so it is losing records continuously — and on a cloud-backed vault they never reached cloud either.",
+		Response: "Chunking will not chunk a segment until a second node also holds a copy of it, so this usually means copies are not reaching the vault's other home nodes. Check that those nodes are up and that replication is progressing. Lengthening the vault's retention window buys time but does not fix the cause. Clears once the vault seals a chunk again.",
 	},
 	{
 		IDPrefix: "wal-reserve",
@@ -104,6 +119,30 @@ var catalog = []AlarmType{
 	// High — durability or availability degraded, will compound.
 	// ------------------------------------------------------------------
 	{
+		// Raised per stranded chunk once the seal-resume retry budget is
+		// exhausted. No DelayOn: the budget is already the patience, so the
+		// condition has by definition stopped self-healing by the time it
+		// annunciates. High rather than Critical — the records are still on
+		// disk; what is lost is their path to durability.
+		IDPrefix: "seal-stranded",
+		Priority: High,
+		Source:   "vault-lifecycle",
+		Cause:    "A chunk stopped part-way through sealing and has exhausted its retries. It is neither writable nor durable-complete, so its records cannot be queried and nothing downstream — replication, cloud upload, retention — will touch them. They sit on this node with no path forward.",
+		Response: "Read the alarm detail for the vault and chunk, then check disk health and free space on the named node. Do not delete the chunk directory without review: its records have not reached a sealed chunk anywhere.",
+	},
+	{
+		// Raised when the announce applier keeps failing. No DelayOn: the raise
+		// already sits behind the applier's own retries, and a divergence
+		// between local disk and the replicated manifest does not heal on a
+		// timer. High rather than Critical — nothing is being destroyed, but
+		// the drift compounds with every seal.
+		IDPrefix: "vault-announce-failing",
+		Priority: High,
+		Source:   "vault-lifecycle",
+		Cause:    "This node seals and uploads chunks successfully but cannot commit that fact to the vault's replicated metadata. The cluster's record of the vault is drifting behind what is actually on this node's disk — chunks that exist here are invisible to queries routed elsewhere, and retention cannot account for them.",
+		Response: "Read the alarm detail for the failing operation and error. Check this node's vault-ctl Raft group: whether it has a leader, whether this node is a member, and whether it is committing. Do not decommission this node while this stands — its chunks are not represented anywhere else.",
+	},
+	{
 		IDPrefix: "chunking-build-blocked",
 		Priority: High,
 		Source:   "chunking",
@@ -114,15 +153,15 @@ var catalog = []AlarmType{
 		// self-healing wedge is the transition-edge Error log's story, not
 		// an operator's.)
 		DelayOn:  2 * time.Minute,
-		Cause:    "The head-of-queue chunk is blocked on segments no local holder can supply (or a manifest referenced a released segment); later chunks cannot seal until it clears.",
-		Response: "Restore a node holding the named segments, or accept the gap.",
+		Cause:    "A chunk cannot be built because segment bytes it references are not on this node and no reachable holder has supplied them. Chunks seal in order within a vault, so one stuck chunk holds up every chunk behind it.",
+		Response: "Bring back a node that holds the named segments. If that node is gone for good, those records exist nowhere else — the alternative is to accept the gap.",
 	},
 	{
 		IDPrefix: "chunking-underreplicated",
 		Priority: High,
 		Source:   "chunking",
-		Cause:    "Segments have stayed below the replication minimum; chunk planning is gated until a second node holds a copy.",
-		Response: "Check that all placement nodes are up and replication is progressing. If the origin node is permanently lost, the affected records exist only there.",
+		Cause:    "Segments have sat with fewer than two copies in the cluster. Chunking deliberately waits for a second copy before chunking a segment, so that losing one node mid-build cannot take the only copy with it. Until replication catches up, these records stay unchunked.",
+		Response: "Check that every node in this vault's placement is up and that replication is progressing. If the node that originated these segments is permanently lost, the records exist nowhere else.",
 	},
 	{
 		IDPrefix: "chunking-glcb-corrupt",
@@ -133,8 +172,8 @@ var catalog = []AlarmType{
 		// couple of sweep cycles. Corruption still standing after minutes
 		// means healing is failing — that is the actionable condition.
 		DelayOn:  5 * time.Minute,
-		Cause:    "A sealed chunk's GLCB was unreadable on this node and was quarantined with a .corrupt suffix.",
-		Response: "Heals on its own — rebuilt from source segments or re-pulled from a peer home. Only actionable if it persists: investigate disk health on this node and replica health on the vault's other homes.",
+		Cause:    "A sealed chunk's GLCB — the on-disk chunk file — failed to read on this node and was renamed aside so it is not served. Queries answered here skip those chunks; the vault's other homes still serve their own copies.",
+		Response: "This normally heals itself: the chunk is rebuilt from its source segments or re-pulled from another home. Only act if it keeps standing — check disk health on this node, and whether the vault's other homes still hold good copies.",
 	},
 	{
 		IDPrefix: "chunk-unreadable",

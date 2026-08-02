@@ -48,7 +48,11 @@ type SegmentCollector interface {
 
 // VaultConfig is per-vault chunking execution state.
 type VaultConfig struct {
-	VaultID   glid.GLID
+	VaultID glid.GLID
+	// VaultName returns the vault's operator-facing display name, resolved
+	// on each call so a renamed vault is never announced under a stale name.
+	// Optional: alarm text falls back to the vault ID when unset or empty.
+	VaultName func() string
 	VaultRoot string
 	ChunkRoot string
 	FSM       *vaultctlfsm.FSM
@@ -156,8 +160,8 @@ type vaultChunking struct {
 	underReplicatedAlerted bool
 	// giveUpAlerted tracks the retention-give-up alert state so release
 	// passes raise/clear and log only on transitions. Without it a vault
-	// shedding never-chunked segments emitted one WARN per pass (~40/min on
-	// the 18h cluster run) that buried the starvation in retention noise.
+	// releasing segments unchunked emits a WARN every pass, burying the
+	// starvation it reports in its own noise.
 	// Guarded by mu like pendingRelease, which the same release pass mutates.
 	giveUpAlerted bool
 	// planFailures tracks segments whose on-disk index cannot be opened or
@@ -225,6 +229,15 @@ func (v *vaultChunking) logger() *slog.Logger {
 		return v.log
 	}
 	return slog.Default()
+}
+
+// vaultLabel names this vault the way an operator knows it, for alarm text.
+func (v *vaultChunking) vaultLabel() string {
+	var name string
+	if v.cfg.VaultName != nil {
+		name = v.cfg.VaultName()
+	}
+	return alert.Label(name, v.cfg.VaultID.String())
 }
 
 // chunkRewire is the rewireable collaborator bundle, published atomically by

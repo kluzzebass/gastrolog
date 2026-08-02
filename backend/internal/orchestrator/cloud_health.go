@@ -123,8 +123,8 @@ func (o *Orchestrator) evaluateVaultCloudHealth(vaultInst *VaultInstance) {
 	degraded := chk.CloudDegraded()
 	if degraded {
 		o.alerts.Raise("cloud-store", vaultInst.VaultID.String(),
-			fmt.Sprintf("Cloud store unreachable for vault %s: %s",
-				vaultInst.VaultID.String()[:8], chk.CloudDegradedError()))
+			fmt.Sprintf("Vault %s cannot reach its cloud store: %s. Sealed chunks are piling up on local disk instead of uploading.",
+				o.vaultLabel(vaultInst.VaultID), chk.CloudDegradedError()))
 	} else {
 		o.alerts.Clear("cloud-store", vaultInst.VaultID.String())
 	}
@@ -419,8 +419,8 @@ func (o *Orchestrator) markBackfillFailure(vaultID glid.GLID, id chunk.ChunkID, 
 		return
 	}
 	o.alerts.Raise("cloud-backfill-stuck", id.String(),
-		fmt.Sprintf("Chunk %s in vault %s failed cloud backfill: %v (next retry %s)",
-			id, vaultID, cause, nextRetry.Format(time.RFC3339)))
+		fmt.Sprintf("Vault %s: chunk %s keeps failing to upload to cloud — %v. Next retry %s; until it succeeds this chunk exists only on local disk.",
+			o.VaultAlarmLabel(vaultID), id, cause, nextRetry.Format(time.RFC3339)))
 }
 
 // clearBackfillFailure drops a chunk's backfill backoff state and clears

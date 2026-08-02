@@ -141,8 +141,8 @@ func (v *vaultChunking) updateCorruptGLCBAlertLocked() {
 		break
 	}
 	v.cfg.Alerts.Raise(glcbCorruptAlarmType, v.cfg.VaultID.String(),
-		fmt.Sprintf("vault %s: %d sealed chunk GLCB(s) were unreadable on this node (e.g. chunk %s: %s); each file was quarantined with a %s suffix",
-			v.cfg.VaultID, len(v.corruptGLCBs), example, exampleErr, GLCBCorruptSuffix))
+		fmt.Sprintf("Vault %s: %d sealed chunk GLCB(s) are unreadable on this node (e.g. chunk %s: %s). Each was renamed with a %s suffix so it is not served; this node cannot answer queries from those chunks.",
+			v.vaultLabel(), len(v.corruptGLCBs), example, exampleErr, GLCBCorruptSuffix))
 }
 
 // NoteGLCBRestored tells chunking that a chunk's canonical GLCB became
