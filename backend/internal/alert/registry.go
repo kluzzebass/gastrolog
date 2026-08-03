@@ -127,6 +127,16 @@ var catalog = []AlarmType{
 	// High — durability or availability degraded, will compound.
 	// ------------------------------------------------------------------
 	{
+		// Non-latching: a later successful removal clears it, proving the
+		// WAL directory is unlinkable again. Not a software fault — the
+		// counter and index are correct, the filesystem call is what fails.
+		IDPrefix: "wal-unlink-error",
+		Priority: High,
+		Source:   "storage",
+		Cause:    "A Raft WAL segment could not be removed after reclamation freed it. Reclamation is oldest-first, so nothing sealed behind that segment can be reclaimed until the removal succeeds, and this node stops returning WAL space.",
+		Response: "Check permissions and filesystem health on the WAL directory on the named node. Reclamation retries the removal on every later pass and this alarm clears the moment one succeeds — no restart needed.",
+	},
+	{
 		// Raised per stranded chunk once the seal-resume retry budget is
 		// exhausted. No DelayOn: the budget is already the patience, so the
 		// condition has by definition stopped self-healing by the time it

@@ -203,6 +203,40 @@ func walReclaimLog(logger *slog.Logger, walName string) func(raftwal.ReclaimStat
 	}
 }
 
+// walReclaimObserved builds the OnReclaim callback for a named WAL: it logs
+// the reclaimed segment (walReclaimLog) and clears wal-unlink-error — a
+// successful removal proves the WAL directory is unlinkable again, which is
+// the only condition that alarm reports.
+func walReclaimObserved(alerts *alert.Collector, logger *slog.Logger, walName string) func(raftwal.ReclaimStats) {
+	logFn := walReclaimLog(logger, walName)
+	return func(s raftwal.ReclaimStats) {
+		if logFn != nil {
+			logFn(s)
+		}
+		if alerts != nil {
+			alerts.Clear("wal-unlink-error", walName)
+		}
+	}
+}
+
+// walUnlinkErrorAlarm raises a storage alarm when reclamation fails to
+// unlink a segment's file. The counter and index are correct — only the
+// filesystem operation failed — so reclamation retries the segment on every
+// later pass; the stall is oldest-first until the removal succeeds.
+func walUnlinkErrorAlarm(alerts *alert.Collector, logger *slog.Logger, walName string) func(seq int, err error) {
+	return func(seq int, err error) {
+		if logger != nil {
+			logger.Error("raft WAL segment unlink failed — reclamation stalled until it succeeds",
+				"wal", walName, "segment", seq, "error", err)
+		}
+		if alerts != nil {
+			alerts.Raise("wal-unlink-error", walName, fmt.Sprintf(
+				"Raft WAL (%s) failed to unlink reclaimed segment %d: %v; reclamation retries automatically once it succeeds. Check permissions and filesystem health on the WAL directory.",
+				walName, seq, err))
+		}
+	}
+}
+
 // walReclaimAnomalyAlarm raises a storage alarm when the reclamation
 // verification scan contradicts the live-bytes counter, in either
 // direction: the segment is retained and reclamation halts on it until a
@@ -235,8 +269,9 @@ func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 	walDir := opts.Home.ClusterCtlWALDir()
 	wal, err := raftwal.Open(walDir, raftwal.Config{
 		OnReserveState:   walReserveAlarm(opts.Alerts, opts.Logger, "cluster-ctl"),
-		OnReclaim:        walReclaimLog(opts.Logger, "cluster-ctl"),
+		OnReclaim:        walReclaimObserved(opts.Alerts, opts.Logger, "cluster-ctl"),
 		OnReclaimAnomaly: walReclaimAnomalyAlarm(opts.Alerts, opts.Logger, "cluster-ctl"),
+		OnUnlinkError:    walUnlinkErrorAlarm(opts.Alerts, opts.Logger, "cluster-ctl"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open cluster-ctl raft WAL: %w", err)

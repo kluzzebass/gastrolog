@@ -1,7 +1,10 @@
 package raftwal
 
 import (
+	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1300,4 +1303,201 @@ func TestRepeatedScavengeCyclesSurviveRestarts(t *testing.T) {
 		}
 	}
 	assertLiveBytesInvariant(t, w, "final")
+}
+
+var errHarnessUnlinkFail = errors.New("harness: injected unlink failure")
+
+// unlinkErrorCall pairs an OnUnlinkError callback's arguments for assertion.
+type unlinkErrorCall struct {
+	seq int
+	err error
+}
+
+// A purely drained segment (no scavenge involved) whose removal fails:
+// OnUnlinkError fires with the segment and the error, the file and every
+// counter are untouched, and nothing sealed behind it reclaims. The next
+// pass retries and fires again — the stall is visible, not silent. Clearing
+// the injection lets the retry succeed and OnReclaim fires.
+func TestUnlinkFailureReportedAndRetried(t *testing.T) {
+	var mu sync.Mutex
+	var calls []unlinkErrorCall
+	var reclaimed []ReclaimStats
+	var failing atomic.Bool
+
+	dir := t.TempDir()
+	failSeq := 2
+	failPath := filepath.Join(dir, fmt.Sprintf("%s%06d%s", walFilePrefix, failSeq, walFileSuffix))
+	w, err := Open(dir, Config{
+		SegmentTargetSize:    2048,
+		ScavengeMaxLiveBytes: 128,
+		OnReclaim:            func(s ReclaimStats) { mu.Lock(); reclaimed = append(reclaimed, s); mu.Unlock() },
+		OnUnlinkError: func(seq int, err error) {
+			mu.Lock()
+			calls = append(calls, unlinkErrorCall{seq: seq, err: err})
+			mu.Unlock()
+		},
+		SegmentRemove: func(path string) error {
+			if failing.Load() && path == failPath {
+				return errHarnessUnlinkFail
+			}
+			return os.Remove(path)
+		},
+	})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	gs := w.GroupStore("grp")
+
+	failing.Store(true)
+	// The registration record pins segment 1 until scavenged forward; the
+	// drained bulk behind it — including segment 2, the injection target —
+	// unlinks outright with no scavenge involved.
+	fillAndDrain(t, gs, 1, 60, 64)
+	if err := gs.StoreLog(&hraft.Log{Index: 100, Term: 1, Data: []byte("live")}); err != nil {
+		t.Fatalf("store live: %v", err)
+	}
+	if _, err := os.Stat(failPath); err != nil {
+		t.Fatalf("test premise: segment %d must exist to inject a failure on: %v", failSeq, err)
+	}
+	before := segmentFileCount(t, dir)
+
+	triggerReclaim(t, w, gs)
+
+	mu.Lock()
+	got := append([]unlinkErrorCall(nil), calls...)
+	mu.Unlock()
+	if len(got) != 1 {
+		t.Fatalf("unlink error calls = %d, want 1: %+v", len(got), got)
+	}
+	if got[0].seq != failSeq {
+		t.Errorf("seq = %d, want %d", got[0].seq, failSeq)
+	}
+	if !errors.Is(got[0].err, errHarnessUnlinkFail) {
+		t.Errorf("err = %v, want %v", got[0].err, errHarnessUnlinkFail)
+	}
+	if _, err := os.Stat(failPath); err != nil {
+		t.Fatalf("segment %d removed despite the injected failure: %v", failSeq, err)
+	}
+	if after := segmentFileCount(t, dir); after != before {
+		t.Errorf("segment count changed from %d to %d despite the failed unlink — nothing behind a failed segment may reclaim", before, after)
+	}
+	assertLiveBytesInvariant(t, w, "after failed unlink")
+
+	// Retry: every later pass retries and reports again.
+	triggerReclaim(t, w, gs)
+	mu.Lock()
+	total := len(calls)
+	mu.Unlock()
+	if total != 2 {
+		t.Errorf("unlink error calls after a second pass = %d, want 2 (retry visible)", total)
+	}
+
+	// Clear the injection: the retry succeeds and OnReclaim fires.
+	failing.Store(false)
+	triggerReclaim(t, w, gs)
+	if _, err := os.Stat(failPath); !os.IsNotExist(err) {
+		t.Fatalf("segment %d still present after the retry succeeded: stat err = %v", failSeq, err)
+	}
+	mu.Lock()
+	reclaimedNow := append([]ReclaimStats(nil), reclaimed...)
+	mu.Unlock()
+	found := false
+	for _, s := range reclaimedNow {
+		if s.Seq == failSeq {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("OnReclaim never fired for segment %d after the retry succeeded; reclaimed = %+v", failSeq, reclaimedNow)
+	}
+	assertLiveBytesInvariant(t, w, "after the retry succeeds")
+}
+
+// The scavenge path's final step is the same removeSegmentLocked: when it
+// fails, the swap that already repointed the index at the fsynced copies
+// stays durable — values keep reading back from their new locations — and
+// the old segment's file is retried on the next pass without re-scavenging,
+// since nothing live is left to carry forward.
+func TestScavengeUnlinkFailureLeavesSwapDurable(t *testing.T) {
+	var mu sync.Mutex
+	var reclaimed []ReclaimStats
+	var unlinkErrs int
+	var failing atomic.Bool
+	failing.Store(true)
+
+	dir := t.TempDir()
+	const victimSeq = 1
+	failPath := filepath.Join(dir, fmt.Sprintf("%s%06d%s", walFilePrefix, victimSeq, walFileSuffix))
+	w, err := Open(dir, Config{
+		SegmentTargetSize:    2048,
+		ScavengeMaxLiveBytes: 512,
+		OnReclaim:            func(s ReclaimStats) { mu.Lock(); reclaimed = append(reclaimed, s); mu.Unlock() },
+		OnUnlinkError:        func(int, error) { mu.Lock(); unlinkErrs++; mu.Unlock() },
+		SegmentRemove: func(path string) error {
+			if failing.Load() && path == failPath {
+				return errHarnessUnlinkFail
+			}
+			return os.Remove(path)
+		},
+	})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	gs := w.GroupStore("grp")
+
+	if err := gs.SetUint64([]byte("CurrentTerm"), 7); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	fillAndDrain(t, gs, 1, 60, 64)
+	if err := gs.StoreLog(&hraft.Log{Index: 100, Term: 7, Data: []byte("seal")}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	triggerReclaim(t, w, gs)
+
+	if _, err := os.Stat(failPath); err != nil {
+		t.Fatalf("segment %d removed despite the injected failure: %v", victimSeq, err)
+	}
+	mu.Lock()
+	failedSoFar := unlinkErrs
+	mu.Unlock()
+	if failedSoFar == 0 {
+		t.Fatal("OnUnlinkError never fired for the failed scavenge unlink")
+	}
+
+	// The swap already repointed the index at the fsynced copies before the
+	// unlink was attempted; that must hold regardless of the unlink outcome.
+	if v, err := gs.GetUint64([]byte("CurrentTerm")); err != nil || v != 7 {
+		t.Errorf("GetUint64 after the failed unlink = %d, %v; want 7", v, err)
+	}
+	assertLiveBytesInvariant(t, w, "after scavenge with a failed unlink")
+
+	// Clear the injection: the next pass reclaims the segment without
+	// re-scavenging it — there is nothing live left to carry forward.
+	failing.Store(false)
+	mu.Lock()
+	reclaimed = nil
+	mu.Unlock()
+	triggerReclaim(t, w, gs)
+
+	if _, err := os.Stat(failPath); !os.IsNotExist(err) {
+		t.Fatalf("segment %d still present after the retry succeeded: stat err = %v", victimSeq, err)
+	}
+	mu.Lock()
+	got := append([]ReclaimStats(nil), reclaimed...)
+	mu.Unlock()
+	var final *ReclaimStats
+	for i := range got {
+		if got[i].Seq == victimSeq {
+			final = &got[i]
+		}
+	}
+	if final == nil {
+		t.Fatalf("OnReclaim never fired for segment %d on retry; reclaimed = %+v", victimSeq, got)
+	}
+	if final.ScavengedBytes != 0 {
+		t.Errorf("ScavengedBytes = %d, want 0 (the retry reclaims without re-scavenging)", final.ScavengedBytes)
+	}
+	assertLiveBytesInvariant(t, w, "after the retry succeeds")
 }

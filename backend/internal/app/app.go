@@ -1662,8 +1662,9 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 	walDir := hd.VaultCtlWALDir()
 	wal, err := raftwal.Open(walDir, raftwal.Config{
 		OnReserveState:   walReserveAlarm(alerts, logger, "vault-ctl"),
-		OnReclaim:        walReclaimLog(logger, "vault-ctl"),
+		OnReclaim:        walReclaimObserved(alerts, logger, "vault-ctl"),
 		OnReclaimAnomaly: walReclaimAnomalyAlarm(alerts, logger, "vault-ctl"),
+		OnUnlinkError:    walUnlinkErrorAlarm(alerts, logger, "vault-ctl"),
 	})
 	if err != nil {
 		logger.Warn("failed to open vault-ctl raft WAL", "dir", walDir, "error", err)

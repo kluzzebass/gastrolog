@@ -117,6 +117,11 @@ type Config struct {
 	// leave this nil.
 	SegmentPreallocate func(*os.File, int64) error
 
+	// SegmentRemove, if non-nil, is called instead of os.Remove when
+	// reclamation unlinks a segment file. Used by tests for deterministic
+	// unlink failure injection. Production code must leave this nil.
+	SegmentRemove func(string) error
+
 	// OnReserveState, if non-nil, is invoked when the WAL's space reserve is
 	// lost (preallocation failed — the WAL runs on ordinary allocation and a
 	// full volume can panic Raft) or restored. Invoked from the batch-writer
@@ -161,6 +166,13 @@ type Config struct {
 	// live references by more than ScavengeMaxLiveBytes. Such a segment is
 	// eligible for neither path, so no scan ever runs against it.
 	OnReclaimAnomaly func(seq int, liveRefs int)
+
+	// OnUnlinkError, if non-nil, is invoked when removing a reclaimed
+	// segment's file fails. Reclamation retries the segment on every later
+	// pass, and the stall it causes is oldest-first: nothing behind the
+	// segment is reclaimed until the removal succeeds. Invoked outside
+	// stateMu, after the pass: must not block.
+	OnUnlinkError func(seq int, err error)
 }
 
 func (c Config) withDefaults() Config {
@@ -548,6 +560,15 @@ func (w *WAL) syncActiveSegment() error {
 		return w.cfg.SegmentSync(w.seg)
 	}
 	return w.seg.Sync()
+}
+
+// removeSegmentFile deletes a sealed segment's file; SegmentRemove overrides
+// when set.
+func (w *WAL) removeSegmentFile(path string) error {
+	if w.cfg.SegmentRemove != nil {
+		return w.cfg.SegmentRemove(path)
+	}
+	return os.Remove(path)
 }
 
 // appliedRecord is a successfully appended writeOp plus where its payload

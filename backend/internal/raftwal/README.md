@@ -228,6 +228,10 @@ A scavenge copies a nearly-drained segment's live records onto the active segmen
 
 No window loses a live record. The worst case is a redundant, idempotent copy that the next `Open` cleans up.
 
+### Segment Removal Failure
+
+If `os.Remove` on a reclaimed segment's file fails (permissions, a locked or immutable file, an I/O error), `Config.OnUnlinkError` reports it and the segment stays nominated: the next reclamation pass retries the same removal, and because reclamation is oldest-first, nothing sealed behind that segment reclaims until it succeeds.
+
 ### WAL Close With Pending Writes
 
 When `Close()` is called:
@@ -282,7 +286,7 @@ flowchart TD
 - **Reads** (`GetLog`, `Get`, `GetUint64`, `FirstIndex`, `LastIndex`): Acquire `stateMu.RLock`. Recent-window hits are a map lookup; older log entries `ReadAt` their payload from the segment file under the read lock (reclamation closes a superseded read handle only under `stateMu.Lock`, so a handle is never closed mid-read).
 - **Writes** (`StoreLogs`, `Set`, `SetUint64`, `DeleteRange`): Submit ONE op to `writeCh` (a multi-entry `StoreLogs` is one op), block on `done` channel until the batch is fsynced.
 - **batchWriter**: Single goroutine. Writes to the segment file, briefly takes `stateMu.Lock` to update in-memory state, then fsyncs without the lock.
-- **Reclamation**: Runs on the batchWriter, strictly after `notifyBatchWaiters` — waiters never wait on it. Holds `stateMu.Lock` across the whole drained-unlink run (readers wait for it to finish, as they do for any other write-lock hold), verified by at most one index scan for that run — a pass that unlinks nothing takes the lock but no scan. Then scavenges at most one nearly-drained segment (that victim gets its own fresh single-segment scan under a separate lock acquisition, since the scavenge swap just mutated the index). `Config.ScavengeMaxLiveBytes` bounds the rewrite in a pass and nothing else: the unlink run is unbounded in count. Callbacks (`OnReclaim`, `OnReclaimAnomaly`) are collected during the pass and invoked after `stateMu` is released, so a slow notification never blocks reads.
+- **Reclamation**: Runs on the batchWriter, strictly after `notifyBatchWaiters` — waiters never wait on it. Holds `stateMu.Lock` across the whole drained-unlink run (readers wait for it to finish, as they do for any other write-lock hold), verified by at most one index scan for that run — a pass that unlinks nothing takes the lock but no scan. Then scavenges at most one nearly-drained segment (that victim gets its own fresh single-segment scan under a separate lock acquisition, since the scavenge swap just mutated the index). `Config.ScavengeMaxLiveBytes` bounds the rewrite in a pass and nothing else: the unlink run is unbounded in count. Callbacks (`OnReclaim`, `OnReclaimAnomaly`, `OnUnlinkError`) are collected during the pass and invoked after `stateMu` is released, so a slow notification never blocks reads.
 
 Reads never wait on fsync; the batch writer holds the write lock only for the in-memory index updates.
 

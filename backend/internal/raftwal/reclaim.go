@@ -22,15 +22,22 @@ type reclaimAnomaly struct {
 	liveRefs int
 }
 
+// unlinkFailure records a segment whose file removal failed.
+type unlinkFailure struct {
+	seq int
+	err error
+}
+
 // reclaimEvents collects the notifications a reclamation pass owes its
-// callbacks. OnReclaim and OnReclaimAnomaly run slog and the alert
-// collector, each taking locks of their own; calling them under stateMu
-// would block every group's reads for that duration and order this lock
-// ahead of theirs. Steps append here and reclaimPass delivers once the lock
-// is released, preserving per-callback order.
+// callbacks. OnReclaim, OnReclaimAnomaly and OnUnlinkError run slog and the
+// alert collector, each taking locks of their own; calling them under
+// stateMu would block every group's reads for that duration and order this
+// lock ahead of theirs. Steps append here and reclaimPass delivers once the
+// lock is released, preserving per-callback order.
 type reclaimEvents struct {
-	reclaimed []ReclaimStats
-	anomalies []reclaimAnomaly
+	reclaimed      []ReclaimStats
+	anomalies      []reclaimAnomaly
+	unlinkFailures []unlinkFailure
 }
 
 func (e *reclaimEvents) deliver(cfg Config) {
@@ -42,6 +49,11 @@ func (e *reclaimEvents) deliver(cfg Config) {
 	if cfg.OnReclaimAnomaly != nil {
 		for _, a := range e.anomalies {
 			cfg.OnReclaimAnomaly(a.seq, a.liveRefs)
+		}
+	}
+	if cfg.OnUnlinkError != nil {
+		for _, u := range e.unlinkFailures {
+			cfg.OnUnlinkError(u.seq, u.err)
 		}
 	}
 }
@@ -140,13 +152,20 @@ func (w *WAL) unlinkDrainedBurst(events *reclaimEvents) {
 // live-bytes index. Caller holds stateMu and has already verified the
 // segment carries no live index reference. Returns whether the file was
 // removed.
+//
+// A failing removal is not quarantined: the counter and index are right,
+// only the filesystem is wrong, so the segment stays nominated and every
+// later pass retries it. It reports the failure into events instead — the
+// caller's burst loop stops at the first segment it cannot remove, so this
+// fires at most once per pass for a given segment.
 func (w *WAL) removeSegmentLocked(seq int, scavengedBytes int64, start time.Time, events *reclaimEvents) bool {
 	path := w.segmentPath(seq)
 	var reclaimedBytes int64
 	if info, err := os.Stat(path); err == nil {
 		reclaimedBytes = info.Size()
 	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	if err := w.removeSegmentFile(path); err != nil && !os.IsNotExist(err) {
+		events.unlinkFailures = append(events.unlinkFailures, unlinkFailure{seq: seq, err: err})
 		return false
 	}
 	w.closeSegmentReadersUpTo(seq)
