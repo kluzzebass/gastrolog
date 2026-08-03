@@ -144,21 +144,29 @@ Segments are numbered sequentially (`wal-000001.log`, `wal-000002.log`, ...). Th
 flowchart TD
     T[Pass runs: DeleteRange batch flushed,<br/>rotation sealed a segment, or at Open] --> OLD{Oldest sealed segment}
     OLD -->|none sealed| DONE[Nothing to reclaim]
-    OLD -->|drained: 0 live bytes| UNLINK[Verify no index reference,<br/>then unlink]
+    OLD -->|drained: 0 live bytes| VERIFY{Verification scan:<br/>index reference found?}
+    VERIFY -->|none| UNLINK[Unlink segment]
+    VERIFY -->|found| QUAR1[Quarantine segment;<br/>fire OnReclaimAnomaly]
     UNLINK --> OLD
-    OLD -->|live <= ScavengeMaxLiveBytes| SCAV[Re-append live records,<br/>fsync, repoint index]
+    OLD -->|live <= ScavengeMaxLiveBytes| COLLECT{Collect live records}
+    COLLECT -->|found| SCAV[Re-append, fsync,<br/>repoint index]
+    COLLECT -->|none| QUAR2[Quarantine segment;<br/>fire OnReclaimAnomaly]
     SCAV --> UNLINK
     OLD -->|live > ScavengeMaxLiveBytes| RETAIN[Retain segment;<br/>everything sealed behind it waits too]
 
     style UNLINK fill:#2d5016,stroke:#4a8c28
     style SCAV fill:#5c3d1e,stroke:#a67c52
     style RETAIN fill:#5c1e1e,stroke:#c84a4a
+    style QUAR1 fill:#5c1e1e,stroke:#c84a4a
+    style QUAR2 fill:#5c1e1e,stroke:#c84a4a
 ```
 
 Each sealed segment tracks its live payload bytes: the total size of records the in-memory index still references. A reclamation pass runs on the batch writer strictly after batch waiters are notified — three triggers: a flushed batch containing a `DeleteRange`, a rotation sealing a segment, and once at `Open` after replay. Every pass targets the oldest sealed segment, never a newer one:
 
 - **Drained** (zero live bytes): unlink outright. Before the `os.Remove`, a verification scan confirms no index reference survives into the segment — the live-bytes counter only nominates a segment for removal, the scan gates the removal itself. Microseconds, no rewrite I/O.
-- **Nearly drained** (live bytes at or below `Config.ScavengeMaxLiveBytes`, default 4 MiB): scavenge. The writer re-appends the segment's surviving records — log entries, current stable values, group registrations — through the normal write path onto the active segment, fsyncs, then repoints the index at the copies. That drains the segment to zero, and it unlinks in the same pass.
+- **Nearly drained** (live bytes at or below `Config.ScavengeMaxLiveBytes`, default 4 MiB): scavenge. The writer re-appends the segment's surviving records — log entries, current stable values, group registrations — through the normal write path onto the active segment, fsyncs, then repoints the index at the copies. That drains the segment to zero, and it unlinks in the same pass. A transient error collecting or re-appending those records aborts the pass with the segment untouched; the next trigger retries it.
+
+The verification scan (drained path) and the record collection (scavenge path) can each disagree with the live-bytes counter. A segment the counter reads as drained can still turn up an index reference; a segment eligible for scavenge can turn up no live records to collect — drift in opposite directions. Either disagreement **quarantines** the segment: it is retained, `Config.OnReclaimAnomaly` fires once, and — because reclamation is oldest-first — every sealed segment behind it is retained too, until a restart rebuilds the live-bytes counters from replay. One drift direction escapes detection: a counter overstating a segment's live bytes past the scavenge threshold makes it eligible for neither path, so no scan ever runs against it.
 
 A pass unlinks every drained segment it finds (each one is cheap) but scavenges at most one segment, capping the inline rewrite cost per pass at the threshold. Reclamation is strictly oldest-first: a segment whose live remainder sits above the threshold — and every sealed segment behind it, regardless of which Raft group they belong to — is retained until further truncation shrinks it.
 
