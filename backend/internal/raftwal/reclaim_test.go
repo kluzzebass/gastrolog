@@ -793,6 +793,54 @@ func TestMaskReplaysAgainstEmptierState(t *testing.T) {
 	assertLiveBytesInvariant(t, w2, "after replay")
 }
 
+// Readers hammer GetLog/FirstIndex/LastIndex while the writer truncates and
+// reclaims via the wired passes. Correctness is the race detector plus never
+// observing a read error other than ErrLogNotFound.
+func TestConcurrentReadsDuringReclamation(t *testing.T) {
+	w, _ := openTestWAL(t, Config{ScavengeMaxLiveBytes: 512})
+	gs := w.GroupStore("grp")
+
+	var stop atomic.Bool
+	var wg sync.WaitGroup
+	for r := 0; r < 4; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var lg hraft.Log
+			for !stop.Load() {
+				first, _ := gs.FirstIndex()
+				last, _ := gs.LastIndex()
+				if first == 0 || last < first {
+					continue
+				}
+				for i := first; i <= last; i++ {
+					if err := gs.GetLog(i, &lg); err != nil && err != hraft.ErrLogNotFound {
+						t.Errorf("GetLog(%d): %v", i, err)
+						return
+					}
+				}
+			}
+		}()
+	}
+
+	next := uint64(1)
+	for round := 0; round < 30; round++ {
+		for i := 0; i < 40; i++ {
+			if err := gs.StoreLog(&hraft.Log{Index: next, Term: 1, Data: make([]byte, 64)}); err != nil {
+				t.Fatalf("store %d: %v", next, err)
+			}
+			next++
+		}
+		if err := gs.DeleteRange(1, next-10); err != nil {
+			t.Fatalf("truncate: %v", err)
+		}
+	}
+	stop.Store(true)
+	wg.Wait()
+	syncBarrier(t, w)
+	assertLiveBytesInvariant(t, w, "after concurrent load")
+}
+
 // Repeated scavenge cycles across restarts: registrations and stable keys
 // migrate forward indefinitely without loss or duplication.
 func TestRepeatedScavengeCyclesSurviveRestarts(t *testing.T) {
