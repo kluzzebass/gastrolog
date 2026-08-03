@@ -173,6 +173,12 @@ type WAL struct {
 	groupIDs map[string]uint32      // group name → numeric ID
 	nextGID  uint32
 
+	// segLive tracks, per segment, the payload bytes of records the index
+	// still references (live log entries, current stable values, group
+	// registrations). Masks (entryDeleteRange) never count. Zero means no
+	// live references. Guarded by stateMu.
+	segLive map[int]int64
+
 	// Active segment.
 	seg     *os.File
 	segPath string
@@ -328,6 +334,7 @@ func Open(dir string, cfgs ...Config) (*WAL, error) {
 		groups:   make(map[uint32]*groupState),
 		groupIDs: make(map[string]uint32),
 		nextGID:  1,
+		segLive:  make(map[int]int64),
 		readers:  make(map[int]*os.File),
 		writeCh:  make(chan writeOp, 4096),
 		syncCh:   make(chan chan error, 64),
@@ -645,26 +652,34 @@ func (w *WAL) applyToMemory(groupID uint32, typ entryType, payload []byte, seg i
 
 	switch typ {
 	case entryLog:
-		gs.applyLogEntry(payload, logLoc{seg: seg, off: payloadOff, length: len(payload)}, w.cfg.LogCacheBudgetBytes)
+		w.applyLogEntry(gs, payload, loc)
 
 	case entryLogBatch:
 		forEachBatchEntry(payload, func(off int, enc []byte) {
-			gs.applyLogEntry(enc, logLoc{seg: seg, off: payloadOff + int64(off), length: len(enc)}, w.cfg.LogCacheBudgetBytes)
+			w.applyLogEntry(gs, enc, logLoc{seg: seg, off: payloadOff + int64(off), length: len(enc)})
 		})
 
 	case entryStableSet:
 		key, val := decodeStableSet(payload)
+		if old, ok := gs.stable[key]; ok {
+			w.segLive[old.loc.seg] -= int64(old.loc.length)
+		}
 		gs.stable[key] = stableVal{value: val, loc: loc}
+		w.segLive[loc.seg] += int64(loc.length)
 
 	case entryStableUint64:
 		key, val := decodeStableUint64(payload)
 		// Store as 8-byte big-endian for GetUint64 compatibility.
 		buf := make([]byte, 8)
 		binary.BigEndian.PutUint64(buf, val)
+		if old, ok := gs.stable[key]; ok {
+			w.segLive[old.loc.seg] -= int64(old.loc.length)
+		}
 		gs.stable[key] = stableVal{value: buf, loc: loc}
+		w.segLive[loc.seg] += int64(loc.length)
 
 	case entryDeleteRange:
-		gs.applyDeleteRange(payload)
+		w.applyDeleteRange(gs, payload)
 
 	case entryGroupReg:
 		name := string(payload)
@@ -672,8 +687,12 @@ func (w *WAL) applyToMemory(groupID uint32, typ entryType, payload []byte, seg i
 		if groupID >= w.nextGID {
 			w.nextGID = groupID + 1
 		}
+		if gs.regName != "" {
+			w.segLive[gs.regLoc.seg] -= int64(gs.regLoc.length)
+		}
 		gs.regName = name
 		gs.regLoc = loc
+		w.segLive[loc.seg] += int64(loc.length)
 	}
 }
 
@@ -749,8 +768,21 @@ func (w *WAL) rotateSegment() error {
 	}
 	w.seg = f
 	w.segSize = 0
+	w.registerSegment(w.segSeq)
 	w.reconcileReserve(promotedSpare)
 	return nil
+}
+
+// registerSegment ensures a live-bytes counter exists for a data segment so
+// a segment whose records all die (or that holds only masks) still becomes
+// a reclamation candidate. Runs on the writer or during single-threaded
+// replay; takes stateMu because readers may scan segLive concurrently.
+func (w *WAL) registerSegment(seq int) {
+	w.stateMu.Lock()
+	if _, ok := w.segLive[seq]; !ok {
+		w.segLive[seq] = 0
+	}
+	w.stateMu.Unlock()
 }
 
 // reconcileReserve restores the space-reserve invariant after a rotation:
@@ -1162,6 +1194,8 @@ func (w *WAL) appendCompactedEntry(groupID uint32, typ entryType, payload []byte
 // Streams the file to avoid loading 64MB segments into heap; tracks each
 // record's payload offset so the log index can serve payloads from disk.
 func (w *WAL) replaySegment(path string, seq int) error {
+	w.registerSegment(seq)
+
 	f, err := os.Open(path) //nolint:gosec // G304: path constructed internally
 	if err != nil {
 		return err
@@ -1220,14 +1254,18 @@ func (w *WAL) replaySegment(path string, seq int) error {
 	}
 }
 
-// applyLogEntry indexes one encoded raft.Log at its durable location and
-// admits the payload to the recent window (bounded by budget bytes).
-// Must be called with w.stateMu held for writing.
-func (gs *groupState) applyLogEntry(payload []byte, loc logLoc, budget int64) {
+// applyLogEntry indexes one encoded raft.Log at its durable location, moves
+// live-bytes accounting off any overwritten record, and admits the payload
+// to the recent window. Caller holds stateMu for writing.
+func (w *WAL) applyLogEntry(gs *groupState, payload []byte, loc logLoc) {
 	var log hraft.Log
 	if err := decodelog(payload, &log); err != nil {
 		return
 	}
+	if old, ok := gs.logs[log.Index]; ok {
+		w.segLive[old.seg] -= int64(old.length)
+	}
+	w.segLive[loc.seg] += int64(loc.length)
 	gs.logs[log.Index] = loc
 	if gs.firstIndex == 0 || log.Index < gs.firstIndex {
 		gs.firstIndex = log.Index
@@ -1235,7 +1273,7 @@ func (gs *groupState) applyLogEntry(payload []byte, loc logLoc, budget int64) {
 	if log.Index > gs.lastIndex {
 		gs.lastIndex = log.Index
 	}
-	gs.cacheStore(log.Index, payload, budget)
+	gs.cacheStore(log.Index, payload, w.cfg.LogCacheBudgetBytes)
 }
 
 // cacheStore admits a payload to the recent window and evicts the oldest
@@ -1285,12 +1323,19 @@ func (gs *groupState) cacheDrop(index uint64) {
 	}
 }
 
-func (gs *groupState) applyDeleteRange(payload []byte) {
+// applyDeleteRange removes the log entries in [lo, hi] from the index and
+// moves their live-bytes accounting off the segments that held them. The
+// mask record itself is never credited as live. Caller holds stateMu for
+// writing.
+func (w *WAL) applyDeleteRange(gs *groupState, payload []byte) {
 	lo, hi := decodeDeleteRange(payload)
 	if hi < lo {
 		return
 	}
 	for i := lo; i <= hi; i++ {
+		if old, ok := gs.logs[i]; ok {
+			w.segLive[old.seg] -= int64(old.length)
+		}
 		delete(gs.logs, i)
 		gs.cacheDrop(i)
 	}
@@ -1454,4 +1499,44 @@ func decodeDeleteRange(data []byte) (uint64, uint64) {
 		return 0, 0
 	}
 	return binary.LittleEndian.Uint64(data[0:8]), binary.LittleEndian.Uint64(data[8:16])
+}
+
+// recomputeSegLive rebuilds live-bytes counters by full index scan. Test and
+// verification support. Caller holds stateMu.
+func (w *WAL) recomputeSegLive() map[int]int64 {
+	out := make(map[int]int64, len(w.segLive))
+	for _, gs := range w.groups {
+		for _, loc := range gs.logs {
+			out[loc.seg] += int64(loc.length)
+		}
+		for _, sv := range gs.stable {
+			out[sv.loc.seg] += int64(sv.loc.length)
+		}
+		if gs.regName != "" {
+			out[gs.regLoc.seg] += int64(gs.regLoc.length)
+		}
+	}
+	return out
+}
+
+// liveRefsForSegment counts index references into segment seq. Caller holds
+// stateMu.
+func (w *WAL) liveRefsForSegment(seq int) int {
+	refs := 0
+	for _, gs := range w.groups {
+		for _, loc := range gs.logs {
+			if loc.seg == seq {
+				refs++
+			}
+		}
+		for _, sv := range gs.stable {
+			if sv.loc.seg == seq {
+				refs++
+			}
+		}
+		if gs.regName != "" && gs.regLoc.seg == seq {
+			refs++
+		}
+	}
+	return refs
 }

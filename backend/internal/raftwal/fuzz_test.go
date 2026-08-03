@@ -151,6 +151,7 @@ func FuzzReplayCorruptedSegment(f *testing.F) {
 			groups:   make(map[uint32]*groupState),
 			groupIDs: make(map[string]uint32),
 			nextGID:  1,
+			segLive:  make(map[int]int64),
 		}
 		// Write the fuzzed data as a segment file and replay it.
 		dir := t.TempDir()
