@@ -659,3 +659,180 @@ func TestReclaimKeepsWALBoundedAcrossTruncationCycles(t *testing.T) {
 		t.Errorf("FirstIndex %d > LastIndex %d", first, last)
 	}
 }
+
+// Crash window: copies fsynced, index never repointed, victim never
+// unlinked. Replay applies victim then copies (idempotent duplicates, later
+// wins), leaves the victim drained, and the Open-time pass unlinks it.
+//
+// ScavengeMaxLiveBytes: 1 keeps the wired pass from scavenging the victim
+// on its own; the manual steps below ARE the scavenge, halted mid-way.
+// syncBarrier quiesces the writer before the test touches writer-owned
+// segment fields via appendScavenge.
+func TestCrashAfterScavengeCopiesBeforeSwap(t *testing.T) {
+	cfg := Config{SegmentTargetSize: 2048, ScavengeMaxLiveBytes: 1}
+	w, dir := openTestWAL(t, cfg)
+	gs := w.GroupStore("grp")
+	if err := gs.SetUint64([]byte("CurrentTerm"), 7); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	for i := uint64(1); i <= 3; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 7, Data: []byte{byte(i)}}); err != nil {
+			t.Fatalf("store %d: %v", i, err)
+		}
+	}
+	fillAndDrain(t, gs, 4, 60, 64)
+	if err := gs.StoreLog(&hraft.Log{Index: 100, Term: 7, Data: []byte("seal")}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	syncBarrier(t, w)
+
+	w.stateMu.RLock()
+	victim := w.oldestSealedSegment()
+	w.stateMu.RUnlock()
+	records, err := w.collectScavenge(victim)
+	if err != nil {
+		t.Fatalf("collectScavenge: %v", err)
+	}
+	if len(records) == 0 {
+		t.Fatal("expected live records in the oldest segment")
+	}
+	if _, err := w.appendScavenge(records); err != nil {
+		t.Fatalf("appendScavenge: %v", err)
+	}
+	victimPath := w.segmentPath(victim)
+	if err := w.Close(); err != nil { // crash: no swap, no unlink
+		t.Fatalf("close: %v", err)
+	}
+	if _, err := os.Stat(victimPath); err != nil {
+		t.Fatalf("victim must still exist at crash point: %v", err)
+	}
+
+	// Reopen with a workable threshold: replay makes the copies the live
+	// index (later wins), the victim reads drained, Open's pass unlinks it.
+	w2, err := Open(dir, Config{SegmentTargetSize: 2048, ScavengeMaxLiveBytes: 512})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer func() { _ = w2.Close() }()
+	assertLiveBytesInvariant(t, w2, "after crash replay")
+
+	if _, err := os.Stat(victimPath); !os.IsNotExist(err) {
+		t.Errorf("victim not reclaimed at Open: stat err = %v", err)
+	}
+	gs2 := w2.GroupStore("grp")
+	var lg hraft.Log
+	if err := gs2.GetLog(2, &lg); err != nil || lg.Term != 7 {
+		t.Errorf("GetLog(2) = %+v, %v", lg, err)
+	}
+	if v, err := gs2.GetUint64([]byte("CurrentTerm")); err != nil || v != 7 {
+		t.Errorf("GetUint64 = %d, %v", v, err)
+	}
+}
+
+// A DeleteRange whose targets were scavenged forward replays against emptier
+// state than it originally saw (the mask applies before the copies). The
+// first/last bounds bookkeeping must converge once the copies apply.
+func TestMaskReplaysAgainstEmptierState(t *testing.T) {
+	cfg := Config{SegmentTargetSize: 2048, ScavengeMaxLiveBytes: 1024}
+	w, dir := openTestWAL(t, cfg)
+	gs := w.GroupStore("grp")
+
+	for i := uint64(1); i <= 30; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: make([]byte, 48)}); err != nil {
+			t.Fatalf("store %d: %v", i, err)
+		}
+	}
+	// Suffix truncation (AppendEntries-conflict shape) then prefix
+	// truncation: survivors are 11..19, in the oldest segments.
+	if err := gs.DeleteRange(20, 30); err != nil {
+		t.Fatalf("suffix delete: %v", err)
+	}
+	if err := gs.DeleteRange(1, 10); err != nil {
+		t.Fatalf("prefix delete: %v", err)
+	}
+	if err := gs.StoreLog(&hraft.Log{Index: 100, Term: 2, Data: []byte("seal")}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	// Each pass scavenges at most one segment; drive passes until the
+	// survivors have been carried forward past both DeleteRange records.
+	for range 8 {
+		triggerReclaim(t, w, gs)
+	}
+	assertLiveBytesInvariant(t, w, "after reclaim cycles")
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	w2, err := Open(dir, cfg)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer func() { _ = w2.Close() }()
+	gs2 := w2.GroupStore("grp")
+
+	first, err := gs2.FirstIndex()
+	if err != nil || first != 11 {
+		t.Errorf("FirstIndex = %d, %v; want 11", first, err)
+	}
+	last, err := gs2.LastIndex()
+	if err != nil || last != 100 {
+		t.Errorf("LastIndex = %d, %v; want 100", last, err)
+	}
+	var lg hraft.Log
+	for i := uint64(11); i <= 19; i++ {
+		if err := gs2.GetLog(i, &lg); err != nil {
+			t.Errorf("GetLog(%d): %v", i, err)
+		}
+	}
+	for _, i := range []uint64{1, 10, 20, 30} {
+		if err := gs2.GetLog(i, &lg); err != hraft.ErrLogNotFound {
+			t.Errorf("GetLog(%d) = %v, want ErrLogNotFound", i, err)
+		}
+	}
+	assertLiveBytesInvariant(t, w2, "after replay")
+}
+
+// Repeated scavenge cycles across restarts: registrations and stable keys
+// migrate forward indefinitely without loss or duplication.
+func TestRepeatedScavengeCyclesSurviveRestarts(t *testing.T) {
+	cfg := Config{SegmentTargetSize: 2048, ScavengeMaxLiveBytes: 512}
+	dir := t.TempDir()
+	next := uint64(1)
+	for cycle := 0; cycle < 4; cycle++ {
+		w, err := Open(dir, cfg)
+		if err != nil {
+			t.Fatalf("cycle %d open: %v", cycle, err)
+		}
+		gs := w.GroupStore("grp")
+		if err := gs.SetUint64([]byte("CurrentTerm"), uint64(cycle+1)); err != nil {
+			t.Fatalf("cycle %d set: %v", cycle, err)
+		}
+		fillAndDrain(t, gs, next, next+40, 64)
+		next += 41
+		if err := gs.StoreLog(&hraft.Log{Index: 1000 + uint64(cycle), Term: uint64(cycle + 1), Data: []byte("live")}); err != nil {
+			t.Fatalf("cycle %d live: %v", cycle, err)
+		}
+		triggerReclaim(t, w, gs)
+		assertLiveBytesInvariant(t, w, "cycle reclaim")
+		if err := w.Close(); err != nil {
+			t.Fatalf("cycle %d close: %v", cycle, err)
+		}
+	}
+	w, err := Open(dir, cfg)
+	if err != nil {
+		t.Fatalf("final open: %v", err)
+	}
+	defer func() { _ = w.Close() }()
+	gs := w.GroupStore("grp")
+	if v, err := gs.GetUint64([]byte("CurrentTerm")); err != nil || v != 4 {
+		t.Errorf("CurrentTerm = %d, %v; want 4", v, err)
+	}
+	var lg hraft.Log
+	for cycle := uint64(0); cycle < 4; cycle++ {
+		if err := gs.GetLog(1000+cycle, &lg); err != nil {
+			t.Errorf("GetLog(%d): %v", 1000+cycle, err)
+		}
+	}
+	assertLiveBytesInvariant(t, w, "final")
+}
