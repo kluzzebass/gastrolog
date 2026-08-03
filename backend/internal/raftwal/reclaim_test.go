@@ -315,6 +315,139 @@ func TestReclaimAnomalyQuarantinesSegment(t *testing.T) {
 	_ = dir
 }
 
+// The opposite drift to TestReclaimAnomalyQuarantinesSegment: the counter
+// claims live bytes the index does not reference. Such a segment is never
+// nominated for unlink and, oldest-first, pins every segment behind it — so
+// the scavenge scan finding nothing to carry must report it rather than
+// return quietly.
+func TestReclaimAnomalyDetectsInverseCounterDrift(t *testing.T) {
+	var mu sync.Mutex
+	var reportedRefs []int
+	w, dir := openTestWAL(t, Config{
+		OnReclaimAnomaly: func(_, liveRefs int) {
+			mu.Lock()
+			reportedRefs = append(reportedRefs, liveRefs)
+			mu.Unlock()
+		},
+	})
+	gs := w.GroupStore("grp")
+
+	// Fill segment 1 past the scavenge threshold so nothing reclaims it
+	// while the entries are live.
+	for i := uint64(1); i <= 60; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: make([]byte, 64)}); err != nil {
+			t.Fatalf("store %d: %v", i, err)
+		}
+	}
+	syncBarrier(t, w) // writer idle: no pass can run under the injection
+
+	// Inject a missed debit on segment 1 — bytes the counter carries that
+	// no index entry accounts for.
+	const phantomBytes = 40
+	w.stateMu.Lock()
+	victim := w.oldestSealedSegment()
+	w.segLive[victim] += phantomBytes
+	w.stateMu.Unlock()
+	if victim == 0 {
+		t.Fatal("test premise: no sealed segment to drift")
+	}
+	victimPath := w.segmentPath(victim)
+
+	// Kill every real record in it. The pass scavenges the registration out
+	// and the victim is left holding nothing but the phantom count, which
+	// keeps it off the unlink path forever.
+	if err := gs.DeleteRange(1, 60); err != nil {
+		t.Fatalf("delete range: %v", err)
+	}
+	syncBarrier(t, w)
+
+	w.stateMu.RLock()
+	stillLive := w.segLive[victim]
+	realRefs := w.liveRefsForSegment(victim)
+	w.stateMu.RUnlock()
+	if stillLive != phantomBytes || realRefs != 0 {
+		t.Fatalf("test premise: segment %d live=%d refs=%d, want %d and 0",
+			victim, stillLive, realRefs, phantomBytes)
+	}
+
+	before := segmentFileCount(t, dir)
+	triggerReclaim(t, w, gs)
+	triggerReclaim(t, w, gs) // quarantine must suppress a second anomaly
+
+	mu.Lock()
+	got := append([]int(nil), reportedRefs...)
+	mu.Unlock()
+	if len(got) != 1 {
+		t.Fatalf("anomalies = %v, want exactly one", got)
+	}
+	if got[0] != 0 {
+		t.Errorf("reported liveRefs = %d, want 0 (counter overstates an unreferenced segment)", got[0])
+	}
+	if _, err := os.Stat(victimPath); err != nil {
+		t.Errorf("drifted segment must be retained: %v", err)
+	}
+	if after := segmentFileCount(t, dir); after < before {
+		t.Errorf("reclaimed %d segment(s) behind a quarantined head", before-after)
+	}
+}
+
+// Reclamation is deliberately lazy: a segment whose live remainder exceeds
+// ScavengeMaxLiveBytes is retained until truncation drains it, and
+// oldest-first keeps every segment behind it. This pins that documented
+// stall, which on a shared WAL is one group holding space for all of them.
+func TestReclaimStallsBehindHeadSegmentAboveThreshold(t *testing.T) {
+	const threshold = 512
+	w, dir := openTestWAL(t, Config{
+		SegmentTargetSize:    1024,
+		ScavengeMaxLiveBytes: threshold,
+	})
+	gs := w.GroupStore("grp")
+
+	// Each cycle truncates all but its last entry, so survivors accumulate
+	// at the head instead of draining it.
+	payload := make([]byte, 256)
+	idx := uint64(0)
+	for range 12 {
+		for range 10 {
+			idx++
+			if err := gs.StoreLog(&hraft.Log{Index: idx, Term: 1, Data: payload}); err != nil {
+				t.Fatalf("store %d: %v", idx, err)
+			}
+		}
+		if err := gs.DeleteRange(idx-9, idx-1); err != nil {
+			t.Fatalf("delete range ending at %d: %v", idx, err)
+		}
+		syncBarrier(t, w)
+	}
+
+	w.stateMu.RLock()
+	head := w.oldestSealedSegment()
+	headLive := w.segLive[head]
+	w.stateMu.RUnlock()
+	if head == 0 || headLive <= threshold {
+		t.Fatalf("test premise: head segment %d live=%d, want a head above the %d threshold",
+			head, headLive, threshold)
+	}
+
+	before := segmentFileCount(t, dir)
+	triggerReclaim(t, w, gs)
+	triggerReclaim(t, w, gs)
+
+	if after := segmentFileCount(t, dir); after < before {
+		t.Errorf("reclaimed %d segment(s) behind a head above the threshold", before-after)
+	}
+	w.stateMu.RLock()
+	stillHead := w.oldestSealedSegment()
+	w.stateMu.RUnlock()
+	if stillHead != head {
+		t.Errorf("head segment moved from %d to %d; reclamation passed a segment above the threshold", head, stillHead)
+	}
+	if _, err := os.Stat(w.segmentPath(head)); err != nil {
+		t.Errorf("head segment above the threshold must be retained: %v", err)
+	}
+	assertLiveBytesInvariant(t, w, "stalled behind an over-threshold head")
+}
+
 func TestScavengeReclaimsNearlyDrainedSegment(t *testing.T) {
 	var mu sync.Mutex
 	var reclaimed []ReclaimStats

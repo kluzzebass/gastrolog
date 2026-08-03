@@ -55,10 +55,7 @@ func (w *WAL) unlinkOldestDrained(scavengedBytes int64, start time.Time) bool {
 		return false
 	}
 	if refs := w.liveRefsForSegment(seq); refs > 0 {
-		w.quarantined[seq] = struct{}{}
-		if w.cfg.OnReclaimAnomaly != nil {
-			w.cfg.OnReclaimAnomaly(seq, refs)
-		}
+		w.quarantineSegment(seq, refs)
 		return false
 	}
 
@@ -82,6 +79,20 @@ func (w *WAL) unlinkOldestDrained(scavengedBytes int64, start time.Time) bool {
 		})
 	}
 	return true
+}
+
+// quarantineSegment excludes a segment from reclamation and reports the
+// contradiction once. liveRefs is what the verification scan found: above
+// zero when the counter read drained, zero when the counter claims live
+// bytes no index entry references. Caller holds stateMu.
+func (w *WAL) quarantineSegment(seq, liveRefs int) {
+	if _, bad := w.quarantined[seq]; bad {
+		return
+	}
+	w.quarantined[seq] = struct{}{}
+	if w.cfg.OnReclaimAnomaly != nil {
+		w.cfg.OnReclaimAnomaly(seq, liveRefs)
+	}
 }
 
 // scavRecord is one live record carried out of a segment being scavenged.
@@ -116,8 +127,18 @@ func (w *WAL) scavengeOldest() {
 		return
 	}
 
-	records := w.collectScavenge(victim)
+	records, err := w.collectScavenge(victim)
+	if err != nil {
+		return // victim unreadable right now; a later pass retries
+	}
 	if len(records) == 0 {
+		// The counter claims live bytes, the scan finds no reference: drift
+		// in the opposite direction to the drained-but-referenced case.
+		// Nothing can drain the segment, so quarantine it rather than let
+		// it pin every segment behind it in silence.
+		w.stateMu.Lock()
+		w.quarantineSegment(victim, 0)
+		w.stateMu.Unlock()
 		return
 	}
 	locs, err := w.appendScavenge(records)
@@ -132,8 +153,10 @@ func (w *WAL) scavengeOldest() {
 // registrations, current stable values, and surviving log entries. Log
 // payloads come from the recent window when cached, otherwise from the
 // victim file (still on disk). Deterministic order: group, then kind, then
-// key/index.
-func (w *WAL) collectScavenge(victim int) []scavRecord {
+// key/index. An empty result means the index references nothing in the
+// segment; a non-nil error means the payloads could not be read this pass
+// and the caller must not read anything into the empty result.
+func (w *WAL) collectScavenge(victim int) ([]scavRecord, error) {
 	w.stateMu.RLock()
 	defer w.stateMu.RUnlock()
 
@@ -180,7 +203,7 @@ func (w *WAL) collectScavenge(victim int) []scavRecord {
 				var err error
 				payload, err = w.readPayload(gs.logs[idx])
 				if err != nil {
-					return nil // victim unreadable: abort, retry later
+					return nil, err // victim unreadable: abort, retry later
 				}
 			}
 			records = append(records, scavRecord{
@@ -188,7 +211,7 @@ func (w *WAL) collectScavenge(victim int) []scavRecord {
 			})
 		}
 	}
-	return records
+	return records, nil
 }
 
 // appendScavenge writes the records through the normal append path on the

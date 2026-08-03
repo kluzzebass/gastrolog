@@ -124,20 +124,33 @@ type Config struct {
 	// ScavengeMaxLiveBytes bounds the live payload bytes the writer will
 	// rewrite in one reclamation pass to free the oldest segment. It is the
 	// hard ceiling on reclamation's inline cost: about 6% of a default
-	// segment and single-digit milliseconds of sequential write. Segments
-	// above the bound are retained until truncation drains them further.
+	// segment and single-digit milliseconds of sequential write.
 	// Default: 4 MiB.
+	//
+	// A segment whose live remainder exceeds the bound is retained until
+	// truncation drains it below the bound, and because reclamation is
+	// oldest-first, every segment behind it is retained with it. On a WAL
+	// shared by several groups, one group's slow-draining head segment
+	// therefore holds space for all of them. Setting the bound at or above
+	// SegmentTargetSize removes the ceiling entirely: every pass then
+	// rewrites the whole oldest segment.
 	ScavengeMaxLiveBytes int64
 
 	// OnReclaim, if non-nil, is invoked after each reclaimed segment.
 	// Invoked from the batch-writer goroutine: must not block.
 	OnReclaim func(ReclaimStats)
 
-	// OnReclaimAnomaly, if non-nil, is invoked when the pre-unlink
-	// verification scan finds live references in a segment whose counter
-	// reads drained. The segment is retained and reclamation halts on it;
-	// a restart rebuilds counters from replay. Invoked from the
-	// batch-writer goroutine: must not block.
+	// OnReclaimAnomaly, if non-nil, is invoked when a verification scan
+	// contradicts a segment's live-bytes counter, in either direction:
+	// liveRefs above zero when the counter read drained, or liveRefs zero
+	// when the counter claims live bytes no index entry references. The
+	// segment is retained and reclamation halts on it; a restart rebuilds
+	// counters from replay. Invoked from the batch-writer goroutine: must
+	// not block.
+	//
+	// One drift escapes detection: a counter overstating a segment with no
+	// live references by more than ScavengeMaxLiveBytes. Such a segment is
+	// eligible for neither path, so no scan ever runs against it.
 	OnReclaimAnomaly func(seq int, liveRefs int)
 }
 
