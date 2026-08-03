@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -37,6 +38,7 @@ func openTestWAL(t *testing.T, cfg Config) (*WAL, string) {
 }
 
 func TestStableAndRegLocationsTracked(t *testing.T) {
+	t.Parallel()
 	w, _ := openTestWAL(t, Config{})
 	gs := w.GroupStore("grp")
 	if err := gs.Set([]byte("CurrentTerm"), []byte{9}); err != nil {
@@ -62,7 +64,6 @@ func TestStableAndRegLocationsTracked(t *testing.T) {
 	if sv.loc.length == 0 || sv.loc.seg == 0 {
 		t.Errorf("stable loc not recorded: %+v", sv.loc)
 	}
-	var _ = hraft.Log{} // imports used heavily by later tests in this file
 }
 
 // assertLiveBytesInvariant recomputes live bytes by full index scan and diffs
@@ -85,6 +86,7 @@ func assertLiveBytesInvariant(t *testing.T, w *WAL, when string) {
 }
 
 func TestLiveBytesAccounting(t *testing.T) {
+	t.Parallel()
 	w, _ := openTestWAL(t, Config{})
 	gs := w.GroupStore("grp")
 	assertLiveBytesInvariant(t, w, "after registration")
@@ -133,7 +135,7 @@ func TestLiveBytesAccounting(t *testing.T) {
 	if err := w.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	w2, err := Open(dir, Config{SegmentTargetSize: 2048})
+	w2, err := Open(dir, Config{SegmentTargetSize: 2048, ScavengeMaxLiveBytes: 128})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -198,6 +200,7 @@ func segmentFileCount(t *testing.T, dir string) int {
 }
 
 func TestReclaimUnlinksDrainedSegments(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var reclaimed []ReclaimStats
 	w, dir := openTestWAL(t, Config{
@@ -254,6 +257,7 @@ func TestReclaimUnlinksDrainedSegments(t *testing.T) {
 }
 
 func TestReclaimIsStrictlyOldestFirst(t *testing.T) {
+	t.Parallel()
 	w, dir := openTestWAL(t, Config{})
 	gs := w.GroupStore("grp")
 
@@ -280,8 +284,9 @@ func TestReclaimIsStrictlyOldestFirst(t *testing.T) {
 }
 
 func TestReclaimAnomalyQuarantinesSegment(t *testing.T) {
+	t.Parallel()
 	var anomalies atomic.Int32
-	w, dir := openTestWAL(t, Config{
+	w, _ := openTestWAL(t, Config{
 		OnReclaimAnomaly: func(seq, liveRefs int) { anomalies.Add(1) },
 	})
 	gs := w.GroupStore("grp")
@@ -315,7 +320,6 @@ func TestReclaimAnomalyQuarantinesSegment(t *testing.T) {
 	if _, err := os.Stat(victimPath); err != nil {
 		t.Fatalf("segment with live references was unlinked: %v", err)
 	}
-	_ = dir
 }
 
 // The opposite drift to TestReclaimAnomalyQuarantinesSegment: the counter
@@ -324,6 +328,7 @@ func TestReclaimAnomalyQuarantinesSegment(t *testing.T) {
 // the scavenge scan finding nothing to carry must report it rather than
 // return quietly.
 func TestReclaimAnomalyDetectsInverseCounterDrift(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var reportedRefs []int
 	w, dir := openTestWAL(t, Config{
@@ -394,14 +399,13 @@ func TestReclaimAnomalyDetectsInverseCounterDrift(t *testing.T) {
 	}
 }
 
-// A reclamation pass verifies every drained-by-counter candidate against one
-// index scan taken when the pass locks the state, not a fresh scan per
-// segment. This pins that the shared scan still gets each candidate right
-// across a burst: a genuinely drained segment unlinks, a segment whose
-// counter disagrees with the scan quarantines, and oldest-first stops the
-// burst there — a segment behind it that is itself genuinely drained stays
-// untouched.
-func TestReclaimBurstSharesOneScanAcrossCandidates(t *testing.T) {
+// Per-candidate verification stays correct across a burst that shares one
+// index scan, and oldest-first still stops at the first disagreement: a
+// genuinely drained segment unlinks, a segment whose counter disagrees with
+// the scan quarantines, and a segment behind it that is itself genuinely
+// drained stays untouched rather than unlinking out of order.
+func TestReclaimBurstVerifiesEachCandidateAndStopsOldestFirst(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var reclaimed []ReclaimStats
 	var anomalies []int
@@ -454,7 +458,9 @@ func TestReclaimBurstSharesOneScanAcrossCandidates(t *testing.T) {
 	syncBarrier(t, w)
 
 	// Drain segment C early: fully dead already, but oldest-first means it
-	// stays unreachable behind A and B until they clear.
+	// stays unreachable behind A and B until they clear. This range starts
+	// mid-log rather than at the group's first index — a white-box setup
+	// step, not a state raft ever produces (raft only truncates prefixes).
 	if err := gs.DeleteRange(cStart, dStart-1); err != nil {
 		t.Fatalf("delete segment C's logs: %v", err)
 	}
@@ -543,6 +549,7 @@ func TestReclaimBurstSharesOneScanAcrossCandidates(t *testing.T) {
 // oldest-first keeps every segment behind it. This pins that documented
 // stall, which on a shared WAL is one group holding space for all of them.
 func TestReclaimStallsBehindHeadSegmentAboveThreshold(t *testing.T) {
+	t.Parallel()
 	const threshold = 512
 	w, dir := openTestWAL(t, Config{
 		SegmentTargetSize:    1024,
@@ -596,6 +603,7 @@ func TestReclaimStallsBehindHeadSegmentAboveThreshold(t *testing.T) {
 }
 
 func TestScavengeReclaimsNearlyDrainedSegment(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var reclaimed []ReclaimStats
 	w, dir := openTestWAL(t, Config{
@@ -674,6 +682,7 @@ func TestScavengeReclaimsNearlyDrainedSegment(t *testing.T) {
 }
 
 func TestScavengeSkipsSegmentAboveThreshold(t *testing.T) {
+	t.Parallel()
 	w, dir := openTestWAL(t, Config{ScavengeMaxLiveBytes: 64})
 	gs := w.GroupStore("grp")
 	for i := uint64(1); i <= 20; i++ {
@@ -696,6 +705,7 @@ func TestScavengeSkipsSegmentAboveThreshold(t *testing.T) {
 }
 
 func TestScavengeFsyncFailureLeavesVictimIntact(t *testing.T) {
+	t.Parallel()
 	fail := &atomic.Bool{}
 	w, dir := openTestWAL(t, Config{
 		ScavengeMaxLiveBytes: 512,
@@ -747,6 +757,7 @@ func TestScavengeFsyncFailureLeavesVictimIntact(t *testing.T) {
 // counters and every readable value exactly as they were — and the orphan
 // copies must replay as idempotent duplicates.
 func TestScavengeInternalSyncFailureAbortsPassIntact(t *testing.T) {
+	t.Parallel()
 	const threshold = 512
 	var syncs, failFrom atomic.Int64
 	w, dir := openTestWAL(t, Config{
@@ -899,6 +910,7 @@ func TestReclaimKeepsWALBoundedAcrossTruncationCycles(t *testing.T) {
 	if testing.Short() {
 		t.Skip("second-scale: 12 append-and-truncate cycles across dozens of segment rotations")
 	}
+	t.Parallel()
 	w, dir := openTestWAL(t, Config{
 		SegmentTargetSize:    1024,
 		ScavengeMaxLiveBytes: 512,
@@ -1033,6 +1045,7 @@ func TestCrashAfterScavengeCopiesBeforeSwap(t *testing.T) {
 // state than it originally saw (the mask applies before the copies). The
 // first/last bounds bookkeeping must converge once the copies apply.
 func TestMaskReplaysAgainstEmptierState(t *testing.T) {
+	t.Parallel()
 	cfg := Config{SegmentTargetSize: 2048, ScavengeMaxLiveBytes: 1024}
 	w, dir := openTestWAL(t, cfg)
 	gs := w.GroupStore("grp")
@@ -1102,6 +1115,7 @@ func TestMaskReplaysAgainstEmptierState(t *testing.T) {
 // index makes hashicorp/raft's NewRaft fail to construct the group, on
 // every restart.
 func TestReplayFullyTruncatedGroupRestoresEmptyBounds(t *testing.T) {
+	t.Parallel()
 	cfg := Config{SegmentTargetSize: 2048, ScavengeMaxLiveBytes: 512}
 	dir := t.TempDir()
 	w, err := Open(dir, cfg)
@@ -1214,7 +1228,12 @@ func TestConcurrentReadsDuringReclamation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("multi-second: 1200 appends and 30 truncations against four hammering readers")
 	}
-	w, _ := openTestWAL(t, Config{ScavengeMaxLiveBytes: 512})
+	t.Parallel()
+	var reclaims atomic.Int32
+	w, _ := openTestWAL(t, Config{
+		ScavengeMaxLiveBytes: 512,
+		OnReclaim:            func(ReclaimStats) { reclaims.Add(1) },
+	})
 	gs := w.GroupStore("grp")
 
 	var stop atomic.Bool
@@ -1255,6 +1274,9 @@ func TestConcurrentReadsDuringReclamation(t *testing.T) {
 	stop.Store(true)
 	wg.Wait()
 	syncBarrier(t, w)
+	if reclaims.Load() == 0 {
+		t.Fatal("test premise: no reclamation ran concurrently with the readers")
+	}
 	assertLiveBytesInvariant(t, w, "after concurrent load")
 }
 
@@ -1264,6 +1286,7 @@ func TestRepeatedScavengeCyclesSurviveRestarts(t *testing.T) {
 	if testing.Short() {
 		t.Skip("second-scale: four open/churn/reclaim/close restart cycles")
 	}
+	t.Parallel()
 	cfg := Config{SegmentTargetSize: 2048, ScavengeMaxLiveBytes: 512}
 	dir := t.TempDir()
 	next := uint64(1)
@@ -1319,6 +1342,7 @@ type unlinkErrorCall struct {
 // pass retries and fires again — the stall is visible, not silent. Clearing
 // the injection lets the retry succeed and OnReclaim fires.
 func TestUnlinkFailureReportedAndRetried(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var calls []unlinkErrorCall
 	var reclaimed []ReclaimStats
@@ -1420,6 +1444,7 @@ func TestUnlinkFailureReportedAndRetried(t *testing.T) {
 // the old segment's file is retried on the next pass without re-scavenging,
 // since nothing live is left to carry forward.
 func TestScavengeUnlinkFailureLeavesSwapDurable(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var reclaimed []ReclaimStats
 	var unlinkErrs int
@@ -1500,4 +1525,38 @@ func TestScavengeUnlinkFailureLeavesSwapDurable(t *testing.T) {
 		t.Errorf("ScavengedBytes = %d, want 0 (the retry reclaims without re-scavenging)", final.ScavengedBytes)
 	}
 	assertLiveBytesInvariant(t, w, "after the retry succeeds")
+}
+
+// Lock-order canary: OnReclaim is delivered after reclaimPass releases
+// stateMu, so a callback that itself takes stateMu.RLock must complete, not
+// deadlock. The timeout is a safety net catching a regression that moves
+// callback delivery back under the lock, not a condition the test is racing
+// to observe.
+func TestOnReclaimCallbackMayTakeStateMu(t *testing.T) {
+	t.Parallel()
+	done := make(chan struct{})
+	var closeOnce sync.Once
+	var w *WAL
+	w, _ = openTestWAL(t, Config{
+		OnReclaim: func(ReclaimStats) {
+			if w == nil {
+				return // Open's leading pass fired before assignment; nothing to reclaim yet on a fresh dir.
+			}
+			w.stateMu.RLock()
+			w.stateMu.RUnlock()
+			closeOnce.Do(func() { close(done) })
+		},
+	})
+	gs := w.GroupStore("grp")
+	fillAndDrain(t, gs, 1, 60, 64)
+	if err := gs.StoreLog(&hraft.Log{Index: 100, Term: 1, Data: []byte("live")}); err != nil {
+		t.Fatalf("store live: %v", err)
+	}
+	triggerReclaim(t, w, gs)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnReclaim callback taking stateMu.RLock deadlocked: callback delivery must run outside stateMu")
+	}
 }

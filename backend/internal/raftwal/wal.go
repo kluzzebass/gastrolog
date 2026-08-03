@@ -151,7 +151,8 @@ type Config struct {
 	ScavengeMaxLiveBytes int64
 
 	// OnReclaim, if non-nil, is invoked after each reclaimed segment.
-	// Invoked from the batch-writer goroutine: must not block.
+	// Invoked from the batch-writer goroutine: must not block. Open's
+	// leading pass invokes it too, before the writer goroutine starts.
 	OnReclaim func(ReclaimStats)
 
 	// OnReclaimAnomaly, if non-nil, is invoked when a verification scan
@@ -216,7 +217,10 @@ type WAL struct {
 	// replay. Guarded by stateMu.
 	quarantined map[int]struct{}
 
-	// Active segment.
+	// Active segment. seg, segPath and segSize are writer-only. segSeq is
+	// written under stateMu (via registerSegment) because oldestSealedSegment
+	// reads it under stateMu too; the writer itself reads its own prior
+	// writes without the lock, safe by single-goroutine program order.
 	seg     *os.File
 	segPath string
 	segSize int64
@@ -799,26 +803,33 @@ func (w *WAL) rotateSegment() error {
 		}
 	}
 
-	w.segSeq++
-	w.segPath = w.segmentPath(w.segSeq)
-	promotedSpare := w.segPath == w.sparePath
-	f, err := os.OpenFile(w.segPath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644) //nolint:gosec // G304: path is constructed internally
+	seq := w.segSeq + 1
+	path := w.segmentPath(seq)
+	promotedSpare := path == w.sparePath
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644) //nolint:gosec // G304: path is constructed internally
 	if err != nil {
-		return fmt.Errorf("open segment %s: %w", w.segPath, err)
+		return fmt.Errorf("open segment %s: %w", path, err)
 	}
 	w.seg = f
 	w.segSize = 0
-	w.registerSegment(w.segSeq)
+	w.segPath = path
+	w.registerSegment(seq)
 	w.reconcileReserve(promotedSpare)
 	return nil
 }
 
-// registerSegment ensures a live-bytes counter exists for a data segment so
-// a segment whose records all die (or that holds only masks) still becomes
-// a reclamation candidate. Runs on the writer or during single-threaded
-// replay; takes stateMu because readers may scan segLive concurrently.
+// registerSegment advances segSeq to seq (the writer only ever moves it
+// forward; replay calls it in ascending file order) and ensures a live-bytes
+// counter exists for the segment so one whose records all die (or that holds
+// only masks) still becomes a reclamation candidate. Runs on the writer or
+// during single-threaded replay; takes stateMu because oldestSealedSegment's
+// stateMu-holding callers read segSeq and segLive concurrently with the
+// writer's next rotation.
 func (w *WAL) registerSegment(seq int) {
 	w.stateMu.Lock()
+	if seq > w.segSeq {
+		w.segSeq = seq
+	}
 	if _, ok := w.segLive[seq]; !ok {
 		w.segLive[seq] = 0
 	}
@@ -924,10 +935,6 @@ func (w *WAL) replay() error {
 	for _, seg := range segments {
 		if err := w.replaySegment(seg.path, seg.seq); err != nil {
 			return fmt.Errorf("replay %s: %w", seg.path, err)
-		}
-		// Track the highest segment sequence number.
-		if seg.seq > w.segSeq {
-			w.segSeq = seg.seq
 		}
 	}
 	w.reconcileBoundsFromIndex()

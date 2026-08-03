@@ -549,7 +549,7 @@ func TestFourNodeRaftSustainedTruncationReclaims(t *testing.T) {
 		if segments > maxSegments {
 			t.Errorf("%s: %d data-bearing segments, want <= %d", n.id, segments, maxSegments)
 		}
-		assertLiveBytesInvariant(t, n.wal, "final")
+		assertLiveBytesInvariant(t, n.wal, fmt.Sprintf("%s: final", n.id))
 
 		var lg hraft.Log
 		if err := n.gs.GetLog(last, &lg); err != nil {

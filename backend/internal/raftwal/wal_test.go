@@ -1541,9 +1541,11 @@ func TestSegmentReclamationPreservesSparseIndexAfterRestart(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	w, err := Open(dir, Config{
-		SegmentTargetSize: 1024,
-	})
+	cfg := Config{
+		SegmentTargetSize:    1024,
+		ScavengeMaxLiveBytes: 128,
+	}
+	w, err := Open(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1569,7 +1571,7 @@ func TestSegmentReclamationPreservesSparseIndexAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	w2, err := Open(dir)
+	w2, err := Open(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
