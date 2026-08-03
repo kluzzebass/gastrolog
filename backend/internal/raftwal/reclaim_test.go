@@ -793,6 +793,120 @@ func TestMaskReplaysAgainstEmptierState(t *testing.T) {
 	assertLiveBytesInvariant(t, w2, "after replay")
 }
 
+// A group emptied outright — prefix truncation after a snapshot, then the
+// full suffix truncation of an AppendEntries conflict — sits at bounds
+// (0,0). Reclamation unlinks the drained segments that held its entries
+// while its DeleteRange masks survive in a later segment another group
+// keeps live, so replay applies those masks against empty state. The
+// rebuilt bounds must still be (0,0): a non-zero LastIndex over an empty
+// index makes hashicorp/raft's NewRaft fail to construct the group, on
+// every restart.
+func TestReplayFullyTruncatedGroupRestoresEmptyBounds(t *testing.T) {
+	cfg := Config{SegmentTargetSize: 2048, ScavengeMaxLiveBytes: 512}
+	dir := t.TempDir()
+	w, err := Open(dir, cfg)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	gs := w.GroupStore("emptied")
+	keeper := w.GroupStore("keeper")
+
+	for i := uint64(1); i <= 30; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: make([]byte, 64)}); err != nil {
+			t.Fatalf("store %d: %v", i, err)
+		}
+	}
+	// A record far above the scavenge threshold pins the segment it lands
+	// in, so the masks written after it are never reclaimed.
+	if err := keeper.StoreLog(&hraft.Log{Index: 1, Term: 1, Data: make([]byte, 1800)}); err != nil {
+		t.Fatalf("keeper store: %v", err)
+	}
+	syncBarrier(t, w)
+
+	entrySegs := make(map[int]bool)
+	w.stateMu.RLock()
+	for _, loc := range w.groups[gs.groupID].logs {
+		entrySegs[loc.seg] = true
+	}
+	keeperSeg := w.groups[keeper.groupID].logs[1].seg
+	w.stateMu.RUnlock()
+	if len(entrySegs) == 0 {
+		t.Fatal("test premise: no segments hold the group's entries")
+	}
+	for seg := range entrySegs {
+		if seg >= keeperSeg {
+			t.Fatalf("test premise: entry segment %d is not older than the pinned segment %d", seg, keeperSeg)
+		}
+	}
+
+	if err := gs.DeleteRange(1, 10); err != nil {
+		t.Fatalf("prefix delete: %v", err)
+	}
+	if err := gs.DeleteRange(11, 30); err != nil {
+		t.Fatalf("suffix delete: %v", err)
+	}
+	first, _ := gs.FirstIndex()
+	last, _ := gs.LastIndex()
+	if first != 0 || last != 0 {
+		t.Fatalf("live bounds = (%d,%d), want (0,0)", first, last)
+	}
+
+	// One scavenge per pass: drive passes until every entry segment is gone.
+	for range 10 {
+		triggerReclaim(t, w, keeper)
+	}
+	for seg := range entrySegs {
+		if _, err := os.Stat(w.segmentPath(seg)); !os.IsNotExist(err) {
+			t.Fatalf("test premise: entry segment %d survived reclamation (stat err = %v)", seg, err)
+		}
+	}
+	if _, err := os.Stat(w.segmentPath(keeperSeg)); err != nil {
+		t.Fatalf("test premise: the segment holding the masks was reclaimed: %v", err)
+	}
+	assertLiveBytesInvariant(t, w, "after reclamation")
+	if err := w.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	w2, err := Open(dir, cfg)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer func() { _ = w2.Close() }()
+
+	gs2 := w2.GroupStore("emptied")
+	first, err = gs2.FirstIndex()
+	if err != nil {
+		t.Fatalf("FirstIndex: %v", err)
+	}
+	last, err = gs2.LastIndex()
+	if err != nil {
+		t.Fatalf("LastIndex: %v", err)
+	}
+	if first != 0 || last != 0 {
+		t.Errorf("replayed bounds = (%d,%d), want (0,0); hashicorp/raft calls GetLog(LastIndex) and refuses to construct the group", first, last)
+	}
+	var lg hraft.Log
+	for _, i := range []uint64{1, 10, 11, 30} {
+		if err := gs2.GetLog(i, &lg); err != hraft.ErrLogNotFound {
+			t.Errorf("GetLog(%d) = %v, want ErrLogNotFound", i, err)
+		}
+	}
+
+	keeper2 := w2.GroupStore("keeper")
+	kFirst, _ := keeper2.FirstIndex()
+	kLast, _ := keeper2.LastIndex()
+	if kFirst != 1 || kLast != 1 {
+		t.Errorf("keeper bounds = (%d,%d), want (1,1)", kFirst, kLast)
+	}
+	if err := keeper2.GetLog(1, &lg); err != nil {
+		t.Errorf("keeper GetLog(1): %v", err)
+	} else if len(lg.Data) != 1800 {
+		t.Errorf("keeper payload len = %d, want 1800", len(lg.Data))
+	}
+	assertLiveBytesInvariant(t, w2, "after replay")
+}
+
 // Readers hammer GetLog/FirstIndex/LastIndex while the writer truncates and
 // reclaims via the wired passes. Correctness is the race detector plus never
 // observing a read error other than ErrLogNotFound.

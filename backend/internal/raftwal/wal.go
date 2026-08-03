@@ -902,7 +902,33 @@ func (w *WAL) replay() error {
 			w.segSeq = seg.seq
 		}
 	}
+	w.reconcileBoundsFromIndex()
 	return nil
+}
+
+// reconcileBoundsFromIndex derives every group's first/last index from the
+// rebuilt log index. Once reclamation has unlinked drained segments, a
+// group's surviving DeleteRange masks replay against emptier state than they
+// originally saw, and the incremental bound updates they carry can leave
+// bounds that describe entries the index does not hold. After replay the
+// index is the authority. Single-threaded: the writer has not started.
+func (w *WAL) reconcileBoundsFromIndex() {
+	for _, gs := range w.groups {
+		if len(gs.logs) == 0 {
+			gs.firstIndex, gs.lastIndex = 0, 0
+			continue
+		}
+		first, last := uint64(0), uint64(0)
+		for idx := range gs.logs {
+			if first == 0 || idx < first {
+				first = idx
+			}
+			if idx > last {
+				last = idx
+			}
+		}
+		gs.firstIndex, gs.lastIndex = first, last
+	}
 }
 
 type segmentInfo struct {
