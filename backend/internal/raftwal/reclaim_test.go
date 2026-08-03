@@ -593,12 +593,165 @@ func TestScavengeFsyncFailureLeavesVictimIntact(t *testing.T) {
 	assertLiveBytesInvariant(t, w, "after retried scavenge")
 }
 
+// The failure the previous test cannot reach: the scavenge's OWN fsync,
+// inside appendScavenge, after the trigger batch's fsync already succeeded
+// and the pass is under way. The copies are written but unsynced and the
+// index never points at them, so the abort must leave the victim, the
+// counters and every readable value exactly as they were — and the orphan
+// copies must replay as idempotent duplicates.
+func TestScavengeInternalSyncFailureAbortsPassIntact(t *testing.T) {
+	const threshold = 512
+	var syncs, failFrom atomic.Int64
+	w, dir := openTestWAL(t, Config{
+		SegmentTargetSize:    2048,
+		ScavengeMaxLiveBytes: threshold,
+		SegmentSync: func(f *os.File) error {
+			n := syncs.Add(1)
+			if from := failFrom.Load(); from != 0 && n >= from {
+				return errHarnessSyncFail
+			}
+			return f.Sync()
+		},
+	})
+	gs := w.GroupStore("grp")
+	const total = 40
+	for i := uint64(1); i <= total; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 7, Data: make([]byte, 64)}); err != nil {
+			t.Fatalf("store %d: %v", i, err)
+		}
+	}
+	syncBarrier(t, w)
+
+	// The oldest sealed segment is packed with live entries, so no pass can
+	// touch it yet. Truncating exactly its span — the Raft prefix truncation
+	// after a snapshot — drops it to a small remainder, and the very flush
+	// carrying that mask scavenges it.
+	w.stateMu.RLock()
+	victim := w.oldestSealedSegment()
+	victimLive := w.segLive[victim]
+	var truncTo, entryBytes int64
+	state := w.groups[gs.groupID]
+	for idx, loc := range state.logs {
+		if loc.seg != victim {
+			continue
+		}
+		entryBytes += int64(loc.length)
+		if int64(idx) > truncTo {
+			truncTo = int64(idx)
+		}
+	}
+	w.stateMu.RUnlock()
+	remainder := victimLive - entryBytes
+	if victim == 0 || victimLive <= threshold || truncTo == 0 {
+		t.Fatalf("test premise: oldest sealed segment %d live=%d truncTo=%d, want a segment above the %d threshold",
+			victim, victimLive, truncTo, threshold)
+	}
+	if remainder <= 0 || remainder > threshold {
+		t.Fatalf("test premise: truncating 1..%d leaves segment %d with %d live bytes, want a remainder in (0,%d]",
+			truncTo, victim, remainder, threshold)
+	}
+	victimPath := w.segmentPath(victim)
+	segmentsBefore := segmentFileCount(t, dir)
+
+	// Arm one sync ahead: the trigger batch's own fsync succeeds and the
+	// scavenge's — the next one, in the pass that same flush kicks off —
+	// fails. Everything after stays armed so nothing quietly finishes the
+	// scavenge before the assertions below.
+	base := syncs.Load()
+	failFrom.Store(base + 2)
+	if err := gs.DeleteRange(1, uint64(truncTo)); err != nil {
+		t.Fatalf("trigger batch must not fail: %v", err)
+	}
+	// Order past the pass: the writer is serial, so this write's round-trip
+	// completes only once the trigger flush's reclamation has finished. Its
+	// own fsync is injected-failing, hence the ignored error.
+	_ = w.GroupStore("barrier").SetUint64([]byte("b"), 2)
+
+	if n := syncs.Load() - base; n < 3 {
+		t.Fatalf("test premise: %d syncs since arming, want at least 3 (trigger, scavenge, barrier) — the pass never attempted a scavenge", n)
+	}
+	if _, err := os.Stat(victimPath); err != nil {
+		t.Fatalf("victim unlinked despite the scavenge fsync failing: %v", err)
+	}
+	if after := segmentFileCount(t, dir); after < segmentsBefore {
+		t.Errorf("reclaimed %d segment(s) despite the scavenge fsync failing", segmentsBefore-after)
+	}
+	w.stateMu.RLock()
+	stillLive := w.segLive[victim]
+	stillRefs := w.liveRefsForSegment(victim)
+	stillOldest := w.oldestSealedSegment()
+	w.stateMu.RUnlock()
+	if stillRefs == 0 {
+		t.Error("the index no longer references the victim: the aborted scavenge repointed it at unsynced copies")
+	}
+	if stillLive != remainder {
+		t.Errorf("segLive[%d] = %d after the aborted scavenge, want the untouched remainder %d", victim, stillLive, remainder)
+	}
+	if stillOldest != victim {
+		t.Errorf("oldest sealed segment moved from %d to %d across an aborted scavenge", victim, stillOldest)
+	}
+	assertLiveBytesInvariant(t, w, "after the aborted scavenge")
+	var lg hraft.Log
+	for i := uint64(truncTo) + 1; i <= total; i++ {
+		if err := gs.GetLog(i, &lg); err != nil {
+			t.Fatalf("GetLog(%d) after the aborted scavenge: %v", i, err)
+		}
+	}
+
+	// Clear the injection: the retry writes a second generation of copies
+	// over the orphaned first, then scavenges and unlinks for real.
+	failFrom.Store(0)
+	triggerReclaim(t, w, gs)
+	if _, err := os.Stat(victimPath); !os.IsNotExist(err) {
+		t.Fatalf("retry after clearing the injection did not reclaim the victim: stat err = %v", err)
+	}
+	assertLiveBytesInvariant(t, w, "after the retried scavenge")
+
+	// Replay over the orphaned copies: duplicates are idempotent, later wins.
+	if err := w.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	w2, err := Open(dir, Config{SegmentTargetSize: 2048, ScavengeMaxLiveBytes: threshold})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer func() { _ = w2.Close() }()
+	gs2 := w2.GroupStore("grp")
+	first, err := gs2.FirstIndex()
+	if err != nil {
+		t.Fatalf("FirstIndex: %v", err)
+	}
+	last, err := gs2.LastIndex()
+	if err != nil {
+		t.Fatalf("LastIndex: %v", err)
+	}
+	if first != uint64(truncTo)+1 || last != total {
+		t.Errorf("replayed bounds = (%d,%d), want (%d,%d)", first, last, truncTo+1, total)
+	}
+	for i := uint64(truncTo) + 1; i <= total; i++ {
+		if err := gs2.GetLog(i, &lg); err != nil {
+			t.Errorf("replayed GetLog(%d): %v", i, err)
+		} else if lg.Term != 7 || len(lg.Data) != 64 {
+			t.Errorf("replayed log %d = term %d, %d data bytes", i, lg.Term, len(lg.Data))
+		}
+	}
+	for i := uint64(1); i <= uint64(truncTo); i++ {
+		if err := gs2.GetLog(i, &lg); err != hraft.ErrLogNotFound {
+			t.Errorf("replayed GetLog(%d) = %v, want ErrLogNotFound", i, err)
+		}
+	}
+	assertLiveBytesInvariant(t, w2, "after replay over orphaned copies")
+}
+
 // The Raft pattern reclamation is built for: append a batch, snapshot, then
 // truncate the whole log prefix. Repeated cycles must keep the WAL bounded —
 // a reclamation gate that never opens leaves it growing without bound as
 // truncations pile up. The exact steady state is an implementation detail;
 // staying far below the unreclaimed count is the invariant.
 func TestReclaimKeepsWALBoundedAcrossTruncationCycles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("second-scale: 12 append-and-truncate cycles across dozens of segment rotations")
+	}
 	w, dir := openTestWAL(t, Config{
 		SegmentTargetSize:    1024,
 		ScavengeMaxLiveBytes: 512,
@@ -911,6 +1064,9 @@ func TestReplayFullyTruncatedGroupRestoresEmptyBounds(t *testing.T) {
 // reclaims via the wired passes. Correctness is the race detector plus never
 // observing a read error other than ErrLogNotFound.
 func TestConcurrentReadsDuringReclamation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-second: 1200 appends and 30 truncations against four hammering readers")
+	}
 	w, _ := openTestWAL(t, Config{ScavengeMaxLiveBytes: 512})
 	gs := w.GroupStore("grp")
 
@@ -958,6 +1114,9 @@ func TestConcurrentReadsDuringReclamation(t *testing.T) {
 // Repeated scavenge cycles across restarts: registrations and stable keys
 // migrate forward indefinitely without loss or duplication.
 func TestRepeatedScavengeCyclesSurviveRestarts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("second-scale: four open/churn/reclaim/close restart cycles")
+	}
 	cfg := Config{SegmentTargetSize: 2048, ScavengeMaxLiveBytes: 512}
 	dir := t.TempDir()
 	next := uint64(1)
