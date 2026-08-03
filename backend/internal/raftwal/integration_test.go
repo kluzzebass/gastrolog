@@ -196,7 +196,7 @@ func TestWALBackedRaftSnapshotAndRestore(t *testing.T) {
 		t.Fatalf("FSM count = %d, want 30", fsm.count)
 	}
 
-	// After snapshot + compaction, first index should have advanced.
+	// After the snapshot's truncation, first index should have advanced.
 	first, _ := gs.FirstIndex()
 	last, _ := gs.LastIndex()
 	t.Logf("after snapshot: first=%d last=%d (trailing=%d)", first, last, conf.TrailingLogs)
@@ -333,8 +333,9 @@ func TestFourNodeRaftSustainedTruncationReclaims(t *testing.T) {
 		for range perRound {
 			apply(payload)
 		}
-		// A user snapshot compacts only the node it runs on, so every node
-		// takes one: this is what drives DeleteRange into all four WALs.
+		// A user snapshot truncates the log only on the node that runs it,
+		// so every node takes one: this is what drives DeleteRange into all
+		// four WALs.
 		for _, n := range nodes {
 			if err := n.raft.Snapshot().Error(); err != nil {
 				t.Fatalf("round %d: %s snapshot: %v", round, n.id, err)

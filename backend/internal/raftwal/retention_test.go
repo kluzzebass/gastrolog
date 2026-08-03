@@ -304,7 +304,7 @@ func TestRetentionServesEvictedEntriesAcrossReclamation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gs := w.GroupStore("ret-compact")
+	gs := w.GroupStore("ret-reclaim")
 	for i := uint64(1); i <= 40; i++ {
 		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: make([]byte, 100)}); err != nil {
 			t.Fatal(err)
@@ -337,7 +337,7 @@ func TestRetentionServesEvictedEntriesAcrossReclamation(t *testing.T) {
 		}
 	}
 	verify(gs, "post-reclamation")
-	inspectWindow(t, w, "ret-compact")
+	inspectWindow(t, w, "ret-reclaim")
 
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
@@ -347,7 +347,7 @@ func TestRetentionServesEvictedEntriesAcrossReclamation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer w2.Close()
-	verify(w2.GroupStore("ret-compact"), "replayed")
+	verify(w2.GroupStore("ret-reclaim"), "replayed")
 }
 
 // Two groups with independent windows: churn on one must not disturb the

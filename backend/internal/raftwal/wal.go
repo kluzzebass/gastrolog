@@ -8,9 +8,11 @@
 // through the shared WAL with coalesced fsync.
 //
 // The WAL is segmented: when a segment exceeds the target size, a new segment
-// is started. Space is returned by reclamation: after a truncation or a
-// rotation the writer unlinks sealed segments the index no longer references,
-// oldest first, so replay never sees a hole ahead of a surviving record.
+// is started. Space is returned by reclamation, oldest sealed segment first:
+// after a truncation, a rotation, or at Open, the writer unlinks a fully
+// drained segment outright, and scavenges a nearly-drained one by
+// re-appending its surviving records through the write path before unlinking
+// it — so replay never sees a hole ahead of a surviving record.
 package raftwal
 
 import (
