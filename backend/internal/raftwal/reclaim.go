@@ -15,13 +15,47 @@ type ReclaimStats struct {
 	Duration       time.Duration
 }
 
+// reclaimAnomaly records a segment whose verification scan contradicted its
+// live-bytes counter, with the reference count the scan found.
+type reclaimAnomaly struct {
+	seq      int
+	liveRefs int
+}
+
+// reclaimEvents collects the notifications a reclamation pass owes its
+// callbacks. OnReclaim and OnReclaimAnomaly run slog and the alert
+// collector, each taking locks of their own; calling them under stateMu
+// would block every group's reads for that duration and order this lock
+// ahead of theirs. Steps append here and reclaimPass delivers once the lock
+// is released, preserving per-callback order.
+type reclaimEvents struct {
+	reclaimed []ReclaimStats
+	anomalies []reclaimAnomaly
+}
+
+func (e *reclaimEvents) deliver(cfg Config) {
+	if cfg.OnReclaim != nil {
+		for _, s := range e.reclaimed {
+			cfg.OnReclaim(s)
+		}
+	}
+	if cfg.OnReclaimAnomaly != nil {
+		for _, a := range e.anomalies {
+			cfg.OnReclaimAnomaly(a.seq, a.liveRefs)
+		}
+	}
+}
+
 // reclaimPass reclaims dead WAL space. Runs on the batch writer strictly
 // after batch waiters are notified: unlinks every drained oldest segment,
-// then scavenges at most one nearly-drained one.
+// then scavenges at most one nearly-drained one. It is the sole sequencing
+// owner of a pass's callbacks.
 func (w *WAL) reclaimPass() {
-	for w.unlinkOldestDrained(0, time.Now()) {
+	var events reclaimEvents
+	for w.unlinkOldestDrained(0, time.Now(), &events) {
 	}
-	w.scavengeOldest()
+	w.scavengeOldest(&events)
+	events.deliver(w.cfg)
 }
 
 // oldestSealedSegment returns the lowest tracked segment sequence below the
@@ -41,9 +75,9 @@ func (w *WAL) oldestSealedSegment() int {
 
 // unlinkOldestDrained removes the oldest sealed segment if its counter reads
 // drained AND a verification scan confirms no index reference survives — the
-// counter only nominates. A disagreement quarantines the segment and raises
-// OnReclaimAnomaly once. Returns whether a segment was removed.
-func (w *WAL) unlinkOldestDrained(scavengedBytes int64, start time.Time) bool {
+// counter only nominates. A disagreement quarantines the segment and reports
+// an anomaly once. Returns whether a segment was removed.
+func (w *WAL) unlinkOldestDrained(scavengedBytes int64, start time.Time, events *reclaimEvents) bool {
 	w.stateMu.Lock()
 	defer w.stateMu.Unlock()
 
@@ -55,7 +89,7 @@ func (w *WAL) unlinkOldestDrained(scavengedBytes int64, start time.Time) bool {
 		return false
 	}
 	if refs := w.liveRefsForSegment(seq); refs > 0 {
-		w.quarantineSegment(seq, refs)
+		w.quarantineSegment(seq, refs, events)
 		return false
 	}
 
@@ -70,29 +104,27 @@ func (w *WAL) unlinkOldestDrained(scavengedBytes int64, start time.Time) bool {
 	w.closeSegmentReadersUpTo(seq)
 	delete(w.segLive, seq)
 
-	if w.cfg.OnReclaim != nil {
-		w.cfg.OnReclaim(ReclaimStats{
-			Seq:            seq,
-			ReclaimedBytes: reclaimedBytes,
-			ScavengedBytes: scavengedBytes,
-			Duration:       time.Since(start),
-		})
-	}
+	events.reclaimed = append(events.reclaimed, ReclaimStats{
+		Seq:            seq,
+		ReclaimedBytes: reclaimedBytes,
+		ScavengedBytes: scavengedBytes,
+		Duration:       time.Since(start),
+	})
 	return true
 }
 
-// quarantineSegment excludes a segment from reclamation and reports the
-// contradiction once. liveRefs is what the verification scan found: above
-// zero when the counter read drained, zero when the counter claims live
-// bytes no index entry references. Caller holds stateMu.
-func (w *WAL) quarantineSegment(seq, liveRefs int) {
+// quarantineSegment excludes a segment from reclamation and records the
+// contradiction once — the quarantined set is the guard, so one segment
+// yields one report however many passes nominate it. liveRefs is what the
+// verification scan found: above zero when the counter read drained, zero
+// when the counter claims live bytes no index entry references. Caller holds
+// stateMu.
+func (w *WAL) quarantineSegment(seq, liveRefs int, events *reclaimEvents) {
 	if _, bad := w.quarantined[seq]; bad {
 		return
 	}
 	w.quarantined[seq] = struct{}{}
-	if w.cfg.OnReclaimAnomaly != nil {
-		w.cfg.OnReclaimAnomaly(seq, liveRefs)
-	}
+	events.anomalies = append(events.anomalies, reclaimAnomaly{seq: seq, liveRefs: liveRefs})
 }
 
 // scavRecord is one live record carried out of a segment being scavenged.
@@ -110,7 +142,7 @@ type scavRecord struct {
 // through the normal write path, fsync, repoint the index, then unlink. Any
 // error aborts with the index untouched — the copies are idempotent
 // duplicates on replay and the pass retries later. Runs on the batch writer.
-func (w *WAL) scavengeOldest() {
+func (w *WAL) scavengeOldest(events *reclaimEvents) {
 	start := time.Now()
 
 	w.stateMu.RLock()
@@ -137,7 +169,7 @@ func (w *WAL) scavengeOldest() {
 		// Nothing can drain the segment, so quarantine it rather than let
 		// it pin every segment behind it in silence.
 		w.stateMu.Lock()
-		w.quarantineSegment(victim, 0)
+		w.quarantineSegment(victim, 0, events)
 		w.stateMu.Unlock()
 		return
 	}
@@ -146,7 +178,7 @@ func (w *WAL) scavengeOldest() {
 		return
 	}
 	scavenged := w.swapScavenged(victim, records, locs)
-	w.unlinkOldestDrained(scavenged, start)
+	w.unlinkOldestDrained(scavenged, start, events)
 }
 
 // collectScavenge gathers the victim segment's live records: group
