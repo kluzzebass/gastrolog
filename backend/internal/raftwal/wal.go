@@ -225,6 +225,14 @@ type logLoc struct {
 	length int   // encoded payload length
 }
 
+// stableVal is a stable-store value plus the durable location of the record
+// that last set it, so reclamation can tell which segment the live copy
+// occupies.
+type stableVal struct {
+	value []byte
+	loc   logLoc
+}
+
 // groupState holds per-group in-memory state.
 type groupState struct {
 	// Log index: raft log index → durable location in the WAL segments.
@@ -242,14 +250,19 @@ type groupState struct {
 	cacheQueue cacheFIFO
 
 	// Stable store: small key-value pairs (CurrentTerm, LastVotedFor).
-	stable map[string][]byte
+	stable map[string]stableVal
+
+	// Live registration record for this group: the name and the durable
+	// location of the entryGroupReg record replay would use.
+	regName string
+	regLoc  logLoc
 }
 
 func newGroupState() *groupState {
 	return &groupState{
 		logs:   make(map[uint64]logLoc),
 		cache:  make(map[uint64][]byte),
-		stable: make(map[string][]byte),
+		stable: make(map[string]stableVal),
 	}
 }
 
@@ -628,6 +641,8 @@ func (w *WAL) applyToMemory(groupID uint32, typ entryType, payload []byte, seg i
 		w.groups[groupID] = gs
 	}
 
+	loc := logLoc{seg: seg, off: payloadOff, length: len(payload)}
+
 	switch typ {
 	case entryLog:
 		gs.applyLogEntry(payload, logLoc{seg: seg, off: payloadOff, length: len(payload)}, w.cfg.LogCacheBudgetBytes)
@@ -639,14 +654,14 @@ func (w *WAL) applyToMemory(groupID uint32, typ entryType, payload []byte, seg i
 
 	case entryStableSet:
 		key, val := decodeStableSet(payload)
-		gs.stable[key] = val
+		gs.stable[key] = stableVal{value: val, loc: loc}
 
 	case entryStableUint64:
 		key, val := decodeStableUint64(payload)
 		// Store as 8-byte big-endian for GetUint64 compatibility.
 		buf := make([]byte, 8)
 		binary.BigEndian.PutUint64(buf, val)
-		gs.stable[key] = buf
+		gs.stable[key] = stableVal{value: buf, loc: loc}
 
 	case entryDeleteRange:
 		gs.applyDeleteRange(payload)
@@ -657,6 +672,8 @@ func (w *WAL) applyToMemory(groupID uint32, typ entryType, payload []byte, seg i
 		if groupID >= w.nextGID {
 			w.nextGID = groupID + 1
 		}
+		gs.regName = name
+		gs.regLoc = loc
 	}
 }
 
@@ -1073,7 +1090,7 @@ func (w *WAL) collectCompactionSnapshot() compactionSnapshot {
 		}
 		sort.Strings(stableKeys)
 		for _, key := range stableKeys {
-			val := gs.stable[key]
+			val := gs.stable[key].value
 			payload := encodeStableSet(key, val)
 			snap.records = append(snap.records, snapshotRecord{
 				groupID: gid,
