@@ -628,6 +628,10 @@ func TestFourNodeRaftInstallSnapshotFollowerReclaims(t *testing.T) {
 	}
 	t.Logf("%s isolated at last=%d (bound %d), snapshot=%d",
 		lagger.id, laggerLast, frozen, laggerSnapBefore)
+	if laggerLast > frozen {
+		t.Fatalf("%s: LastIndex = %d, past the leader's log at isolation (%d), which bounds it",
+			lagger.id, laggerLast, frozen)
+	}
 	for _, n := range c.nodes {
 		if n == lagger {
 			continue
@@ -712,9 +716,12 @@ func TestFourNodeRaftInstallSnapshotFollowerReclaims(t *testing.T) {
 		t.Errorf("%s: GetLog(%d) in the compacted hole = %v, want ErrLogNotFound", lagger.id, frozen+1, err)
 	}
 
-	// Restart the lagger's WAL stack. Replay sees the surviving DeleteRange
-	// masks against segments reclamation has already unlinked, so the rebuilt
-	// index is the only authority for the group's bounds.
+	// Restart the lagger's WAL stack: replay of a gapped log, whose surviving
+	// DeleteRange masks reach into segments reclamation has already unlinked,
+	// must land on the bounds the live index reported. The emptied-group replay
+	// shape — where the masks are all that survive and bounds can only come
+	// from the rebuilt index — is unreachable through InstallSnapshot and is
+	// covered by the WAL package's own replay tests.
 	if err := lagger.wal.Close(); err != nil {
 		t.Fatalf("%s: close WAL: %v", lagger.id, err)
 	}
