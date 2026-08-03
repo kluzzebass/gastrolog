@@ -124,10 +124,14 @@ type Config struct {
 	OnReserveState func(lost bool, err error)
 
 	// ScavengeMaxLiveBytes bounds the live payload bytes the writer will
-	// rewrite in one reclamation pass to free the oldest segment. It is the
-	// hard ceiling on reclamation's inline cost: about 6% of a default
-	// segment and single-digit milliseconds of sequential write.
-	// Default: 4 MiB.
+	// rewrite in one reclamation pass to free the oldest segment: about 6%
+	// of a default segment and single-digit milliseconds of sequential
+	// write. Default: 4 MiB.
+	//
+	// It bounds the rewrite, and only the rewrite. The same pass also
+	// unlinks every drained segment it finds — unbounded in count, and each
+	// unlink runs a verification scan over the whole index before removing
+	// the file. That cost is not capped by this setting.
 	//
 	// A segment whose live remainder exceeds the bound is retained until
 	// truncation drains it below the bound, and because reclamation is

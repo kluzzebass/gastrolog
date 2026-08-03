@@ -204,19 +204,23 @@ func walReclaimLog(logger *slog.Logger, walName string) func(raftwal.ReclaimStat
 }
 
 // walReclaimAnomalyAlarm raises a storage alarm when the reclamation
-// verification scan contradicts the live-bytes counter: the segment is
-// retained and reclamation halts on it until a restart rebuilds the
-// counters.
+// verification scan contradicts the live-bytes counter, in either
+// direction: the segment is retained and reclamation halts on it until a
+// restart rebuilds the counters.
 func walReclaimAnomalyAlarm(alerts *alert.Collector, logger *slog.Logger, walName string) func(seq, liveRefs int) {
 	return func(seq, liveRefs int) {
+		drift := fmt.Sprintf("segment %d was nominated as drained but the index holds %d live references into it", seq, liveRefs)
+		if liveRefs == 0 {
+			drift = fmt.Sprintf("the live-bytes counter reads above zero for segment %d but the index holds no references into it", seq)
+		}
 		if logger != nil {
 			logger.Error("raft WAL reclamation halted — live-bytes counter contradicts verification scan",
-				"wal", walName, "segment", seq, "live_refs", liveRefs)
+				"wal", walName, "segment", seq, "live_refs", liveRefs, "drift", drift)
 		}
 		if alerts != nil {
 			alerts.Raise("wal-reclaim-anomaly", walName, fmt.Sprintf(
-				"Raft WAL (%s) reclamation halted: segment %d nominated as drained still holds %d live references; restart the node to rebuild counters",
-				walName, seq, liveRefs))
+				"Raft WAL (%s) reclamation halted: %s; restart the node to rebuild counters",
+				walName, drift))
 		}
 	}
 }

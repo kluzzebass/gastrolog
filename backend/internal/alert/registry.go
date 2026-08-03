@@ -119,7 +119,7 @@ var catalog = []AlarmType{
 		SoftwareFault: true,
 		Latching:      true, // reclamation stays halted on the segment until restart
 		Source:        "storage",
-		Cause:         "A Raft WAL segment its live-bytes counter nominated as drained still holds live references. The counter and the index disagree — an accounting defect, not an operating condition. The segment is retained and the WAL stops returning space on this node.",
+		Cause:         "A Raft WAL segment's live-bytes counter and the index disagree — either the counter nominated a segment as drained that the index still references, or it reads above zero for a segment the index does not reference at all. An accounting defect, not an operating condition. The segment is retained and the WAL stops returning space on this node.",
 		Response:      "This should never fire. Capture the alarm detail and this node's WAL log lines and file it. Restarting the node rebuilds the counters from replay and resumes reclamation, but that is a workaround, not the response.",
 	},
 
