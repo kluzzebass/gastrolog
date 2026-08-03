@@ -129,10 +129,12 @@ type Config struct {
 	// write. Default: 4 MiB.
 	//
 	// It bounds the rewrite, and only the rewrite. The same pass also
-	// unlinks every drained segment it finds — unbounded in count, but one
-	// index scan verifies every drained candidate in the pass, so each
-	// additional segment costs only its unlink syscall. That cost is not
-	// capped by this setting.
+	// unlinks every drained segment it finds — unbounded in count, and
+	// verified by at most one index scan for the whole pass. Removing a
+	// segment past the first one costs only that segment's own file work
+	// (stat, remove, close its reader handles), not another scan. Neither
+	// the unlink count nor that per-segment removal cost is capped by this
+	// setting.
 	//
 	// A segment whose live remainder exceeds the bound is retained until
 	// truncation drains it below the bound, and because reclamation is

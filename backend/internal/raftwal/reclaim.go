@@ -98,20 +98,23 @@ func (w *WAL) unlinkOldestDrained(scavengedBytes int64, start time.Time, events 
 	return w.removeSegmentLocked(seq, scavengedBytes, start, events)
 }
 
-// unlinkDrainedBurst removes every oldest-first run of drained sealed
-// segments behind one index scan taken when the burst locks stateMu.
-// Unlinking a drained segment cannot create or remove a live reference
-// elsewhere, so the same scan verifies every candidate in the run: each
-// segment after the first costs only its unlink syscall, not another scan.
-// A segment whose counter disagrees with the scan quarantines and stops the
-// burst — oldest-first, nothing behind a retained segment may be touched.
-// Caller must not be scavengeOldest, whose index-mutating swap makes this
-// scan stale for its own victim.
+// unlinkDrainedBurst removes the oldest-first run of drained sealed segments
+// a pass finds, holding stateMu for the whole run. The index scan that
+// verifies a counter-drained candidate is deferred until the first one
+// actually needs it, and reused for the rest of the run once taken: nothing
+// mutates the index between lock acquisition and that first scan, so it
+// still costs at most one scan per pass — but a pass that unlinks nothing
+// (the common case: nothing sealed, a live oldest segment, or a segment
+// already quarantined) never pays for one. A segment whose counter
+// disagrees with the scan quarantines and stops the run — oldest-first,
+// nothing behind a retained segment may be touched. Caller must not be
+// scavengeOldest, whose index-mutating swap makes a scan taken here stale
+// for its own victim.
 func (w *WAL) unlinkDrainedBurst(events *reclaimEvents) {
 	w.stateMu.Lock()
 	defer w.stateMu.Unlock()
 
-	refs := w.liveRefsBySegment()
+	var refs map[int]int
 	for {
 		seq := w.oldestSealedSegment()
 		if seq == 0 || w.segLive[seq] != 0 {
@@ -119,6 +122,9 @@ func (w *WAL) unlinkDrainedBurst(events *reclaimEvents) {
 		}
 		if _, bad := w.quarantined[seq]; bad {
 			return
+		}
+		if refs == nil {
+			refs = w.liveRefsBySegment()
 		}
 		if r := refs[seq]; r > 0 {
 			w.quarantineSegment(seq, r, events)
