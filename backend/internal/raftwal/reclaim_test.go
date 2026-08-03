@@ -391,6 +391,150 @@ func TestReclaimAnomalyDetectsInverseCounterDrift(t *testing.T) {
 	}
 }
 
+// A reclamation pass verifies every drained-by-counter candidate against one
+// index scan taken when the pass locks the state, not a fresh scan per
+// segment. This pins that the shared scan still gets each candidate right
+// across a burst: a genuinely drained segment unlinks, a segment whose
+// counter disagrees with the scan quarantines, and oldest-first stops the
+// burst there — a segment behind it that is itself genuinely drained stays
+// untouched.
+func TestReclaimBurstSharesOneScanAcrossCandidates(t *testing.T) {
+	var mu sync.Mutex
+	var reclaimed []ReclaimStats
+	var anomalies []int
+	w, _ := openTestWAL(t, Config{
+		SegmentTargetSize:    600,
+		ScavengeMaxLiveBytes: 128,
+		OnReclaim:            func(s ReclaimStats) { mu.Lock(); reclaimed = append(reclaimed, s); mu.Unlock() },
+		OnReclaimAnomaly:     func(seq, _ int) { mu.Lock(); anomalies = append(anomalies, seq); mu.Unlock() },
+	})
+	gs := w.GroupStore("grp")
+	payload := make([]byte, 64)
+
+	// Walk entries one at a time, recording the first index to land in each
+	// distinct segment, until 5 segments are seen: the registration-tainted
+	// oldest, three sealed segments (A, B, C), and the still-active head (D).
+	type transition struct {
+		seg      int
+		firstIdx uint64
+	}
+	var transitions []transition
+	lastSeg := 0
+	idx := uint64(0)
+	for len(transitions) < 5 {
+		idx++
+		if idx > 500 {
+			t.Fatal("test premise: never observed 5 distinct segments")
+		}
+		if err := gs.StoreLog(&hraft.Log{Index: idx, Term: 1, Data: payload}); err != nil {
+			t.Fatalf("store %d: %v", idx, err)
+		}
+		w.stateMu.RLock()
+		seg := w.groups[gs.groupID].logs[idx].seg
+		w.stateMu.RUnlock()
+		if seg != lastSeg {
+			lastSeg = seg
+			transitions = append(transitions, transition{seg: seg, firstIdx: idx})
+		}
+	}
+	segA, segB, segC := transitions[1].seg, transitions[2].seg, transitions[3].seg
+	rStart, aStart, bStart, cStart, dStart :=
+		transitions[0].firstIdx, transitions[1].firstIdx, transitions[2].firstIdx, transitions[3].firstIdx, transitions[4].firstIdx
+	pathA, pathB, pathC := w.segmentPath(segA), w.segmentPath(segB), w.segmentPath(segC)
+
+	// Drain the registration-tainted oldest segment on its own pass: the
+	// registration remnant left behind routes it through scavenge, a
+	// separate path from the burst under test.
+	if err := gs.DeleteRange(rStart, aStart-1); err != nil {
+		t.Fatalf("delete registration-tainted segment's logs: %v", err)
+	}
+	syncBarrier(t, w)
+
+	// Drain segment C early: fully dead already, but oldest-first means it
+	// stays unreachable behind A and B until they clear.
+	if err := gs.DeleteRange(cStart, dStart-1); err != nil {
+		t.Fatalf("delete segment C's logs: %v", err)
+	}
+	syncBarrier(t, w)
+
+	w.stateMu.RLock()
+	oldest := w.oldestSealedSegment()
+	liveA, liveB, liveC := w.segLive[segA], w.segLive[segB], w.segLive[segC]
+	w.stateMu.RUnlock()
+	if oldest != segA || liveA == 0 || liveB == 0 || liveC != 0 {
+		t.Fatalf("test premise: oldest=%d (want %d) liveA=%d liveB=%d liveC=%d (want >0, >0, 0)",
+			oldest, segA, liveA, liveB, liveC)
+	}
+
+	// Inject counter drift on B: the counter will read drained even though
+	// its log entries are still live and indexed.
+	w.stateMu.Lock()
+	trueLiveB := w.segLive[segB]
+	w.segLive[segB] = 0
+	w.stateMu.Unlock()
+
+	mu.Lock()
+	reclaimedBefore, anomaliesBefore := len(reclaimed), len(anomalies)
+	mu.Unlock()
+
+	// One trigger: draining A's range makes the burst's single scan see both
+	// A (genuinely drained) and B (counter-drained, still referenced) within
+	// the same locked pass.
+	if err := gs.DeleteRange(aStart, bStart-1); err != nil {
+		t.Fatalf("delete segment A's logs: %v", err)
+	}
+	syncBarrier(t, w)
+
+	mu.Lock()
+	newReclaimed := append([]ReclaimStats(nil), reclaimed[reclaimedBefore:]...)
+	newAnomalies := append([]int(nil), anomalies[anomaliesBefore:]...)
+	mu.Unlock()
+
+	if len(newAnomalies) != 1 || newAnomalies[0] != segB {
+		t.Fatalf("anomalies since trigger = %v, want exactly one for segment %d", newAnomalies, segB)
+	}
+	foundA := false
+	for _, s := range newReclaimed {
+		if s.Seq == segA {
+			foundA = true
+			if s.ScavengedBytes != 0 {
+				t.Errorf("segment %d ScavengedBytes = %d, want 0 (pure unlink)", segA, s.ScavengedBytes)
+			}
+		}
+		if s.Seq == segB {
+			t.Errorf("quarantined segment %d must not appear in OnReclaim", segB)
+		}
+	}
+	if !foundA {
+		t.Fatalf("segment %d (genuinely drained) was not unlinked in the burst", segA)
+	}
+	if _, err := os.Stat(pathA); err == nil {
+		t.Errorf("segment %d file still exists after unlink", segA)
+	}
+	if _, err := os.Stat(pathB); err != nil {
+		t.Errorf("quarantined segment %d file missing: %v", segB, err)
+	}
+	if _, err := os.Stat(pathC); err != nil {
+		t.Errorf("segment %d (behind the quarantined segment) must be untouched: %v", segC, err)
+	}
+
+	// A second pass must not re-report the same quarantine.
+	triggerReclaim(t, w, gs)
+	mu.Lock()
+	total := len(anomalies)
+	mu.Unlock()
+	if total != anomaliesBefore+1 {
+		t.Errorf("anomalies total = %d, want %d (quarantine suppresses repeats)", total, anomaliesBefore+1)
+	}
+
+	// Restore the injected drift before checking the invariant: the
+	// corruption itself, not the code under test, would otherwise fail it.
+	w.stateMu.Lock()
+	w.segLive[segB] = trueLiveB
+	w.stateMu.Unlock()
+	assertLiveBytesInvariant(t, w, "after burst quarantine with counter restored")
+}
+
 // Reclamation is deliberately lazy: a segment whose live remainder exceeds
 // ScavengeMaxLiveBytes is retained until truncation drains it, and
 // oldest-first keeps every segment behind it. This pins that documented

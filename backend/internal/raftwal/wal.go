@@ -129,9 +129,10 @@ type Config struct {
 	// write. Default: 4 MiB.
 	//
 	// It bounds the rewrite, and only the rewrite. The same pass also
-	// unlinks every drained segment it finds — unbounded in count, and each
-	// unlink runs a verification scan over the whole index before removing
-	// the file. That cost is not capped by this setting.
+	// unlinks every drained segment it finds — unbounded in count, but one
+	// index scan verifies every drained candidate in the pass, so each
+	// additional segment costs only its unlink syscall. That cost is not
+	// capped by this setting.
 	//
 	// A segment whose live remainder exceeds the bound is retained until
 	// truncation drains it below the bound, and because reclamation is
@@ -1296,6 +1297,25 @@ func (w *WAL) liveRefsForSegment(seq int) int {
 		}
 		if gs.regName != "" && gs.regLoc.seg == seq {
 			refs++
+		}
+	}
+	return refs
+}
+
+// liveRefsBySegment counts index references into every segment in one walk
+// of every group's logs, stable, and registration locations. Caller holds
+// stateMu.
+func (w *WAL) liveRefsBySegment() map[int]int {
+	refs := make(map[int]int)
+	for _, gs := range w.groups {
+		for _, loc := range gs.logs {
+			refs[loc.seg]++
+		}
+		for _, sv := range gs.stable {
+			refs[sv.loc.seg]++
+		}
+		if gs.regName != "" {
+			refs[gs.regLoc.seg]++
 		}
 	}
 	return refs

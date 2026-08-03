@@ -47,13 +47,12 @@ func (e *reclaimEvents) deliver(cfg Config) {
 }
 
 // reclaimPass reclaims dead WAL space. Runs on the batch writer strictly
-// after batch waiters are notified: unlinks every drained oldest segment,
-// then scavenges at most one nearly-drained one. It is the sole sequencing
-// owner of a pass's callbacks.
+// after batch waiters are notified: unlinks every drained oldest segment
+// behind one index scan, then scavenges at most one nearly-drained one. It
+// is the sole sequencing owner of a pass's callbacks.
 func (w *WAL) reclaimPass() {
 	var events reclaimEvents
-	for w.unlinkOldestDrained(0, time.Now(), &events) {
-	}
+	w.unlinkDrainedBurst(&events)
 	w.scavengeOldest(&events)
 	events.deliver(w.cfg)
 }
@@ -74,9 +73,13 @@ func (w *WAL) oldestSealedSegment() int {
 }
 
 // unlinkOldestDrained removes the oldest sealed segment if its counter reads
-// drained AND a verification scan confirms no index reference survives — the
-// counter only nominates. A disagreement quarantines the segment and reports
-// an anomaly once. Returns whether a segment was removed.
+// drained AND a fresh verification scan confirms no index reference
+// survives — the counter only nominates. A disagreement quarantines the
+// segment and reports an anomaly once. Used only after scavengeOldest
+// repoints the index (swapScavenged): that mutation makes any earlier
+// pass-level scan stale, so this path always re-scans just its own victim
+// rather than consulting a shared map. Returns whether a segment was
+// removed.
 func (w *WAL) unlinkOldestDrained(scavengedBytes int64, start time.Time, events *reclaimEvents) bool {
 	w.stateMu.Lock()
 	defer w.stateMu.Unlock()
@@ -92,7 +95,46 @@ func (w *WAL) unlinkOldestDrained(scavengedBytes int64, start time.Time, events 
 		w.quarantineSegment(seq, refs, events)
 		return false
 	}
+	return w.removeSegmentLocked(seq, scavengedBytes, start, events)
+}
 
+// unlinkDrainedBurst removes every oldest-first run of drained sealed
+// segments behind one index scan taken when the burst locks stateMu.
+// Unlinking a drained segment cannot create or remove a live reference
+// elsewhere, so the same scan verifies every candidate in the run: each
+// segment after the first costs only its unlink syscall, not another scan.
+// A segment whose counter disagrees with the scan quarantines and stops the
+// burst — oldest-first, nothing behind a retained segment may be touched.
+// Caller must not be scavengeOldest, whose index-mutating swap makes this
+// scan stale for its own victim.
+func (w *WAL) unlinkDrainedBurst(events *reclaimEvents) {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+
+	refs := w.liveRefsBySegment()
+	for {
+		seq := w.oldestSealedSegment()
+		if seq == 0 || w.segLive[seq] != 0 {
+			return
+		}
+		if _, bad := w.quarantined[seq]; bad {
+			return
+		}
+		if r := refs[seq]; r > 0 {
+			w.quarantineSegment(seq, r, events)
+			return
+		}
+		if !w.removeSegmentLocked(seq, 0, time.Now(), events) {
+			return
+		}
+	}
+}
+
+// removeSegmentLocked unlinks segment seq's file and drops it from the
+// live-bytes index. Caller holds stateMu and has already verified the
+// segment carries no live index reference. Returns whether the file was
+// removed.
+func (w *WAL) removeSegmentLocked(seq int, scavengedBytes int64, start time.Time, events *reclaimEvents) bool {
 	path := w.segmentPath(seq)
 	var reclaimedBytes int64
 	if info, err := os.Stat(path); err == nil {
