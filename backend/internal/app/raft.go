@@ -186,22 +186,38 @@ func walReserveAlarm(alerts *alert.Collector, logger *slog.Logger, walName strin
 	}
 }
 
-// walCompactionLog reports each WAL compaction run. Compaction holds the shared
-// batch writer for its whole duration, so every group's appends queue behind it;
-// without this line that cost is only visible as unexplained append latency, and
-// the WAL-latency diagnostic points at bulk I/O instead.
-func walCompactionLog(logger *slog.Logger, walName string) func(raftwal.CompactionStats) {
+// walReclaimLog reports each reclaimed WAL segment. Reclamation runs on the
+// shared batch writer (bounded per pass), so the log line is the only
+// operator-visible record of space being returned.
+func walReclaimLog(logger *slog.Logger, walName string) func(raftwal.ReclaimStats) {
 	if logger == nil {
 		return nil
 	}
-	return func(s raftwal.CompactionStats) {
-		logger.Info("raft WAL compacted",
+	return func(s raftwal.ReclaimStats) {
+		logger.Info("raft WAL segment reclaimed",
 			"wal", walName,
+			"segment", s.Seq,
 			"duration", s.Duration,
-			"reclaimed_segments", s.ReclaimedSegments,
 			"reclaimed_bytes", s.ReclaimedBytes,
-			"retained_segments", s.RetainedSegments,
-			"retained_bytes", s.RetainedBytes)
+			"scavenged_bytes", s.ScavengedBytes)
+	}
+}
+
+// walReclaimAnomalyAlarm raises a storage alarm when the reclamation
+// verification scan contradicts the live-bytes counter: the segment is
+// retained and reclamation halts on it until a restart rebuilds the
+// counters.
+func walReclaimAnomalyAlarm(alerts *alert.Collector, logger *slog.Logger, walName string) func(seq, liveRefs int) {
+	return func(seq, liveRefs int) {
+		if logger != nil {
+			logger.Error("raft WAL reclamation halted — live-bytes counter contradicts verification scan",
+				"wal", walName, "segment", seq, "live_refs", liveRefs)
+		}
+		if alerts != nil {
+			alerts.Raise("wal-reclaim-anomaly", walName, fmt.Sprintf(
+				"Raft WAL (%s) reclamation halted: segment %d nominated as drained still holds %d live references; restart the node to rebuild counters",
+				walName, seq, liveRefs))
+		}
 	}
 }
 
@@ -214,8 +230,9 @@ func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 
 	walDir := opts.Home.ClusterCtlWALDir()
 	wal, err := raftwal.Open(walDir, raftwal.Config{
-		OnReserveState: walReserveAlarm(opts.Alerts, opts.Logger, "cluster-ctl"),
-		OnCompaction:   walCompactionLog(opts.Logger, "cluster-ctl"),
+		OnReserveState:   walReserveAlarm(opts.Alerts, opts.Logger, "cluster-ctl"),
+		OnReclaim:        walReclaimLog(opts.Logger, "cluster-ctl"),
+		OnReclaimAnomaly: walReclaimAnomalyAlarm(opts.Alerts, opts.Logger, "cluster-ctl"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open cluster-ctl raft WAL: %w", err)

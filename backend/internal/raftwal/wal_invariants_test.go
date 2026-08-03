@@ -1,13 +1,14 @@
 package raftwal
 
 // High-signal contract tests for raftwal: reference-model equivalence, full
-// index scans after compaction/reopen, and concurrent stable+log stress.
+// index scans after reclamation/reopen, and concurrent stable+log stress.
 // Run with: go test ./internal/raftwal -race
 
 import (
 	"fmt"
 	"math/rand/v2"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	hraft "github.com/hashicorp/raft"
@@ -150,14 +151,16 @@ func TestHarnessRandomAppendPrefixDeleteMatchesReference(t *testing.T) {
 	ref.assertEqual(t, gs)
 }
 
-// Every index in [FirstIndex, LastIndex] must be readable after compaction + reopen.
-func TestHarnessFullIndexScanAfterCompactionAndReopen(t *testing.T) {
+// Every index in [FirstIndex, LastIndex] must be readable after reclamation + reopen.
+func TestHarnessFullIndexScanAfterReclamationAndReopen(t *testing.T) {
 	if testing.Short() {
-		t.Skip("compaction + reopen full-index-scan harness; -short skips")
+		t.Skip("reclamation + reopen full-index-scan harness; -short skips")
 	}
 	t.Parallel()
 	dir := t.TempDir()
 	cfg := harnessWalConfig()
+	var reclaims atomic.Int64
+	cfg.OnReclaim = func(ReclaimStats) { reclaims.Add(1) }
 	w, err := Open(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -174,12 +177,17 @@ func TestHarnessFullIndexScanAfterCompactionAndReopen(t *testing.T) {
 			t.Fatalf("StoreLog %d: %v", i, err)
 		}
 	}
-	if err := gs.DeleteRange(1, 6); err != nil {
+	// Truncate past the small head entries into the bulk so the oldest
+	// segments genuinely drain; reclamation is oldest-first and a live head
+	// would leave it nothing to do.
+	if err := gs.DeleteRange(1, 20); err != nil {
 		t.Fatal(err)
 	}
-	if w.LastCompactionStats().ReclaimedSegments == 0 {
-		t.Fatal("expected compaction")
+	syncBarrier(t, w)
+	if reclaims.Load() == 0 {
+		t.Fatal("expected reclamation")
 	}
+	assertLiveBytesInvariant(t, w, "after reclamation")
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}

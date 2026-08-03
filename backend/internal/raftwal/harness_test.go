@@ -14,12 +14,12 @@ import (
 )
 
 // harnessWalConfig is a small, fast WAL layout used by verification tests so
-// segment rotation and compaction exercise real code paths without huge I/O.
+// segment rotation and reclamation exercise real code paths without huge I/O.
 func harnessWalConfig() Config {
 	return Config{
-		SegmentTargetSize:     2048,
-		SyncBatchWindow:       2 * time.Millisecond,
-		CompactionMinSegments: 2,
+		SegmentTargetSize:    2048,
+		SyncBatchWindow:      2 * time.Millisecond,
+		ScavengeMaxLiveBytes: 512,
 	}
 }
 
@@ -177,11 +177,13 @@ func TestHarnessPartialHeaderTailReplay(t *testing.T) {
 	}
 }
 
-// Deterministic multi-group interleaving, DeleteRange, compaction, and reopen.
-func TestHarnessMultiGroupChurnCompactionRestart(t *testing.T) {
+// Deterministic multi-group interleaving, DeleteRange, reclamation, and reopen.
+func TestHarnessMultiGroupChurnReclamationRestart(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	cfg := harnessWalConfig()
+	var reclaims atomic.Int64
+	cfg.OnReclaim = func(ReclaimStats) { reclaims.Add(1) }
 	w, err := Open(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -206,20 +208,27 @@ func TestHarnessMultiGroupChurnCompactionRestart(t *testing.T) {
 	if err := g1.DeleteRange(3, 10); err != nil {
 		t.Fatal(err)
 	}
-	// Grow enough segments for compaction.
+	// Grow enough segments for reclamation to have something to free.
 	big := make([]byte, 700)
 	for i := uint64(10); i <= 28; i++ {
 		if err := g2.StoreLog(&hraft.Log{Index: i, Term: 2, Data: big}); err != nil {
 			t.Fatalf("g2 StoreLog %d: %v", i, err)
 		}
 	}
-	if err := g2.DeleteRange(1, 8); err != nil {
+	// Truncate g2's bulk and g3's prefix so the head segments genuinely
+	// drain — reclamation is oldest-first, so a live head would leave it
+	// with nothing to do and the restart checks below unexercised.
+	if err := g2.DeleteRange(1, 20); err != nil {
 		t.Fatal(err)
 	}
-	stats := w.LastCompactionStats()
-	if stats.ReclaimedSegments == 0 {
-		t.Fatalf("expected compaction to reclaim segments, stats=%+v", stats)
+	if err := g3.DeleteRange(1, 3); err != nil {
+		t.Fatal(err)
 	}
+	syncBarrier(t, w)
+	if n := reclaims.Load(); n == 0 {
+		t.Fatal("expected reclamation to free segments")
+	}
+	assertLiveBytesInvariant(t, w, "after churn reclamation")
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -244,11 +253,17 @@ func TestHarnessMultiGroupChurnCompactionRestart(t *testing.T) {
 			t.Fatalf("g1 GetLog %d: want ErrLogNotFound, got %v", idx, err)
 		}
 	}
-	if err := g2b.GetLog(20, &log); err != nil {
-		t.Fatalf("g2 GetLog 20: %v", err)
+	if err := g2b.GetLog(24, &log); err != nil {
+		t.Fatalf("g2 GetLog 24: %v", err)
+	}
+	if err := g2b.GetLog(15, &log); err != hraft.ErrLogNotFound {
+		t.Fatalf("g2 GetLog 15: want ErrLogNotFound, got %v", err)
 	}
 	if err := g3b.GetLog(6, &log); err != nil {
 		t.Fatalf("g3 GetLog 6: %v", err)
+	}
+	if err := g3b.GetLog(2, &log); err != hraft.ErrLogNotFound {
+		t.Fatalf("g3 GetLog 2: want ErrLogNotFound, got %v", err)
 	}
 }
 
@@ -257,12 +272,13 @@ func TestHarnessSegmentSyncFailurePropagates(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	cfg := harnessWalConfig()
-	var syncCalls int
+	// Counted atomically: the hook runs on the batch writer, and reclamation
+	// can fsync after the batch round-trip has already returned.
+	var syncCalls atomic.Int64
 	cfg.SegmentSync = func(f *os.File) error {
-		syncCalls++
 		// First batch is often group registration alone; fail the third sync so
 		// the first user StoreLog batch succeeds and the second hits the fault.
-		if syncCalls == 3 {
+		if syncCalls.Add(1) == 3 {
 			return errHarnessSyncFail
 		}
 		return f.Sync()
@@ -285,8 +301,8 @@ func TestHarnessSegmentSyncFailurePropagates(t *testing.T) {
 	if err := gs.StoreLog(&hraft.Log{Index: 3, Term: 1, Data: []byte("c")}); err != nil {
 		t.Fatalf("third StoreLog after hook passes: %v", err)
 	}
-	if syncCalls < 4 {
-		t.Fatalf("expected at least 4 sync calls, got %d", syncCalls)
+	if n := syncCalls.Load(); n < 4 {
+		t.Fatalf("expected at least 4 sync calls, got %d", n)
 	}
 }
 
@@ -388,7 +404,7 @@ func TestHarnessConcurrentChurn(t *testing.T) {
 					time.Sleep(2 * time.Millisecond)
 					continue
 				}
-				// Prefix compaction-ish: delete 1..k
+				// Prefix truncation: delete 1..k
 				k := hi / 3
 				if k > 0 {
 					_ = stores[g].DeleteRange(1, k)

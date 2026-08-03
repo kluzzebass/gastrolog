@@ -1,6 +1,10 @@
 package raftwal
 
 import (
+	"os"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	hraft "github.com/hashicorp/raft"
@@ -14,9 +18,12 @@ func openTestWAL(t *testing.T, cfg Config) (*WAL, string) {
 	if cfg.SegmentTargetSize == 0 {
 		cfg.SegmentTargetSize = 2048
 	}
-	// Removed in the compaction-retirement task along with the field.
-	if cfg.CompactionMinSegments == 0 {
-		cfg.CompactionMinSegments = 1 << 30
+	// Keep the scavenge threshold a small fraction of the segment, as it is
+	// in production (4 MiB of a 64 MiB segment). The default is larger than
+	// these tiny test segments, which would make every segment scavengeable
+	// and turn reclamation into a full rewrite on every pass.
+	if cfg.ScavengeMaxLiveBytes == 0 {
+		cfg.ScavengeMaxLiveBytes = 128
 	}
 	w, err := Open(dir, cfg)
 	if err != nil {
@@ -123,10 +130,399 @@ func TestLiveBytesAccounting(t *testing.T) {
 	if err := w.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	w2, err := Open(dir, Config{SegmentTargetSize: 2048, CompactionMinSegments: 1 << 30})
+	w2, err := Open(dir, Config{SegmentTargetSize: 2048})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer func() { _ = w2.Close() }()
 	assertLiveBytesInvariant(t, w2, "after replay")
+}
+
+// syncBarrier orders the test after any reclamation the writer is running:
+// the barrier write's round-trip completes only after the previous flush's
+// reclamation pass finished, because the writer goroutine is serial.
+func syncBarrier(t *testing.T, w *WAL) {
+	t.Helper()
+	if err := w.GroupStore("barrier").SetUint64([]byte("b"), 1); err != nil {
+		t.Fatalf("barrier: %v", err)
+	}
+}
+
+// triggerReclaim fires one wired reclamation pass on the writer (an empty
+// DeleteRange is a trigger and masks nothing) and waits for it to finish.
+func triggerReclaim(t *testing.T, w *WAL, gs *GroupStore) {
+	t.Helper()
+	if err := gs.DeleteRange(1, 0); err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+	syncBarrier(t, w)
+}
+
+// fillAndDrain appends entries [from..to] of size payloadLen and deletes
+// them all, so the segments they landed in drain.
+func fillAndDrain(t *testing.T, gs *GroupStore, from, to uint64, payloadLen int) {
+	t.Helper()
+	for i := from; i <= to; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: make([]byte, payloadLen)}); err != nil {
+			t.Fatalf("store %d: %v", i, err)
+		}
+	}
+	if err := gs.DeleteRange(from, to); err != nil {
+		t.Fatalf("delete range: %v", err)
+	}
+}
+
+func segmentFileCount(t *testing.T, dir string) int {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, walFilePrefix) && strings.HasSuffix(name, walFileSuffix) {
+			info, err := e.Info()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Size() > 0 { // ignore the preallocated-but-empty spare
+				n++
+			}
+		}
+	}
+	return n
+}
+
+func TestReclaimUnlinksDrainedSegments(t *testing.T) {
+	var mu sync.Mutex
+	var reclaimed []ReclaimStats
+	w, dir := openTestWAL(t, Config{
+		OnReclaim: func(s ReclaimStats) { mu.Lock(); reclaimed = append(reclaimed, s); mu.Unlock() },
+	})
+	gs := w.GroupStore("grp")
+
+	// The registration record pins segment 1 until the pass scavenges those
+	// few bytes forward; everything behind it drains and unlinks outright.
+	// Seal the drained segments behind a live append, then let the wired
+	// pass run.
+	fillAndDrain(t, gs, 1, 60, 64)
+	if err := gs.StoreLog(&hraft.Log{Index: 100, Term: 1, Data: []byte("live")}); err != nil {
+		t.Fatalf("store live: %v", err)
+	}
+	triggerReclaim(t, w, gs)
+
+	// Structural bound: segment 1 (registration-pinned), the active
+	// segment, and at most one sealed predecessor of it survive; the
+	// drained bulk between them is gone.
+	if n := segmentFileCount(t, dir); n > 3 {
+		t.Fatalf("segment count = %d after reclamation, want <= 3", n)
+	}
+	mu.Lock()
+	got := len(reclaimed)
+	pureUnlinks := 0
+	for _, s := range reclaimed {
+		if s.ReclaimedBytes <= 0 {
+			t.Errorf("ReclaimedBytes = %d, want > 0", s.ReclaimedBytes)
+		}
+		if s.ScavengedBytes > 128 {
+			t.Errorf("ScavengedBytes = %d exceeds threshold 128", s.ScavengedBytes)
+		}
+		if s.ScavengedBytes == 0 {
+			pureUnlinks++
+		}
+	}
+	mu.Unlock()
+	if got == 0 {
+		t.Fatal("OnReclaim never invoked")
+	}
+	if pureUnlinks == 0 {
+		t.Error("no drained segment was unlinked without scavenging")
+	}
+	assertLiveBytesInvariant(t, w, "after reclaim")
+
+	var lg hraft.Log
+	if err := gs.GetLog(30, &lg); err != hraft.ErrLogNotFound {
+		t.Errorf("GetLog(30) = %v, want ErrLogNotFound", err)
+	}
+	if err := gs.GetLog(100, &lg); err != nil {
+		t.Errorf("GetLog(100): %v", err)
+	}
+}
+
+func TestReclaimIsStrictlyOldestFirst(t *testing.T) {
+	w, dir := openTestWAL(t, Config{})
+	gs := w.GroupStore("grp")
+
+	// Segment 1 holds the registration + live entries 1..20. Later segments
+	// drain completely. Oldest-first: NOTHING may be unlinked while the
+	// still-live segment 1 is the oldest.
+	for i := uint64(1); i <= 20; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: make([]byte, 64)}); err != nil {
+			t.Fatalf("store %d: %v", i, err)
+		}
+	}
+	fillAndDrain(t, gs, 21, 80, 64)
+	if err := gs.StoreLog(&hraft.Log{Index: 100, Term: 1, Data: []byte("seal")}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	syncBarrier(t, w) // any wired pass from the drain has finished
+	before := segmentFileCount(t, dir)
+
+	triggerReclaim(t, w, gs)
+
+	if after := segmentFileCount(t, dir); after != before {
+		t.Fatalf("reclaimed %d segment(s) despite a live older segment", before-after)
+	}
+}
+
+func TestReclaimAnomalyQuarantinesSegment(t *testing.T) {
+	var anomalies atomic.Int32
+	w, dir := openTestWAL(t, Config{
+		OnReclaimAnomaly: func(seq, liveRefs int) { anomalies.Add(1) },
+	})
+	gs := w.GroupStore("grp")
+	// Live entries first so segment 1 stays live even without its
+	// registration record counted.
+	for i := uint64(1); i <= 5; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: make([]byte, 32)}); err != nil {
+			t.Fatalf("store %d: %v", i, err)
+		}
+	}
+	fillAndDrain(t, gs, 6, 60, 64)
+	if err := gs.StoreLog(&hraft.Log{Index: 100, Term: 1, Data: []byte("live")}); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	syncBarrier(t, w)
+
+	// Inject counter drift: zero the oldest sealed segment's counter while
+	// it still holds live records.
+	w.stateMu.Lock()
+	victim := w.oldestSealedSegment()
+	w.segLive[victim] = 0
+	w.stateMu.Unlock()
+	victimPath := w.segmentPath(victim)
+
+	triggerReclaim(t, w, gs)
+	triggerReclaim(t, w, gs) // quarantine must suppress a second anomaly
+
+	if n := anomalies.Load(); n != 1 {
+		t.Errorf("anomalies = %d, want exactly 1", n)
+	}
+	if _, err := os.Stat(victimPath); err != nil {
+		t.Fatalf("segment with live references was unlinked: %v", err)
+	}
+	_ = dir
+}
+
+func TestScavengeReclaimsNearlyDrainedSegment(t *testing.T) {
+	var mu sync.Mutex
+	var reclaimed []ReclaimStats
+	w, dir := openTestWAL(t, Config{
+		ScavengeMaxLiveBytes: 512,
+		OnReclaim:            func(s ReclaimStats) { mu.Lock(); reclaimed = append(reclaimed, s); mu.Unlock() },
+	})
+	gs := w.GroupStore("grp")
+
+	// Segment 1 ends up holding the registration, a stable key, and a few
+	// live log entries — all below the scavenge threshold — plus dead bulk.
+	if err := gs.SetUint64([]byte("CurrentTerm"), 7); err != nil {
+		t.Fatalf("set term: %v", err)
+	}
+	for i := uint64(1); i <= 3; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 7, Data: []byte{byte(i)}}); err != nil {
+			t.Fatalf("store survivor %d: %v", i, err)
+		}
+	}
+	fillAndDrain(t, gs, 4, 60, 64)
+	if err := gs.StoreLog(&hraft.Log{Index: 100, Term: 7, Data: []byte("seal")}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	triggerReclaim(t, w, gs)
+	triggerReclaim(t, w, gs) // one scavenge per pass; give it a second pass
+
+	if n := segmentFileCount(t, dir); n > 2 {
+		t.Fatalf("segment count = %d after scavenging, want <= 2", n)
+	}
+	mu.Lock()
+	var scavenged bool
+	for _, s := range reclaimed {
+		if s.ScavengedBytes > 0 {
+			scavenged = true
+			if s.ScavengedBytes > 512 {
+				t.Errorf("ScavengedBytes = %d exceeds threshold 512", s.ScavengedBytes)
+			}
+		}
+	}
+	mu.Unlock()
+	if !scavenged {
+		t.Fatal("no scavenge reported; the registration-pinned oldest segment was never freed")
+	}
+	assertLiveBytesInvariant(t, w, "after scavenge")
+
+	// Survivors intact, served from their new locations.
+	for i := uint64(1); i <= 3; i++ {
+		var lg hraft.Log
+		if err := gs.GetLog(i, &lg); err != nil {
+			t.Fatalf("GetLog(%d) after scavenge: %v", i, err)
+		}
+		if lg.Term != 7 || len(lg.Data) != 1 || lg.Data[0] != byte(i) {
+			t.Errorf("GetLog(%d) = %+v", i, lg)
+		}
+	}
+	if v, err := gs.GetUint64([]byte("CurrentTerm")); err != nil || v != 7 {
+		t.Errorf("GetUint64 = %d, %v", v, err)
+	}
+
+	// The scavenged copies are the durable truth across replay.
+	if err := w.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	w2, err := Open(dir, Config{SegmentTargetSize: 2048, ScavengeMaxLiveBytes: 512})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer func() { _ = w2.Close() }()
+	gs2 := w2.GroupStore("grp")
+	var lg hraft.Log
+	if err := gs2.GetLog(2, &lg); err != nil || lg.Term != 7 {
+		t.Errorf("after replay GetLog(2) = %+v, %v", lg, err)
+	}
+	if v, err := gs2.GetUint64([]byte("CurrentTerm")); err != nil || v != 7 {
+		t.Errorf("after replay GetUint64 = %d, %v", v, err)
+	}
+}
+
+func TestScavengeSkipsSegmentAboveThreshold(t *testing.T) {
+	w, dir := openTestWAL(t, Config{ScavengeMaxLiveBytes: 64})
+	gs := w.GroupStore("grp")
+	for i := uint64(1); i <= 20; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: make([]byte, 64)}); err != nil {
+			t.Fatalf("store %d: %v", i, err)
+		}
+	}
+	if err := gs.DeleteRange(1, 2); err != nil { // mostly live
+		t.Fatalf("delete: %v", err)
+	}
+	if err := gs.StoreLog(&hraft.Log{Index: 100, Term: 1, Data: []byte("seal")}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	syncBarrier(t, w)
+	before := segmentFileCount(t, dir)
+	triggerReclaim(t, w, gs)
+	if after := segmentFileCount(t, dir); after != before {
+		t.Fatal("segment above scavenge threshold was reclaimed")
+	}
+}
+
+func TestScavengeFsyncFailureLeavesVictimIntact(t *testing.T) {
+	fail := &atomic.Bool{}
+	w, dir := openTestWAL(t, Config{
+		ScavengeMaxLiveBytes: 512,
+		SegmentSync: func(f *os.File) error {
+			if fail.Load() {
+				return errHarnessSyncFail
+			}
+			return f.Sync()
+		},
+	})
+	gs := w.GroupStore("grp")
+	if err := gs.SetUint64([]byte("CurrentTerm"), 7); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	fillAndDrain(t, gs, 1, 60, 64)
+	if err := gs.StoreLog(&hraft.Log{Index: 100, Term: 7, Data: []byte("seal")}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	syncBarrier(t, w) // drained bulk unlinked; the pinned oldest remains
+	before := segmentFileCount(t, dir)
+
+	fail.Store(true)
+	// The trigger batch's own fsync fails (SegmentSync covers batch fsync
+	// too), so the pass never runs; a scavenge attempted by a later
+	// successful batch is exercised by clearing the failure below. What
+	// must hold under injected failure: victim intact, index unchanged.
+	_ = gs.DeleteRange(1, 0) // returns the injected error; ignore it
+	fail.Store(false)
+	syncBarrier(t, w)
+	if after := segmentFileCount(t, dir); after < before {
+		t.Fatal("victim unlinked despite fsync failure")
+	}
+	assertLiveBytesInvariant(t, w, "after failed trigger")
+	if v, err := gs.GetUint64([]byte("CurrentTerm")); err != nil || v != 7 {
+		t.Errorf("stable read = %d, %v", v, err)
+	}
+
+	triggerReclaim(t, w, gs) // clean retry scavenges and unlinks
+	if after := segmentFileCount(t, dir); after >= before {
+		t.Fatal("retry after clearing fsync failure reclaimed nothing")
+	}
+	assertLiveBytesInvariant(t, w, "after retried scavenge")
+}
+
+// The Raft pattern reclamation is built for: append a batch, snapshot, then
+// truncate the whole log prefix. Repeated cycles must keep the WAL bounded —
+// a reclamation gate that never opens leaves it growing without bound as
+// truncations pile up. The exact steady state is an implementation detail;
+// staying far below the unreclaimed count is the invariant.
+func TestReclaimKeepsWALBoundedAcrossTruncationCycles(t *testing.T) {
+	w, dir := openTestWAL(t, Config{
+		SegmentTargetSize:    1024,
+		ScavengeMaxLiveBytes: 512,
+	})
+	gs := w.GroupStore("grp")
+
+	payload := make([]byte, 256)
+	const cycles = 12
+	const perCycle = 10
+
+	idx := uint64(0)
+	peak := 0
+	for range cycles {
+		for range perCycle {
+			idx++
+			if err := gs.StoreLog(&hraft.Log{Index: idx, Term: 1, Data: payload}); err != nil {
+				t.Fatalf("store %d: %v", idx, err)
+			}
+		}
+		// Truncate to the newest entry, as a Raft group does after a
+		// snapshot: the head genuinely drains, cycle after cycle.
+		if err := gs.DeleteRange(1, idx-1); err != nil {
+			t.Fatalf("delete range ending at %d: %v", idx, err)
+		}
+		syncBarrier(t, w)
+		if n := segmentFileCount(t, dir); n > peak {
+			peak = n
+		}
+	}
+
+	// 12 cycles x 10 entries x 256B against a 1 KiB target is tens of
+	// segments when nothing is reclaimed.
+	if peak > 8 {
+		t.Errorf("peak data-bearing segments = %d, want <= 8 (the WAL is not being reclaimed)", peak)
+	}
+	assertLiveBytesInvariant(t, w, "after truncation cycles")
+
+	// The survivor must still read back after all that reclamation.
+	var lg hraft.Log
+	if err := gs.GetLog(idx, &lg); err != nil {
+		t.Fatalf("GetLog(%d) after %d truncation cycles: %v", idx, cycles, err)
+	}
+	if len(lg.Data) != len(payload) {
+		t.Errorf("payload len = %d, want %d", len(lg.Data), len(payload))
+	}
+	first, err := gs.FirstIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	last, err := gs.LastIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last != idx {
+		t.Errorf("LastIndex = %d, want %d", last, idx)
+	}
+	if first > last {
+		t.Errorf("FirstIndex %d > LastIndex %d", first, last)
+	}
 }

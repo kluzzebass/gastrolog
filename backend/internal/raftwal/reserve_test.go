@@ -7,6 +7,8 @@ import (
 	"hash/crc32"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	hraft "github.com/hashicorp/raft"
@@ -24,8 +26,10 @@ func segPath(dir string, seq int) string {
 func TestWALSpareSegmentLifecycle(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	// Small target so a handful of appends forces rotation.
-	w, err := Open(dir, Config{SegmentTargetSize: 4096})
+	// Small target so a handful of appends forces rotation, and a scavenge
+	// threshold well under it so reclamation leaves these live segments
+	// alone — the reserve lifecycle is what is under test here.
+	w, err := Open(dir, Config{SegmentTargetSize: 4096, ScavengeMaxLiveBytes: 128})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,18 +131,30 @@ func TestWALReserveFailureDegradesGracefully(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	failing := true
+	// Both hooks run on the batch writer, and reclamation can rotate after
+	// the batch round-trip has already returned — so neither the flag nor
+	// the transition log can rely on submit for happens-before.
+	var failing atomic.Bool
+	failing.Store(true)
+	var mu sync.Mutex
 	var transitions []bool
+	readTransitions := func() []bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]bool(nil), transitions...)
+	}
 	w, err := Open(dir, Config{
 		SegmentTargetSize: 2048,
 		SegmentPreallocate: func(_ *os.File, _ int64) error {
-			if failing {
+			if failing.Load() {
 				return errors.New("injected: no space left on device")
 			}
 			return nil
 		},
 		OnReserveState: func(lost bool, _ error) {
+			mu.Lock()
 			transitions = append(transitions, lost)
+			mu.Unlock()
 		},
 	})
 	if err != nil {
@@ -149,8 +165,8 @@ func TestWALReserveFailureDegradesGracefully(t *testing.T) {
 	if !w.ReserveLost() {
 		t.Fatal("reserve must report lost while preallocation fails")
 	}
-	if len(transitions) != 1 || !transitions[0] {
-		t.Fatalf("exactly one lost transition expected, got %v", transitions)
+	if got := readTransitions(); len(got) != 1 || !got[0] {
+		t.Fatalf("exactly one lost transition expected, got %v", got)
 	}
 
 	// Degraded, not broken: appends keep working.
@@ -163,7 +179,7 @@ func TestWALReserveFailureDegradesGracefully(t *testing.T) {
 	}
 
 	// Space returns: the next rotation restores the reserve and reports it.
-	failing = false
+	failing.Store(false)
 	for i := uint64(5); i <= 12; i++ {
 		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: payload}); err != nil {
 			t.Fatalf("StoreLog %d: %v", i, err)
@@ -172,8 +188,8 @@ func TestWALReserveFailureDegradesGracefully(t *testing.T) {
 	if w.ReserveLost() {
 		t.Fatal("reserve must be restored after a successful rotation")
 	}
-	if len(transitions) != 2 || transitions[1] {
-		t.Fatalf("lost-then-restored transitions expected, got %v", transitions)
+	if got := readTransitions(); len(got) != 2 || got[1] {
+		t.Fatalf("lost-then-restored transitions expected, got %v", got)
 	}
 }
 
@@ -264,21 +280,25 @@ func dataSegment(t *testing.T, dir string) string {
 	return found
 }
 
-// TestWALCompactionProceedsWhenSpareReservationFails pins the ENOSPC-safe
-// compaction property: compaction rotates into the ALREADY-reserved spare to
-// write its snapshot, then frees the old segments — so it makes progress even
-// when reserving the NEXT spare fails (a full disk). Without this, compaction
-// (the mechanism that frees WAL space) could itself be blocked at ENOSPC.
-func TestWALCompactionProceedsWhenSpareReservationFails(t *testing.T) {
+// TestWALReclamationProceedsWhenSpareReservationFails pins the ENOSPC-safe
+// reclamation property: reclamation only unlinks drained segments, so it frees
+// space even when reserving the NEXT spare fails (a full disk). Without this,
+// reclamation — the mechanism that frees WAL space — could itself be blocked
+// at ENOSPC.
+func TestWALReclamationProceedsWhenSpareReservationFails(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	failSpare := false
+	var reclaims atomic.Int64
+	// The hook runs on the batch writer, including from reclamation after
+	// the batch round-trip returned: the flag needs its own synchronization.
+	var failSpare atomic.Bool
 	w, err := Open(dir, Config{
-		SegmentTargetSize:     2048,
-		CompactionMinSegments: 2,
+		SegmentTargetSize:    2048,
+		ScavengeMaxLiveBytes: 512,
+		OnReclaim:            func(ReclaimStats) { reclaims.Add(1) },
 		SegmentPreallocate: func(_ *os.File, _ int64) error {
-			if failSpare {
+			if failSpare.Load() {
 				return errors.New("injected: no space left on device")
 			}
 			return nil
@@ -297,20 +317,32 @@ func TestWALCompactionProceedsWhenSpareReservationFails(t *testing.T) {
 		}
 	}
 
-	// Space runs out just before compaction: the pre-existing spare is still
-	// reserved (promotion allocates nothing), but reserving the post-compaction
-	// spare will fail.
-	failSpare = true
-	if err := gs.DeleteRange(1, 20); err != nil {
-		t.Fatalf("DeleteRange: %v", err)
-	}
-
-	stats := w.LastCompactionStats()
-	if stats.ReclaimedSegments == 0 {
-		t.Fatalf("compaction must free segments even when the next spare can't be reserved: %+v", stats)
+	// Space runs out: the pre-existing spare is still reserved (promotion
+	// allocates nothing), but the next rotation cannot reserve a new one.
+	failSpare.Store(true)
+	for i := uint64(21); i <= 26; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: payload}); err != nil {
+			t.Fatalf("StoreLog %d: %v", i, err)
+		}
 	}
 	if !w.ReserveLost() {
-		t.Fatal("reserve must report lost after the post-compaction spare reservation failed")
+		t.Fatal("reserve must report lost once a rotation cannot reserve the next spare")
+	}
+
+	// Reclamation must still free space on the full disk — it unlinks, and
+	// scavenges through the already-reserved active segment, so it needs no
+	// new allocation to make progress.
+	if err := gs.DeleteRange(1, 26); err != nil {
+		t.Fatalf("DeleteRange: %v", err)
+	}
+	syncBarrier(t, w)
+
+	if reclaims.Load() == 0 {
+		t.Fatal("reclamation must free segments even when the next spare can't be reserved")
+	}
+	assertLiveBytesInvariant(t, w, "after reclamation")
+	if !w.ReserveLost() {
+		t.Fatal("reserve must still report lost after reclamation")
 	}
 }
 

@@ -114,6 +114,14 @@ var catalog = []AlarmType{
 		Cause:         "The orchestrator registry lock has been held or write-stuck past one minute — a lock-discipline defect, not an operating condition. The node is likely wedging.",
 		Response:      "This should never fire. Capture the acquisition stack from this node's log and file it. Restarting the node is a workaround to recover service, not the response.",
 	},
+	{
+		IDPrefix:      "wal-reclaim-anomaly",
+		SoftwareFault: true,
+		Latching:      true, // reclamation stays halted on the segment until restart
+		Source:        "storage",
+		Cause:         "A Raft WAL segment its live-bytes counter nominated as drained still holds live references. The counter and the index disagree — an accounting defect, not an operating condition. The segment is retained and the WAL stops returning space on this node.",
+		Response:      "This should never fire. Capture the alarm detail and this node's WAL log lines and file it. Restarting the node rebuilds the counters from replay and resumes reclamation, but that is a workaround, not the response.",
+	},
 
 	// ------------------------------------------------------------------
 	// High — durability or availability degraded, will compound.
