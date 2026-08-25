@@ -559,10 +559,12 @@ func TestFourNodeRaftSustainedTruncationReclaims(t *testing.T) {
 }
 
 // A follower that falls behind the leader's retained log window catches up by
-// InstallSnapshot, and hashicorp/raft compacts the whole log it had in one
-// DeleteRange — a different truncation shape from the incremental one a local
-// snapshot produces. The WAL must still reclaim behind it, keep its live-bytes
-// accounting straight, serve reads, and replay to the same bounds on restart.
+// InstallSnapshot. The store declares itself monotonic, so hashicorp/raft
+// clears the follower's whole log in one DeleteRange rather than retaining a
+// tail below the installed snapshot — a different truncation shape from the
+// incremental one a local snapshot produces. The WAL must still reclaim behind
+// it, keep its live-bytes accounting straight, serve reads, and replay to the
+// same bounds on restart.
 func TestFourNodeRaftInstallSnapshotFollowerReclaims(t *testing.T) {
 	if testing.Short() {
 		t.Skip("isolates a follower from a four-node raft cluster and waits out InstallSnapshot catch-up")
@@ -575,10 +577,11 @@ func TestFourNodeRaftInstallSnapshotFollowerReclaims(t *testing.T) {
 		perRound     = 50
 		lagApplies   = 60
 		payloadBytes = 200
-		// The follower rotates through roughly ten 4 KiB segments here. What
-		// survives the catch-up is the head segment plus the one or two the
-		// entries hraft retains below the installed snapshot index pin.
-		maxSegments = 6
+		// The follower rotates through roughly ten 4 KiB segments here. The
+		// install clears its whole log, so what survives the catch-up is the
+		// head segment plus at most a sealed predecessor reclamation has not
+		// reached yet.
+		maxSegments = 3
 	)
 
 	c := newRaftCluster(t, nodeCount)
@@ -697,10 +700,9 @@ func TestFourNodeRaftInstallSnapshotFollowerReclaims(t *testing.T) {
 	}
 	assertLiveBytesInvariant(t, lagger.wal, "after install-snapshot catch-up")
 
-	// The compacted log is gapped: hashicorp/raft compacts up to
-	// TrailingLogs back from the log head it had, which is below the installed
-	// snapshot index, and the leader resumes appending above that index. Both
-	// ends stay readable and the hole reads as missing.
+	// Nothing of the pre-catch-up log survives: the install cleared it whole,
+	// and the log now holds only what the leader appended above the installed
+	// snapshot index. Those entries are readable, everything below is gone.
 	var lg hraft.Log
 	if err := lagger.gs.GetLog(last, &lg); err != nil {
 		t.Errorf("%s: GetLog(%d): %v", lagger.id, last, err)
@@ -708,20 +710,21 @@ func TestFourNodeRaftInstallSnapshotFollowerReclaims(t *testing.T) {
 	if err := lagger.gs.GetLog(first, &lg); err != nil {
 		t.Errorf("%s: GetLog(%d): %v", lagger.id, first, err)
 	}
-	if first > frozen {
-		t.Errorf("%s: FirstIndex = %d, want the retained tail of the pre-catch-up log (<= %d)",
-			lagger.id, first, frozen)
+	if first <= shipped {
+		t.Errorf("%s: FirstIndex = %d, want the first index appended past the installed snapshot %d",
+			lagger.id, first, shipped)
 	}
-	if err := lagger.gs.GetLog(frozen+1, &lg); !errors.Is(err, hraft.ErrLogNotFound) {
-		t.Errorf("%s: GetLog(%d) in the compacted hole = %v, want ErrLogNotFound", lagger.id, frozen+1, err)
+	for _, idx := range []uint64{1, frozen, frozen + 1, shipped} {
+		if err := lagger.gs.GetLog(idx, &lg); !errors.Is(err, hraft.ErrLogNotFound) {
+			t.Errorf("%s: GetLog(%d) below the installed snapshot = %v, want ErrLogNotFound",
+				lagger.id, idx, err)
+		}
 	}
 
-	// Restart the lagger's WAL stack: replay of a gapped log, whose surviving
-	// DeleteRange masks reach into segments reclamation has already unlinked,
-	// must land on the bounds the live index reported. The emptied-group replay
-	// shape — where the masks are all that survive and bounds can only come
-	// from the rebuilt index — is unreachable through InstallSnapshot and is
-	// covered by the WAL package's own replay tests.
+	// Restart the lagger's WAL stack: what is left on disk after the install
+	// cleared the log and reclamation unlinked the drained segments must replay
+	// to the same bounds the live index reported. Only the entries appended
+	// after the install can supply them.
 	if err := lagger.wal.Close(); err != nil {
 		t.Fatalf("%s: close WAL: %v", lagger.id, err)
 	}

@@ -1123,6 +1123,78 @@ func (w *WAL) applyDeleteRange(gs *groupState, payload []byte) {
 	if hi < lo {
 		return
 	}
+	w.dropRange(gs, lo, hi)
+	gs.shrinkBounds(lo, hi)
+}
+
+// deleteRangePath is how a mask over [lo, hi] is applied to the index.
+type deleteRangePath int
+
+const (
+	// deleteRangeByIndex looks up every index the mask covers.
+	deleteRangeByIndex deleteRangePath = iota
+	// deleteRangeByEntry walks the live entries and drops those the mask covers.
+	deleteRangeByEntry
+	// deleteRangeWipe discards the whole index: the mask covers all of it.
+	deleteRangeWipe
+)
+
+// chooseDeleteRangePath picks the cheaper side to walk. A mask can be wider
+// than the index space is populated — hashicorp/raft masks the entire log in
+// one DeleteRange after a snapshot install — and the walk runs under
+// stateMu.Lock, where every group's reads on the node wait behind it.
+func chooseDeleteRangePath(gs *groupState, lo, hi uint64) deleteRangePath {
+	live := uint64(len(gs.logs))
+	switch {
+	case gs.firstIndex != 0 && lo <= gs.firstIndex && hi >= gs.lastIndex:
+		return deleteRangeWipe
+	case hi-lo >= live: // mask wider than the live count; subtraction cannot overflow
+		return deleteRangeByEntry
+	default:
+		return deleteRangeByIndex
+	}
+}
+
+func (w *WAL) dropRange(gs *groupState, lo, hi uint64) {
+	switch chooseDeleteRangePath(gs, lo, hi) {
+	case deleteRangeWipe:
+		w.dropWholeIndex(gs)
+	case deleteRangeByEntry:
+		w.dropRangeByEntry(gs, lo, hi)
+	case deleteRangeByIndex:
+		w.dropRangeByIndex(gs, lo, hi)
+	}
+}
+
+// dropWholeIndex discards every entry the group holds. Callers must have
+// established that the mask covers all of them: nothing here consults it.
+// raft.MonotonicLogStore requires the whole-log case to be efficient, so the
+// maps are replaced rather than emptied key by key; debiting the segments is
+// inherently per-entry because each entry's bytes live in its own segment.
+func (w *WAL) dropWholeIndex(gs *groupState) {
+	for _, loc := range gs.logs {
+		w.segLive[loc.seg] -= int64(loc.length)
+	}
+	gs.logs = make(map[uint64]logLoc)
+	// Cached indices are a subset of indexed ones, so the recent window
+	// empties with the index and its FIFO holds nothing but stale keys.
+	gs.cache = make(map[uint64][]byte)
+	gs.cacheBytes = 0
+	gs.cacheQueue = cacheFIFO{}
+}
+
+func (w *WAL) dropRangeByEntry(gs *groupState, lo, hi uint64) {
+	for idx, loc := range gs.logs {
+		if idx < lo || idx > hi {
+			continue
+		}
+		w.segLive[loc.seg] -= int64(loc.length)
+		delete(gs.logs, idx)
+		gs.cacheDrop(idx)
+	}
+}
+
+func (w *WAL) dropRangeByIndex(gs *groupState, lo, hi uint64) {
 	for i := lo; i <= hi; i++ {
 		if old, ok := gs.logs[i]; ok {
 			w.segLive[old.seg] -= int64(old.length)
@@ -1130,9 +1202,12 @@ func (w *WAL) applyDeleteRange(gs *groupState, payload []byte) {
 		delete(gs.logs, i)
 		gs.cacheDrop(i)
 	}
-	// Match hashicorp/raft InmemStore.DeleteRange bound updates so suffix
-	// truncation (AppendEntries conflict) does not erase the surviving prefix
-	// or poison GetLog for indices that still exist.
+}
+
+// shrinkBounds matches hashicorp/raft InmemStore.DeleteRange bound updates so
+// suffix truncation (AppendEntries conflict) does not erase the surviving
+// prefix or poison GetLog for indices that still exist.
+func (gs *groupState) shrinkBounds(lo, hi uint64) {
 	if lo <= gs.firstIndex {
 		gs.firstIndex = hi + 1
 	}
