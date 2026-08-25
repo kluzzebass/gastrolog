@@ -8,9 +8,11 @@
 // through the shared WAL with coalesced fsync.
 //
 // The WAL is segmented: when a segment exceeds the target size, a new segment
-// is started. After DeleteRange batches, when at least CompactionMinSegments
-// segments hold data, the WAL may compact: rewrite live state into new
-// segments, fsync, then remove older segment files (replay-safe).
+// is started. Space is returned by reclamation, oldest sealed segment first:
+// after a truncation, a rotation, or at Open, the writer unlinks a fully
+// drained segment outright, and scavenges a nearly-drained one by
+// re-appending its surviving records through the write path before unlinking
+// it — so replay never sees a hole ahead of a surviving record.
 package raftwal
 
 import (
@@ -21,7 +23,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -52,6 +53,10 @@ const (
 
 	// walFileSuffix is the suffix for WAL segment files.
 	walFileSuffix = ".log"
+
+	// scavengeMaxLiveBytes is the default ceiling on live bytes rewritten to
+	// reclaim the oldest segment in one pass.
+	scavengeMaxLiveBytes = 4 << 20 // 4 MiB
 
 	// syncBatchWindow is how long the writer waits to collect more writes
 	// before fsyncing. A short window (1ms) amortizes fsync across groups
@@ -93,12 +98,6 @@ type Config struct {
 	// before fsyncing. Default: 1ms.
 	SyncBatchWindow time.Duration
 
-	// CompactionMinSegments is the minimum number of data-bearing WAL segments
-	// required before automatic compaction is attempted after DeleteRange
-	// writes. The reserved spare is preallocated and logically empty, so it
-	// never counts toward this floor. Default: 2.
-	CompactionMinSegments int
-
 	// LogCacheBudgetBytes is the per-group heap budget for recently appended
 	// log entry payloads (the recent window). GetLog serves entries within
 	// the window from memory; older entries are read from WAL segment files.
@@ -107,7 +106,7 @@ type Config struct {
 	LogCacheBudgetBytes int64
 
 	// SegmentSync, if non-nil, is called instead of (*os.File).Sync on the
-	// active WAL segment after a batch is written (and during compaction).
+	// active WAL segment after a batch is written.
 	// Used by tests for deterministic fsync failure injection. Production code
 	// must leave this nil.
 	SegmentSync func(*os.File) error
@@ -118,18 +117,63 @@ type Config struct {
 	// leave this nil.
 	SegmentPreallocate func(*os.File, int64) error
 
+	// SegmentRemove, if non-nil, is called instead of os.Remove when
+	// reclamation unlinks a segment file. Used by tests for deterministic
+	// unlink failure injection. Production code must leave this nil.
+	SegmentRemove func(string) error
+
 	// OnReserveState, if non-nil, is invoked when the WAL's space reserve is
 	// lost (preallocation failed — the WAL runs on ordinary allocation and a
 	// full volume can panic Raft) or restored. Invoked from the batch-writer
 	// goroutine: must not block. err is nil when lost is false.
 	OnReserveState func(lost bool, err error)
 
-	// OnCompaction, if non-nil, is invoked after each automatic compaction
-	// completes, with that run's result. Compaction rewrites every live entry
-	// and blocks the batch writer for its whole duration, so an unreported run
-	// surfaces only as unexplained append latency in every group at once.
-	// Invoked from the batch-writer goroutine: must not block.
-	OnCompaction func(CompactionStats)
+	// ScavengeMaxLiveBytes bounds the live payload bytes the writer will
+	// rewrite in one reclamation pass to free the oldest segment: about 6%
+	// of a default segment and single-digit milliseconds of sequential
+	// write. Default: 4 MiB.
+	//
+	// It bounds the rewrite, and only the rewrite. The same pass also
+	// unlinks every drained segment it finds — unbounded in count, and
+	// verified by at most one index scan for the whole pass. Removing a
+	// segment past the first one costs only that segment's own file work
+	// (stat, remove, close its reader handles), not another scan. Neither
+	// the unlink count nor that per-segment removal cost is capped by this
+	// setting.
+	//
+	// A segment whose live remainder exceeds the bound is retained until
+	// truncation drains it below the bound, and because reclamation is
+	// oldest-first, every segment behind it is retained with it. On a WAL
+	// shared by several groups, one group's slow-draining head segment
+	// therefore holds space for all of them. Setting the bound at or above
+	// SegmentTargetSize removes the ceiling entirely: every pass then
+	// rewrites the whole oldest segment.
+	ScavengeMaxLiveBytes int64
+
+	// OnReclaim, if non-nil, is invoked after each reclaimed segment.
+	// Invoked from the batch-writer goroutine: must not block. Open's
+	// leading pass invokes it too, before the writer goroutine starts.
+	OnReclaim func(ReclaimStats)
+
+	// OnReclaimAnomaly, if non-nil, is invoked when a verification scan
+	// contradicts a segment's live-bytes counter, in either direction:
+	// liveRefs above zero when the counter read drained, or liveRefs zero
+	// when the counter claims live bytes no index entry references. The
+	// segment is retained and reclamation halts on it; a restart rebuilds
+	// counters from replay. Invoked from the batch-writer goroutine: must
+	// not block.
+	//
+	// One drift escapes detection: a counter overstating a segment with no
+	// live references by more than ScavengeMaxLiveBytes. Such a segment is
+	// eligible for neither path, so no scan ever runs against it.
+	OnReclaimAnomaly func(seq int, liveRefs int)
+
+	// OnUnlinkError, if non-nil, is invoked when removing a reclaimed
+	// segment's file fails. Reclamation retries the segment on every later
+	// pass, and the stall it causes is oldest-first: nothing behind the
+	// segment is reclaimed until the removal succeeds. Invoked outside
+	// stateMu, after the pass: must not block.
+	OnUnlinkError func(seq int, err error)
 }
 
 func (c Config) withDefaults() Config {
@@ -139,8 +183,8 @@ func (c Config) withDefaults() Config {
 	if c.SyncBatchWindow <= 0 {
 		c.SyncBatchWindow = syncBatchWindow
 	}
-	if c.CompactionMinSegments <= 0 {
-		c.CompactionMinSegments = 2
+	if c.ScavengeMaxLiveBytes <= 0 {
+		c.ScavengeMaxLiveBytes = scavengeMaxLiveBytes
 	}
 	if c.LogCacheBudgetBytes <= 0 {
 		c.LogCacheBudgetBytes = logCacheBudgetBytes
@@ -148,23 +192,11 @@ func (c Config) withDefaults() Config {
 	return c
 }
 
-// CompactionStats captures the most recent automatic WAL compaction result.
-type CompactionStats struct {
-	ReclaimedSegments int
-	ReclaimedBytes    int64
-	RetainedSegments  int
-	RetainedBytes     int64
-
-	// Duration is how long the run held the batch writer. Every group's
-	// appends queue behind it, so this is the blast radius of one compaction.
-	Duration time.Duration
-}
-
 // WAL is the shared write-ahead log. Create one per node; all Raft
 // groups on that node share it.
 type WAL struct {
 	// stateMu protects in-memory group state (groups, groupIDs, nextGID,
-	// lastCompaction). Disk writes and fsync run in batchWriter without
+	// segLive, quarantined). Disk writes and fsync run in batchWriter without
 	// holding stateMu so concurrent reads are not blocked on I/O.
 	stateMu  sync.RWMutex
 	dir      string
@@ -173,7 +205,22 @@ type WAL struct {
 	groupIDs map[string]uint32      // group name → numeric ID
 	nextGID  uint32
 
-	// Active segment.
+	// segLive tracks, per segment, the payload bytes of records the index
+	// still references (live log entries, current stable values, group
+	// registrations). Masks (entryDeleteRange) never count. Zero means no
+	// live references. Guarded by stateMu.
+	segLive map[int]int64
+
+	// quarantined holds segments whose drained counter contradicted the
+	// verification scan. They are excluded from reclamation — the
+	// contradiction is a counter bug, and a restart rebuilds counters from
+	// replay. Guarded by stateMu.
+	quarantined map[int]struct{}
+
+	// Active segment. seg, segPath and segSize are writer-only. segSeq is
+	// written under stateMu (via registerSegment) because oldestSealedSegment
+	// reads it under stateMu too; the writer itself reads its own prior
+	// writes without the lock, safe by single-goroutine program order.
 	seg     *os.File
 	segPath string
 	segSize int64
@@ -192,7 +239,7 @@ type WAL struct {
 
 	// Segment read handles for serving log payloads beyond the recent
 	// window. readersMu guards the map itself; handles
-	// for compacted segments are closed only under stateMu.Lock, which is
+	// for reclaimed segments are closed only under stateMu.Lock, which is
 	// mutually exclusive with GetLog readers (they hold stateMu.RLock
 	// across location lookup + pread), so a handle is never closed while a
 	// read is in flight on it.
@@ -214,8 +261,6 @@ type WAL struct {
 	appendNanos    atomic.Uint64
 	appendMaxNanos atomic.Uint64 // max since the last AppendLatencyStats read
 	wg             sync.WaitGroup
-
-	lastCompaction CompactionStats
 }
 
 // logLoc locates one encoded raft.Log payload inside a WAL segment file.
@@ -223,6 +268,14 @@ type logLoc struct {
 	seg    int   // segment sequence number
 	off    int64 // file offset of the encoded payload
 	length int   // encoded payload length
+}
+
+// stableVal is a stable-store value plus the durable location of the record
+// that last set it, so reclamation can tell which segment the live copy
+// occupies.
+type stableVal struct {
+	value []byte
+	loc   logLoc
 }
 
 // groupState holds per-group in-memory state.
@@ -242,14 +295,19 @@ type groupState struct {
 	cacheQueue cacheFIFO
 
 	// Stable store: small key-value pairs (CurrentTerm, LastVotedFor).
-	stable map[string][]byte
+	stable map[string]stableVal
+
+	// Live registration record for this group: the name and the durable
+	// location of the entryGroupReg record replay would use.
+	regName string
+	regLoc  logLoc
 }
 
 func newGroupState() *groupState {
 	return &groupState{
 		logs:   make(map[uint64]logLoc),
 		cache:  make(map[uint64][]byte),
-		stable: make(map[string][]byte),
+		stable: make(map[string]stableVal),
 	}
 }
 
@@ -310,15 +368,17 @@ func Open(dir string, cfgs ...Config) (*WAL, error) {
 	cfg = cfg.withDefaults()
 
 	w := &WAL{
-		dir:      dir,
-		cfg:      cfg,
-		groups:   make(map[uint32]*groupState),
-		groupIDs: make(map[string]uint32),
-		nextGID:  1,
-		readers:  make(map[int]*os.File),
-		writeCh:  make(chan writeOp, 4096),
-		syncCh:   make(chan chan error, 64),
-		done:     make(chan struct{}),
+		dir:         dir,
+		cfg:         cfg,
+		groups:      make(map[uint32]*groupState),
+		groupIDs:    make(map[string]uint32),
+		nextGID:     1,
+		segLive:     make(map[int]int64),
+		quarantined: make(map[int]struct{}),
+		readers:     make(map[int]*os.File),
+		writeCh:     make(chan writeOp, 4096),
+		syncCh:      make(chan chan error, 64),
+		done:        make(chan struct{}),
 	}
 
 	// Replay existing segments to rebuild in-memory state.
@@ -330,6 +390,11 @@ func Open(dir string, cfgs ...Config) (*WAL, error) {
 	if err := w.rotateSegment(); err != nil {
 		return nil, fmt.Errorf("raftwal: open segment: %w", err)
 	}
+
+	// Collect segments a crash left drained (e.g. an interrupted scavenge
+	// whose copies were fsynced). Single-threaded: the writer has not
+	// started.
+	w.reclaimPass()
 
 	// Start the batch writer goroutine.
 	w.wg.Add(1)
@@ -368,14 +433,6 @@ func (w *WAL) GroupStore(name string) *GroupStore {
 	return &GroupStore{wal: w, groupID: gid}
 }
 
-// LastCompactionStats returns statistics from the most recent automatic
-// compaction run. If no compaction has run yet, fields are zero.
-func (w *WAL) LastCompactionStats() CompactionStats {
-	w.stateMu.RLock()
-	defer w.stateMu.RUnlock()
-	return w.lastCompaction
-}
-
 // Close flushes pending writes and closes the WAL. Safe to call multiple times.
 func (w *WAL) Close() error {
 	w.stateMu.Lock()
@@ -400,7 +457,7 @@ func (w *WAL) Close() error {
 		}
 	}
 drained:
-	// Close read handles under stateMu.Lock — the same exclusion compaction
+	// Close read handles under stateMu.Lock — the same exclusion reclamation
 	// uses — so no in-flight GetLog is mid-pread on a handle being closed.
 	// (A GetLog issued after Close still works: segmentReader reopens.)
 	w.stateMu.Lock()
@@ -509,6 +566,15 @@ func (w *WAL) syncActiveSegment() error {
 	return w.seg.Sync()
 }
 
+// removeSegmentFile deletes a sealed segment's file; SegmentRemove overrides
+// when set.
+func (w *WAL) removeSegmentFile(path string) error {
+	if w.cfg.SegmentRemove != nil {
+		return w.cfg.SegmentRemove(path)
+	}
+	return os.Remove(path)
+}
+
 // appliedRecord is a successfully appended writeOp plus where its payload
 // landed, so the in-memory index can reference the durable bytes.
 type appliedRecord struct {
@@ -517,12 +583,15 @@ type appliedRecord struct {
 	payloadOff int64 // file offset of the record payload
 }
 
-// flushBatch writes all ops to the segment, fsyncs once, and notifies callers.
-// Segment I/O and fsync run without stateMu so reads can proceed concurrently.
+// flushBatch writes all ops to the segment, fsyncs once, notifies callers,
+// then reclaims dead segments. Segment I/O and fsync run without stateMu so
+// reads can proceed concurrently; waiters are notified before reclamation so
+// an already-fsynced op never waits on space management.
 func (w *WAL) flushBatch(batch []writeOp) {
 	if len(batch) == 0 {
 		return
 	}
+	segSeqBefore := w.segSeq
 
 	applied, writeErr, sawDeleteRange := w.appendBatchToSegment(batch)
 
@@ -537,14 +606,11 @@ func (w *WAL) flushBatch(batch []writeOp) {
 	// Single fsync for the entire batch — no stateMu held.
 	syncErr := w.syncActiveSegment()
 
-	if syncErr == nil && writeErr == nil && sawDeleteRange {
-		// Best effort: compaction must never affect caller-visible success
-		// for already-fsynced writes. Run before notifying waiters so
-		// LastCompactionStats is stable when DeleteRange returns.
-		_ = w.compactSegments()
-	}
-
 	w.notifyBatchWaiters(batch, syncErr)
+
+	if syncErr == nil && writeErr == nil && (sawDeleteRange || w.segSeq != segSeqBefore) {
+		w.reclaimPass()
+	}
 }
 
 func (w *WAL) appendBatchToSegment(batch []writeOp) (applied []appliedRecord, writeErr error, sawDeleteRange bool) {
@@ -628,28 +694,38 @@ func (w *WAL) applyToMemory(groupID uint32, typ entryType, payload []byte, seg i
 		w.groups[groupID] = gs
 	}
 
+	loc := logLoc{seg: seg, off: payloadOff, length: len(payload)}
+
 	switch typ {
 	case entryLog:
-		gs.applyLogEntry(payload, logLoc{seg: seg, off: payloadOff, length: len(payload)}, w.cfg.LogCacheBudgetBytes)
+		w.applyLogEntry(gs, payload, loc)
 
 	case entryLogBatch:
 		forEachBatchEntry(payload, func(off int, enc []byte) {
-			gs.applyLogEntry(enc, logLoc{seg: seg, off: payloadOff + int64(off), length: len(enc)}, w.cfg.LogCacheBudgetBytes)
+			w.applyLogEntry(gs, enc, logLoc{seg: seg, off: payloadOff + int64(off), length: len(enc)})
 		})
 
 	case entryStableSet:
 		key, val := decodeStableSet(payload)
-		gs.stable[key] = val
+		if old, ok := gs.stable[key]; ok {
+			w.segLive[old.loc.seg] -= int64(old.loc.length)
+		}
+		gs.stable[key] = stableVal{value: val, loc: loc}
+		w.segLive[loc.seg] += int64(loc.length)
 
 	case entryStableUint64:
 		key, val := decodeStableUint64(payload)
 		// Store as 8-byte big-endian for GetUint64 compatibility.
 		buf := make([]byte, 8)
 		binary.BigEndian.PutUint64(buf, val)
-		gs.stable[key] = buf
+		if old, ok := gs.stable[key]; ok {
+			w.segLive[old.loc.seg] -= int64(old.loc.length)
+		}
+		gs.stable[key] = stableVal{value: buf, loc: loc}
+		w.segLive[loc.seg] += int64(loc.length)
 
 	case entryDeleteRange:
-		gs.applyDeleteRange(payload)
+		w.applyDeleteRange(gs, payload)
 
 	case entryGroupReg:
 		name := string(payload)
@@ -657,6 +733,12 @@ func (w *WAL) applyToMemory(groupID uint32, typ entryType, payload []byte, seg i
 		if groupID >= w.nextGID {
 			w.nextGID = groupID + 1
 		}
+		if gs.regName != "" {
+			w.segLive[gs.regLoc.seg] -= int64(gs.regLoc.length)
+		}
+		gs.regName = name
+		gs.regLoc = loc
+		w.segLive[loc.seg] += int64(loc.length)
 	}
 }
 
@@ -666,8 +748,8 @@ func (w *WAL) segmentPath(seq int) string {
 }
 
 // segmentReader returns a read-only handle for segment seq, opening it
-// lazily. Callers must hold stateMu (read or write): compaction closes
-// superseded handles only under stateMu.Lock.
+// lazily. Callers must hold stateMu (read or write): reclamation closes
+// handles for removed segments only under stateMu.Lock.
 func (w *WAL) segmentReader(seq int) (*os.File, error) {
 	w.readersMu.Lock()
 	defer w.readersMu.Unlock()
@@ -699,9 +781,7 @@ func (w *WAL) closeSegmentReadersUpTo(maxSeq int) {
 }
 
 // readPayload reads an encoded log payload back from its WAL segment.
-// Callers must hold stateMu (read or write) — see segmentReader — except the
-// batchWriter during compaction, when group state is frozen (the batchWriter
-// is the only mutator and it is busy compacting).
+// Callers must hold stateMu (read or write) — see segmentReader.
 func (w *WAL) readPayload(loc logLoc) ([]byte, error) {
 	f, err := w.segmentReader(loc.seg)
 	if err != nil {
@@ -723,17 +803,37 @@ func (w *WAL) rotateSegment() error {
 		}
 	}
 
-	w.segSeq++
-	w.segPath = w.segmentPath(w.segSeq)
-	promotedSpare := w.segPath == w.sparePath
-	f, err := os.OpenFile(w.segPath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644) //nolint:gosec // G304: path is constructed internally
+	seq := w.segSeq + 1
+	path := w.segmentPath(seq)
+	promotedSpare := path == w.sparePath
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644) //nolint:gosec // G304: path is constructed internally
 	if err != nil {
-		return fmt.Errorf("open segment %s: %w", w.segPath, err)
+		return fmt.Errorf("open segment %s: %w", path, err)
 	}
 	w.seg = f
 	w.segSize = 0
+	w.segPath = path
+	w.registerSegment(seq)
 	w.reconcileReserve(promotedSpare)
 	return nil
+}
+
+// registerSegment advances segSeq to seq (the writer only ever moves it
+// forward; replay calls it in ascending file order) and ensures a live-bytes
+// counter exists for the segment so one whose records all die (or that holds
+// only masks) still becomes a reclamation candidate. Runs on the writer or
+// during single-threaded replay; takes stateMu because oldestSealedSegment's
+// stateMu-holding callers read segSeq and segLive concurrently with the
+// writer's next rotation.
+func (w *WAL) registerSegment(seq int) {
+	w.stateMu.Lock()
+	if seq > w.segSeq {
+		w.segSeq = seq
+	}
+	if _, ok := w.segLive[seq]; !ok {
+		w.segLive[seq] = 0
+	}
+	w.stateMu.Unlock()
 }
 
 // reconcileReserve restores the space-reserve invariant after a rotation:
@@ -836,18 +936,39 @@ func (w *WAL) replay() error {
 		if err := w.replaySegment(seg.path, seg.seq); err != nil {
 			return fmt.Errorf("replay %s: %w", seg.path, err)
 		}
-		// Track the highest segment sequence number.
-		if seg.seq > w.segSeq {
-			w.segSeq = seg.seq
-		}
 	}
+	w.reconcileBoundsFromIndex()
 	return nil
+}
+
+// reconcileBoundsFromIndex derives every group's first/last index from the
+// rebuilt log index. Once reclamation has unlinked drained segments, a
+// group's surviving DeleteRange masks replay against emptier state than they
+// originally saw, and the incremental bound updates they carry can leave
+// bounds that describe entries the index does not hold. After replay the
+// index is the authority. Single-threaded: the writer has not started.
+func (w *WAL) reconcileBoundsFromIndex() {
+	for _, gs := range w.groups {
+		if len(gs.logs) == 0 {
+			gs.firstIndex, gs.lastIndex = 0, 0
+			continue
+		}
+		first, last := uint64(0), uint64(0)
+		for idx := range gs.logs {
+			if first == 0 || idx < first {
+				first = idx
+			}
+			if idx > last {
+				last = idx
+			}
+		}
+		gs.firstIndex, gs.lastIndex = first, last
+	}
 }
 
 type segmentInfo struct {
 	path string
 	seq  int
-	size int64
 }
 
 func parseSegmentSeq(name string) (int, bool) {
@@ -860,291 +981,12 @@ func parseSegmentSeq(name string) (int, bool) {
 	return seq, true
 }
 
-func (w *WAL) listSegments() ([]segmentInfo, error) {
-	entries, err := os.ReadDir(w.dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	segments := make([]segmentInfo, 0, len(entries))
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.HasPrefix(name, walFilePrefix) || !strings.HasSuffix(name, walFileSuffix) {
-			continue
-		}
-		seq, ok := parseSegmentSeq(name)
-		if !ok {
-			continue
-		}
-		path := filepath.Join(w.dir, name)
-		info, err := os.Stat(path)
-		if err != nil {
-			return nil, err
-		}
-		segments = append(segments, segmentInfo{
-			path: path,
-			seq:  seq,
-			size: info.Size(),
-		})
-	}
-	sort.Slice(segments, func(i, j int) bool { return segments[i].seq < segments[j].seq })
-	return segments, nil
-}
-
-func (w *WAL) compactSegments() error {
-	segments, err := w.listSegments()
-	if err != nil {
-		return err
-	}
-	// Count only segments that hold data. The reserved spare is a
-	// preallocated, logically empty next segment that always exists, so
-	// counting files would satisfy any floor of 2 from the first write
-	// onward and rewrite the whole live log on every DeleteRange.
-	segmentsWithData := 0
-	for _, s := range segments {
-		if s.size > 0 {
-			segmentsWithData++
-		}
-	}
-	if segmentsWithData < w.cfg.CompactionMinSegments {
-		return nil
-	}
-
-	// Capture segment horizon to reclaim only pre-compaction files.
-	oldMaxSeq := w.segSeq
-	if oldMaxSeq <= 0 {
-		return nil
-	}
-	start := time.Now()
-
-	if w.seg != nil {
-		if err := w.syncActiveSegment(); err != nil {
-			return err
-		}
-	}
-	if err := w.rotateSegment(); err != nil {
-		return err
-	}
-
-	snap := w.collectCompactionSnapshot()
-	newLocs, err := w.writeCompactionSnapshot(snap)
-	if err != nil {
-		return err
-	}
-	if err := w.syncActiveSegment(); err != nil {
-		return err
-	}
-
-	// Swap log locations to the fsynced compacted copies, remove the
-	// superseded files, and close their read handles — all under
-	// stateMu.Lock so no GetLog can pread a segment being removed.
-	w.stateMu.Lock()
-	for gid, locs := range newLocs {
-		gs := w.groups[gid]
-		if gs == nil {
-			continue
-		}
-		for idx, loc := range locs {
-			if _, ok := gs.logs[idx]; ok {
-				gs.logs[idx] = loc
-			}
-		}
-	}
-	var reclaimedSegments int
-	var reclaimedBytes int64
-	var removeErr error
-	for _, seg := range segments {
-		if seg.seq > oldMaxSeq {
-			continue
-		}
-		if err := os.Remove(seg.path); err != nil && !os.IsNotExist(err) {
-			removeErr = err
-			break
-		}
-		reclaimedSegments++
-		reclaimedBytes += seg.size
-	}
-	w.closeSegmentReadersUpTo(oldMaxSeq)
-	w.stateMu.Unlock()
-	if removeErr != nil {
-		// Locations already point at the compacted copies (durable), so a
-		// leftover old file is only wasted space; replay tolerates it.
-		return removeErr
-	}
-
-	remaining, err := w.listSegments()
-	if err != nil {
-		return err
-	}
-	var retainedBytes int64
-	for _, seg := range remaining {
-		retainedBytes += seg.size
-	}
-	stats := CompactionStats{
-		ReclaimedSegments: reclaimedSegments,
-		ReclaimedBytes:    reclaimedBytes,
-		RetainedSegments:  len(remaining),
-		RetainedBytes:     retainedBytes,
-		Duration:          time.Since(start),
-	}
-	w.stateMu.Lock()
-	w.lastCompaction = stats
-	w.stateMu.Unlock()
-	if w.cfg.OnCompaction != nil {
-		w.cfg.OnCompaction(stats)
-	}
-	return nil
-}
-
-type snapshotRecord struct {
-	groupID uint32
-	typ     entryType
-	payload []byte
-}
-
-// compactionLogRef identifies one live log entry to carry across compaction.
-// The payload is NOT materialized up front: it is either referenced from the
-// recent window (cached) or streamed back from its old segment when written,
-// so compaction heap stays bounded regardless of log length.
-type compactionLogRef struct {
-	groupID uint32
-	index   uint64
-	loc     logLoc
-	cached  []byte // payload when inside the recent window; nil → read from loc
-}
-
-// compactionSnapshot is the live state captured for a compaction run.
-type compactionSnapshot struct {
-	records []snapshotRecord   // group registrations + stable keys (small)
-	logs    []compactionLogRef // live log entries
-}
-
-// collectCompactionSnapshot captures live WAL state under stateMu for
-// compaction. Group state is frozen for the whole compaction run — the
-// batchWriter is the only mutator and it is the one compacting — so the
-// captured locations and cached payload references stay valid until the
-// location swap.
-func (w *WAL) collectCompactionSnapshot() compactionSnapshot {
-	w.stateMu.RLock()
-	defer w.stateMu.RUnlock()
-
-	type groupRef struct {
-		name string
-		id   uint32
-	}
-	refs := make([]groupRef, 0, len(w.groupIDs))
-	for name, id := range w.groupIDs {
-		refs = append(refs, groupRef{name: name, id: id})
-	}
-	sort.Slice(refs, func(i, j int) bool {
-		if refs[i].id == refs[j].id {
-			return refs[i].name < refs[j].name
-		}
-		return refs[i].id < refs[j].id
-	})
-
-	var snap compactionSnapshot
-	for _, ref := range refs {
-		payload := append([]byte(nil), []byte(ref.name)...)
-		snap.records = append(snap.records, snapshotRecord{
-			groupID: ref.id,
-			typ:     entryGroupReg,
-			payload: payload,
-		})
-	}
-
-	groupIDs := make([]uint32, 0, len(w.groups))
-	for gid := range w.groups {
-		groupIDs = append(groupIDs, gid)
-	}
-	slices.Sort(groupIDs)
-
-	for _, gid := range groupIDs {
-		gs := w.groups[gid]
-		if gs == nil {
-			continue
-		}
-
-		stableKeys := make([]string, 0, len(gs.stable))
-		for k := range gs.stable {
-			stableKeys = append(stableKeys, k)
-		}
-		sort.Strings(stableKeys)
-		for _, key := range stableKeys {
-			val := gs.stable[key]
-			payload := encodeStableSet(key, val)
-			snap.records = append(snap.records, snapshotRecord{
-				groupID: gid,
-				typ:     entryStableSet,
-				payload: payload,
-			})
-		}
-
-		logIndexes := make([]uint64, 0, len(gs.logs))
-		for idx := range gs.logs {
-			logIndexes = append(logIndexes, idx)
-		}
-		slices.Sort(logIndexes)
-		for _, idx := range logIndexes {
-			ref := compactionLogRef{groupID: gid, index: idx, loc: gs.logs[idx]}
-			if enc, ok := gs.cache[idx]; ok {
-				ref.cached = enc
-			}
-			snap.logs = append(snap.logs, ref)
-		}
-	}
-	return snap
-}
-
-// writeCompactionSnapshot appends the captured state to the fresh segment and
-// returns the new location of every carried log entry, keyed by group.
-func (w *WAL) writeCompactionSnapshot(snap compactionSnapshot) (map[uint32]map[uint64]logLoc, error) {
-	for _, rec := range snap.records {
-		if _, err := w.appendCompactedEntry(rec.groupID, rec.typ, rec.payload); err != nil {
-			return nil, err
-		}
-	}
-	newLocs := make(map[uint32]map[uint64]logLoc)
-	for _, ref := range snap.logs {
-		payload := ref.cached
-		if payload == nil {
-			var err error
-			payload, err = w.readPayload(ref.loc)
-			if err != nil {
-				return nil, err
-			}
-		}
-		loc, err := w.appendCompactedEntry(ref.groupID, entryLog, payload)
-		if err != nil {
-			return nil, err
-		}
-		locs := newLocs[ref.groupID]
-		if locs == nil {
-			locs = make(map[uint64]logLoc)
-			newLocs[ref.groupID] = locs
-		}
-		locs[ref.index] = loc
-	}
-	return newLocs, nil
-}
-
-func (w *WAL) appendCompactedEntry(groupID uint32, typ entryType, payload []byte) (logLoc, error) {
-	entrySize := int64(headerSize + len(payload))
-	if w.segSize > 0 && w.segSize+entrySize > w.cfg.SegmentTargetSize {
-		if err := w.rotateSegment(); err != nil {
-			return logLoc{}, err
-		}
-	}
-	loc := logLoc{seg: w.segSeq, off: w.segSize + headerSize, length: len(payload)}
-	return loc, w.appendEntry(groupID, typ, payload)
-}
-
 // replaySegment reads a single WAL segment file and applies entries to memory.
 // Streams the file to avoid loading 64MB segments into heap; tracks each
 // record's payload offset so the log index can serve payloads from disk.
 func (w *WAL) replaySegment(path string, seq int) error {
+	w.registerSegment(seq)
+
 	f, err := os.Open(path) //nolint:gosec // G304: path constructed internally
 	if err != nil {
 		return err
@@ -1203,14 +1045,18 @@ func (w *WAL) replaySegment(path string, seq int) error {
 	}
 }
 
-// applyLogEntry indexes one encoded raft.Log at its durable location and
-// admits the payload to the recent window (bounded by budget bytes).
-// Must be called with w.stateMu held for writing.
-func (gs *groupState) applyLogEntry(payload []byte, loc logLoc, budget int64) {
+// applyLogEntry indexes one encoded raft.Log at its durable location, moves
+// live-bytes accounting off any overwritten record, and admits the payload
+// to the recent window. Caller holds stateMu for writing.
+func (w *WAL) applyLogEntry(gs *groupState, payload []byte, loc logLoc) {
 	var log hraft.Log
 	if err := decodelog(payload, &log); err != nil {
 		return
 	}
+	if old, ok := gs.logs[log.Index]; ok {
+		w.segLive[old.seg] -= int64(old.length)
+	}
+	w.segLive[loc.seg] += int64(loc.length)
 	gs.logs[log.Index] = loc
 	if gs.firstIndex == 0 || log.Index < gs.firstIndex {
 		gs.firstIndex = log.Index
@@ -1218,7 +1064,7 @@ func (gs *groupState) applyLogEntry(payload []byte, loc logLoc, budget int64) {
 	if log.Index > gs.lastIndex {
 		gs.lastIndex = log.Index
 	}
-	gs.cacheStore(log.Index, payload, budget)
+	gs.cacheStore(log.Index, payload, w.cfg.LogCacheBudgetBytes)
 }
 
 // cacheStore admits a payload to the recent window and evicts the oldest
@@ -1268,12 +1114,19 @@ func (gs *groupState) cacheDrop(index uint64) {
 	}
 }
 
-func (gs *groupState) applyDeleteRange(payload []byte) {
+// applyDeleteRange removes the log entries in [lo, hi] from the index and
+// moves their live-bytes accounting off the segments that held them. The
+// mask record itself is never credited as live. Caller holds stateMu for
+// writing.
+func (w *WAL) applyDeleteRange(gs *groupState, payload []byte) {
 	lo, hi := decodeDeleteRange(payload)
 	if hi < lo {
 		return
 	}
 	for i := lo; i <= hi; i++ {
+		if old, ok := gs.logs[i]; ok {
+			w.segLive[old.seg] -= int64(old.length)
+		}
 		delete(gs.logs, i)
 		gs.cacheDrop(i)
 	}
@@ -1437,4 +1290,63 @@ func decodeDeleteRange(data []byte) (uint64, uint64) {
 		return 0, 0
 	}
 	return binary.LittleEndian.Uint64(data[0:8]), binary.LittleEndian.Uint64(data[8:16])
+}
+
+// recomputeSegLive rebuilds live-bytes counters by full index scan. Test and
+// verification support. Caller holds stateMu.
+func (w *WAL) recomputeSegLive() map[int]int64 {
+	out := make(map[int]int64, len(w.segLive))
+	for _, gs := range w.groups {
+		for _, loc := range gs.logs {
+			out[loc.seg] += int64(loc.length)
+		}
+		for _, sv := range gs.stable {
+			out[sv.loc.seg] += int64(sv.loc.length)
+		}
+		if gs.regName != "" {
+			out[gs.regLoc.seg] += int64(gs.regLoc.length)
+		}
+	}
+	return out
+}
+
+// liveRefsForSegment counts index references into segment seq. Caller holds
+// stateMu.
+func (w *WAL) liveRefsForSegment(seq int) int {
+	refs := 0
+	for _, gs := range w.groups {
+		for _, loc := range gs.logs {
+			if loc.seg == seq {
+				refs++
+			}
+		}
+		for _, sv := range gs.stable {
+			if sv.loc.seg == seq {
+				refs++
+			}
+		}
+		if gs.regName != "" && gs.regLoc.seg == seq {
+			refs++
+		}
+	}
+	return refs
+}
+
+// liveRefsBySegment counts index references into every segment in one walk
+// of every group's logs, stable, and registration locations. Caller holds
+// stateMu.
+func (w *WAL) liveRefsBySegment() map[int]int {
+	refs := make(map[int]int)
+	for _, gs := range w.groups {
+		for _, loc := range gs.logs {
+			refs[loc.seg]++
+		}
+		for _, sv := range gs.stable {
+			refs[sv.loc.seg]++
+		}
+		if gs.regName != "" {
+			refs[gs.regLoc.seg]++
+		}
+	}
+	return refs
 }

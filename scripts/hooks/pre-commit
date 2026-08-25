@@ -75,7 +75,7 @@ TIER_PATHS="$SRC_PATHS CLAUDE.md .github/workflows"
 if true; then
   printf "Checking for banned 'tier' vocabulary... "
   TIER=$(git grep -inE 'tier' -- $TIER_PATHS 2>/dev/null \
-    | grep -viE 'frontier|AccessTier|SetTier|SetBlobTier|types\.Tier|INTELLIGENT_TIERING' || true)
+    | grep -viE 'frontier|emptier|AccessTier|SetTier|SetBlobTier|types\.Tier|INTELLIGENT_TIERING' || true)
   if [ -z "$TIER" ]; then
     printf "${GREEN}ok${NC}\n"
   else

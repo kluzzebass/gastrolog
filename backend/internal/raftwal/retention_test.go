@@ -287,23 +287,24 @@ func TestRetentionRestartSurvival(t *testing.T) {
 	}
 }
 
-// Compaction rewrites disk-resident payloads into new segments and removes
-// the old files; evicted entries must remain readable through the swap and
-// after a subsequent restart.
-func TestRetentionCompactionServesFromCompactedSegments(t *testing.T) {
+// Reclamation removes segment files under live readers; evicted entries must
+// remain readable through the removal and after a subsequent restart.
+func TestRetentionServesEvictedEntriesAcrossReclamation(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
+	var reclaims atomic.Int64
 	cfg := Config{
-		SegmentTargetSize:     1024,
-		CompactionMinSegments: 2,
-		LogCacheBudgetBytes:   512,
+		SegmentTargetSize:    1024,
+		ScavengeMaxLiveBytes: 512,
+		LogCacheBudgetBytes:  512,
+		OnReclaim:            func(ReclaimStats) { reclaims.Add(1) },
 	}
 	w, err := Open(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	gs := w.GroupStore("ret-compact")
+	gs := w.GroupStore("ret-reclaim")
 	for i := uint64(1); i <= 40; i++ {
 		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: make([]byte, 100)}); err != nil {
 			t.Fatal(err)
@@ -312,9 +313,11 @@ func TestRetentionCompactionServesFromCompactedSegments(t *testing.T) {
 	if err := gs.DeleteRange(1, 10); err != nil {
 		t.Fatal(err)
 	}
-	if w.LastCompactionStats().ReclaimedSegments == 0 {
-		t.Fatalf("expected compaction to run, stats=%+v", w.LastCompactionStats())
+	syncBarrier(t, w)
+	if reclaims.Load() == 0 {
+		t.Fatal("expected reclamation to run")
 	}
+	assertLiveBytesInvariant(t, w, "after reclamation")
 
 	verify := func(gs *GroupStore, phase string) {
 		t.Helper()
@@ -333,8 +336,8 @@ func TestRetentionCompactionServesFromCompactedSegments(t *testing.T) {
 			}
 		}
 	}
-	verify(gs, "post-compaction")
-	inspectWindow(t, w, "ret-compact")
+	verify(gs, "post-reclamation")
+	inspectWindow(t, w, "ret-reclaim")
 
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
@@ -344,7 +347,7 @@ func TestRetentionCompactionServesFromCompactedSegments(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer w2.Close()
-	verify(w2.GroupStore("ret-compact"), "replayed")
+	verify(w2.GroupStore("ret-reclaim"), "replayed")
 }
 
 // Two groups with independent windows: churn on one must not disturb the
@@ -398,14 +401,14 @@ func TestRetentionMultiGroupIsolation(t *testing.T) {
 }
 
 // Concurrent append/read/delete churn with a tiny window and small segments
-// forces constant eviction, disk reads, and compaction under -race.
+// forces constant eviction, disk reads, and reclamation under -race.
 func TestRetentionConcurrentChurnTinyWindow(t *testing.T) {
 	t.Parallel()
 	cfg := Config{
-		SegmentTargetSize:     2048,
-		SyncBatchWindow:       2 * time.Millisecond,
-		CompactionMinSegments: 2,
-		LogCacheBudgetBytes:   512,
+		SegmentTargetSize:    2048,
+		SyncBatchWindow:      2 * time.Millisecond,
+		ScavengeMaxLiveBytes: 512,
+		LogCacheBudgetBytes:  512,
 	}
 	w, err := Open(t.TempDir(), cfg)
 	if err != nil {
@@ -477,8 +480,8 @@ func TestRetentionConcurrentChurnTinyWindow(t *testing.T) {
 			}
 		}()
 
-		// Deleter: prefix deletes trigger compaction (which rewrites
-		// disk-resident payloads and swaps locations under readers).
+		// Deleter: prefix deletes trigger reclamation (which removes
+		// segment files under readers).
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

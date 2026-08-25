@@ -119,12 +119,12 @@ func (g *GroupStore) Get(key []byte) ([]byte, error) {
 	if gs == nil {
 		return nil, nil
 	}
-	val, ok := gs.stable[string(key)]
+	sv, ok := gs.stable[string(key)]
 	if !ok {
 		return nil, nil
 	}
-	cp := make([]byte, len(val))
-	copy(cp, val)
+	cp := make([]byte, len(sv.value))
+	copy(cp, sv.value)
 	return cp, nil
 }
 
@@ -143,12 +143,12 @@ func (g *GroupStore) GetUint64(key []byte) (uint64, error) {
 	if gs == nil {
 		return 0, nil
 	}
-	val, ok := gs.stable[string(key)]
+	sv, ok := gs.stable[string(key)]
 	if !ok {
 		return 0, nil
 	}
-	if len(val) < 8 {
+	if len(sv.value) < 8 {
 		return 0, nil
 	}
-	return binary.BigEndian.Uint64(val), nil
+	return binary.BigEndian.Uint64(sv.value), nil
 }

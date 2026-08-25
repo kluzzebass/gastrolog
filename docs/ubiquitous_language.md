@@ -374,6 +374,22 @@ gRPC transport:
 - **Snapshot** — FSM state serialized to disk; lets log be truncated.
 - **InstallSnapshot** — RPC for streaming a snapshot to a slow follower.
 
+### Shared WAL (`raftwal`)
+
+The write-ahead log every Raft group's log and stable state shares on a node:
+one segmented file set, one batch-writer goroutine.
+[`backend/internal/raftwal`](../backend/internal/raftwal).
+
+- **Reclamation** — returning dead space in the shared WAL by removing
+  drained segments, oldest sealed segment first. Runs on the batch writer,
+  strictly after batch waiters are notified, so no caller ever waits on it.
+- **Scavenge** — the reclamation path for a nearly-drained oldest segment:
+  its live records are re-appended through the write path onto the active
+  segment, fsynced, and the index repointed at the copies, before the
+  original is unlinked.
+- **Drained** — a WAL segment with zero live payload bytes: the in-memory
+  index holds no reference into it, so unlinking it loses no live state.
+
 ### Placement & membership
 
 - **VaultPlacement** — covered under [Storage](#1-storage); also a cluster
@@ -1332,6 +1348,7 @@ Canonical milestone verbs (reuse these names; do not coin synonyms):
 | instance FSM     |                   | Per-vault chunk-metadata sub-FSM in `vaultctlfsm`. |
 | Raft contact     | peer heartbeat, liveness ping | Peer liveness comes from Raft's own per-group traffic. The dedicated `Heartbeat` broadcast that "peer heartbeat" named was deleted in gastrolog-1lbifx; "heartbeat" now only ever means hashicorp/raft's replication heartbeat. |
 | vault replication |                  | Record streams from leader to follower, per vault. |
+| reclamation / scavenge | WAL compaction | The shared Raft WAL's dead space returns via oldest-first segment reclamation: a drained segment (zero live payload bytes) unlinks outright; a nearly-drained one scavenges — its live records re-append through the write path onto the active segment before the original unlinks. The monolithic whole-log rewrite the term "WAL compaction" named is retired; no work unit in reclamation exceeds one segment's live remainder. |
 | ingester         | source, collector | "Ingester" is the proto name; "source" leaks from UI copy.          |
 | route            | pipeline (at ingest) | Ingestion "route" ≠ query "pipeline"; use "route pipeline" or "ingestion pipeline" to bridge. |
 | record           | event, message    | "Event" conflates with `EventID`; "message" conflates with ingester internals. |

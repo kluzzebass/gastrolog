@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1427,13 +1428,21 @@ func TestReplayWithDeleteRanges(t *testing.T) {
 	}
 }
 
-func TestSegmentCompactionReclaimsOldFilesAndPreservesState(t *testing.T) {
+func TestSegmentReclamationRemovesOldFilesAndPreservesState(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
+	var reclaimed atomic.Int64
+	var reclaimedBytes atomic.Int64
 	w, err := Open(dir, Config{
-		SegmentTargetSize:     1024,
-		CompactionMinSegments: 2,
+		SegmentTargetSize: 1024,
+		// A threshold well under the segment size, as in production: the
+		// drained bulk unlinks and only a nearly-empty head is scavenged.
+		ScavengeMaxLiveBytes: 256,
+		OnReclaim: func(s ReclaimStats) {
+			reclaimed.Add(1)
+			reclaimedBytes.Add(s.ReclaimedBytes)
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1459,7 +1468,7 @@ func TestSegmentCompactionReclaimsOldFilesAndPreservesState(t *testing.T) {
 
 	segmentsBefore := countWalSegments(t, dir)
 	if segmentsBefore < 2 {
-		t.Fatalf("expected multiple segments before compaction, got %d", segmentsBefore)
+		t.Fatalf("expected multiple segments before reclamation, got %d", segmentsBefore)
 	}
 
 	if err := gsA.DeleteRange(1, 20); err != nil {
@@ -1468,14 +1477,15 @@ func TestSegmentCompactionReclaimsOldFilesAndPreservesState(t *testing.T) {
 	if err := gsB.DeleteRange(1, 20); err != nil {
 		t.Fatal(err)
 	}
+	syncBarrier(t, w)
 
-	stats := w.LastCompactionStats()
-	if stats.ReclaimedSegments == 0 {
-		t.Fatalf("expected reclaimed segments > 0, got %+v", stats)
+	if reclaimed.Load() == 0 {
+		t.Fatal("expected reclaimed segments > 0")
 	}
-	if stats.ReclaimedBytes <= 0 {
-		t.Fatalf("expected reclaimed bytes > 0, got %+v", stats)
+	if reclaimedBytes.Load() <= 0 {
+		t.Fatalf("expected reclaimed bytes > 0, got %d", reclaimedBytes.Load())
 	}
+	assertLiveBytesInvariant(t, w, "after reclamation")
 
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
@@ -1483,7 +1493,7 @@ func TestSegmentCompactionReclaimsOldFilesAndPreservesState(t *testing.T) {
 
 	segmentsAfter := countWalSegments(t, dir)
 	if segmentsAfter > segmentsBefore {
-		t.Fatalf("expected no segment growth after compaction, before=%d after=%d", segmentsBefore, segmentsAfter)
+		t.Fatalf("expected no segment growth after reclamation, before=%d after=%d", segmentsBefore, segmentsAfter)
 	}
 
 	w2, err := Open(dir)
@@ -1508,7 +1518,7 @@ func TestSegmentCompactionReclaimsOldFilesAndPreservesState(t *testing.T) {
 
 	var log hraft.Log
 	if err := ga.GetLog(10, &log); err != hraft.ErrLogNotFound {
-		t.Fatalf("expected compacted log miss for group-a index 10, got %v", err)
+		t.Fatalf("expected truncated log miss for group-a index 10, got %v", err)
 	}
 	if err := ga.GetLog(22, &log); err != nil {
 		t.Fatalf("group-a GetLog 22: %v", err)
@@ -1527,14 +1537,15 @@ func TestSegmentCompactionReclaimsOldFilesAndPreservesState(t *testing.T) {
 	}
 }
 
-func TestSegmentCompactionPreservesSparseIndexAfterRestart(t *testing.T) {
+func TestSegmentReclamationPreservesSparseIndexAfterRestart(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	w, err := Open(dir, Config{
-		SegmentTargetSize:     1024,
-		CompactionMinSegments: 2,
-	})
+	cfg := Config{
+		SegmentTargetSize:    1024,
+		ScavengeMaxLiveBytes: 128,
+	}
+	w, err := Open(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1560,7 +1571,7 @@ func TestSegmentCompactionPreservesSparseIndexAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	w2, err := Open(dir)
+	w2, err := Open(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1575,7 +1586,7 @@ func TestSegmentCompactionPreservesSparseIndexAfterRestart(t *testing.T) {
 
 	var log hraft.Log
 	if err := gs2.GetLog(50, &log); err != hraft.ErrLogNotFound {
-		t.Fatalf("expected ErrLogNotFound for compacted sparse gap index 50, got %v", err)
+		t.Fatalf("expected ErrLogNotFound for truncated sparse gap index 50, got %v", err)
 	}
 	if err := gs2.GetLog(102, &log); err != nil {
 		t.Fatalf("GetLog 102: %v", err)

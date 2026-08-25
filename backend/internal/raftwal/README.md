@@ -136,7 +136,39 @@ flowchart TD
     style ROT fill:#5c3d1e,stroke:#a67c52
 ```
 
-Segments are numbered sequentially (`wal-000001.log`, `wal-000002.log`, ...). The target size is 64MB. When there are at least two segment files and a `DeleteRange` write is fsynced, the WAL may run automatic compaction: it appends a compacted snapshot of registrations, stable keys, and surviving log entries to new segments, fsyncs, then removes older `wal-*.log` files. Tune with `Config.CompactionMinSegments` (default 2). Stats from the last run are available via `WAL.LastCompactionStats()`.
+Segments are numbered sequentially (`wal-000001.log`, `wal-000002.log`, ...). The target size is 64MB.
+
+### Reclamation
+
+```mermaid
+flowchart TD
+    T[Pass runs: DeleteRange batch flushed,<br/>rotation sealed a segment, or at Open] --> OLD{Oldest sealed segment}
+    OLD -->|none sealed| DONE[Nothing to reclaim]
+    OLD -->|drained: 0 live bytes| VERIFY{Verification scan:<br/>index reference found?}
+    VERIFY -->|none| UNLINK[Unlink segment]
+    VERIFY -->|found| QUAR1[Quarantine segment;<br/>fire OnReclaimAnomaly]
+    UNLINK --> OLD
+    OLD -->|live <= ScavengeMaxLiveBytes| COLLECT{Collect live records}
+    COLLECT -->|found| SCAV[Re-append, fsync,<br/>repoint index]
+    COLLECT -->|none| QUAR2[Quarantine segment;<br/>fire OnReclaimAnomaly]
+    SCAV --> UNLINK
+    OLD -->|live > ScavengeMaxLiveBytes| RETAIN[Retain segment;<br/>everything sealed behind it waits too]
+
+    style UNLINK fill:#2d5016,stroke:#4a8c28
+    style SCAV fill:#5c3d1e,stroke:#a67c52
+    style RETAIN fill:#5c1e1e,stroke:#c84a4a
+    style QUAR1 fill:#5c1e1e,stroke:#c84a4a
+    style QUAR2 fill:#5c1e1e,stroke:#c84a4a
+```
+
+Each sealed segment tracks its live payload bytes: the total size of records the in-memory index still references. A reclamation pass runs on the batch writer strictly after batch waiters are notified — three triggers: a flushed batch containing a `DeleteRange`, a rotation sealing a segment, and once at `Open` after replay. Every pass targets the oldest sealed segment, never a newer one:
+
+- **Drained** (zero live bytes): unlink outright. Before any `os.Remove`, a verification scan confirms no index reference survives into the segment — the live-bytes counter only nominates a segment for removal, the scan gates the removal itself. At most one scan per pass verifies every drained candidate the pass finds; a segment past the first costs only its own removal (stat, remove, close its reader handles), not another scan. A pass that finds nothing to unlink takes no scan at all.
+- **Nearly drained** (live bytes at or below `Config.ScavengeMaxLiveBytes`, default 4 MiB): scavenge. The writer re-appends the segment's surviving records — log entries, current stable values, group registrations — through the normal write path onto the active segment, fsyncs, then repoints the index at the copies. That drains the segment to zero, and it unlinks in the same pass. A transient error collecting or re-appending those records aborts the pass with the segment untouched; the next trigger retries it.
+
+The verification scan (drained path) and the record collection (scavenge path) can each disagree with the live-bytes counter. A segment the counter reads as drained can still turn up an index reference; a segment eligible for scavenge can turn up no live records to collect — drift in opposite directions. Either disagreement **quarantines** the segment: it is retained, `Config.OnReclaimAnomaly` fires once, and — because reclamation is oldest-first — every sealed segment behind it is retained too, until a restart rebuilds the live-bytes counters from replay. One drift direction escapes detection: a counter overstating a segment's live bytes past the scavenge threshold makes it eligible for neither path, so no scan ever runs against it.
+
+A pass scavenges at most one segment, so the threshold caps the rewrite per pass. It caps nothing else: the pass unlinks every drained segment it finds, unbounded in count, verified by at most one index scan for the whole pass rather than one per segment — and a pass that unlinks nothing takes no scan at all. Reclamation is strictly oldest-first: a segment whose live remainder sits above the threshold — and every sealed segment behind it, regardless of which Raft group they belong to — is retained until further truncation shrinks it.
 
 ### Group Registration
 
@@ -185,6 +217,20 @@ The batch was fsynced (durable) but the goroutine crashed before sending on `don
 ### Crash Before fsync
 
 Entries in the batch are lost. The in-memory state was updated but the disk doesn't have them. On restart, those entries are absent. Raft treats this as a follower that's behind — the leader replicates the missing entries.
+
+### Interrupted Scavenge
+
+A scavenge copies a nearly-drained segment's live records onto the active segment, fsyncs, then repoints the index and unlinks the original — a crash can land between any of those steps:
+
+- **Before the copies fsync**: the copies never existed as far as replay is concerned; the original segment replays unchanged.
+- **After fsync, before the original unlinks**: replay sees both the original records and their copies. The copies live in a later segment, so they win — same values, same index locations — and the rebuilt live-bytes counter shows the original segment drained. The reclamation pass that runs once at `Open` unlinks it.
+- **Mid-unlink**: `os.Remove` on the original is a single syscall; there is no partial state to reconcile.
+
+No window loses a live record. The worst case is a redundant, idempotent copy that the next `Open` cleans up.
+
+### Segment Removal Failure
+
+If `os.Remove` on a reclaimed segment's file fails (permissions, a locked or immutable file, an I/O error), `Config.OnUnlinkError` reports it and the segment stays nominated: the next reclamation pass retries the same removal, and because reclamation is oldest-first, nothing sealed behind that segment reclaims until it succeeds.
 
 ### WAL Close With Pending Writes
 
@@ -237,9 +283,10 @@ flowchart TD
     BW -->|write + fsync| SEG
 ```
 
-- **Reads** (`GetLog`, `Get`, `GetUint64`, `FirstIndex`, `LastIndex`): Acquire `stateMu.RLock`. Recent-window hits are a map lookup; older log entries `ReadAt` their payload from the segment file under the read lock (compaction closes superseded read handles only under `stateMu.Lock`, so a handle is never closed mid-read).
+- **Reads** (`GetLog`, `Get`, `GetUint64`, `FirstIndex`, `LastIndex`): Acquire `stateMu.RLock`. Recent-window hits are a map lookup; older log entries `ReadAt` their payload from the segment file under the read lock (reclamation closes a superseded read handle only under `stateMu.Lock`, so a handle is never closed mid-read).
 - **Writes** (`StoreLogs`, `Set`, `SetUint64`, `DeleteRange`): Submit ONE op to `writeCh` (a multi-entry `StoreLogs` is one op), block on `done` channel until the batch is fsynced.
 - **batchWriter**: Single goroutine. Writes to the segment file, briefly takes `stateMu.Lock` to update in-memory state, then fsyncs without the lock.
+- **Reclamation**: Runs on the batchWriter, strictly after `notifyBatchWaiters` — waiters never wait on it. Holds `stateMu.Lock` across the whole drained-unlink run (readers wait for it to finish, as they do for any other write-lock hold), verified by at most one index scan for that run — a pass that unlinks nothing takes the lock but no scan. Then scavenges at most one nearly-drained segment (that victim gets its own fresh single-segment scan under a separate lock acquisition, since the scavenge swap just mutated the index). `Config.ScavengeMaxLiveBytes` bounds the rewrite in a pass and nothing else: the unlink run is unbounded in count. Callbacks (`OnReclaim`, `OnReclaimAnomaly`, `OnUnlinkError`) are collected during the pass and invoked after `stateMu` is released, so a slow notification never blocks reads.
 
 Reads never wait on fsync; the batch writer holds the write lock only for the in-memory index updates.
 
@@ -249,7 +296,7 @@ Reads never wait on fsync; the batch writer holds the write lock only for the in
 
 - **In-memory index**: The log index (index → segment location) covers every live entry per group, so index memory grows with live-log length until Raft's post-snapshot `DeleteRange` trims it. Payload heap does NOT grow with log length — it is bounded by `LogCacheBudgetBytes` per group.
 - **No per-read CRC**: payloads read back from segments were CRC-verified at write/replay time; `GetLog` does not re-verify (batch sub-entries share one record CRC and cannot be verified individually).
-- **Segment compaction**: Triggered after successful `DeleteRange` batches when multiple segments exist; failures are best-effort ignored so `DeleteRange` success is never masked. There is no separate manual “prune WAL” API yet.
+- **Reclamation is lazy**: the disk-space floor depends on Raft snapshot cadence and `Config.ScavengeMaxLiveBytes`, not on an on-demand "reclaim now" operation. A group that never snapshots never fires a `DeleteRange`, so its segments are retained indefinitely. Reclamation is also strictly oldest-first and shared across every group on the WAL: a segment whose live remainder sits above the threshold — and every sealed segment behind it, however drained — is retained until further truncation shrinks that one segment. There is no separate manual "prune WAL" API.
 - **Single writer**: All writes go through one goroutine. This is intentional (serializes fsync) but means write throughput is bounded by single-core speed + disk fsync latency. In practice, the 1ms batch window means this is not a bottleneck — multiple groups' writes are coalesced.
 - **No checksumming of headers**: The CRC covers only the payload. A corrupted header (wrong groupID or length) would cause replay to misparse subsequent entries. Mitigation: the CRC of the next entry would fail, stopping replay.
 
@@ -257,7 +304,7 @@ Reads never wait on fsync; the batch writer holds the write lock only for the in
 
 ## Test Coverage
 
-- Unit tests covering happy path, edge cases, isolation, crash recovery, concurrency, segment compaction after `DeleteRange`, batched `StoreLogs` atomicity (torn/corrupt batch replay), and recent-window retention (eviction, disk-served reads, budget accounting)
+- Unit tests covering happy path, edge cases, isolation, crash recovery, concurrency, segment reclamation (drained unlink, scavenge, oldest-first discipline, verification-scan quarantine) after `DeleteRange`, batched `StoreLogs` atomicity (torn/corrupt batch replay), and recent-window retention (eviction, disk-served reads, budget accounting)
 - 6 fuzz targets for encode/decode round-trips (including `entryLogBatch`) and corrupt segment replay
 - 2 hashicorp/raft integration tests (election + apply, snapshot + restore)
 - 2 benchmarks (WAL vs boltdb at 1/4/16/64 concurrent groups)

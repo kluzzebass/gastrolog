@@ -114,10 +114,28 @@ var catalog = []AlarmType{
 		Cause:         "The orchestrator registry lock has been held or write-stuck past one minute — a lock-discipline defect, not an operating condition. The node is likely wedging.",
 		Response:      "This should never fire. Capture the acquisition stack from this node's log and file it. Restarting the node is a workaround to recover service, not the response.",
 	},
+	{
+		IDPrefix:      "wal-reclaim-anomaly",
+		SoftwareFault: true,
+		Latching:      true, // reclamation stays halted on the segment until restart
+		Source:        "storage",
+		Cause:         "A Raft WAL segment's live-bytes counter and the index disagree — either the counter nominated a segment as drained that the index still references, or it reads above zero for a segment the index does not reference at all. An accounting defect, not an operating condition. The segment is retained and the WAL stops returning space on this node.",
+		Response:      "This should never fire. Capture the alarm detail and this node's WAL log lines and file it. Restarting the node rebuilds the counters from replay and resumes reclamation, but that is a workaround, not the response.",
+	},
 
 	// ------------------------------------------------------------------
 	// High — durability or availability degraded, will compound.
 	// ------------------------------------------------------------------
+	{
+		// Non-latching: a later successful removal clears it, proving the
+		// WAL directory is unlinkable again. Not a software fault — the
+		// counter and index are correct, the filesystem call is what fails.
+		IDPrefix: "wal-unlink-error",
+		Priority: High,
+		Source:   "storage",
+		Cause:    "A Raft WAL segment could not be removed after reclamation freed it. Reclamation is oldest-first, so nothing sealed behind that segment can be reclaimed until the removal succeeds, and this node stops returning WAL space.",
+		Response: "Check permissions and filesystem health on the WAL directory on the named node. Reclamation retries the removal on every later pass and this alarm clears the moment one succeeds — no restart needed.",
+	},
 	{
 		// Raised per stranded chunk once the seal-resume retry budget is
 		// exhausted. No DelayOn: the budget is already the patience, so the
