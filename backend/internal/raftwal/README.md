@@ -37,7 +37,7 @@ wal.Close()
 
 `GroupStore` is safe for concurrent use by multiple goroutines. The WAL handles all synchronization internally.
 
-`GroupStore` also reports `IsMonotonic() == true`, so hashicorp/raft clears a group's whole log in one `DeleteRange` after a snapshot install or restore instead of retaining a `TrailingLogs` tail below the snapshot index. A follower that catches up by InstallSnapshot is left with an empty log rather than a dead island of entries pinning WAL segments. Applying a mask costs the live entries it touches, never the width of the range: a mask covering the whole index replaces the index and recent window outright, and any mask wider than the live count is applied by walking the live entries.
+`GroupStore` also reports `IsMonotonic() == true`, so hashicorp/raft clears a group's whole log in one `DeleteRange` after a snapshot install or restore instead of retaining a `TrailingLogs` tail below the snapshot index. A follower that catches up by InstallSnapshot is left with an empty log rather than a dead island of entries pinning WAL segments. Applying a mask costs the smaller of the range width and the live entry count: a mask covering the whole index replaces the index and recent window outright, a mask wider than the live count is applied by walking the live entries, and only a mask narrower than the index walks the range.
 
 ---
 

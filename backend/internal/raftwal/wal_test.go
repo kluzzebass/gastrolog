@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -870,6 +871,14 @@ var deleteRangePathNames = map[deleteRangePath]string{
 	deleteRangeWipe:    "wipe",
 }
 
+func pathNames(paths []deleteRangePath) string {
+	names := make([]string, len(paths))
+	for i, p := range paths {
+		names[i] = deleteRangePathNames[p]
+	}
+	return strings.Join(names, ", ")
+}
+
 func TestChooseDeleteRangePath(t *testing.T) {
 	t.Parallel()
 	populated := func(first, last uint64, indices ...uint64) *groupState {
@@ -968,6 +977,14 @@ func deleteRangeTwin(t *testing.T, last uint64) (*WAL, *GroupStore) {
 	return w, gs
 }
 
+// selectedDeleteRangePath reports the path production picks for the mask.
+func selectedDeleteRangePath(t *testing.T, w *WAL, gs *GroupStore, lo, hi uint64) deleteRangePath {
+	t.Helper()
+	w.stateMu.RLock()
+	defer w.stateMu.RUnlock()
+	return chooseDeleteRangePath(w.groups[gs.groupID], lo, hi)
+}
+
 // applyMaskThroughPath applies [lo, hi] to the group by the named path,
 // bypassing path selection, and reports the state before and after.
 func applyMaskThroughPath(t *testing.T, w *WAL, gs *GroupStore, path deleteRangePath, lo, hi uint64) (pre, post groupSnapshot) {
@@ -1017,6 +1034,13 @@ func TestDeleteRangeApplicationPathsAgree(t *testing.T) {
 			var wantPre groupSnapshot
 			for i, path := range tc.paths {
 				w, gs := deleteRangeTwin(t, last)
+				// Selection and application must not drift apart: whatever
+				// production picks for this mask has to be one of the paths
+				// this case proves equivalent.
+				if selected := selectedDeleteRangePath(t, w, gs, tc.lo, tc.hi); !slices.Contains(tc.paths, selected) {
+					t.Fatalf("production selects %s for [%d, %d]; this case only compares %s",
+						deleteRangePathNames[selected], tc.lo, tc.hi, pathNames(tc.paths))
+				}
 				pre, post := applyMaskThroughPath(t, w, gs, path, tc.lo, tc.hi)
 				assertLiveBytesInvariant(t, w, "after the mask applied "+deleteRangePathNames[path])
 				if i == 0 {

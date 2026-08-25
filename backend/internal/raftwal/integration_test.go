@@ -581,7 +581,7 @@ func TestFourNodeRaftInstallSnapshotFollowerReclaims(t *testing.T) {
 		// install clears its whole log, so what survives the catch-up is the
 		// head segment plus at most a sealed predecessor reclamation has not
 		// reached yet.
-		maxSegments = 3
+		maxSegments = 2
 	)
 
 	c := newRaftCluster(t, nodeCount)
