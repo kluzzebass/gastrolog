@@ -33,8 +33,10 @@ func (t *Transport[K]) RegisterGroup(s grpc.ServiceRegistrar, groupID K) {
 	s.RegisterService(&serviceDesc, newGroupLaneAPI(t, groupID))
 }
 
+const serviceName = "gastrolog.v1.MultiRaftTransportService"
+
 var serviceDesc = grpc.ServiceDesc{
-	ServiceName: "gastrolog.v1.MultiRaftTransportService",
+	ServiceName: serviceName,
 	HandlerType: (*raftDispatcher)(nil),
 	Methods: []grpc.MethodDesc{
 		{MethodName: "AppendEntries", Handler: handleAppendEntries},
@@ -58,44 +60,70 @@ var serviceDesc = grpc.ServiceDesc{
 	},
 }
 
-func handleAppendEntries(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
+// throughInterceptor dispatches req under the server's unary interceptor chain.
+// gRPC hands a hand-written MethodDesc handler the chain as an argument and
+// applies nothing itself, so a handler that drops it silently disables every
+// server-level unary interceptor on this service — mTLS enforcement included.
+func throughInterceptor[Req, Resp any](
+	ctx context.Context,
+	srv any,
+	req *Req,
+	method string,
+	interceptor grpc.UnaryServerInterceptor,
+	dispatch func(*Req) (*Resp, error),
+) (any, error) {
+	handler := func(_ context.Context, r any) (any, error) {
+		resp, err := dispatch(r.(*Req))
+		if err != nil {
+			return nil, err
+		}
+		return resp, nil
+	}
+	if interceptor == nil {
+		return handler(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/" + method}
+	return interceptor(ctx, req, info, handler)
+}
+
+func handleAppendEntries(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	req := new(gastrologv1.MultiRaftAppendEntriesRequest)
 	if err := dec(req); err != nil {
 		return nil, err
 	}
-	return srv.(raftDispatcher).appendEntries(req)
+	return throughInterceptor(ctx, srv, req, "AppendEntries", interceptor, srv.(raftDispatcher).appendEntries)
 }
 
-func handleRequestVote(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
+func handleRequestVote(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	req := new(gastrologv1.MultiRaftRequestVoteRequest)
 	if err := dec(req); err != nil {
 		return nil, err
 	}
-	return srv.(raftDispatcher).requestVote(req)
+	return throughInterceptor(ctx, srv, req, "RequestVote", interceptor, srv.(raftDispatcher).requestVote)
 }
 
-func handleRequestPreVote(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
+func handleRequestPreVote(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	req := new(gastrologv1.MultiRaftRequestPreVoteRequest)
 	if err := dec(req); err != nil {
 		return nil, err
 	}
-	return srv.(raftDispatcher).requestPreVote(req)
+	return throughInterceptor(ctx, srv, req, "RequestPreVote", interceptor, srv.(raftDispatcher).requestPreVote)
 }
 
-func handleTimeoutNow(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
+func handleTimeoutNow(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	req := new(gastrologv1.MultiRaftTimeoutNowRequest)
 	if err := dec(req); err != nil {
 		return nil, err
 	}
-	return srv.(raftDispatcher).timeoutNow(req)
+	return throughInterceptor(ctx, srv, req, "TimeoutNow", interceptor, srv.(raftDispatcher).timeoutNow)
 }
 
-func handleBatchHeartbeat(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
+func handleBatchHeartbeat(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	req := new(gastrologv1.MultiRaftBatchHeartbeatRequest)
 	if err := dec(req); err != nil {
 		return nil, err
 	}
-	return srv.(raftDispatcher).batchHeartbeat(req)
+	return throughInterceptor(ctx, srv, req, "BatchHeartbeat", interceptor, srv.(raftDispatcher).batchHeartbeat)
 }
 
 func handleInstallSnapshot(srv any, stream grpc.ServerStream) error {
