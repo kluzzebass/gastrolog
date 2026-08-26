@@ -49,6 +49,20 @@ func (s *SystemServer) PutCloudService(
 	cfg := convert.CloudServiceFromProto(req.Msg.Config)
 	cfg.ID = id
 
+	// Reads redact credentials, so a client editing an existing service has
+	// none to send back: an empty credential field keeps the stored value.
+	// Clearing instead would strip credentials on the first save after a
+	// config read and lock the cluster out of sealed chunks already in the
+	// object store. Merged before validation so the checks below see the
+	// credentials the service will actually run with.
+	existing, err := s.sysStore.GetCloudService(ctx, id)
+	if err != nil {
+		return nil, errInternal(err)
+	}
+	if existing != nil {
+		cfg = cfg.WithPreservedCredentials(*existing)
+	}
+
 	// Config-accept validation: reject configs that would fail blobstore store
 	// creation at vault init, so a bad provider config (bare endpoint, missing
 	// bucket, …) errors here — visible to the CLI/UI/API caller — instead of

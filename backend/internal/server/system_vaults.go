@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"gastrolog/internal/glid"
@@ -495,6 +496,48 @@ func protoToVaultConfig(p *apiv1.VaultConfig) (system.VaultConfig, error) {
 // CloudServiceTester validates connectivity for a cloud storage configuration.
 type CloudServiceTester func(ctx context.Context, params map[string]string) (string, error)
 
+// credentialParams are the store params that carry secret material — the
+// ones a test request may leave empty and have filled from a stored service.
+var credentialParams = []string{"access_key", "secret_key", "connection_string", "credentials_json"}
+
+// cloudTestParams resolves the params a connection test runs with. When the
+// request names an existing cloud service, credentials the caller left empty
+// are filled from that service, so an operator can test a saved service
+// without retyping secrets the API never returned. The fallback requires the
+// request's endpoint to match the stored one: otherwise the test would spend
+// an admin's credentials against a destination the caller picked.
+func (s *SystemServer) cloudTestParams(ctx context.Context, msg *apiv1.TestCloudServiceRequest) (map[string]string, *connect.Error) {
+	params := make(map[string]string, len(msg.Params))
+	maps.Copy(params, msg.Params)
+	if len(msg.CloudServiceId) == 0 {
+		return params, nil
+	}
+
+	id, connErr := parseProtoID(msg.CloudServiceId)
+	if connErr != nil {
+		return nil, connErr
+	}
+	stored, err := s.sysStore.GetCloudService(ctx, id)
+	if err != nil {
+		return nil, errInternal(err)
+	}
+	if stored == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("cloud service not found"))
+	}
+	if params["endpoint"] != stored.Endpoint {
+		return nil, errInvalidArg(fmt.Errorf(
+			"testing cloud service %q against a different endpoint requires supplying its credentials", stored.Name))
+	}
+
+	storedParams := stored.StoreParams()
+	for _, k := range credentialParams {
+		if params[k] == "" {
+			params[k] = storedParams[k]
+		}
+	}
+	return params, nil
+}
+
 // TestCloudService tests connectivity for a cloud storage configuration without saving it.
 func (s *SystemServer) TestCloudService(
 	ctx context.Context,
@@ -508,7 +551,12 @@ func (s *SystemServer) TestCloudService(
 		}), nil
 	}
 
-	msg, err := tester(ctx, req.Msg.Params)
+	params, connErr := s.cloudTestParams(ctx, req.Msg)
+	if connErr != nil {
+		return nil, connErr
+	}
+
+	msg, err := tester(ctx, params)
 	if err != nil {
 		return connect.NewResponse(&apiv1.TestCloudServiceResponse{ //nolint:nilerr // test failure is reported in the response body, not as an RPC error
 			Success: false,

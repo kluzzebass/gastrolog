@@ -179,17 +179,30 @@ func (s *SystemServer) GetSystem(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetSystemRequest],
 ) (*connect.Response[apiv1.GetSystemResponse], error) {
-	resp, err := s.buildFullSystem(ctx)
+	resp, err := s.buildSystem(ctx, req.Msg.IncludeSecrets && isAdmin(ctx))
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("load config: %w", err))
 	}
 	return connect.NewResponse(resp), nil
 }
 
-// buildFullSystem assembles a complete GetConfigResponse from the config store.
-// Used by GetConfig and by mutation handlers to return the updated config inline.
-// Returns an error if any config section fails to load — never returns partial data.
+// isAdmin reports whether the caller holds the admin role. An
+// unauthenticated caller — the public GetSettings path — is not an admin.
+func isAdmin(ctx context.Context) bool {
+	claims := auth.ClaimsFromContext(ctx)
+	return claims != nil && claims.Role == "admin"
+}
+
+// buildFullSystem assembles a complete GetConfigResponse from the config store,
+// with every secret redacted. Mutation handlers use it to return the updated
+// config inline: a config write is not a secret-retrieval path.
 func (s *SystemServer) buildFullSystem(ctx context.Context) (*apiv1.GetSystemResponse, error) {
+	return s.buildSystem(ctx, false)
+}
+
+// buildSystem assembles a complete GetConfigResponse from the config store.
+// Returns an error if any config section fails to load — never returns partial data.
+func (s *SystemServer) buildSystem(ctx context.Context, includeSecrets bool) (*apiv1.GetSystemResponse, error) {
 	resp := &apiv1.GetSystemResponse{}
 	if s.sysStore != nil {
 		err := errors.Join(
@@ -200,7 +213,7 @@ func (s *SystemServer) buildFullSystem(ctx context.Context) (*apiv1.GetSystemRes
 			s.loadConfigRoutes(ctx, resp),
 			s.loadConfigNodeConfigs(ctx, resp),
 			s.loadConfigManagedFiles(ctx, resp),
-			s.loadConfigCloudServices(ctx, resp),
+			s.loadConfigCloudServices(ctx, resp, includeSecrets),
 			s.loadConfigNodeStorageConfigs(ctx, resp),
 			s.loadConfigLogLevels(ctx, resp),
 		)
@@ -225,7 +238,8 @@ func (s *SystemServer) currentClusterCtlRaftIndex() uint64 {
 }
 
 // buildFullSettingsResponse builds the authenticated GetSettingsResponse payload.
-// includeSecrets mirrors GetSettingsRequest.include_secrets.
+// includeSecrets mirrors GetSettingsRequest.include_secrets after the caller's
+// role has been checked — callers pass false for anyone but an admin.
 func (s *SystemServer) buildFullSettingsResponse(ctx context.Context, includeSecrets bool) (*apiv1.GetSettingsResponse, error) {
 	ss, err := s.loadServerSettings(ctx)
 	if err != nil {
@@ -429,7 +443,11 @@ func (s *SystemServer) loadConfigNodeConfigs(ctx context.Context, resp *apiv1.Ge
 	return nil
 }
 
-func (s *SystemServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.GetSystemResponse) error {
+// loadConfigCloudServices attaches the cluster's cloud services. Credential
+// fields are populated only when includeSecrets is set; otherwise the
+// response carries CredentialsConfigured, which says whether the service
+// has usable credentials without saying what they are.
+func (s *SystemServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.GetSystemResponse, includeSecrets bool) error {
 	services, err := s.sysStore.ListCloudServices(ctx)
 	if err != nil {
 		return fmt.Errorf("list cloud services: %w", err)
@@ -442,26 +460,30 @@ func (s *SystemServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.
 				CloudStorageClass: t.CloudStorageClass,
 			}
 		}
-		resp.CloudServices = append(resp.CloudServices, &apiv1.CloudService{
-			Id:                cs.ID.ToProto(),
-			Name:              cs.Name,
-			Provider:          cs.Provider,
-			Bucket:            cs.Bucket,
-			Region:            cs.Region,
-			Endpoint:          cs.Endpoint,
-			AccessKey:         cs.AccessKey,
-			SecretKey:         cs.SecretKey,
-			Container:         cs.Container,
-			ConnectionString:  cs.ConnectionString,
-			CredentialsJson:   cs.CredentialsJSON,
-			StorageClass:      cs.StorageClass,
-			ArchivalMode:      cs.ArchivalMode,
-			Transitions:       transitions,
-			RestoreSpeed:      cs.RestoreSpeed,
-			RestoreDays:       cs.RestoreDays,
-			SuspectGraceDays:  cs.SuspectGraceDays,
-			ReconcileSchedule: cs.ReconcileSchedule,
-		})
+		out := &apiv1.CloudService{
+			Id:                    cs.ID.ToProto(),
+			Name:                  cs.Name,
+			Provider:              cs.Provider,
+			Bucket:                cs.Bucket,
+			Region:                cs.Region,
+			Endpoint:              cs.Endpoint,
+			Container:             cs.Container,
+			StorageClass:          cs.StorageClass,
+			ArchivalMode:          cs.ArchivalMode,
+			Transitions:           transitions,
+			RestoreSpeed:          cs.RestoreSpeed,
+			RestoreDays:           cs.RestoreDays,
+			SuspectGraceDays:      cs.SuspectGraceDays,
+			ReconcileSchedule:     cs.ReconcileSchedule,
+			CredentialsConfigured: cs.HasCredentials(),
+		}
+		if includeSecrets {
+			out.AccessKey = cs.AccessKey
+			out.SecretKey = cs.SecretKey
+			out.ConnectionString = cs.ConnectionString
+			out.CredentialsJson = cs.CredentialsJSON
+		}
+		resp.CloudServices = append(resp.CloudServices, out)
 	}
 	return nil
 }
@@ -521,7 +543,7 @@ func (s *SystemServer) GetSettings(
 		}), nil
 	}
 
-	resp, err := s.buildFullSettingsResponse(ctx, req.Msg.IncludeSecrets)
+	resp, err := s.buildFullSettingsResponse(ctx, req.Msg.IncludeSecrets && isAdmin(ctx))
 	if err != nil {
 		return nil, err
 	}

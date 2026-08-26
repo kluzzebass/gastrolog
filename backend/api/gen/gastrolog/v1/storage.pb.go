@@ -240,19 +240,24 @@ func (x *CloudStorageTransition) GetCloudStorageClass() string {
 // Not tied to any node. Active chunks and cached chunks live on
 // local storage, referenced by storage class.
 type CloudService struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	Id               []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name             string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Provider         string                 `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`
-	Bucket           string                 `protobuf:"bytes,4,opt,name=bucket,proto3" json:"bucket,omitempty"`
-	Region           string                 `protobuf:"bytes,5,opt,name=region,proto3" json:"region,omitempty"`
-	Endpoint         string                 `protobuf:"bytes,6,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
-	AccessKey        string                 `protobuf:"bytes,7,opt,name=access_key,json=accessKey,proto3" json:"access_key,omitempty"`
-	SecretKey        string                 `protobuf:"bytes,8,opt,name=secret_key,json=secretKey,proto3" json:"secret_key,omitempty"`
-	Container        string                 `protobuf:"bytes,9,opt,name=container,proto3" json:"container,omitempty"`
-	ConnectionString string                 `protobuf:"bytes,10,opt,name=connection_string,json=connectionString,proto3" json:"connection_string,omitempty"`
-	CredentialsJson  string                 `protobuf:"bytes,11,opt,name=credentials_json,json=credentialsJson,proto3" json:"credentials_json,omitempty"`
-	StorageClass     uint32                 `protobuf:"varint,12,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Id       []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name     string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Provider string                 `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`
+	Bucket   string                 `protobuf:"bytes,4,opt,name=bucket,proto3" json:"bucket,omitempty"`
+	Region   string                 `protobuf:"bytes,5,opt,name=region,proto3" json:"region,omitempty"`
+	Endpoint string                 `protobuf:"bytes,6,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
+	// Credentials. On a read these are only populated when the request asks
+	// for secrets and the caller is an admin; every other response leaves
+	// them empty and reports credentials_configured instead. On a write an
+	// empty field means "keep the stored credential" — a client that never
+	// received a value has none to send back.
+	AccessKey        string `protobuf:"bytes,7,opt,name=access_key,json=accessKey,proto3" json:"access_key,omitempty"`
+	SecretKey        string `protobuf:"bytes,8,opt,name=secret_key,json=secretKey,proto3" json:"secret_key,omitempty"`
+	Container        string `protobuf:"bytes,9,opt,name=container,proto3" json:"container,omitempty"`
+	ConnectionString string `protobuf:"bytes,10,opt,name=connection_string,json=connectionString,proto3" json:"connection_string,omitempty"`
+	CredentialsJson  string `protobuf:"bytes,11,opt,name=credentials_json,json=credentialsJson,proto3" json:"credentials_json,omitempty"`
+	StorageClass     uint32 `protobuf:"varint,12,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
 	// Archival lifecycle configuration.
 	// "none" = bucket-level lifecycle handles it (or no archival).
 	// "active" = GastroLog manages transitions via the sweep job.
@@ -262,8 +267,13 @@ type CloudService struct {
 	RestoreDays       uint32                    `protobuf:"varint,16,opt,name=restore_days,json=restoreDays,proto3" json:"restore_days,omitempty"`                  // S3: how long restored copy stays readable (days)
 	SuspectGraceDays  uint32                    `protobuf:"varint,17,opt,name=suspect_grace_days,json=suspectGraceDays,proto3" json:"suspect_grace_days,omitempty"` // days before suspect chunk removed from index (default 7)
 	ReconcileSchedule string                    `protobuf:"bytes,18,opt,name=reconcile_schedule,json=reconcileSchedule,proto3" json:"reconcile_schedule,omitempty"` // cron for reconciliation sweep (default "0 3 * * *")
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// read-only: true when the service carries the credential material its
+	// provider needs (S3: access key + secret key; Azure: connection string;
+	// GCS: credentials JSON). False means the provider's ambient credential
+	// chain is used — an IAM role, ADC, environment variables.
+	CredentialsConfigured bool `protobuf:"varint,19,opt,name=credentials_configured,json=credentialsConfigured,proto3" json:"credentials_configured,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *CloudService) Reset() {
@@ -420,6 +430,13 @@ func (x *CloudService) GetReconcileSchedule() string {
 		return x.ReconcileSchedule
 	}
 	return ""
+}
+
+func (x *CloudService) GetCredentialsConfigured() bool {
+	if x != nil {
+		return x.CredentialsConfigured
+	}
+	return false
 }
 
 // StorageState is one storage's disk-guard state — published only by the
@@ -652,7 +669,7 @@ const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\rfile_storages\x18\x02 \x03(\v2\x19.gastrolog.v1.FileStorageR\ffileStorages\"^\n" +
 	"\x16CloudStorageTransition\x12\x14\n" +
 	"\x05after\x18\x01 \x01(\tR\x05after\x12.\n" +
-	"\x13cloud_storage_class\x18\x02 \x01(\tR\x11cloudStorageClass\"\x85\x05\n" +
+	"\x13cloud_storage_class\x18\x02 \x01(\tR\x11cloudStorageClass\"\xbc\x05\n" +
 	"\fCloudService\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -674,7 +691,8 @@ const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\rrestore_speed\x18\x0f \x01(\tR\frestoreSpeed\x12!\n" +
 	"\frestore_days\x18\x10 \x01(\rR\vrestoreDays\x12,\n" +
 	"\x12suspect_grace_days\x18\x11 \x01(\rR\x10suspectGraceDays\x12-\n" +
-	"\x12reconcile_schedule\x18\x12 \x01(\tR\x11reconcileSchedule\"\xe0\x04\n" +
+	"\x12reconcile_schedule\x18\x12 \x01(\tR\x11reconcileSchedule\x125\n" +
+	"\x16credentials_configured\x18\x13 \x01(\bR\x15credentialsConfigured\"\xe0\x04\n" +
 	"\fStorageState\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +

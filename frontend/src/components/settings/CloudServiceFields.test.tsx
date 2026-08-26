@@ -11,6 +11,7 @@ function values(patch: Partial<CloudServiceFieldValues>): CloudServiceFieldValue
     endpoint: "",
     accessKey: "",
     secretKey: "",
+    credentialsConfigured: false,
     container: "",
     connectionString: "",
     credentialsJson: "",
@@ -24,6 +25,16 @@ function values(patch: Partial<CloudServiceFieldValues>): CloudServiceFieldValue
   };
 }
 
+function inputForLabel(container: HTMLElement, labelText: string): HTMLInputElement {
+  const label = Array.from(container.querySelectorAll("label")).find(
+    (l) => l.textContent === labelText,
+  );
+  expect(label).toBeTruthy();
+  const input = container.querySelector(`#${CSS.escape(label!.htmlFor)}`);
+  expect(input).toBeTruthy();
+  return input as HTMLInputElement;
+}
+
 function endpointInput(container: HTMLElement): HTMLInputElement {
   // The endpoint field is the only S3 input whose value we control here;
   // find it by its current value via the label association.
@@ -35,6 +46,69 @@ function endpointInput(container: HTMLElement): HTMLInputElement {
   expect(input).toBeTruthy();
   return input as HTMLInputElement;
 }
+
+describe("CloudServiceFields credential state", () => {
+  test("a configured service says the empty fields keep the stored credentials", () => {
+    const { container } = render(
+      <CloudServiceFields
+        values={values({ credentialsConfigured: true })}
+        onChange={() => {}}
+        dark={true}
+      />,
+    );
+    expect(container.textContent).toContain("Credentials are stored");
+    expect(container.textContent).toContain("leave the fields below empty to keep them");
+  });
+
+  test("credential inputs render empty — no masked stand-in implying a value", () => {
+    const { container } = render(
+      <CloudServiceFields
+        values={values({ credentialsConfigured: true })}
+        onChange={() => {}}
+        dark={true}
+      />,
+    );
+    for (const label of ["Access Key", "Secret Key"]) {
+      const input = inputForLabel(container, label);
+      expect(input.value).toBe("");
+      expect(input.placeholder).toBe("");
+    }
+  });
+
+  test("an unconfigured s3 service names the fallback credential chain", () => {
+    const { container } = render(
+      <CloudServiceFields
+        values={values({ credentialsConfigured: false })}
+        onChange={() => {}}
+        dark={true}
+      />,
+    );
+    expect(container.textContent).toContain("No credentials stored");
+    expect(container.textContent).toContain("IAM instance role");
+  });
+
+  test("an unconfigured azure service says the connection string is required", () => {
+    const { container } = render(
+      <CloudServiceFields
+        values={values({ provider: "azure", credentialsConfigured: false })}
+        onChange={() => {}}
+        dark={true}
+      />,
+    );
+    expect(container.textContent).toContain("requires a connection string");
+  });
+
+  test("an unconfigured gcs service names Application Default Credentials", () => {
+    const { container } = render(
+      <CloudServiceFields
+        values={values({ provider: "gcs", credentialsConfigured: false })}
+        onChange={() => {}}
+        dark={true}
+      />,
+    );
+    expect(container.textContent).toContain("Application Default Credentials");
+  });
+});
 
 describe("CloudServiceFields endpoint validation", () => {
   test("scheme-less endpoint shows the inline error state", () => {

@@ -195,7 +195,11 @@ service SystemService {
   rpc ListLogComponents(ListLogComponentsRequest) returns (ListLogComponentsResponse);
 }
 
-message GetSystemRequest {}
+message GetSystemRequest {
+  // When true, return cloud service credentials (for export/backup).
+  // Admin only; any other caller gets the redacted response.
+  bool include_secrets = 1;
+}
 
 message GetSystemResponse {
   repeated VaultConfig vaults = 1;
@@ -557,7 +561,9 @@ message DeleteIngesterResponse {
 }
 
 message GetSettingsRequest {
-  bool include_secrets = 1; // When true, return actual secret values (for export/backup).
+  // When true, return actual secret values (for export/backup).
+  // Admin only; any other caller gets the redacted response.
+  bool include_secrets = 1;
 }
 
 // Sub-messages for GetSettingsResponse (read-only fields included).
@@ -976,6 +982,14 @@ message TriggerIngesterResponse {}
 message TestCloudServiceRequest {
   string type = 1;
   map<string, string> params = 2;
+
+  // Optional: an existing cloud service whose stored credentials fill in
+  // the credential params left empty here, so an operator can test a saved
+  // service without retyping secrets the API never returned. The fallback
+  // only applies when params carry the same endpoint the service is stored
+  // with — otherwise the request would spend those credentials on a
+  // destination the caller chose.
+  bytes cloud_service_id = 3;
 }
 
 message TestCloudServiceResponse {

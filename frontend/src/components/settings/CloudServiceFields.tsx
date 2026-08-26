@@ -13,8 +13,13 @@ interface CloudServiceFieldValues {
   bucket: string;
   region: string;
   endpoint: string;
+  // Credentials are write-only: the server reports whether they exist via
+  // credentialsConfigured and never sends the values back, so these start
+  // empty on an existing service and an empty one means "keep the stored
+  // credential".
   accessKey: string;
   secretKey: string;
+  credentialsConfigured: boolean;
   container: string;
   connectionString: string;
   credentialsJson: string;
@@ -102,6 +107,11 @@ export function CloudServiceFields({
       {/* S3 credentials */}
       {isS3 && (
         <>
+          <CredentialNotice
+            configured={values.credentialsConfigured}
+            provider={values.provider}
+            dark={dark}
+          />
           <FormField label="Access Key" dark={dark}>
             <TextInput
               value={values.accessKey}
@@ -123,31 +133,78 @@ export function CloudServiceFields({
 
       {/* Azure credentials */}
       {isAzure && (
-        <FormField label="Connection String" dark={dark}>
-          <TextInput
-            value={values.connectionString}
-            onChange={(v) => onChange({ connectionString: v })}
+        <>
+          <CredentialNotice
+            configured={values.credentialsConfigured}
+            provider={values.provider}
             dark={dark}
-            mono
           />
-        </FormField>
+          <FormField label="Connection String" dark={dark}>
+            <TextInput
+              value={values.connectionString}
+              onChange={(v) => onChange({ connectionString: v })}
+              dark={dark}
+              mono
+            />
+          </FormField>
+        </>
       )}
 
       {/* GCS credentials */}
       {isGCS && (
-        <FormField label="Credentials JSON" dark={dark}>
-          <TextArea
-            value={values.credentialsJson}
-            onChange={(v) => onChange({ credentialsJson: v })}
+        <>
+          <CredentialNotice
+            configured={values.credentialsConfigured}
+            provider={values.provider}
             dark={dark}
-            rows={4}
           />
-        </FormField>
+          <FormField label="Credentials JSON" dark={dark}>
+            <TextArea
+              value={values.credentialsJson}
+              onChange={(v) => onChange({ credentialsJson: v })}
+              dark={dark}
+              rows={4}
+            />
+          </FormField>
+        </>
       )}
 
       {/* Archival Lifecycle */}
       <ArchivalSection values={values} onChange={onChange} dark={dark} />
     </>
+  );
+}
+
+// --- Credentials ---
+
+function unconfiguredCredentialText(provider: string): string {
+  switch (provider) {
+    case "azure":
+      return "No credentials stored. Azure Blob Storage requires a connection string.";
+    case "gcs":
+      return "No credentials stored — Application Default Credentials are used: GOOGLE_APPLICATION_CREDENTIALS, an attached service account, or gcloud auth.";
+    default:
+      return "No credentials stored — the AWS default credential chain is used: environment variables, ~/.aws/credentials, or an IAM instance role.";
+  }
+}
+
+/**
+ * States what the empty credential fields below it mean. Stored credentials
+ * are never sent to the browser, so an empty field is ambiguous on its own:
+ * it either means the service has none, or means "keep the one on the server".
+ */
+function CredentialNotice({
+  configured,
+  provider,
+  dark,
+}: Readonly<{ configured: boolean; provider: string; dark: boolean }>) {
+  const c = useThemeClass(dark);
+  return (
+    <p className={`text-[0.75em] leading-snug ${c("text-text-muted", "text-light-text-muted")}`}>
+      {configured
+        ? "Credentials are stored. They are never sent back to the browser — leave the fields below empty to keep them, or enter a value to replace it."
+        : unconfiguredCredentialText(provider)}
+    </p>
   );
 }
 

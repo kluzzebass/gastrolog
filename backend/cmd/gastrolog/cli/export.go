@@ -198,6 +198,16 @@ func exportSecrets(services []*v1.CloudService, maxmind *maxmindExport) []string
 	return out
 }
 
+// exportableCloudServices drops credentials_configured, which the server
+// derives from the credentials themselves. An import cannot set it, and a
+// document that carries the credentials has no use for a summary of them.
+func exportableCloudServices(services []*v1.CloudService) []*v1.CloudService {
+	for _, cs := range services {
+		cs.CredentialsConfigured = false
+	}
+	return services
+}
+
 type certExport struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -422,7 +432,11 @@ func newExportCmd() *cobra.Command {
 			client := clientFromCmd(cmd)
 			ctx := context.Background()
 
-			cfgResp, err := client.System.GetSystem(ctx, connect.NewRequest(&v1.GetSystemRequest{}))
+			// The document is a restore artifact, so it asks for the cloud
+			// credentials a restore needs. Ordinary config reads never carry
+			// them; this request is admin-only and the file says so in
+			// "contains_secrets".
+			cfgResp, err := client.System.GetSystem(ctx, connect.NewRequest(&v1.GetSystemRequest{IncludeSecrets: true}))
 			if err != nil {
 				return fmt.Errorf("get config: %w", err)
 			}
@@ -489,7 +503,7 @@ func newExportCmd() *cobra.Command {
 				ContainsSecrets:      exportSecrets(cfgResp.Msg.CloudServices, maxmind),
 				RotationPolicies:     cfgResp.Msg.RotationPolicies,
 				RetentionPolicies:    cfgResp.Msg.RetentionPolicies,
-				CloudServices:        cfgResp.Msg.CloudServices,
+				CloudServices:        exportableCloudServices(cfgResp.Msg.CloudServices),
 				Vaults:               strippedVaults(cfgResp.Msg.Vaults),
 				Ingesters:            cfgResp.Msg.Ingesters,
 				Routes:               cfgResp.Msg.Routes,

@@ -35,6 +35,7 @@ interface AddFormState {
   endpoint: string;
   accessKey: string;
   secretKey: string;
+  credentialsConfigured: boolean;
   container: string;
   connectionString: string;
   credentialsJson: string;
@@ -56,6 +57,7 @@ const addFormInitial: AddFormState = {
   endpoint: "",
   accessKey: "",
   secretKey: "",
+  credentialsConfigured: false, // a service being created has nothing stored yet
   container: "",
   connectionString: "",
   credentialsJson: "",

@@ -55,11 +55,18 @@ message CloudService {
   string bucket = 4;
   string region = 5;
   string endpoint = 6;
+
+  // Credentials. On a read these are only populated when the request asks
+  // for secrets and the caller is an admin; every other response leaves
+  // them empty and reports credentials_configured instead. On a write an
+  // empty field means "keep the stored credential" — a client that never
+  // received a value has none to send back.
   string access_key = 7;
   string secret_key = 8;
   string container = 9;
   string connection_string = 10;
   string credentials_json = 11;
+
   uint32 storage_class = 12;
 
   // Archival lifecycle configuration.
@@ -71,6 +78,12 @@ message CloudService {
   uint32 restore_days = 16;                         // S3: how long restored copy stays readable (days)
   uint32 suspect_grace_days = 17;                   // days before suspect chunk removed from index (default 7)
   string reconcile_schedule = 18;                   // cron for reconciliation sweep (default "0 3 * * *")
+
+  // read-only: true when the service carries the credential material its
+  // provider needs (S3: access key + secret key; Azure: connection string;
+  // GCS: credentials JSON). False means the provider's ambient credential
+  // chain is used — an IAM role, ADC, environment variables.
+  bool credentials_configured = 19;
 }
 
 // StorageState is one storage's disk-guard state — published only by the

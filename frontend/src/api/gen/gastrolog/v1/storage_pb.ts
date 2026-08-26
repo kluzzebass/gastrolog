@@ -229,6 +229,12 @@ export class CloudService extends Message<CloudService> {
   endpoint = "";
 
   /**
+   * Credentials. On a read these are only populated when the request asks
+   * for secrets and the caller is an admin; every other response leaves
+   * them empty and reports credentials_configured instead. On a write an
+   * empty field means "keep the stored credential" — a client that never
+   * received a value has none to send back.
+   *
    * @generated from field: string access_key = 7;
    */
   accessKey = "";
@@ -302,6 +308,16 @@ export class CloudService extends Message<CloudService> {
    */
   reconcileSchedule = "";
 
+  /**
+   * read-only: true when the service carries the credential material its
+   * provider needs (S3: access key + secret key; Azure: connection string;
+   * GCS: credentials JSON). False means the provider's ambient credential
+   * chain is used — an IAM role, ADC, environment variables.
+   *
+   * @generated from field: bool credentials_configured = 19;
+   */
+  credentialsConfigured = false;
+
   constructor(data?: PartialMessage<CloudService>) {
     super();
     proto3.util.initPartial(data, this);
@@ -328,6 +344,7 @@ export class CloudService extends Message<CloudService> {
     { no: 16, name: "restore_days", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 17, name: "suspect_grace_days", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 18, name: "reconcile_schedule", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 19, name: "credentials_configured", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CloudService {

@@ -317,9 +317,12 @@ func (LogComponentLevelSource) EnumDescriptor() ([]byte, []int) {
 }
 
 type GetSystemRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// When true, return cloud service credentials (for export/backup).
+	// Admin only; any other caller gets the redacted response.
+	IncludeSecrets bool `protobuf:"varint,1,opt,name=include_secrets,json=includeSecrets,proto3" json:"include_secrets,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *GetSystemRequest) Reset() {
@@ -350,6 +353,13 @@ func (x *GetSystemRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GetSystemRequest.ProtoReflect.Descriptor instead.
 func (*GetSystemRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *GetSystemRequest) GetIncludeSecrets() bool {
+	if x != nil {
+		return x.IncludeSecrets
+	}
+	return false
 }
 
 type GetSystemResponse struct {
@@ -2617,8 +2627,10 @@ func (x *DeleteIngesterResponse) GetSystem() *GetSystemResponse {
 }
 
 type GetSettingsRequest struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	IncludeSecrets bool                   `protobuf:"varint,1,opt,name=include_secrets,json=includeSecrets,proto3" json:"include_secrets,omitempty"` // When true, return actual secret values (for export/backup).
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// When true, return actual secret values (for export/backup).
+	// Admin only; any other caller gets the redacted response.
+	IncludeSecrets bool `protobuf:"varint,1,opt,name=include_secrets,json=includeSecrets,proto3" json:"include_secrets,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -6458,11 +6470,18 @@ func (*TriggerIngesterResponse) Descriptor() ([]byte, []int) {
 }
 
 type TestCloudServiceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
-	Params        map[string]string      `protobuf:"bytes,2,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Type   string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	Params map[string]string      `protobuf:"bytes,2,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Optional: an existing cloud service whose stored credentials fill in
+	// the credential params left empty here, so an operator can test a saved
+	// service without retyping secrets the API never returned. The fallback
+	// only applies when params carry the same endpoint the service is stored
+	// with — otherwise the request would spend those credentials on a
+	// destination the caller chose.
+	CloudServiceId []byte `protobuf:"bytes,3,opt,name=cloud_service_id,json=cloudServiceId,proto3" json:"cloud_service_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *TestCloudServiceRequest) Reset() {
@@ -6505,6 +6524,13 @@ func (x *TestCloudServiceRequest) GetType() string {
 func (x *TestCloudServiceRequest) GetParams() map[string]string {
 	if x != nil {
 		return x.Params
+	}
+	return nil
+}
+
+func (x *TestCloudServiceRequest) GetCloudServiceId() []byte {
+	if x != nil {
+		return x.CloudServiceId
 	}
 	return nil
 }
@@ -9094,8 +9120,9 @@ var File_gastrolog_v1_system_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\n" +
-	"\x19gastrolog/v1/system.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1agastrolog/v1/storage.proto\x1a\x18gastrolog/v1/vault.proto\"\x12\n" +
-	"\x10GetSystemRequest\"\xbd\x06\n" +
+	"\x19gastrolog/v1/system.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1agastrolog/v1/storage.proto\x1a\x18gastrolog/v1/vault.proto\";\n" +
+	"\x10GetSystemRequest\x12'\n" +
+	"\x0finclude_secrets\x18\x01 \x01(\bR\x0eincludeSecrets\"\xbd\x06\n" +
 	"\x11GetSystemResponse\x121\n" +
 	"\x06vaults\x18\x01 \x03(\v2\x19.gastrolog.v1.VaultConfigR\x06vaults\x12:\n" +
 	"\tingesters\x18\x02 \x03(\v2\x1c.gastrolog.v1.IngesterConfigR\tingesters\x12O\n" +
@@ -9551,10 +9578,11 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\vunreachable\x18\x04 \x01(\bR\vunreachable\"(\n" +
 	"\x16TriggerIngesterRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\"\x19\n" +
-	"\x17TriggerIngesterResponse\"\xb3\x01\n" +
+	"\x17TriggerIngesterResponse\"\xdd\x01\n" +
 	"\x17TestCloudServiceRequest\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12I\n" +
-	"\x06params\x18\x02 \x03(\v21.gastrolog.v1.TestCloudServiceRequest.ParamsEntryR\x06params\x1a9\n" +
+	"\x06params\x18\x02 \x03(\v21.gastrolog.v1.TestCloudServiceRequest.ParamsEntryR\x06params\x12(\n" +
+	"\x10cloud_service_id\x18\x03 \x01(\fR\x0ecloudServiceId\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"N\n" +

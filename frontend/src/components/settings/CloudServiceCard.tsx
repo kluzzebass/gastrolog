@@ -51,6 +51,7 @@ interface CloudServiceEdit {
   endpoint: string;
   accessKey: string;
   secretKey: string;
+  credentialsConfigured: boolean;
   container: string;
   connectionString: string;
   credentialsJson: string;
@@ -60,6 +61,36 @@ interface CloudServiceEdit {
   restoreDays: number;
   suspectGraceDays: number;
   reconcileSchedule: string;
+}
+
+/**
+ * Builds the PutCloudService payload for an edited service. Credentials go
+ * out exactly as typed: an empty one was never displayed and never changed,
+ * and the server reads that as "keep the stored credential".
+ */
+export function cloudServiceSaveRequest(id: string, e: CloudServiceEdit) {
+  return {
+    id,
+    name: e.name,
+    provider: e.provider,
+    bucket: e.bucket,
+    region: e.region,
+    endpoint: e.endpoint,
+    accessKey: e.accessKey,
+    secretKey: e.secretKey,
+    container: e.container,
+    connectionString: e.connectionString,
+    credentialsJson: e.credentialsJson,
+    archivalMode: e.archivalMode,
+    transitions: e.transitions.map((t) => ({
+      after: t.after,
+      cloudStorageClass: t.cloudStorageClass,
+    })),
+    restoreSpeed: e.restoreSpeed,
+    restoreDays: e.restoreDays,
+    suspectGraceDays: e.suspectGraceDays,
+    reconcileSchedule: e.reconcileSchedule,
+  };
 }
 
 export function CloudServiceCard({
@@ -79,11 +110,14 @@ export function CloudServiceCard({
     bucket: service.bucket,
     region: service.region,
     endpoint: service.endpoint,
-    accessKey: service.accessKey,
-    secretKey: service.secretKey,
+    // Credentials are never delivered to the browser; the fields start
+    // empty and only a value the operator types is sent.
+    accessKey: "",
+    secretKey: "",
+    credentialsConfigured: service.credentialsConfigured,
     container: service.container,
-    connectionString: service.connectionString,
-    credentialsJson: service.credentialsJson,
+    connectionString: "",
+    credentialsJson: "",
     archivalMode: service.archivalMode || "none",
     transitions: service.transitions.map((t) => ({
       after: t.after,
@@ -103,28 +137,7 @@ export function CloudServiceCard({
     mutation: putCloudService,
     deleteMutation: deleteCloudService,
     label: "Cloud Storage",
-    onSaveTransform: (id, e: CloudServiceEdit) => ({
-      id,
-      name: e.name,
-      provider: e.provider,
-      bucket: e.bucket,
-      region: e.region,
-      endpoint: e.endpoint,
-      accessKey: e.accessKey,
-      secretKey: e.secretKey,
-      container: e.container,
-      connectionString: e.connectionString,
-      credentialsJson: e.credentialsJson,
-      archivalMode: e.archivalMode,
-      transitions: e.transitions.map((t) => ({
-        after: t.after,
-        cloudStorageClass: t.cloudStorageClass,
-      })),
-      restoreSpeed: e.restoreSpeed,
-      restoreDays: e.restoreDays,
-      suspectGraceDays: e.suspectGraceDays,
-      reconcileSchedule: e.reconcileSchedule,
-    }),
+    onSaveTransform: cloudServiceSaveRequest,
     onDeleteTransform: (id) => ({ id }),
   });
 
@@ -145,6 +158,10 @@ export function CloudServiceCard({
               testCloud.mutate(
                 {
                   type: "file",
+                  // Naming the saved service lets the server fill in the
+                  // credentials the browser was never given, as long as the
+                  // endpoint still matches the one it stored them against.
+                  cloudServiceId: encode(service.id),
                   params: {
                     sealed_backing: edit.provider,
                     bucket: edit.bucket,
