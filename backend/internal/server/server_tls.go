@@ -74,12 +74,16 @@ func (s *Server) reconfigureTLS() {
 	tlsConfig.CurvePreferences = []tls.CurveID{tls.X25519, tls.CurveP256}
 	tlsLn := tls.NewListener(ln, tlsConfig)
 
+	httpsServer := newTimedServer(s.handler, readHeaderTimeout, readTimeout, idleTimeout)
 	s.httpsListener = tlsLn
-	s.httpsServer = newTimedServer(s.handler, readHeaderTimeout, readTimeout, idleTimeout)
+	s.httpsServer = httpsServer
 	s.logger.Info("HTTPS listener started", "addr", httpsAddr)
 
+	// Serve on the local httpsServer, not s.httpsServer: a concurrent
+	// Stop() nils s.httpsServer, and this goroutine can run after that
+	// race window since goroutine scheduling isn't immediate.
 	go func() {
-		if err := s.httpsServer.Serve(tlsLn); err != nil && err != http.ErrServerClosed {
+		if err := httpsServer.Serve(tlsLn); err != nil && err != http.ErrServerClosed {
 			s.logger.Warn("HTTPS serve error", "error", err)
 		}
 	}()
@@ -141,16 +145,20 @@ func (s *Server) ListenUnix(path string) error {
 	mux := s.buildMux(noAuthOpt)
 	handler := s.trackingMiddleware(s.corsMiddleware(securityHeadersMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(s.logger, mux)))))
 
+	unixServer := newTimedServer(handler, readHeaderTimeout, readTimeout, idleTimeout)
 	s.mu.Lock()
 	s.unixListener = ln
 	s.unixPath = path
-	s.unixServer = newTimedServer(handler, readHeaderTimeout, readTimeout, idleTimeout)
+	s.unixServer = unixServer
 	s.mu.Unlock()
 
 	s.logger.Info("unix socket listener started", "path", path)
 
+	// Serve on the local unixServer, not s.unixServer: a concurrent Stop()
+	// nils s.unixServer, and this goroutine can run after that race window
+	// since goroutine scheduling isn't immediate.
 	go func() {
-		if err := s.unixServer.Serve(ln); err != nil && err != http.ErrServerClosed {
+		if err := unixServer.Serve(ln); err != nil && err != http.ErrServerClosed {
 			s.logger.Warn("unix socket serve error", "error", err)
 		}
 	}()

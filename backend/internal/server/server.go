@@ -47,35 +47,44 @@ const systemLoadTimeout = 5 * time.Second
 // attacks — before any application-level auth or handler code runs.
 //
 // WriteTimeout is deliberately left unset (zero, meaning unbounded) on all
-// three servers. This API serves long-lived Connect server-streaming RPCs
-// (Follow, Search, ExportVault, WatchSystem, WatchChunks,
-// WatchIngesterStatus, WatchJobs, WatchSystemStatus) over HTTP/2 — both the
-// h2c listeners (HTTP, Unix socket) and the TLS listener, which negotiates
-// HTTP/2 automatically. golang.org/x/net/http2 arms WriteTimeout as a
-// single, non-resetting per-stream deadline timer at stream creation, not a
-// per-write or per-inactivity deadline, so any nonzero value here would kill
-// every stream at a fixed wall-clock offset from when it opened — including
-// ones actively sending data. ReadHeaderTimeout, ReadTimeout, and
-// IdleTimeout together already close the slowloris/idle-hold vectors
-// without this hazard: a stream with open frames never counts as idle (see
-// the HTTP/2 IdleTimeout note below), so it is never at risk from any of
-// the three.
+// three servers. The primary reason is plain HTTP/1.1, which every one of
+// these listeners speaks by default (the HTTPS listener never negotiates
+// h2 — CertManager.TLSConfig() sets no ALPN NextProtos — and the Unix
+// socket listener isn't wrapped in h2c at all): WriteTimeout there is a
+// single absolute deadline covering the whole response, headers through
+// last byte, not a per-write or per-inactivity bound. This API serves
+// long-lived Connect server-streaming RPCs (Follow, Search, ExportVault,
+// WatchSystem, WatchChunks, WatchIngesterStatus, WatchJobs,
+// WatchSystemStatus); a nonzero WriteTimeout caps every one of them to a
+// fixed lifetime measured from when the response started, which is the
+// same failure mode a slowloris timeout guards against, just from the
+// opposite end of the connection. The main HTTP listener additionally
+// speaks HTTP/2 via h2c (see Serve, below); there golang.org/x/net/http2
+// arms WriteTimeout as one non-resetting per-stream timer set at stream
+// creation, which is the identical hazard enforced per RPC call instead of
+// per connection.
+//
+// ReadHeaderTimeout and IdleTimeout close the slowloris/idle-hold vectors
+// without this hazard. See the h2c.NewHandler call in Serve for why
+// IdleTimeout needs to be set on the *http2.Server, not only the
+// *http.Server, for the main listener.
 const (
 	// readHeaderTimeout is the maximum time to read HTTP request headers.
 	readHeaderTimeout = 10 * time.Second
 
 	// readTimeout is the maximum time to read an entire request, including
-	// the body. Sized to accommodate the managed-file upload endpoint (up
-	// to 256 MiB, upload.go maxUploadSize) on a slow connection while still
-	// bounding a slow-body-trickle attack. Connect RPC bodies are capped at
-	// 4 MiB (WithReadMaxBytes) and read in a fraction of this.
-	readTimeout = 5 * time.Minute
+	// the body. Kept tight because it has to work for every handler on
+	// these listeners except one: the managed-file upload endpoint (up to
+	// 256 MiB, upload.go maxUploadSize) explicitly clears its own read
+	// deadline via http.ResponseController, since no single duration both
+	// bounds a slowloris body trickle for a 4 MiB Connect RPC and
+	// tolerates a legitimate 256 MiB transfer on a slow link.
+	readTimeout = 30 * time.Second
 
 	// idleTimeout is the maximum time a keep-alive connection may sit idle
-	// between requests. For HTTP/2 this only fires when a connection has
-	// zero open streams (golang.org/x/net/http2 resets/arms it on stream
-	// count reaching zero), so it never cuts off an in-progress streaming
-	// RPC — only a connection with nothing in flight.
+	// between requests, i.e. with no request being read or served. This
+	// never fires against an in-progress request or stream on any of the
+	// three listeners — see the package comment above.
 	idleTimeout = 120 * time.Second
 )
 
@@ -83,12 +92,12 @@ const (
 // timeouts applied, shared by the HTTP, HTTPS, and Unix socket listeners.
 // Tests use this directly with short-lived values to exercise timeout
 // behavior without waiting out the production durations.
-func newTimedServer(handler http.Handler, headerTimeout, readTimeout, idleTimeout time.Duration) *http.Server {
+func newTimedServer(handler http.Handler, hdrTimeout, reqTimeout, connIdleTimeout time.Duration) *http.Server {
 	return &http.Server{
 		Handler:           handler,
-		ReadHeaderTimeout: headerTimeout,
-		ReadTimeout:       readTimeout,
-		IdleTimeout:       idleTimeout,
+		ReadHeaderTimeout: hdrTimeout,
+		ReadTimeout:       reqTimeout,
+		IdleTimeout:       connIdleTimeout,
 	}
 }
 
@@ -800,9 +809,15 @@ func (s *Server) Serve(listener net.Listener) error {
 	mux := s.buildMux()
 	s.handler = s.trackingMiddleware(s.corsMiddleware(securityHeadersMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(s.logger, mux)))))
 
-	// HTTP adds redirect-to-HTTPS + h2c (HTTP/2 without TLS).
+	// HTTP adds redirect-to-HTTPS + h2c (HTTP/2 without TLS). h2c.NewHandler
+	// never calls http2.ConfigureServer, so the *http.Server's IdleTimeout
+	// below is invisible to HTTP/2 connections unless it is also set on the
+	// *http2.Server directly — golang.org/x/net/http2 reads its own
+	// IdleTimeout field, not the outer http.Server's, for the idle-hold
+	// bound on this listener's h2c connections.
 	redirectHandler := s.redirectMiddleware(s.handler)
-	s.server = newTimedServer(h2c.NewHandler(redirectHandler, &http2.Server{}), readHeaderTimeout, readTimeout, idleTimeout)
+	srv := newTimedServer(h2c.NewHandler(redirectHandler, &http2.Server{IdleTimeout: idleTimeout}), readHeaderTimeout, readTimeout, idleTimeout)
+	s.server = srv
 
 	// Initial TLS config: start HTTPS if enabled
 	s.reconfigureTLS()
@@ -816,7 +831,11 @@ func (s *Server) Serve(listener net.Listener) error {
 
 	s.logger.Info("server starting", "addr", listener.Addr().String())
 
-	err := s.server.Serve(listener)
+	// Serve on the local srv, not s.server: a concurrent Stop() nils
+	// s.server, and this call can start after that race window (TLS/Unix
+	// socket setup above takes real time) even though it was assigned
+	// before them.
+	err := srv.Serve(listener)
 	if err == http.ErrServerClosed {
 		return nil
 	}

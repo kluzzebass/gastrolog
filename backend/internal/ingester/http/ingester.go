@@ -30,11 +30,14 @@ const (
 // never finishes it (headers, body, or response read) before the pipeline
 // ever sees a message. Unlike the main API server, this ingester has no
 // long-lived streaming responses — every push is a single request/response
-// — so WriteTimeout is safe to set here. It covers the X-Wait-Ack path's
-// wait for persistence as well as the write itself, since it is reset when
-// the request header finishes reading; that is intentional; a caller
-// waiting on an ack past this bound is better disconnected than holding
-// the goroutine.
+// — so WriteTimeout is safe to set here. WriteTimeout is reset when the
+// request header finishes reading, so its clock also runs across the
+// X-Wait-Ack path's wait for persistence (sendAcked blocking on ackCh).
+// That wait is not itself interrupted by the deadline — the handler stays
+// parked on ackCh regardless. What the deadline changes is the connection:
+// once it elapses the server drops it, so a shipper waiting past this
+// bound sees a failed request and retries, which can double-ingest the
+// message if it had already reached the pipeline before the ack was lost.
 const (
 	readHeaderTimeout = 10 * time.Second
 	readTimeout       = 30 * time.Second // bodies capped at 10MiB (bodyutil.ReadBody)
