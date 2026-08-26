@@ -24,7 +24,7 @@ hashicorp/raft does not authenticate peers; it trusts its transport completely. 
 
 Two lenses found this independently. It is the single most serious finding in the audit.
 
-Around it sits a weak identity story (Theme 2b): one certificate and one private key for the whole cluster, so no node has a distinct identity and any peer certificate implies unrestricted FSM authority; a static, never-rotating join token printed to logs on every boot; the cluster CA private key replicated to every node in the FSM; and an enrollment callback that fingerprint-matches a chain member without verifying the leaf against it. Fixing the missing interceptor closes the open door; fixing identity is what makes the lock meaningful.
+Around it sits a weak identity story (Theme 2b): one certificate and one private key for the whole cluster, so no node has a distinct identity and any peer certificate implies unrestricted FSM authority; a static, never-rotating join token printed to logs on every boot; the cluster CA private key replicated to every node in the FSM; and an enrollment callback that fingerprint-matches a chain member without verifying the leaf against it. Requiring a client certificate on the lane handshake closes the open door; fixing identity is what makes the lock meaningful.
 
 ## Theme 3 — Untrusted input is unbounded, and nothing contains a panic
 
@@ -66,7 +66,7 @@ Ranked by exploitability × blast radius, not by finding count.
 
 ### P0 — remote or low-privilege compromise, fix before anything else
 
-1. **Raft lanes require no client certificate** (Theme 2). Pass `fullInterceptors=true` for the lane servers and move the listener to `RequireAndVerifyClientCert`. Small change, largest payoff. *Interim mitigation available today: firewall the cluster ports, which currently bind to all interfaces.*
+1. **Raft lanes require no client certificate** (Theme 2). Gate at the TLS layer: pick `ClientAuth` per connection from the ClientHello SNI, `RequireAndVerifyClientCert` for raft lane SNIs only. Do **not** move the whole listener — enrollment depends on cert-optional TLS on the service lane. Attaching the mTLS interceptors is necessary but not sufficient: the hand-written `MultiRaftTransportService` method descriptors discard the interceptor gRPC passes them, so the chain stays inert until they dispatch through it. Largest payoff in the audit. *Interim mitigation available today: firewall the cluster ports, which currently bind to all interfaces.*
 2. **Chart-tooltip XSS → token theft** (Theme 5). Escape log-derived values in every formatter; add CSP; reconsider `localStorage` for tokens.
 3. **Unauthenticated remote node kill** (Theme 3). Bound RELP `DATALEN`, cap decompressed size, bound syslog lines — and add panic containment at every listener goroutine and detached query goroutine.
 4. **Cloud credentials returned in plaintext** (Theme 4). Apply the `LicenseConfigured` pattern already used for MaxMind.
