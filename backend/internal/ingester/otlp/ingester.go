@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"net"
 	"net/http"
 	"strconv"
@@ -27,11 +26,22 @@ import (
 
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/ingester/bodyutil"
+	"gastrolog/internal/ingester/limits"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
 	"gastrolog/internal/panicguard"
 	"gastrolog/internal/pipeline/ingestion"
 )
+
+// maxExportBodyBytes bounds one OTLP/HTTP request after decompression.
+// Collectors batch well under this; the ceiling is what stops a small
+// compressed payload from expanding into the node's memory.
+const maxExportBodyBytes = 10 << 20
+
+// droppedAttrLogInterval spaces the "attributes dropped" warning. A
+// misconfigured producer emits the same oversized record continuously, and
+// one line per record would bury the condition it reports.
+const droppedAttrLogInterval = 10 * time.Second
 
 // Ingester accepts OpenTelemetry log records via HTTP and gRPC.
 type Ingester struct {
@@ -40,6 +50,11 @@ type Ingester struct {
 	grpcAddr string
 	out      chan<- ingestion.IngesterMessage
 	logger   *slog.Logger
+
+	// droppedAttrLog throttles the report of attributes the record ceiling
+	// refused. Dropping them silently would leave records that quietly
+	// disagree with what the producer sent.
+	droppedAttrLog logging.Throttle
 
 	// pressureGate is consulted non-blockingly by processExportRequest to
 	// decide whether to reject incoming exports with 429 / ResourceExhausted.
@@ -65,10 +80,11 @@ type Config struct {
 // New creates a new OTLP ingester.
 func New(cfg Config) *Ingester {
 	return &Ingester{
-		id:       cfg.ID,
-		httpAddr: cfg.HTTPAddr,
-		grpcAddr: cfg.GRPCAddr,
-		logger:   comp.Ingester.Sub("otlp").Desc("OpenTelemetry Logs ingester — accepts OTLP log records via HTTP (POST /v1/logs) and gRPC.").Apply(logging.Default(cfg.Logger)),
+		id:             cfg.ID,
+		httpAddr:       cfg.HTTPAddr,
+		grpcAddr:       cfg.GRPCAddr,
+		droppedAttrLog: logging.Throttle{Interval: droppedAttrLogInterval},
+		logger:         comp.Ingester.Sub("otlp").Desc("OpenTelemetry Logs ingester — accepts OTLP log records via HTTP (POST /v1/logs) and gRPC.").Apply(logging.Default(cfg.Logger)),
 	}
 }
 
@@ -144,8 +160,11 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 // handleHTTP handles POST /v1/logs requests.
 // Accepts protobuf (application/x-protobuf) and JSON (application/json).
 func (ing *Ingester) handleHTTP(w http.ResponseWriter, req *http.Request) {
-	data, err := bodyutil.ReadBody(req.Body, req.Header.Get("Content-Encoding"), 10<<20)
+	data, err := bodyutil.ReadBody(req.Body, req.Header.Get("Content-Encoding"), maxExportBodyBytes)
 	if err != nil {
+		// A rejected body means the sender's records did not land. Say so
+		// on both sides rather than only answering 400.
+		ing.logger.Warn("export body rejected", "error", err, "remote", req.RemoteAddr)
 		http.Error(w, "failed to read body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -239,11 +258,21 @@ func (ing *Ingester) processExportRequest(ctx context.Context, req *collogspb.Ex
 }
 
 func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceAttrs, scopeAttrs map[string]string, now time.Time) ingestion.IngesterMessage {
-	attrs := make(map[string]string, len(resourceAttrs)+len(scopeAttrs)+8)
+	attrs := make(map[string]string, min(len(resourceAttrs)+len(scopeAttrs)+8, limits.Records.Count))
 
-	maps.Copy(attrs, resourceAttrs)
-	maps.Copy(attrs, scopeAttrs)
-	maps.Copy(attrs, flattenKVList(lr.GetAttributes()))
+	// A record's attributes are attacker-chosen in both count and length,
+	// and each one becomes an index term. Bound them, and drop the excess
+	// rather than the record: the log line itself is the payload that must
+	// not be lost.
+	dropped := ing.copyBounded(attrs, resourceAttrs)
+	dropped += ing.copyBounded(attrs, scopeAttrs)
+	dropped += ing.copyBounded(attrs, flattenKVList(lr.GetAttributes()))
+	if dropped > 0 {
+		if n, ok := ing.droppedAttrLog.Allow("record-attrs"); ok {
+			ing.logger.Warn("OTLP record attributes dropped: over ceiling",
+				"dropped", dropped, "max_attrs", limits.Records.Count, "suppressed", n)
+		}
+	}
 
 	if lr.GetSeverityText() != "" {
 		attrs["severity"] = lr.GetSeverityText()
@@ -284,6 +313,18 @@ func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceAttrs, sco
 		IngestTS:   now,
 		IngesterID: ing.id,
 	}
+}
+
+// copyBounded copies src into attrs under the record ceiling, returning how
+// many attributes it had to leave out.
+func (ing *Ingester) copyBounded(attrs, src map[string]string) int {
+	dropped := 0
+	for k, v := range src {
+		if err := limits.Records.Add(attrs, k, v); err != nil {
+			dropped++
+		}
+	}
+	return dropped
 }
 
 // logsServiceServer implements the gRPC LogsService.

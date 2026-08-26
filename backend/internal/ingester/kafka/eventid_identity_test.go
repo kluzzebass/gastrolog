@@ -26,6 +26,6 @@ func TestEventIDIdentity(t *testing.T) {
 		Value:     []byte("identity probe"),
 		Timestamp: now,
 	}
-	msg := buildMessage(rec, ingesterID, now)
+	msg, _ := buildMessage(rec, ingesterID, now)
 	identitytest.AssertHasIdentity(t, msg, ingesterID)
 }

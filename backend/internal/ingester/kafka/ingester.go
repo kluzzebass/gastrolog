@@ -15,6 +15,7 @@ import (
 	"github.com/twmb/franz-go/pkg/sasl/scram"
 
 	"gastrolog/internal/chanwatch"
+	"gastrolog/internal/ingester/limits"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
 	"gastrolog/internal/pipeline/ingestion"
@@ -23,6 +24,11 @@ import (
 const (
 	backoffMin = 100 * time.Millisecond
 	backoffMax = 5 * time.Second
+
+	// droppedAttrLogInterval spaces the "headers dropped" warning so a
+	// producer emitting the same oversized record cannot bury the
+	// condition under one line per record.
+	droppedAttrLogInterval = 10 * time.Second
 )
 
 // SASLConfig holds SASL authentication parameters.
@@ -48,6 +54,11 @@ type Ingester struct {
 	cfg    Config
 	logger *slog.Logger
 
+	// droppedAttrLog throttles the report of headers the record ceiling
+	// refused. A producer emitting the same oversized record continuously
+	// would otherwise write one line per record.
+	droppedAttrLog logging.Throttle
+
 	// pressureGate throttles PollFetches calls when the ingest pipeline is
 	// backed up. Kafka offset tracking makes pausing lossless — we resume
 	// from the same offset when pressure clears. Injected by the
@@ -64,8 +75,9 @@ func (ing *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 // New creates a new Kafka ingester.
 func New(cfg Config) *Ingester {
 	return &Ingester{
-		cfg:    cfg,
-		logger: comp.Ingester.Sub("kafka").Desc("Kafka consumer ingester — pulls log messages from configured Kafka topics.").Apply(logging.Default(cfg.Logger)),
+		cfg:            cfg,
+		droppedAttrLog: logging.Throttle{Interval: droppedAttrLogInterval},
+		logger:         comp.Ingester.Sub("kafka").Desc("Kafka consumer ingester — pulls log messages from configured Kafka topics.").Apply(logging.Default(cfg.Logger)),
 	}
 }
 
@@ -125,7 +137,14 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 		now := time.Now()
 
 		fetches.EachRecord(func(rec *kgo.Record) {
-			msg := buildMessage(rec, ing.cfg.ID, now)
+			msg, dropped := buildMessage(rec, ing.cfg.ID, now)
+			if dropped > 0 {
+				if n, ok := ing.droppedAttrLog.Allow("record-attrs"); ok {
+					ing.logger.Warn("kafka record headers dropped: over ceiling",
+						"topic", rec.Topic, "dropped", dropped,
+						"max_attrs", limits.Records.Count, "suppressed", n)
+				}
+			}
 			select {
 			case out <- msg:
 			case <-ctx.Done():
@@ -180,15 +199,22 @@ func (ing *Ingester) handleFetchErrors(fetches kgo.Fetches, backoff *time.Durati
 	return true
 }
 
-// buildMessage converts a kgo.Record into an ingestion.IngesterMessage.
-func buildMessage(rec *kgo.Record, ingesterID string, now time.Time) ingestion.IngesterMessage {
-	attrs := make(map[string]string, len(rec.Headers)+5)
+// buildMessage converts a kgo.Record into an ingestion.IngesterMessage,
+// reporting how many headers the attribute ceiling refused. Headers are
+// producer-chosen in both count and length and each becomes an index term,
+// so the excess is dropped — but never silently, and never at the cost of
+// the record itself.
+func buildMessage(rec *kgo.Record, ingesterID string, now time.Time) (ingestion.IngesterMessage, int) {
+	attrs := make(map[string]string, min(len(rec.Headers)+5, limits.Records.Count))
 	attrs["ingester_type"] = "kafka"
 	attrs["kafka_topic"] = rec.Topic
 	attrs["kafka_partition"] = strconv.Itoa(int(rec.Partition))
 	attrs["kafka_offset"] = strconv.FormatInt(rec.Offset, 10)
+	dropped := 0
 	for _, h := range rec.Headers {
-		attrs[h.Key] = string(h.Value)
+		if err := limits.Records.Add(attrs, h.Key, string(h.Value)); err != nil {
+			dropped++
+		}
 	}
 	return ingestion.IngesterMessage{
 		Attrs:      attrs,
@@ -196,7 +222,7 @@ func buildMessage(rec *kgo.Record, ingesterID string, now time.Time) ingestion.I
 		SourceTS:   rec.Timestamp,
 		IngestTS:   now,
 		IngesterID: ingesterID,
-	}
+	}, dropped
 }
 
 // buildSASLMechanism constructs the appropriate SASL mechanism.

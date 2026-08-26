@@ -20,11 +20,18 @@ import (
 	"github.com/vmihailenco/msgpack/v5/msgpcode"
 
 	"gastrolog/internal/chanwatch"
+	"gastrolog/internal/ingester/limits"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
 	"gastrolog/internal/panicguard"
 	"gastrolog/internal/pipeline/ingestion"
 )
+
+// refusedLogInterval spaces the "listener at capacity" and "attributes
+// dropped" warnings. A peer that hammers a full listener, or a producer
+// emitting the same oversized record continuously, would otherwise write one
+// line per event and bury the condition it reports.
+const refusedLogInterval = 10 * time.Second
 
 // Ingester accepts messages via the Fluent Forward protocol over TCP.
 type Ingester struct {
@@ -32,6 +39,12 @@ type Ingester struct {
 	addr   string
 	out    chan<- ingestion.IngesterMessage
 	logger *slog.Logger
+
+	// conns caps concurrent connections; refusedLog throttles both the
+	// refusal warning and the report of attributes the record ceiling
+	// dropped, neither of which may be silent.
+	conns      *limits.ConnLimiter
+	refusedLog logging.Throttle
 
 	// pressureGate throttles msgpack reads when the ingest pipeline is backed
 	// up. Pausing before DecodeArrayLen stops reads from the TCP socket, so
@@ -56,9 +69,11 @@ type Config struct {
 // New creates a new Fluent Forward ingester.
 func New(cfg Config) *Ingester {
 	return &Ingester{
-		id:     cfg.ID,
-		addr:   cfg.Addr,
-		logger: comp.Ingester.Sub("fluentfwd").Desc("Fluent Forward ingester — accepts records from fluentd/fluent-bit using the Forward protocol.").Apply(logging.Default(cfg.Logger)),
+		id:         cfg.ID,
+		addr:       cfg.Addr,
+		conns:      limits.NewConnLimiter(limits.MaxConnections),
+		refusedLog: logging.Throttle{Interval: refusedLogInterval},
+		logger:     comp.Ingester.Sub("fluentfwd").Desc("Fluent Forward ingester — accepts records from fluentd/fluent-bit using the Forward protocol.").Apply(logging.Default(cfg.Logger)),
 	}
 }
 
@@ -126,7 +141,20 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 		}
 
 		remote := conn.RemoteAddr().String()
+		// Past the cap, refuse immediately: a peer opening connections
+		// faster than they close must not exhaust the node's file
+		// descriptors or goroutines.
+		if !ing.conns.Acquire() {
+			_ = conn.Close()
+			if n, ok := ing.refusedLog.Allow("conn-limit"); ok {
+				ing.logger.Warn("fluent forward connection refused: listener at capacity",
+					"remote", remote, "max_connections", limits.MaxConnections, "suppressed", n)
+			}
+			continue
+		}
+
 		wg.Go(func() {
+			defer ing.conns.Release()
 			// A panic on a hostile record costs this connection, not the
 			// node and every other vault and ingester running on it.
 			defer panicguard.Recover(ing.logger, "fluent forward connection", "remote", remote)
@@ -142,7 +170,12 @@ func (ing *Ingester) handleConn(ctx context.Context, conn net.Conn) {
 	remote := conn.RemoteAddr().String()
 	ing.logger.Debug("connection accepted", "remote", remote)
 
-	dec := msgpack.NewDecoder(conn)
+	// A sender that starts a message must finish it. Idle time between
+	// messages stays unbounded: a forwarder on a quiet host legitimately
+	// holds an open connection, and is not the thing being defended
+	// against.
+	framed := limits.NewFrameConn(conn, limits.FrameTimeout)
+	dec := msgpack.NewDecoder(framed)
 
 	for {
 		if ctx.Err() != nil {
@@ -159,6 +192,9 @@ func (ing *Ingester) handleConn(ctx context.Context, conn net.Conn) {
 		}
 
 		option, ok := ing.handleOneMessage(ctx, dec, remote)
+		// The message is off the wire; clear its deadline before acking,
+		// or the next read inherits a deadline that already expired.
+		framed.Done()
 		if !ok {
 			return
 		}
@@ -204,7 +240,7 @@ func (ing *Ingester) handleOneMessage(ctx context.Context, dec *msgpack.Decoder,
 }
 
 func (ing *Ingester) handlePackedForward(ctx context.Context, dec *msgpack.Decoder, tag string, arrLen int, remote string) (map[string]any, bool) {
-	binData, err := dec.DecodeBytes()
+	binData, err := readPackedEntries(dec)
 	if err != nil {
 		ing.logger.Warn("decode packed entries", "remote", remote, "error", err)
 		return nil, false
@@ -292,6 +328,28 @@ func sendAck(conn net.Conn, option map[string]any) {
 	ack := map[string]string{"ack": chunkStr}
 	data, _ := msgpack.Marshal(ack)
 	_, _ = conn.Write(data)
+}
+
+// readPackedEntries reads a packed-forward batch, refusing a length the
+// sender declares beyond the batch ceiling. The payload is copied in as it
+// arrives rather than allocated from the declared length, so a claim alone
+// costs nothing.
+func readPackedEntries(dec *msgpack.Decoder) ([]byte, error) {
+	n, err := dec.DecodeBytesLen()
+	if err != nil {
+		return nil, err
+	}
+	if n < 0 {
+		return nil, nil
+	}
+	if int64(n) > maxDecompressedFluentBytes {
+		return nil, fmt.Errorf("fluentfwd: packed batch declares %d bytes, over %d", n, maxDecompressedFluentBytes)
+	}
+	var buf bytes.Buffer
+	if _, err := io.CopyN(&buf, dec.Buffered(), int64(n)); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // entry is a [time, record] pair.
@@ -386,7 +444,7 @@ func (ing *Ingester) processEntries(ctx context.Context, tag string, entries []e
 
 // processRecord converts a single record to an IngestMessage and sends it.
 func (ing *Ingester) processRecord(ctx context.Context, tag string, ts time.Time, record map[string]any) error {
-	attrs := make(map[string]string, len(record)+4)
+	attrs := make(map[string]string, min(len(record)+4, limits.Records.Count))
 	attrs["tag"] = tag
 	attrs["ingester_type"] = "fluentfwd"
 
@@ -404,9 +462,21 @@ func (ing *Ingester) processRecord(ctx context.Context, tag string, ts time.Time
 		raw = string(data)
 	}
 
-	// Stringify all record keys as attributes.
+	// Record fields are attacker-chosen in both count and length, and each
+	// one becomes an index term. Bound them, and drop the excess rather
+	// than the record: the log line itself is the payload that must not be
+	// lost.
+	dropped := 0
 	for k, v := range record {
-		attrs[k] = fmt.Sprint(v)
+		if err := limits.Records.Add(attrs, k, fmt.Sprint(v)); err != nil {
+			dropped++
+		}
+	}
+	if dropped > 0 {
+		if n, ok := ing.refusedLog.Allow("record-attrs"); ok {
+			ing.logger.Warn("fluent record attributes dropped: over ceiling",
+				"tag", tag, "dropped", dropped, "max_attrs", limits.Records.Count, "suppressed", n)
+		}
 	}
 
 	msg := ingestion.IngesterMessage{
