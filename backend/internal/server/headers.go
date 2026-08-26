@@ -1,6 +1,33 @@
 package server
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
+
+// contentSecurityPolicy governs the embedded frontend the binary serves.
+//
+// script-src without 'unsafe-inline' is the load-bearing part: it makes inline
+// event-handler attributes and javascript: URLs inert, so an injection into
+// chart or log-derived markup cannot reach the operator's token. The Vite
+// production build emits only external module scripts, so no allowance beyond
+// 'self' is needed.
+//
+// style-src does allow 'unsafe-inline': ECharts tooltips and Mermaid's rendered
+// SVG both carry style attributes in markup they insert themselves. img-src
+// allows data: for the SVG textures the stylesheet embeds.
+var contentSecurityPolicy = strings.Join([]string{
+	"default-src 'self'",
+	"script-src 'self'",
+	"style-src 'self' 'unsafe-inline'",
+	"img-src 'self' data:",
+	"font-src 'self'",
+	"connect-src 'self'",
+	"object-src 'none'",
+	"base-uri 'self'",
+	"form-action 'self'",
+	"frame-ancestors 'none'",
+}, "; ")
 
 // securityHeadersMiddleware sets standard HTTP security headers on every response.
 func securityHeadersMiddleware(next http.Handler) http.Handler {
@@ -9,6 +36,7 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
 		next.ServeHTTP(w, r)
 	})
 }

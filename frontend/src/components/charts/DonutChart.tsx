@@ -3,6 +3,7 @@ import ReactEChartsCore from "echarts-for-react/esm/core";
 import { echarts } from "./echartsSetup";
 import { buildThemeOption } from "./echartsTheme";
 import { getColorForCategory, resolveColor, formatChartValue, cssVar } from "./chartColors";
+import { donutTooltipHtml } from "./chartTooltips";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import type { EChartsOption } from "echarts";
 
@@ -43,12 +44,7 @@ export function DonutChart({ columns, rows, dark }: Readonly<DonutChartProps>) {
     tooltip: {
       ...theme.tooltip as object,
       trigger: "item",
-      formatter: (params: any) => {
-        const p = params;
-        const pct = ((p.value / total) * 100).toFixed(1);
-        const dot = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${p.color};margin-right:6px;"></span>`;
-        return `<div style="opacity:0.7">${p.name}</div>${dot}${columns[valueColIdx]} <b>${formatChartValue(p.value as number)} (${pct}%)</b>`;
-      },
+      formatter: (params: any) => donutTooltipHtml(params, columns, total),
     },
     graphic: [
       {

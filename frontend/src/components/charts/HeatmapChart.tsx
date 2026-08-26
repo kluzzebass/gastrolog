@@ -1,7 +1,8 @@
 import ReactEChartsCore from "echarts-for-react/esm/core";
 import { echarts } from "./echartsSetup";
 import { buildThemeOption } from "./echartsTheme";
-import { formatChartValue, cssVar } from "./chartColors";
+import { cssVar } from "./chartColors";
+import { heatmapTooltipHtml } from "./chartTooltips";
 import type { EChartsOption } from "echarts";
 
 interface HeatmapChartProps {
@@ -65,17 +66,8 @@ export function HeatmapChart({ columns, rows, dark }: Readonly<HeatmapChartProps
     tooltip: {
       ...theme.tooltip as object,
       position: "top",
-      formatter: (params: any) => {
-        const p = params;
-        const x = xValues[p.value[0]] ?? "";
-        const y = yValues[p.value[1]] ?? "";
-        const v = p.value[2] as number;
-        return [
-          `<div style="opacity:0.7">${xLabel}: ${x}</div>`,
-          `<div style="opacity:0.7">${yLabel}: ${y}</div>`,
-          `<b>${valueLabel}: ${formatChartValue(v)}</b>`,
-        ].join("");
-      },
+      formatter: (params: any) =>
+        heatmapTooltipHtml(params, { x: xLabel, y: yLabel, value: valueLabel }, xValues, yValues),
     },
     xAxis: {
       ...theme.xAxis as object,

@@ -2,6 +2,7 @@ import ReactEChartsCore from "echarts-for-react/esm/core";
 import { echarts } from "./echartsSetup";
 import { buildThemeOption } from "./echartsTheme";
 import { resolveColor, formatChartValue, GROUP_PALETTE } from "./chartColors";
+import { scatterTooltipHtml } from "./chartTooltips";
 import type { EChartsOption } from "echarts";
 
 interface ScatterChartProps {
@@ -69,18 +70,8 @@ export function ScatterChart({ columns, rows, dark }: Readonly<ScatterChartProps
     tooltip: {
       ...theme.tooltip as object,
       trigger: "item",
-      formatter: (params: any) => {
-        const p = Array.isArray(params) ? params[0] : params;
-        const [x, y] = p.value as [number, number];
-        const label = data[p.dataIndex as number]?.label;
-        const lines = [];
-        if (label) lines.push(`<div style="opacity:0.7">${label}</div>`);
-        lines.push(
-          `${xLabel} <b>${formatChartValue(x)}</b>`,
-          `${yLabel} <b>${formatChartValue(y)}</b>`,
-        );
-        return lines.join("<br/>");
-      },
+      formatter: (params: any) =>
+        scatterTooltipHtml(params, xLabel, yLabel, data.map((d) => d.label)),
     },
     series: [
       {

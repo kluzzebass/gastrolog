@@ -4,14 +4,12 @@ import { useThemeClass } from "../hooks/useThemeClass";
 import { helpTopics, findTopic, resolveTopicId, allTopics } from "../help/topics";
 import type { HelpTopic } from "../help/topics";
 import { buildMarkdownComponents } from "./helpMarkdownComponents";
+import { markdownUrlTransform } from "../lib/markdownUrlTransform";
 
 const Markdown = lazy(() => import("react-markdown"));
 
 let remarkGfmPlugin: any[] = [];
 import("remark-gfm").then((m) => { remarkGfmPlugin = [m.default]; });
-
-/** Stable identity transform — hoisted to module level to avoid re-renders. */
-const identityUrlTransform = (url: string) => url;
 
 interface HelpDialogProps {
   dark: boolean;
@@ -433,7 +431,7 @@ function MarkdownContent({ dark, content, onNavigate, onOpenSettings }: Readonly
 
   return (
     <Suspense fallback={null}>
-      <Markdown remarkPlugins={remarkGfmPlugin} components={components} urlTransform={identityUrlTransform}>
+      <Markdown remarkPlugins={remarkGfmPlugin} components={components} urlTransform={markdownUrlTransform}>
         {content}
       </Markdown>
     </Suspense>
