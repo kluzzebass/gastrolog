@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,52 @@ func (panickingLogClient) ContainerInspect(context.Context, string) (containerIn
 }
 
 func (panickingLogClient) Ping(context.Context) (string, error) { return "", nil }
+
+// panickingEventClient serves an empty container list and panics when the
+// event stream is opened.
+type panickingEventClient struct{ panickingLogClient }
+
+func (panickingEventClient) ContainerList(context.Context) ([]containerInfo, error) {
+	return nil, nil
+}
+
+func (panickingEventClient) Events(context.Context) (<-chan containerEvent, <-chan error) {
+	panic("event decode")
+}
+
+// TestDockerEventLoopPanicFailsTheRun proves a panic in container discovery
+// ends the run rather than leaving the ingester alive but blind to new
+// containers. The ingester manager retries a failed run; a swallowed panic
+// would leave a process that looks healthy and ingests nothing new.
+func TestDockerEventLoopPanicFailsTheRun(t *testing.T) {
+	t.Parallel()
+
+	logger, logs := logtest.New()
+	ing := newIngesterWithClient(ingesterConfig{
+		ID:        "test-docker",
+		StateFile: filepath.Join(t.TempDir(), "state.json"),
+		Logger:    logger,
+	}, panickingEventClient{})
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- ing.Run(t.Context(), make(chan ingestion.IngesterMessage, 1)) }()
+
+	select {
+	case err := <-runErr:
+		if err == nil {
+			t.Fatal("panic in the event loop was swallowed; the run reported success")
+		}
+		if !strings.Contains(err.Error(), "panicked") {
+			t.Errorf("run error does not identify the panic: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("run never returned after the event loop panicked")
+	}
+
+	if !logs.Wait(5*time.Second, "recovered panic", "docker event loop", "stack") {
+		t.Errorf("panic was contained but not reported with a stack: %s", logs)
+	}
+}
 
 // TestDockerFrameReaderPanicFailsTheStream proves a panic while decoding
 // Docker log frames is reported as a stream error, so the container's stream

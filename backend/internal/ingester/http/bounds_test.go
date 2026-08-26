@@ -55,6 +55,12 @@ func TestPushBombIsRejectedAndReported(t *testing.T) {
 	bomb := enc.EncodeAll(make([]byte, maxPushBodyBytes*8), nil)
 	_ = enc.Close()
 
+	// The premise: on the wire this is well inside the limit, so a bound
+	// on the compressed input would let it through.
+	if int64(len(bomb)) > maxPushBodyBytes {
+		t.Fatalf("the bomb is not a bomb: %d compressed bytes already exceed the limit", len(bomb))
+	}
+
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
 		"http://"+addr+"/loki/api/v1/push", bytes.NewReader(bomb))
 	if err != nil {

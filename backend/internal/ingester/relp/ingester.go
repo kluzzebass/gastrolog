@@ -53,6 +53,10 @@ type Ingester struct {
 	conns      *limits.ConnLimiter
 	refusedLog logging.Throttle
 
+	// frameTimeout bounds how long a sender may take to finish a frame it
+	// has started. Tests shorten it; nothing else sets it.
+	frameTimeout time.Duration
+
 	// pressureGate throttles socket reads when the ingest pipeline is backed up.
 	// The ack-gated message flow already provides indirect backpressure; this
 	// gate provides a faster signal via the TCP window before senders queue up
@@ -85,12 +89,13 @@ type Config struct {
 // New creates a new RELP ingester.
 func New(cfg Config) *Ingester {
 	return &Ingester{
-		id:         cfg.ID,
-		addr:       cfg.Addr,
-		tlsConfig:  cfg.TLSConfig,
-		conns:      limits.NewConnLimiter(limits.MaxConnections),
-		refusedLog: logging.Throttle{Interval: refusedLogInterval},
-		logger:     comp.Ingester.Sub("relp").Desc("RELP ingester — TCP transport with transaction-based acknowledgments (rsyslog-compatible).").Apply(logging.Default(cfg.Logger)),
+		id:           cfg.ID,
+		addr:         cfg.Addr,
+		tlsConfig:    cfg.TLSConfig,
+		conns:        limits.NewConnLimiter(limits.MaxConnections),
+		frameTimeout: limits.FrameTimeout,
+		refusedLog:   logging.Throttle{Interval: refusedLogInterval},
+		logger:       comp.Ingester.Sub("relp").Desc("RELP ingester — TCP transport with transaction-based acknowledgments (rsyslog-compatible).").Apply(logging.Default(cfg.Logger)),
 	}
 }
 
@@ -186,7 +191,7 @@ func (r *Ingester) handleConn(ctx context.Context, conn net.Conn, out chan<- ing
 	// A sender that starts a frame must finish it. Idle time between
 	// frames stays unbounded: a relay on a quiet host holds an open
 	// connection for hours and is not the thing being defended against.
-	framed := limits.NewFrameConn(conn, limits.FrameTimeout)
+	framed := limits.NewFrameConn(conn, r.frameTimeout)
 
 	// Wrap with TLS if configured.
 	var fd io.ReadWriter = framed
@@ -201,6 +206,11 @@ func (r *Ingester) handleConn(ctx context.Context, conn net.Conn, out chan<- ing
 	}
 
 	session := NewSession(fd, fd)
+	// Clear the deadline as each frame completes rather than once per
+	// ReceiveLog: the first ReceiveLog reads the open handshake and then
+	// blocks on the next frame, so a per-call boundary would hold the
+	// handshake's deadline over a sender that is simply idle.
+	session.OnFrame(framed.Done)
 
 	r.logger.Debug("RELP session established", "remote", remoteIP)
 
@@ -217,7 +227,7 @@ func (r *Ingester) handleConn(ctx context.Context, conn net.Conn, out chan<- ing
 		if ctx.Err() != nil {
 			return
 		}
-		if !r.receiveAndForward(ctx, session, framed, out, remoteIP) {
+		if !r.receiveAndForward(ctx, session, out, remoteIP) {
 			return
 		}
 	}
@@ -229,14 +239,10 @@ func (r *Ingester) handleConn(ctx context.Context, conn net.Conn, out chan<- ing
 func (r *Ingester) receiveAndForward(
 	ctx context.Context,
 	session *Session,
-	framed *limits.FrameConn,
 	out chan<- ingestion.IngesterMessage,
 	remoteIP string,
 ) bool {
 	msg, err := session.ReceiveLog()
-	// The frame is off the wire; clear its deadline before waiting on the
-	// pipeline, or the next read inherits a deadline that already expired.
-	framed.Done()
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrOversizeFrame):

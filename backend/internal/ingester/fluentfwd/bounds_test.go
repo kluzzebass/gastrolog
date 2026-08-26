@@ -102,7 +102,7 @@ func TestPackedBatchLengthClaimIsRejected(t *testing.T) {
 	enc := msgpack.NewEncoder(&buf)
 	_ = enc.EncodeArrayLen(2)
 	_ = enc.EncodeString("app.log")
-	buf.Write(bin32Header(maxDecompressedFluentBytes + 1))
+	buf.Write(bin32Header(limits.MaxDecompressedBytes + 1))
 	if _, err := conn.Write(buf.Bytes()); err != nil {
 		t.Fatalf("write: %v", err)
 	}

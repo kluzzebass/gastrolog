@@ -239,13 +239,17 @@ func (ing *Ingester) processExportRequest(ctx context.Context, req *collogspb.Ex
 	now := time.Now()
 
 	for _, rl := range req.GetResourceLogs() {
-		resourceAttrs := flattenKVList(rl.GetResource().GetAttributes())
+		// The KeyValue lists are carried down as-is rather than flattened
+		// into maps first: flattening would materialize an
+		// attacker-sized map before anything checked its size, and the
+		// protobuf order is what makes the ceiling deterministic.
+		resourceKVs := rl.GetResource().GetAttributes()
 
 		for _, sl := range rl.GetScopeLogs() {
-			scopeAttrs := flattenKVList(sl.GetScope().GetAttributes())
+			scopeKVs := sl.GetScope().GetAttributes()
 
 			for _, lr := range sl.GetLogRecords() {
-				msg := ing.logRecordToMessage(lr, resourceAttrs, scopeAttrs, now)
+				msg := ing.logRecordToMessage(lr, resourceKVs, scopeKVs, now)
 				select {
 				case ing.out <- msg:
 				case <-ctx.Done():
@@ -257,16 +261,22 @@ func (ing *Ingester) processExportRequest(ctx context.Context, req *collogspb.Ex
 	return nil
 }
 
-func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceAttrs, scopeAttrs map[string]string, now time.Time) ingestion.IngesterMessage {
-	attrs := make(map[string]string, min(len(resourceAttrs)+len(scopeAttrs)+8, limits.Records.Count))
+func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceKVs, scopeKVs []*commonpb.KeyValue, now time.Time) ingestion.IngesterMessage {
+	attrs := make(map[string]string, min(len(resourceKVs)+len(scopeKVs)+8, limits.Records.Count))
 
 	// A record's attributes are attacker-chosen in both count and length,
 	// and each one becomes an index term. Bound them, and drop the excess
 	// rather than the record: the log line itself is the payload that must
 	// not be lost.
-	dropped := ing.copyBounded(attrs, resourceAttrs)
-	dropped += ing.copyBounded(attrs, scopeAttrs)
-	dropped += ing.copyBounded(attrs, flattenKVList(lr.GetAttributes()))
+	//
+	// Most specific first, and an attribute already present is not
+	// replaced, so record attributes still win over scope and scope over
+	// resource — and a resource-level flood cannot starve the record's own
+	// attributes out of the budget. Within each level the protobuf order
+	// decides, so two identical records always keep the same attributes.
+	dropped := ing.addBounded(attrs, lr.GetAttributes())
+	dropped += ing.addBounded(attrs, scopeKVs)
+	dropped += ing.addBounded(attrs, resourceKVs)
 	if dropped > 0 {
 		if n, ok := ing.droppedAttrLog.Allow("record-attrs"); ok {
 			ing.logger.Warn("OTLP record attributes dropped: over ceiling",
@@ -315,12 +325,17 @@ func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceAttrs, sco
 	}
 }
 
-// copyBounded copies src into attrs under the record ceiling, returning how
-// many attributes it had to leave out.
-func (ing *Ingester) copyBounded(attrs, src map[string]string) int {
+// addBounded adds kvs to attrs in protobuf order under the record ceiling,
+// returning how many it had to leave out. A key already present keeps the
+// value a more specific level gave it.
+func (ing *Ingester) addBounded(attrs map[string]string, kvs []*commonpb.KeyValue) int {
 	dropped := 0
-	for k, v := range src {
-		if err := limits.Records.Add(attrs, k, v); err != nil {
+	for _, kv := range kvs {
+		key := kv.GetKey()
+		if _, taken := attrs[key]; taken {
+			continue
+		}
+		if err := limits.Records.Add(attrs, key, anyValueToString(kv.GetValue())); err != nil {
 			dropped++
 		}
 	}

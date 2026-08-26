@@ -41,6 +41,12 @@ type Session struct {
 	r      *bufio.Reader
 	w      io.Writer
 	opened bool
+
+	// onFrame is called as each complete frame leaves the wire. The
+	// boundary is per frame, not per ReceiveLog: the first call reads the
+	// open handshake and the first syslog frame, so a caller timing a
+	// partially-read frame must learn about both.
+	onFrame func()
 }
 
 // NewSession creates a RELP session over the given read/write streams.
@@ -51,6 +57,10 @@ func NewSession(r io.Reader, w io.Writer) *Session {
 		w: w,
 	}
 }
+
+// OnFrame registers a callback invoked once each complete frame has been
+// read, before the caller does anything with it.
+func (s *Session) OnFrame(fn func()) { s.onFrame = fn }
 
 // ReceiveLog returns the next syslog message from the RELP stream.
 // On the first call it transparently handles the "open" handshake.
@@ -103,6 +113,13 @@ func (s *Session) AnswerError(msg *Message, reason string) error {
 //
 // Frame format: TXNR SP COMMAND SP DATALEN [SP DATA] LF
 func (s *Session) readFrame() (*Message, error) {
+	if s.onFrame != nil {
+		defer s.onFrame()
+	}
+	return s.readFrameBody()
+}
+
+func (s *Session) readFrameBody() (*Message, error) {
 	// Read TXNR.
 	txnrStr, err := s.readToken()
 	if err != nil {

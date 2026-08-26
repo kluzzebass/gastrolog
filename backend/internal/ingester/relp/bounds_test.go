@@ -24,11 +24,11 @@ func startBoundedRELP(t *testing.T) (string, chan ingestion.IngesterMessage, *lo
 	return waitForAddr(t, ing).String(), out, logs
 }
 
-// TestHugeDatalenIsRejectedWithoutAllocating proves a frame whose DATALEN
-// claims more than the frame ceiling is refused before the allocation. The
-// claim alone is the attack: the sender never has to transmit a byte of the
-// payload it declares.
-func TestHugeDatalenIsRejectedWithoutAllocating(t *testing.T) {
+// TestHugeDatalenIsRejected proves a frame whose DATALEN claims more than
+// the frame ceiling is refused. The claim alone is the attack: the sender
+// transmits one byte here and the ceiling is checked before the frame's
+// buffer is sized, so nothing is allocated for the 10^10 bytes it declares.
+func TestHugeDatalenIsRejected(t *testing.T) {
 	t.Parallel()
 	addr, out, logs := startBoundedRELP(t)
 
@@ -94,6 +94,84 @@ func TestUnterminatedHeaderTokenIsRejected(t *testing.T) {
 
 	if !logs.Wait(5*time.Second, "RELP frame rejected") {
 		t.Errorf("the rejection was silent: %s", logs)
+	}
+}
+
+// TestIdleSenderKeepsItsConnection proves the frame deadline bounds an
+// unfinished frame and nothing else. A relay on a quiet host sends the open
+// handshake and then has nothing to say for a while; disconnecting it would
+// churn every quiet sender in the fleet. The timeout is shortened here so
+// the test does not have to wait out the real one.
+func TestIdleSenderKeepsItsConnection(t *testing.T) {
+	t.Parallel()
+	logger, _ := logtest.New()
+	out := make(chan ingestion.IngesterMessage, 4)
+	ing := New(Config{ID: "test-relp", Addr: "127.0.0.1:0", Logger: logger})
+	ing.frameTimeout = 100 * time.Millisecond
+
+	go func() { _ = ing.Run(t.Context(), out) }()
+	addr := waitForAddr(t, ing).String()
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+	relpOpen(t, conn, reader)
+
+	// Nothing to send for several frame timeouts.
+	time.Sleep(5 * ing.frameTimeout)
+
+	msg := "<34>Jan 15 10:22:15 host app: after a quiet spell"
+	writeRELPFrame(conn, 2, "syslog", msg)
+
+	select {
+	case got := <-out:
+		if string(got.Raw) != msg {
+			t.Errorf("payload altered: %q", got.Raw)
+		}
+		got.Ack <- nil
+	case <-time.After(5 * time.Second):
+		t.Fatal("an idle sender was disconnected between frames")
+	}
+
+	if _, cmd, _, err := readRELPResponse(reader); err != nil || cmd != "rsp" {
+		t.Fatalf("the connection did not survive the idle spell: cmd=%q err=%v", cmd, err)
+	}
+}
+
+// TestUnfinishedFrameIsDisconnected proves the other half: a sender that
+// starts a frame and stops mid-way is dropped rather than holding a
+// connection slot.
+func TestUnfinishedFrameIsDisconnected(t *testing.T) {
+	t.Parallel()
+	logger, _ := logtest.New()
+	out := make(chan ingestion.IngesterMessage, 4)
+	ing := New(Config{ID: "test-relp", Addr: "127.0.0.1:0", Logger: logger})
+	ing.frameTimeout = 100 * time.Millisecond
+
+	go func() { _ = ing.Run(t.Context(), out) }()
+	addr := waitForAddr(t, ing).String()
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+	relpOpen(t, conn, reader)
+
+	// A frame header with a payload that never arrives.
+	if _, err := fmt.Fprint(conn, "2 syslog 64 partial"); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := reader.ReadByte(); err == nil {
+		t.Fatal("a sender that stopped mid-frame kept its connection")
+	} else if !connectionEnded(err) {
+		t.Fatalf("a sender that stopped mid-frame was held open: %v", err)
 	}
 }
 

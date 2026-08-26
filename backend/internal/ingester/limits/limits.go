@@ -37,10 +37,12 @@ const MaxFrameBytes = 1 << 20
 // long as it keeps writing.
 const MaxTokenBytes = 64
 
-// MaxDecompressedBytes bounds what a compressed request body may expand to.
-// Bounding the compressed input alone is no bound at all: a few kilobytes of
-// crafted zstd expand to gigabytes. Callers pass their own body limit where
-// they have one; this is the ceiling for callers that do not.
+// MaxDecompressedBytes bounds a compressed batch's decompressed size, and
+// the size a sender may declare for one. Bounding the compressed input alone
+// is no bound at all: a few kilobytes of crafted gzip or zstd expand to
+// gigabytes. It applies to batch protocols with no request-level ceiling of
+// their own — the Fluent Forward packed batch; the HTTP ingesters bound
+// their own request bodies, which are far smaller.
 const MaxDecompressedBytes = 100 << 20
 
 // MaxConnections bounds concurrent connections on one listener. Each
@@ -61,9 +63,10 @@ const FrameTimeout = 30 * time.Second
 // explosion in the vault as much as a memory cost at ingest.
 type Attrs struct {
 	// Count is the most producer-supplied attributes one record may carry.
-	// An ingester's own identifying attributes — ingester_type, severity,
-	// trace ids — are a fixed handful set outside this budget, so they are
-	// never crowded out by a flood.
+	// An ingester's own identifying attributes — ingester_type, the Kafka
+	// topic, the Fluent tag — are a fixed handful written after the
+	// producer's and outside this budget, so a flood can neither crowd
+	// them out nor forge them.
 	Count int
 	// KeyBytes and ValueBytes bound a single attribute's key and value.
 	KeyBytes   int

@@ -205,17 +205,25 @@ func (ing *Ingester) handleFetchErrors(fetches kgo.Fetches, backoff *time.Durati
 // so the excess is dropped — but never silently, and never at the cost of
 // the record itself.
 func buildMessage(rec *kgo.Record, ingesterID string, now time.Time) (ingestion.IngesterMessage, int) {
-	attrs := make(map[string]string, min(len(rec.Headers)+5, limits.Records.Count))
-	attrs["ingester_type"] = "kafka"
-	attrs["kafka_topic"] = rec.Topic
-	attrs["kafka_partition"] = strconv.Itoa(int(rec.Partition))
-	attrs["kafka_offset"] = strconv.FormatInt(rec.Offset, 10)
+	attrs := make(map[string]string, min(len(rec.Headers), limits.Records.Count)+4)
+
+	// Headers first, in the order the producer sent them, so the same
+	// record always keeps the same headers.
 	dropped := 0
 	for _, h := range rec.Headers {
 		if err := limits.Records.Add(attrs, h.Key, string(h.Value)); err != nil {
 			dropped++
 		}
 	}
+
+	// The ingester's own attributes are set last and outside the budget:
+	// they identify where the record came from, so a header flood must
+	// neither crowd them out nor be able to forge them.
+	attrs["ingester_type"] = "kafka"
+	attrs["kafka_topic"] = rec.Topic
+	attrs["kafka_partition"] = strconv.Itoa(int(rec.Partition))
+	attrs["kafka_offset"] = strconv.FormatInt(rec.Offset, 10)
+
 	return ingestion.IngesterMessage{
 		Attrs:      attrs,
 		Raw:        rec.Value,

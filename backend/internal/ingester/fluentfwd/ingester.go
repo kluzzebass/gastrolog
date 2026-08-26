@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"slices"
 	"sync"
 	"time"
 
@@ -342,8 +343,8 @@ func readPackedEntries(dec *msgpack.Decoder) ([]byte, error) {
 	if n < 0 {
 		return nil, nil
 	}
-	if int64(n) > maxDecompressedFluentBytes {
-		return nil, fmt.Errorf("fluentfwd: packed batch declares %d bytes, over %d", n, maxDecompressedFluentBytes)
+	if int64(n) > limits.MaxDecompressedBytes {
+		return nil, fmt.Errorf("fluentfwd: packed batch declares %d bytes, over %d", n, limits.MaxDecompressedBytes)
 	}
 	var buf bytes.Buffer
 	if _, err := io.CopyN(&buf, dec.Buffered(), int64(n)); err != nil {
@@ -444,9 +445,7 @@ func (ing *Ingester) processEntries(ctx context.Context, tag string, entries []e
 
 // processRecord converts a single record to an IngestMessage and sends it.
 func (ing *Ingester) processRecord(ctx context.Context, tag string, ts time.Time, record map[string]any) error {
-	attrs := make(map[string]string, min(len(record)+4, limits.Records.Count))
-	attrs["tag"] = tag
-	attrs["ingester_type"] = "fluentfwd"
+	attrs := make(map[string]string, min(len(record), limits.Records.Count)+2)
 
 	// Extract raw log line from well-known keys.
 	var raw string
@@ -466,9 +465,20 @@ func (ing *Ingester) processRecord(ctx context.Context, tag string, ts time.Time
 	// one becomes an index term. Bound them, and drop the excess rather
 	// than the record: the log line itself is the payload that must not be
 	// lost.
+	//
+	// Sorted, because msgpack hands the fields over as a Go map and its
+	// iteration order is randomized: dropping whatever the range happened
+	// to reach last would ingest two identical records differently, and
+	// the same record differently on the next process.
+	keys := make([]string, 0, len(record))
+	for k := range record {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+
 	dropped := 0
-	for k, v := range record {
-		if err := limits.Records.Add(attrs, k, fmt.Sprint(v)); err != nil {
+	for _, k := range keys {
+		if err := limits.Records.Add(attrs, k, fmt.Sprint(record[k])); err != nil {
 			dropped++
 		}
 	}
@@ -478,6 +488,12 @@ func (ing *Ingester) processRecord(ctx context.Context, tag string, ts time.Time
 				"tag", tag, "dropped", dropped, "max_attrs", limits.Records.Count, "suppressed", n)
 		}
 	}
+
+	// The ingester's own attributes are set last and outside the budget:
+	// they identify where the record came from, so a field flood must
+	// neither crowd them out nor be able to forge them.
+	attrs["tag"] = tag
+	attrs["ingester_type"] = "fluentfwd"
 
 	msg := ingestion.IngesterMessage{
 		Attrs:      attrs,
@@ -563,19 +579,11 @@ func isCompressed(opt map[string]any) bool {
 	return ok && s == "gzip"
 }
 
-// maxDecompressedFluentBytes caps the size of a single fluent-forward
-// packed-forward batch after gzip decompression. Without this bound, an
-// attacker (or a misconfigured forwarder) can send a small gzipped payload
-// that decompresses to gigabytes, OOMing the ingester goroutine. 100 MiB
-// is well above any realistic batch size and well below any single-batch
-// memory budget.
-const maxDecompressedFluentBytes = 100 << 20
-
-// gunzip decompresses gzip data, capping the output at
-// maxDecompressedFluentBytes. Returns an error if the decompressed payload
-// would exceed the cap, so callers can drop the offending batch and log
-// rather than OOMing. We stream into a bytes.Buffer via io.Copy with an
-// io.LimitReader rather than reading the whole thing unbounded.
+// gunzip decompresses gzip data, capping the output at the shared
+// decompression ceiling. Returns an error if the decompressed payload would
+// exceed it, so callers can drop the offending batch and log rather than
+// OOMing. We stream into a bytes.Buffer via io.Copy with an io.LimitReader
+// rather than reading the whole thing unbounded.
 func gunzip(data []byte) ([]byte, error) {
 	r, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
@@ -584,13 +592,13 @@ func gunzip(data []byte) ([]byte, error) {
 	defer func() { _ = r.Close() }()
 
 	// Limit to cap+1 so we can distinguish "exactly at limit" from "exceeded".
-	limited := io.LimitReader(r, maxDecompressedFluentBytes+1)
+	limited := io.LimitReader(r, limits.MaxDecompressedBytes+1)
 	var buf bytes.Buffer
 	if _, err := io.Copy(&buf, limited); err != nil {
 		return nil, err
 	}
-	if int64(buf.Len()) > maxDecompressedFluentBytes {
-		return nil, fmt.Errorf("fluentfwd: decompressed payload exceeds %d bytes (gzip bomb?)", maxDecompressedFluentBytes)
+	if int64(buf.Len()) > limits.MaxDecompressedBytes {
+		return nil, fmt.Errorf("fluentfwd: decompressed payload exceeds %d bytes (gzip bomb?)", limits.MaxDecompressedBytes)
 	}
 	return buf.Bytes(), nil
 }

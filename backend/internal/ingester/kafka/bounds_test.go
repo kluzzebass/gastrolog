@@ -20,7 +20,7 @@ func TestHeaderFloodIsBounded(t *testing.T) {
 
 	headers := make([]kgo.RecordHeader, 50_000)
 	for i := range headers {
-		headers[i] = kgo.RecordHeader{Key: "k" + strconv.Itoa(i), Value: []byte("v")}
+		headers[i] = kgo.RecordHeader{Key: "hdr" + strconv.Itoa(i), Value: []byte("v")}
 	}
 	rec := &kgo.Record{Topic: "logs", Value: []byte("the log line"), Headers: headers}
 
@@ -28,12 +28,19 @@ func TestHeaderFloodIsBounded(t *testing.T) {
 
 	fromProducer := 0
 	for k := range msg.Attrs {
-		if strings.HasPrefix(k, "k") {
+		if strings.HasPrefix(k, "hdr") {
 			fromProducer++
 		}
 	}
-	if fromProducer > limits.Records.Count {
-		t.Errorf("stored %d producer headers, past the %d ceiling", fromProducer, limits.Records.Count)
+	if fromProducer != limits.Records.Count {
+		t.Errorf("stored %d producer headers, want exactly the %d the ceiling allows", fromProducer, limits.Records.Count)
+	}
+	// Which headers survive is pinned: the first Count in the order the
+	// producer sent them, so the same record never ingests two ways.
+	for i := range limits.Records.Count {
+		if _, ok := msg.Attrs["hdr"+strconv.Itoa(i)]; !ok {
+			t.Fatalf("hdr%d was dropped; the survivors are not the first %d the producer sent", i, limits.Records.Count)
+		}
 	}
 	if dropped == 0 {
 		t.Error("headers were dropped without being reported")
@@ -43,6 +50,30 @@ func TestHeaderFloodIsBounded(t *testing.T) {
 	}
 	if msg.Attrs["kafka_topic"] != "logs" {
 		t.Errorf("the ingester's own attributes were crowded out: %v", msg.Attrs["kafka_topic"])
+	}
+}
+
+// TestHeadersCannotForgeTheIngestersOwnAttributes proves a producer cannot
+// overwrite the attributes that say where a record came from.
+func TestHeadersCannotForgeTheIngestersOwnAttributes(t *testing.T) {
+	t.Parallel()
+
+	rec := &kgo.Record{
+		Topic: "logs",
+		Value: []byte("line"),
+		Headers: []kgo.RecordHeader{
+			{Key: "ingester_type", Value: []byte("syslog")},
+			{Key: "kafka_topic", Value: []byte("somewhere-else")},
+		},
+	}
+
+	msg, _ := buildMessage(rec, "test-kafka", time.Now())
+
+	if msg.Attrs["ingester_type"] != "kafka" {
+		t.Errorf("a header forged ingester_type: %q", msg.Attrs["ingester_type"])
+	}
+	if msg.Attrs["kafka_topic"] != "logs" {
+		t.Errorf("a header forged kafka_topic: %q", msg.Attrs["kafka_topic"])
 	}
 }
 

@@ -38,16 +38,13 @@ func TestZstdBombIsRejected(t *testing.T) {
 // fails to parse later, hiding why the batch went missing.
 func TestGzipBombIsRejected(t *testing.T) {
 	t.Parallel()
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	if _, err := gz.Write(make([]byte, 8<<20)); err != nil {
-		t.Fatalf("gzip write: %v", err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatalf("gzip close: %v", err)
+	bomb := gzipCompress(t, make([]byte, 8<<20))
+
+	if len(bomb) > testMaxBytes {
+		t.Fatalf("the bomb is not a bomb: %d compressed bytes already exceed the limit", len(bomb))
 	}
 
-	out, err := ReadBody(bytes.NewReader(buf.Bytes()), "gzip", testMaxBytes)
+	out, err := ReadBody(bytes.NewReader(bomb), "gzip", testMaxBytes)
 	if err == nil {
 		t.Fatalf("decompressed %d bytes past a %d ceiling", len(out), testMaxBytes)
 	}
