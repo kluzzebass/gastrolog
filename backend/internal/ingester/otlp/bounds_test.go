@@ -129,6 +129,86 @@ func TestOversizeAttributeValueIsDroppedNotStored(t *testing.T) {
 	}
 }
 
+// TestAttributesCannotForgeTheIngestersOwnAttributes proves a producer
+// cannot overwrite the attributes that describe the record itself — and that
+// an attribute displaced this way is reported rather than vanishing. Every
+// one of these names is a plausible OTLP attribute, "severity" most of all,
+// so this is a real record losing real attributes, not only an attack.
+func TestAttributesCannotForgeTheIngestersOwnAttributes(t *testing.T) {
+	t.Parallel()
+	logger, logs := logtest.New()
+	ing := New(Config{ID: "test-otlp", Logger: logger})
+
+	ts := time.Unix(1700000000, 0)
+	record := &logspb.LogRecord{
+		Body:                 &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "line"}},
+		SeverityText:         "ERROR",
+		SeverityNumber:       logspb.SeverityNumber_SEVERITY_NUMBER_ERROR,
+		TraceId:              []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
+		SpanId:               []byte{1, 2, 3, 4, 5, 6, 7, 8},
+		TimeUnixNano:         uint64(ts.UnixNano()),
+		ObservedTimeUnixNano: uint64(ts.UnixNano()),
+		Attributes: []*commonpb.KeyValue{
+			stringKV("severity", "DEBUG"),
+			stringKV("severity_number", "1"),
+			stringKV("trace_id", "deadbeef"),
+			stringKV("span_id", "deadbeef"),
+			stringKV("ingester_type", "syslog"),
+			stringKV("time_unix_nano", "not a time"),
+			stringKV("observed_ts", "not a time"),
+		},
+	}
+
+	msg := ing.logRecordToMessage(record, nil, nil, time.Now())
+
+	for key, want := range map[string]string{
+		"severity":        "ERROR",
+		"severity_number": strconv.Itoa(int(logspb.SeverityNumber_SEVERITY_NUMBER_ERROR)),
+		"trace_id":        "0102030405060708090a0b0c0d0e0f10",
+		"span_id":         "0102030405060708",
+		"ingester_type":   "otlp",
+		"time_unix_nano":  ts.Format(time.RFC3339Nano),
+		"observed_ts":     ts.Format(time.RFC3339Nano),
+	} {
+		if msg.Attrs[key] != want {
+			t.Errorf("an attribute forged %s: got %q, want %q", key, msg.Attrs[key], want)
+		}
+	}
+
+	// All seven are written after the producer's attributes, so all seven
+	// displaced one here.
+	if !logs.Contains("OTLP record attributes dropped", "displaced=7") {
+		t.Errorf("displaced attributes vanished without a word: %s", logs)
+	}
+}
+
+// TestUncontestedAttributesAreNotReportedAsDisplaced proves the accounting
+// does not cry wolf: a record whose attributes do not collide with the
+// ingester's own reports nothing, even though the ingester still writes
+// several of them.
+func TestUncontestedAttributesAreNotReportedAsDisplaced(t *testing.T) {
+	t.Parallel()
+	logger, logs := logtest.New()
+	ing := New(Config{ID: "test-otlp", Logger: logger})
+
+	record := &logspb.LogRecord{
+		Body:           &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "line"}},
+		SeverityText:   "ERROR",
+		SeverityNumber: logspb.SeverityNumber_SEVERITY_NUMBER_ERROR,
+		TimeUnixNano:   uint64(time.Unix(1700000000, 0).UnixNano()),
+		Attributes:     []*commonpb.KeyValue{stringKV("request_id", "abc123")},
+	}
+
+	msg := ing.logRecordToMessage(record, nil, nil, time.Now())
+
+	if msg.Attrs["request_id"] != "abc123" {
+		t.Errorf("attribute lost: %v", msg.Attrs)
+	}
+	if logs.Contains("OTLP record attributes dropped") {
+		t.Errorf("a conforming record was reported as lossy: %s", logs)
+	}
+}
+
 // TestConformingAttributesAreUntouched proves the ceiling did not change
 // what a normal collector's records look like, including resource and scope
 // precedence and a multi-kilobyte stack trace.

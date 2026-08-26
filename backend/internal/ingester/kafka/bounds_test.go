@@ -24,7 +24,7 @@ func TestHeaderFloodIsBounded(t *testing.T) {
 	}
 	rec := &kgo.Record{Topic: "logs", Value: []byte("the log line"), Headers: headers}
 
-	msg, dropped := buildMessage(rec, "test-kafka", time.Now())
+	msg, loss := buildMessage(rec, "test-kafka", time.Now())
 
 	fromProducer := 0
 	for k := range msg.Attrs {
@@ -42,7 +42,7 @@ func TestHeaderFloodIsBounded(t *testing.T) {
 			t.Fatalf("hdr%d was dropped; the survivors are not the first %d the producer sent", i, limits.Records.Count)
 		}
 	}
-	if dropped == 0 {
+	if loss.Dropped == 0 {
 		t.Error("headers were dropped without being reported")
 	}
 	if string(msg.Raw) != "the log line" {
@@ -67,13 +67,16 @@ func TestHeadersCannotForgeTheIngestersOwnAttributes(t *testing.T) {
 		},
 	}
 
-	msg, _ := buildMessage(rec, "test-kafka", time.Now())
+	msg, loss := buildMessage(rec, "test-kafka", time.Now())
 
 	if msg.Attrs["ingester_type"] != "kafka" {
 		t.Errorf("a header forged ingester_type: %q", msg.Attrs["ingester_type"])
 	}
 	if msg.Attrs["kafka_topic"] != "logs" {
 		t.Errorf("a header forged kafka_topic: %q", msg.Attrs["kafka_topic"])
+	}
+	if loss.Displaced != 2 {
+		t.Errorf("displaced headers vanished without a word: %+v", loss)
 	}
 }
 
@@ -91,10 +94,10 @@ func TestConformingHeadersAreUntouched(t *testing.T) {
 		},
 	}
 
-	msg, dropped := buildMessage(rec, "test-kafka", time.Now())
+	msg, loss := buildMessage(rec, "test-kafka", time.Now())
 
-	if dropped != 0 {
-		t.Errorf("dropped %d conforming headers", dropped)
+	if loss.Any() {
+		t.Errorf("a conforming record was reported as lossy: %+v", loss)
 	}
 	if msg.Attrs["trace_id"] != "abc123" || msg.Attrs["source"] != "api" {
 		t.Errorf("conforming headers altered: %v", msg.Attrs)

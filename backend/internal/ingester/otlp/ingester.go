@@ -274,30 +274,31 @@ func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceKVs, scope
 	// resource — and a resource-level flood cannot starve the record's own
 	// attributes out of the budget. Within each level the protobuf order
 	// decides, so two identical records always keep the same attributes.
-	dropped := ing.addBounded(attrs, lr.GetAttributes())
-	dropped += ing.addBounded(attrs, scopeKVs)
-	dropped += ing.addBounded(attrs, resourceKVs)
-	if dropped > 0 {
-		if n, ok := ing.droppedAttrLog.Allow("record-attrs"); ok {
-			ing.logger.Warn("OTLP record attributes dropped: over ceiling",
-				"dropped", dropped, "max_attrs", limits.Records.Count, "suppressed", n)
-		}
-	}
+	var loss limits.AttrLoss
+	loss.Dropped = ing.addBounded(attrs, lr.GetAttributes())
+	loss.Dropped += ing.addBounded(attrs, scopeKVs)
+	loss.Dropped += ing.addBounded(attrs, resourceKVs)
 
+	// The ingester's own attributes are written last and outside the
+	// budget: they describe the record rather than repeat what the
+	// producer said, so a flood must neither crowd them out nor forge
+	// them. Every one of these names is a plausible producer attribute —
+	// "severity" most of all — so a record can lose a real attribute this
+	// way, and SetOwn counts it.
 	if lr.GetSeverityText() != "" {
-		attrs["severity"] = lr.GetSeverityText()
+		loss.SetOwn(attrs, "severity", lr.GetSeverityText())
 	}
 	if lr.GetSeverityNumber() != logspb.SeverityNumber_SEVERITY_NUMBER_UNSPECIFIED {
-		attrs["severity_number"] = strconv.Itoa(int(lr.GetSeverityNumber()))
+		loss.SetOwn(attrs, "severity_number", strconv.Itoa(int(lr.GetSeverityNumber())))
 	}
 	if len(lr.GetTraceId()) > 0 {
-		attrs["trace_id"] = hex.EncodeToString(lr.GetTraceId())
+		loss.SetOwn(attrs, "trace_id", hex.EncodeToString(lr.GetTraceId()))
 	}
 	if len(lr.GetSpanId()) > 0 {
-		attrs["span_id"] = hex.EncodeToString(lr.GetSpanId())
+		loss.SetOwn(attrs, "span_id", hex.EncodeToString(lr.GetSpanId()))
 	}
 
-	attrs["ingester_type"] = "otlp"
+	loss.SetOwn(attrs, "ingester_type", "otlp")
 
 	// Both OTLP timestamps are preserved as attributes unconditionally.
 	// SourceTS prefers TimeUnixNano, falls back to ObservedTimeUnixNano.
@@ -305,14 +306,22 @@ func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceKVs, scope
 	if lr.GetTimeUnixNano() != 0 {
 		t := time.Unix(0, int64(lr.GetTimeUnixNano())) //nolint:gosec // G115: OTLP nanosecond timestamps are well within int64 range
 		sourceTS = t
-		attrs["time_unix_nano"] = t.Format(time.RFC3339Nano)
+		loss.SetOwn(attrs, "time_unix_nano", t.Format(time.RFC3339Nano))
 	}
 	if lr.GetObservedTimeUnixNano() != 0 {
 		t := time.Unix(0, int64(lr.GetObservedTimeUnixNano())) //nolint:gosec // G115
 		if sourceTS.IsZero() {
 			sourceTS = t
 		}
-		attrs["observed_ts"] = t.Format(time.RFC3339Nano)
+		loss.SetOwn(attrs, "observed_ts", t.Format(time.RFC3339Nano))
+	}
+
+	if loss.Any() {
+		if n, ok := ing.droppedAttrLog.Allow("record-attrs"); ok {
+			ing.logger.Warn("OTLP record attributes dropped",
+				"dropped", loss.Dropped, "displaced", loss.Displaced,
+				"max_attrs", limits.Records.Count, "suppressed", n)
+		}
 	}
 
 	return ingestion.IngesterMessage{

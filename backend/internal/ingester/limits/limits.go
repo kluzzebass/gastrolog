@@ -103,6 +103,33 @@ func (a Attrs) Add(attrs map[string]string, key, value string) error {
 	return nil
 }
 
+// AttrLoss counts what one record could not keep: attributes the ceiling
+// refused, and producer attributes displaced by an ingester's own. They are
+// separate numbers because they are separate operator problems — a record
+// carrying too many fields, versus a record using a name the ingester
+// reserves — and both must be reported, because an attribute that vanishes
+// without a word is indistinguishable to the sender from one that never
+// arrived.
+type AttrLoss struct {
+	Dropped   int
+	Displaced int
+}
+
+// Any reports whether the record lost anything.
+func (l AttrLoss) Any() bool { return l.Dropped > 0 || l.Displaced > 0 }
+
+// SetOwn writes one of the ingester's own attributes over whatever the
+// producer put under that name, counting the displacement when it replaces a
+// different value. Call it after the producer's attributes: that is what
+// makes these attributes unforgeable and keeps them outside the budget, and
+// it is why the displacement has to be counted here.
+func (l *AttrLoss) SetOwn(attrs map[string]string, key, value string) {
+	if existing, ok := attrs[key]; ok && existing != value {
+		l.Displaced++
+	}
+	attrs[key] = value
+}
+
 // ConnLimiter caps how many connections one listener serves at once.
 // The zero value is unusable; call NewConnLimiter.
 type ConnLimiter struct {

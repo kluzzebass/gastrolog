@@ -476,10 +476,10 @@ func (ing *Ingester) processRecord(ctx context.Context, tag string, ts time.Time
 	}
 	slices.Sort(keys)
 
-	dropped := 0
+	var loss limits.AttrLoss
 	for _, k := range keys {
 		if err := limits.Records.Add(attrs, k, fmt.Sprint(record[k])); err != nil {
-			dropped++
+			loss.Dropped++
 		}
 	}
 	// The ingester's own attributes are set last and outside the budget:
@@ -488,13 +488,13 @@ func (ing *Ingester) processRecord(ctx context.Context, tag string, ts time.Time
 	// name, so a record can lose one this way — which is counted, because
 	// a field that vanishes without a word is indistinguishable to the
 	// sender from one that never arrived.
-	displaced := setOwnAttr(attrs, "tag", tag)
-	displaced += setOwnAttr(attrs, "ingester_type", "fluentfwd")
+	loss.SetOwn(attrs, "tag", tag)
+	loss.SetOwn(attrs, "ingester_type", "fluentfwd")
 
-	if dropped > 0 || displaced > 0 {
+	if loss.Any() {
 		if n, ok := ing.refusedLog.Allow("record-attrs"); ok {
 			ing.logger.Warn("fluent record attributes dropped",
-				"tag", tag, "dropped", dropped, "displaced", displaced,
+				"tag", tag, "dropped", loss.Dropped, "displaced", loss.Displaced,
 				"max_attrs", limits.Records.Count, "suppressed", n)
 		}
 	}
@@ -514,18 +514,6 @@ func (ing *Ingester) processRecord(ctx context.Context, tag string, ts time.Time
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-}
-
-// setOwnAttr writes one of the ingester's own attributes over whatever the
-// record had under that name, reporting whether it displaced a different
-// value.
-func setOwnAttr(attrs map[string]string, key, value string) int {
-	displaced := 0
-	if existing, ok := attrs[key]; ok && existing != value {
-		displaced = 1
-	}
-	attrs[key] = value
-	return displaced
 }
 
 // decodeTime decodes a msgpack value as a timestamp.

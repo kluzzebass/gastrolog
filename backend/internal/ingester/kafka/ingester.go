@@ -137,11 +137,11 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 		now := time.Now()
 
 		fetches.EachRecord(func(rec *kgo.Record) {
-			msg, dropped := buildMessage(rec, ing.cfg.ID, now)
-			if dropped > 0 {
+			msg, loss := buildMessage(rec, ing.cfg.ID, now)
+			if loss.Any() {
 				if n, ok := ing.droppedAttrLog.Allow("record-attrs"); ok {
-					ing.logger.Warn("kafka record headers dropped: over ceiling",
-						"topic", rec.Topic, "dropped", dropped,
+					ing.logger.Warn("kafka record headers dropped",
+						"topic", rec.Topic, "dropped", loss.Dropped, "displaced", loss.Displaced,
 						"max_attrs", limits.Records.Count, "suppressed", n)
 				}
 			}
@@ -200,29 +200,29 @@ func (ing *Ingester) handleFetchErrors(fetches kgo.Fetches, backoff *time.Durati
 }
 
 // buildMessage converts a kgo.Record into an ingestion.IngesterMessage,
-// reporting how many headers the attribute ceiling refused. Headers are
-// producer-chosen in both count and length and each becomes an index term,
-// so the excess is dropped — but never silently, and never at the cost of
-// the record itself.
-func buildMessage(rec *kgo.Record, ingesterID string, now time.Time) (ingestion.IngesterMessage, int) {
+// reporting what it could not keep. Headers are producer-chosen in both
+// count and length and each becomes an index term, so the excess is dropped
+// — but never silently, and never at the cost of the record itself.
+func buildMessage(rec *kgo.Record, ingesterID string, now time.Time) (ingestion.IngesterMessage, limits.AttrLoss) {
 	attrs := make(map[string]string, min(len(rec.Headers), limits.Records.Count)+4)
 
 	// Headers first, in the order the producer sent them, so the same
 	// record always keeps the same headers.
-	dropped := 0
+	var loss limits.AttrLoss
 	for _, h := range rec.Headers {
 		if err := limits.Records.Add(attrs, h.Key, string(h.Value)); err != nil {
-			dropped++
+			loss.Dropped++
 		}
 	}
 
 	// The ingester's own attributes are set last and outside the budget:
 	// they identify where the record came from, so a header flood must
-	// neither crowd them out nor be able to forge them.
-	attrs["ingester_type"] = "kafka"
-	attrs["kafka_topic"] = rec.Topic
-	attrs["kafka_partition"] = strconv.Itoa(int(rec.Partition))
-	attrs["kafka_offset"] = strconv.FormatInt(rec.Offset, 10)
+	// neither crowd them out nor forge them. A header of the same name
+	// loses, and SetOwn counts the loss.
+	loss.SetOwn(attrs, "ingester_type", "kafka")
+	loss.SetOwn(attrs, "kafka_topic", rec.Topic)
+	loss.SetOwn(attrs, "kafka_partition", strconv.Itoa(int(rec.Partition)))
+	loss.SetOwn(attrs, "kafka_offset", strconv.FormatInt(rec.Offset, 10))
 
 	return ingestion.IngesterMessage{
 		Attrs:      attrs,
@@ -230,7 +230,7 @@ func buildMessage(rec *kgo.Record, ingesterID string, now time.Time) (ingestion.
 		SourceTS:   rec.Timestamp,
 		IngestTS:   now,
 		IngesterID: ingesterID,
-	}, dropped
+	}, loss
 }
 
 // buildSASLMechanism constructs the appropriate SASL mechanism.
