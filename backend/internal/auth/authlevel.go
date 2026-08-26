@@ -14,6 +14,13 @@ import (
 // ("/gastrolog.v1.AuthService/Login"). It is derived from the method
 // descriptors, so a level travels with the RPC that declares it and the table
 // cannot fall behind the schema. Built once; the descriptors are immutable.
+//
+// This covers Connect procedures only. Plain http.Handler routes on the same
+// mux carry their own checks and no declaration can reach them: the
+// managed-file upload endpoint (POST /api/v1/managed-files/upload, admin
+// only), /cluster/bootstrap-token (shared-secret header), and the /healthz
+// and /readyz probes (deliberately unauthenticated). A new non-Connect route
+// is not covered by the completeness test either — it must gate itself.
 var procedureLevels = sync.OnceValue(buildProcedureLevels)
 
 // buildProcedureLevels walks every registered service and records the level

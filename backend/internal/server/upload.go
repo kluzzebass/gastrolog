@@ -38,15 +38,24 @@ func (s *Server) handleManagedFileUpload(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Auth check: verify JWT from Authorization header (unless noAuth mode).
+	// Auth check: verify the JWT from the Authorization header (unless noAuth
+	// mode). Admin only — a managed file's display name is what resolves a
+	// lookup source, so an upload can shadow an admin-configured source and
+	// steer enrichment. This route is a plain http.Handler and never passes
+	// through the Connect auth interceptor, so the check lives here.
 	if !s.noAuth && s.tokens != nil {
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if token == "" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		if _, err := s.tokens.Verify(token); err != nil {
+		claims, err := s.tokens.Verify(token)
+		if err != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if claims.Role != "admin" {
+			http.Error(w, "admin role required", http.StatusForbidden)
 			return
 		}
 	}
