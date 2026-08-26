@@ -41,9 +41,56 @@ import (
 // Prevents indefinite hangs if the Raft FSM or underlying store is slow.
 const systemLoadTimeout = 5 * time.Second
 
-// readHeaderTimeout is the maximum time to read HTTP request headers.
-// Shared by HTTP, HTTPS, and Unix socket servers.
-const readHeaderTimeout = 10 * time.Second
+// Transport-level timeouts for the HTTP, HTTPS, and Unix socket servers.
+// These bound resource holding (goroutines, file descriptors) by a client
+// that opens a connection and never finishes it — the slowloris family of
+// attacks — before any application-level auth or handler code runs.
+//
+// WriteTimeout is deliberately left unset (zero, meaning unbounded) on all
+// three servers. This API serves long-lived Connect server-streaming RPCs
+// (Follow, Search, ExportVault, WatchSystem, WatchChunks,
+// WatchIngesterStatus, WatchJobs, WatchSystemStatus) over HTTP/2 — both the
+// h2c listeners (HTTP, Unix socket) and the TLS listener, which negotiates
+// HTTP/2 automatically. golang.org/x/net/http2 arms WriteTimeout as a
+// single, non-resetting per-stream deadline timer at stream creation, not a
+// per-write or per-inactivity deadline, so any nonzero value here would kill
+// every stream at a fixed wall-clock offset from when it opened — including
+// ones actively sending data. ReadHeaderTimeout, ReadTimeout, and
+// IdleTimeout together already close the slowloris/idle-hold vectors
+// without this hazard: a stream with open frames never counts as idle (see
+// the HTTP/2 IdleTimeout note below), so it is never at risk from any of
+// the three.
+const (
+	// readHeaderTimeout is the maximum time to read HTTP request headers.
+	readHeaderTimeout = 10 * time.Second
+
+	// readTimeout is the maximum time to read an entire request, including
+	// the body. Sized to accommodate the managed-file upload endpoint (up
+	// to 256 MiB, upload.go maxUploadSize) on a slow connection while still
+	// bounding a slow-body-trickle attack. Connect RPC bodies are capped at
+	// 4 MiB (WithReadMaxBytes) and read in a fraction of this.
+	readTimeout = 5 * time.Minute
+
+	// idleTimeout is the maximum time a keep-alive connection may sit idle
+	// between requests. For HTTP/2 this only fires when a connection has
+	// zero open streams (golang.org/x/net/http2 resets/arms it on stream
+	// count reaching zero), so it never cuts off an in-progress streaming
+	// RPC — only a connection with nothing in flight.
+	idleTimeout = 120 * time.Second
+)
+
+// newTimedServer builds an http.Server with the standard transport
+// timeouts applied, shared by the HTTP, HTTPS, and Unix socket listeners.
+// Tests use this directly with short-lived values to exercise timeout
+// behavior without waiting out the production durations.
+func newTimedServer(handler http.Handler, headerTimeout, readTimeout, idleTimeout time.Duration) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: headerTimeout,
+		ReadTimeout:       readTimeout,
+		IdleTimeout:       idleTimeout,
+	}
+}
 
 // Config holds server configuration.
 type Config struct {
@@ -755,10 +802,7 @@ func (s *Server) Serve(listener net.Listener) error {
 
 	// HTTP adds redirect-to-HTTPS + h2c (HTTP/2 without TLS).
 	redirectHandler := s.redirectMiddleware(s.handler)
-	s.server = &http.Server{
-		Handler:           h2c.NewHandler(redirectHandler, &http2.Server{}),
-		ReadHeaderTimeout: readHeaderTimeout,
-	}
+	s.server = newTimedServer(h2c.NewHandler(redirectHandler, &http2.Server{}), readHeaderTimeout, readTimeout, idleTimeout)
 
 	// Initial TLS config: start HTTPS if enabled
 	s.reconfigureTLS()

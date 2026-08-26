@@ -75,10 +75,7 @@ func (s *Server) reconfigureTLS() {
 	tlsLn := tls.NewListener(ln, tlsConfig)
 
 	s.httpsListener = tlsLn
-	s.httpsServer = &http.Server{
-		Handler:           s.handler,
-		ReadHeaderTimeout: readHeaderTimeout,
-	}
+	s.httpsServer = newTimedServer(s.handler, readHeaderTimeout, readTimeout, idleTimeout)
 	s.logger.Info("HTTPS listener started", "addr", httpsAddr)
 
 	go func() {
@@ -147,10 +144,7 @@ func (s *Server) ListenUnix(path string) error {
 	s.mu.Lock()
 	s.unixListener = ln
 	s.unixPath = path
-	s.unixServer = &http.Server{
-		Handler:           handler,
-		ReadHeaderTimeout: readHeaderTimeout,
-	}
+	s.unixServer = newTimedServer(handler, readHeaderTimeout, readTimeout, idleTimeout)
 	s.mu.Unlock()
 
 	s.logger.Info("unix socket listener started", "path", path)

@@ -32,6 +32,17 @@ import (
 	"gastrolog/internal/pipeline/ingestion"
 )
 
+// Transport-level timeouts for the HTTP export listener, bounding a client
+// that opens a connection and never finishes it before the handler ever
+// runs. Every export is a single request/response — no streaming — so
+// WriteTimeout is safe to set here, unlike the main API server.
+const (
+	readHeaderTimeout = 10 * time.Second
+	readTimeout       = 30 * time.Second // bodies capped at 10MiB (bodyutil.ReadBody)
+	writeTimeout      = 30 * time.Second
+	idleTimeout       = 120 * time.Second
+)
+
 // Ingester accepts OpenTelemetry log records via HTTP and gRPC.
 type Ingester struct {
 	id       string
@@ -101,7 +112,13 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 	mux.HandleFunc("GET /ready", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	httpSrv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	httpSrv := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}
 
 	go func() {
 		if err := httpSrv.Serve(httpLn); err != nil && !errors.Is(err, http.ErrServerClosed) {

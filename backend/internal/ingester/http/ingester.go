@@ -26,6 +26,22 @@ const (
 	maxAttrValueLen = 256 // maximum length of attribute value
 )
 
+// Transport-level timeouts, bounding a client that opens a connection and
+// never finishes it (headers, body, or response read) before the pipeline
+// ever sees a message. Unlike the main API server, this ingester has no
+// long-lived streaming responses — every push is a single request/response
+// — so WriteTimeout is safe to set here. It covers the X-Wait-Ack path's
+// wait for persistence as well as the write itself, since it is reset when
+// the request header finishes reading; that is intentional; a caller
+// waiting on an ack past this bound is better disconnected than holding
+// the goroutine.
+const (
+	readHeaderTimeout = 10 * time.Second
+	readTimeout       = 30 * time.Second // bodies capped at 10MiB (bodyutil.ReadBody)
+	writeTimeout      = 30 * time.Second
+	idleTimeout       = 120 * time.Second
+)
+
 // Ingester accepts log messages via the Loki Push API (POST /loki/api/v1/push).
 // It implements ingestion.Ingester.
 //
@@ -95,7 +111,10 @@ func (r *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage
 
 	r.server = &http.Server{
 		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 
 	// Create listener.
