@@ -169,6 +169,38 @@ func TestPutCloudServiceReplacesSuppliedCredential(t *testing.T) {
 	}
 }
 
+// TestPutCloudServiceClearsCredentialsOnRequest — an empty field can no
+// longer mean "remove this", so moving a service to its provider's ambient
+// credential chain needs an explicit instruction.
+func TestPutCloudServiceClearsCredentialsOnRequest(t *testing.T) {
+	client, cfgStore, _ := newConfigTestSetup(t)
+	ctx := adminContext(context.Background())
+
+	id := glid.New()
+	if err := putCloudService(ctx, client, s3ServiceWithCredentials(id.ToProto(), "archive")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	cleared := getCloudService(t, ctx, client, id, false)
+	if _, err := client.PutCloudService(ctx, connect.NewRequest(&gastrologv1.PutCloudServiceRequest{
+		Config:           cleared,
+		ClearCredentials: true,
+	})); err != nil {
+		t.Fatalf("clear credentials: %v", err)
+	}
+
+	after, err := cfgStore.GetCloudService(ctx, id)
+	if err != nil || after == nil {
+		t.Fatalf("reload service: %v", err)
+	}
+	if after.AccessKey != "" || after.SecretKey != "" {
+		t.Fatalf("credentials survived an explicit clear: access=%q secret=%q", after.AccessKey, after.SecretKey)
+	}
+	if after.HasCredentials() {
+		t.Fatal("service still reports configured credentials after a clear")
+	}
+}
+
 // TestGetSystemRedactsCloudCredentials pins who sees credential material.
 func TestGetSystemRedactsCloudCredentials(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)

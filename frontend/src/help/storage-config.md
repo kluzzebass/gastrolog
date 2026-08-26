@@ -38,6 +38,7 @@ Stored credentials are never sent back to the browser or returned by the API. A 
 
 - **Leave a credential field empty** and the stored value is kept, so saving an unrelated edit never disturbs it.
 - **Type a value** and it replaces the stored one for that field alone — enough to rotate a secret key without re-entering the access key.
+- **Remove the stored credentials** is the explicit way to drop them and fall back to the provider's ambient chain, since an empty field no longer means "remove this". The CLI spells it `--clear-credentials`.
 - **Test Connection** on a saved service uses the stored credentials. Change its Endpoint first and the test asks you to supply credentials for the new destination, rather than spending the stored ones on it.
 
 `gastrolog config export` is the one path that retrieves credentials; it requires the admin role and names what it carries in the document's `contains_secrets` section.

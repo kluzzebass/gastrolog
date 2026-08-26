@@ -110,8 +110,10 @@ func newCloudServiceCreateCmd() *cobra.Command {
 
 			applyCloudServiceFlags(cmd, cfg)
 
+			clearCredentials, _ := cmd.Flags().GetBool("clear-credentials")
 			_, err = client.System.PutCloudService(ctx, connect.NewRequest(&v1.PutCloudServiceRequest{
-				Config: cfg,
+				Config:           cfg,
+				ClearCredentials: clearCredentials,
 			}))
 			if err != nil {
 				return err
@@ -133,6 +135,7 @@ func newCloudServiceCreateCmd() *cobra.Command {
 	cmd.Flags().String("container", "", "container name (Azure)")
 	cmd.Flags().String("connection-string", "", "connection string (Azure)")
 	cmd.Flags().String("credentials-json", "", "credentials JSON (GCS)")
+	cmd.Flags().Bool("clear-credentials", false, "remove the stored credentials and fall back to the provider's ambient credential chain (IAM role, ADC, environment)")
 	cmd.Flags().Uint32("storage-class", 0, "storage class for vault placement")
 	cmd.Flags().String("archival-mode", "", "storage class transition management: 'none' (external) or 'active' (managed by GastroLog)")
 	cmd.Flags().StringSlice("transition", nil, "archival transition: 'AFTER:CLASS' (e.g. '90d:GLACIER', '360d:DEEP_ARCHIVE', '730d:' for delete). Repeatable.")

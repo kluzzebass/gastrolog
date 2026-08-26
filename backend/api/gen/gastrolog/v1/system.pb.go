@@ -8307,10 +8307,15 @@ func (x *PreviewYAMLLookupResponse) GetQueryError() string {
 }
 
 type PutCloudServiceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Config        *CloudService          `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Config *CloudService          `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
+	// Drop the stored credentials instead of keeping the ones config leaves
+	// empty. This is how a service moves to its provider's ambient
+	// credential chain — an IAM role, ADC — now that an empty credential
+	// field means "unchanged".
+	ClearCredentials bool `protobuf:"varint,2,opt,name=clear_credentials,json=clearCredentials,proto3" json:"clear_credentials,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *PutCloudServiceRequest) Reset() {
@@ -8348,6 +8353,13 @@ func (x *PutCloudServiceRequest) GetConfig() *CloudService {
 		return x.Config
 	}
 	return nil
+}
+
+func (x *PutCloudServiceRequest) GetClearCredentials() bool {
+	if x != nil {
+		return x.ClearCredentials
+	}
+	return false
 }
 
 type PutCloudServiceResponse struct {
@@ -9729,9 +9741,10 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x05error\x18\x04 \x01(\tR\x05error\x12!\n" +
 	"\fquery_result\x18\x05 \x01(\tR\vqueryResult\x12\x1f\n" +
 	"\vquery_error\x18\x06 \x01(\tR\n" +
-	"queryError\"L\n" +
+	"queryError\"y\n" +
 	"\x16PutCloudServiceRequest\x122\n" +
-	"\x06config\x18\x01 \x01(\v2\x1a.gastrolog.v1.CloudServiceR\x06config\"R\n" +
+	"\x06config\x18\x01 \x01(\v2\x1a.gastrolog.v1.CloudServiceR\x06config\x12+\n" +
+	"\x11clear_credentials\x18\x02 \x01(\bR\x10clearCredentials\"R\n" +
 	"\x17PutCloudServiceResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"+\n" +
 	"\x19DeleteCloudServiceRequest\x12\x0e\n" +

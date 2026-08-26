@@ -7091,6 +7091,16 @@ export class PutCloudServiceRequest extends Message<PutCloudServiceRequest> {
    */
   config?: CloudService;
 
+  /**
+   * Drop the stored credentials instead of keeping the ones config leaves
+   * empty. This is how a service moves to its provider's ambient
+   * credential chain — an IAM role, ADC — now that an empty credential
+   * field means "unchanged".
+   *
+   * @generated from field: bool clear_credentials = 2;
+   */
+  clearCredentials = false;
+
   constructor(data?: PartialMessage<PutCloudServiceRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -7100,6 +7110,7 @@ export class PutCloudServiceRequest extends Message<PutCloudServiceRequest> {
   static readonly typeName = "gastrolog.v1.PutCloudServiceRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "config", kind: "message", T: CloudService },
+    { no: 2, name: "clear_credentials", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutCloudServiceRequest {

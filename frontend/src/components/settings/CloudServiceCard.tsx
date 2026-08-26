@@ -52,6 +52,7 @@ interface CloudServiceEdit {
   accessKey: string;
   secretKey: string;
   credentialsConfigured: boolean;
+  clearCredentials: boolean;
   container: string;
   connectionString: string;
   credentialsJson: string;
@@ -71,6 +72,7 @@ interface CloudServiceEdit {
 export function cloudServiceSaveRequest(id: string, e: CloudServiceEdit) {
   return {
     id,
+    clearCredentials: e.clearCredentials,
     name: e.name,
     provider: e.provider,
     bucket: e.bucket,
@@ -115,6 +117,7 @@ export function CloudServiceCard({
     accessKey: "",
     secretKey: "",
     credentialsConfigured: service.credentialsConfigured,
+    clearCredentials: false,
     container: service.container,
     connectionString: "",
     credentialsJson: "",

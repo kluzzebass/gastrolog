@@ -1,6 +1,7 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { endpointSchemeError } from "../../utils/endpointScheme";
 import { FormField, TextInput, TextArea, SelectInput, NumberInput } from "./FormField";
+import { Checkbox } from "./Checkbox";
 import { Button } from "./Buttons";
 
 interface CloudStorageTransitionEdit {
@@ -20,6 +21,9 @@ interface CloudServiceFieldValues {
   accessKey: string;
   secretKey: string;
   credentialsConfigured: boolean;
+  // Drops the stored credentials, which an empty field would otherwise
+  // keep. This is how a service moves to its provider's ambient chain.
+  clearCredentials: boolean;
   container: string;
   connectionString: string;
   credentialsJson: string;
@@ -107,11 +111,7 @@ export function CloudServiceFields({
       {/* S3 credentials */}
       {isS3 && (
         <>
-          <CredentialNotice
-            configured={values.credentialsConfigured}
-            provider={values.provider}
-            dark={dark}
-          />
+          <CredentialNotice values={values} onChange={onChange} dark={dark} />
           <FormField label="Access Key" dark={dark}>
             <TextInput
               value={values.accessKey}
@@ -134,11 +134,7 @@ export function CloudServiceFields({
       {/* Azure credentials */}
       {isAzure && (
         <>
-          <CredentialNotice
-            configured={values.credentialsConfigured}
-            provider={values.provider}
-            dark={dark}
-          />
+          <CredentialNotice values={values} onChange={onChange} dark={dark} />
           <FormField label="Connection String" dark={dark}>
             <TextInput
               value={values.connectionString}
@@ -153,11 +149,7 @@ export function CloudServiceFields({
       {/* GCS credentials */}
       {isGCS && (
         <>
-          <CredentialNotice
-            configured={values.credentialsConfigured}
-            provider={values.provider}
-            dark={dark}
-          />
+          <CredentialNotice values={values} onChange={onChange} dark={dark} />
           <FormField label="Credentials JSON" dark={dark}>
             <TextArea
               value={values.credentialsJson}
@@ -192,19 +184,43 @@ function unconfiguredCredentialText(provider: string): string {
  * States what the empty credential fields below it mean. Stored credentials
  * are never sent to the browser, so an empty field is ambiguous on its own:
  * it either means the service has none, or means "keep the one on the server".
+ * When something is stored, this is also the only way to drop it — an empty
+ * field can no longer say "remove this".
  */
 function CredentialNotice({
-  configured,
-  provider,
+  values,
+  onChange,
   dark,
-}: Readonly<{ configured: boolean; provider: string; dark: boolean }>) {
+}: Readonly<{
+  values: CloudServiceFieldValues;
+  onChange: (patch: Partial<CloudServiceFieldValues>) => void;
+  dark: boolean;
+}>) {
   const c = useThemeClass(dark);
+  const muted = c("text-text-muted", "text-light-text-muted");
+
+  if (!values.credentialsConfigured) {
+    return (
+      <p className={`text-[0.75em] leading-snug ${muted}`}>
+        {unconfiguredCredentialText(values.provider)}
+      </p>
+    );
+  }
+
   return (
-    <p className={`text-[0.75em] leading-snug ${c("text-text-muted", "text-light-text-muted")}`}>
-      {configured
-        ? "Credentials are stored. They are never sent back to the browser — leave the fields below empty to keep them, or enter a value to replace it."
-        : unconfiguredCredentialText(provider)}
-    </p>
+    <div className="flex flex-col gap-1">
+      <p className={`text-[0.75em] leading-snug ${muted}`}>
+        {values.clearCredentials
+          ? "The stored credentials will be removed on save."
+          : "Credentials are stored. They are never sent back to the browser — leave the fields below empty to keep them, or enter a value to replace it."}
+      </p>
+      <Checkbox
+        checked={values.clearCredentials}
+        onChange={(v) => onChange({ clearCredentials: v })}
+        label="Remove the stored credentials"
+        dark={dark}
+      />
+    </div>
   );
 }
 

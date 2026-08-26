@@ -16,6 +16,7 @@ function edit(patch: Partial<Parameters<typeof cloudServiceSaveRequest>[1]> = {}
     accessKey: "",
     secretKey: "",
     credentialsConfigured: true,
+    clearCredentials: false,
     container: "",
     connectionString: "",
     credentialsJson: "",
@@ -48,5 +49,12 @@ describe("cloudServiceSaveRequest", () => {
   test("credentialsConfigured is a read-only signal and is never sent back", () => {
     const req = cloudServiceSaveRequest("svc-1", edit());
     expect(req).not.toHaveProperty("credentialsConfigured");
+  });
+
+  test("removing the stored credentials is an explicit instruction, not an empty field", () => {
+    expect(cloudServiceSaveRequest("svc-1", edit()).clearCredentials).toBe(false);
+    expect(
+      cloudServiceSaveRequest("svc-1", edit({ clearCredentials: true })).clearCredentials,
+    ).toBe(true);
   });
 });

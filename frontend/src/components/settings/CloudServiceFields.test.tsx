@@ -12,6 +12,7 @@ function values(patch: Partial<CloudServiceFieldValues>): CloudServiceFieldValue
     accessKey: "",
     secretKey: "",
     credentialsConfigured: false,
+    clearCredentials: false,
     container: "",
     connectionString: "",
     credentialsJson: "",

@@ -53,13 +53,14 @@ func (s *SystemServer) PutCloudService(
 	// none to send back: an empty credential field keeps the stored value.
 	// Clearing instead would strip credentials on the first save after a
 	// config read and lock the cluster out of sealed chunks already in the
-	// object store. Merged before validation so the checks below see the
-	// credentials the service will actually run with.
+	// object store. clear_credentials is the explicit way to drop them and
+	// fall back to the provider's ambient chain. Merged before validation so
+	// the checks below see the credentials the service will actually run with.
 	existing, err := s.sysStore.GetCloudService(ctx, id)
 	if err != nil {
 		return nil, errInternal(err)
 	}
-	if existing != nil {
+	if existing != nil && !req.Msg.ClearCredentials {
 		cfg = cfg.WithPreservedCredentials(*existing)
 	}
 

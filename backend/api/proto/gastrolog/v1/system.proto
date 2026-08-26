@@ -1216,6 +1216,12 @@ message PreviewYAMLLookupResponse {
 
 message PutCloudServiceRequest {
   CloudService config = 1;
+
+  // Drop the stored credentials instead of keeping the ones config leaves
+  // empty. This is how a service moves to its provider's ambient
+  // credential chain — an IAM role, ADC — now that an empty credential
+  // field means "unchanged".
+  bool clear_credentials = 2;
 }
 
 message PutCloudServiceResponse {
