@@ -1116,6 +1116,13 @@ Live on `Config` directly (not as entities):
   `viewer` (exact set is in
   [`auth/roles.go`](../backend/internal/auth/roles.go)).
 
+- **AuthLevel** — the authorization an RPC requires, declared on the
+  method itself via the `auth_level` option in
+  [`authz.proto`](../backend/api/proto/gastrolog/v1/authz.proto):
+  `PUBLIC` (no token), `AUTHENTICATED` (any role), `ADMIN` (role
+  `admin`). The interceptor builds its table from the method
+  descriptors and denies any procedure that declares no level.
+
 - **JWT** (access token) — short-lived bearer token. Carries claims:
   `sub` (username), `role`, `exp`, `iat`.
 

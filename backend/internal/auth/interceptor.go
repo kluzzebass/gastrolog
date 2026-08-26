@@ -10,6 +10,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/golang-jwt/jwt/v5"
 
+	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 )
 
@@ -59,94 +60,23 @@ type TokenValidator interface {
 }
 
 // AuthInterceptor is a Connect interceptor that validates JWT tokens
-// and enforces access levels per endpoint.
+// and enforces the authorization level each RPC declares in its proto.
 type AuthInterceptor struct {
 	tokens    *TokenService
 	counter   UserCounter
 	validator TokenValidator
-	public    map[string]bool
-	admin     map[string]bool
+	levels    map[string]apiv1.AuthLevel
 }
 
-// NewAuthInterceptor creates an interceptor with the standard access level
-// configuration. Public endpoints require no auth. Admin endpoints require
-// role=admin. Everything else requires a valid token.
-// validator may be nil (token revocation is skipped).
+// NewAuthInterceptor creates an interceptor that enforces the level each RPC
+// declares through the auth_level method option. A procedure that declares no
+// level is denied. validator may be nil (token revocation is skipped).
 func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator TokenValidator) *AuthInterceptor {
 	return &AuthInterceptor{
 		tokens:    tokens,
 		counter:   counter,
 		validator: validator,
-		public: map[string]bool{
-			gastrologv1connect.LifecycleServiceHealthProcedure:   true,
-			gastrologv1connect.AuthServiceGetAuthStatusProcedure: true,
-			gastrologv1connect.AuthServiceLoginProcedure:         true,
-			gastrologv1connect.AuthServiceRegisterProcedure:      true, // self-guards after first user
-			gastrologv1connect.AuthServiceRefreshTokenProcedure:  true, // uses opaque token, not JWT
-			gastrologv1connect.SystemServiceGetSettingsProcedure: true, // password policy needed on register page
-		},
-		admin: map[string]bool{
-			// User management
-			gastrologv1connect.AuthServiceCreateUserProcedure:     true,
-			gastrologv1connect.AuthServiceListUsersProcedure:      true,
-			gastrologv1connect.AuthServiceUpdateUserRoleProcedure: true,
-			gastrologv1connect.AuthServiceResetPasswordProcedure:  true,
-			gastrologv1connect.AuthServiceDeleteUserProcedure:     true,
-			gastrologv1connect.AuthServiceRenameUserProcedure:     true,
-			// Lifecycle + cluster
-			gastrologv1connect.LifecycleServiceShutdownProcedure:          true,
-			gastrologv1connect.LifecycleServiceGetClusterStatusProcedure:  true,
-			gastrologv1connect.LifecycleServiceSetNodeSuffrageProcedure:   true,
-			gastrologv1connect.LifecycleServiceJoinClusterProcedure:       true,
-			gastrologv1connect.LifecycleServiceRemoveNodeProcedure:        true,
-			gastrologv1connect.LifecycleServiceWatchSystemStatusProcedure: true,
-			// VaultService (inspector + operations)
-			gastrologv1connect.VaultServiceListVaultsProcedure:    true,
-			gastrologv1connect.VaultServiceGetVaultProcedure:      true,
-			gastrologv1connect.VaultServiceListChunksProcedure:    true,
-			gastrologv1connect.VaultServiceGetChunkProcedure:      true,
-			gastrologv1connect.VaultServiceGetIndexesProcedure:    true,
-			gastrologv1connect.VaultServiceAnalyzeChunkProcedure:  true,
-			gastrologv1connect.VaultServiceGetStatsProcedure:      true,
-			gastrologv1connect.VaultServiceReindexVaultProcedure:  true,
-			gastrologv1connect.VaultServiceValidateVaultProcedure: true,
-			gastrologv1connect.VaultServiceExportVaultProcedure:   true,
-			gastrologv1connect.VaultServiceImportRecordsProcedure: true,
-			gastrologv1connect.VaultServiceSealVaultProcedure:     true,
-			// ConfigService — mutations
-			gastrologv1connect.SystemServiceGetSystemProcedure:             true,
-			gastrologv1connect.SystemServiceGetIngesterStatusProcedure:     true,
-			gastrologv1connect.SystemServicePutRotationPolicyProcedure:     true,
-			gastrologv1connect.SystemServiceDeleteRotationPolicyProcedure:  true,
-			gastrologv1connect.SystemServicePutRetentionPolicyProcedure:    true,
-			gastrologv1connect.SystemServiceDeleteRetentionPolicyProcedure: true,
-			gastrologv1connect.SystemServicePutVaultProcedure:              true,
-			gastrologv1connect.SystemServiceDeleteVaultProcedure:           true,
-			gastrologv1connect.SystemServicePutIngesterProcedure:           true,
-			gastrologv1connect.SystemServiceDeleteIngesterProcedure:        true,
-			gastrologv1connect.SystemServicePutServiceSettingsProcedure:    true,
-			gastrologv1connect.SystemServicePutLookupSettingsProcedure:     true,
-			gastrologv1connect.SystemServicePutMaxMindSettingsProcedure:    true,
-			gastrologv1connect.SystemServicePutSetupSettingsProcedure:      true,
-			gastrologv1connect.SystemServiceRegenerateJwtSecretProcedure:   true,
-			gastrologv1connect.SystemServicePutNodeConfigProcedure:         true,
-			gastrologv1connect.SystemServicePutRouteProcedure:              true,
-			gastrologv1connect.SystemServiceDeleteRouteProcedure:           true,
-			gastrologv1connect.SystemServiceValidateExpressionProcedure:    true,
-			gastrologv1connect.SystemServicePauseVaultProcedure:            true,
-			gastrologv1connect.SystemServiceResumeVaultProcedure:           true,
-			gastrologv1connect.SystemServiceTriggerIngesterProcedure:       true,
-			// ConfigService — certificates
-			gastrologv1connect.SystemServiceListCertificatesProcedure:  true,
-			gastrologv1connect.SystemServiceGetCertificateProcedure:    true,
-			gastrologv1connect.SystemServicePutCertificateProcedure:    true,
-			gastrologv1connect.SystemServiceDeleteCertificateProcedure: true,
-			// ConfigService — managed files
-			gastrologv1connect.SystemServiceListManagedFilesProcedure:  true,
-			gastrologv1connect.SystemServiceDeleteManagedFileProcedure: true,
-			// QueryService — destructive
-			gastrologv1connect.QueryServiceExportToVaultProcedure: true,
-		},
+		levels:    procedureLevels(),
 	}
 }
 
@@ -177,13 +107,21 @@ func (i *AuthInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) 
 	return next
 }
 
-// authenticate checks the token and access level for a procedure.
+// authenticate checks the token and declared level for a procedure.
 // Returns the (possibly enriched) context or a Connect error.
 func (i *AuthInterceptor) authenticate(ctx context.Context, procedure string, headers interface{ Get(string) string }) (context.Context, error) {
+	// Authorization is part of an RPC's contract: a procedure that declares no
+	// level is denied, so an RPC added without one is unreachable rather than
+	// open to everyone.
+	level, declared := i.levels[procedure]
+	if !declared {
+		return ctx, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("procedure %s declares no authorization level", procedure))
+	}
+
 	// Public endpoints need no auth but still benefit from knowing WHO is
 	// calling (e.g. GetSettings returns more data to authenticated users).
 	// Best-effort: parse the token if present, ignore failures.
-	if i.public[procedure] {
+	if level == apiv1.AuthLevel_AUTH_LEVEL_PUBLIC {
 		return i.bestEffortClaims(ctx, headers), nil
 	}
 
@@ -206,8 +144,7 @@ func (i *AuthInterceptor) authenticate(ctx context.Context, procedure string, he
 		return ctx, err
 	}
 
-	// Admin check.
-	if i.admin[procedure] && claims.Role != "admin" {
+	if level == apiv1.AuthLevel_AUTH_LEVEL_ADMIN && claims.Role != "admin" {
 		return ctx, connect.NewError(connect.CodePermissionDenied, errors.New("admin role required"))
 	}
 

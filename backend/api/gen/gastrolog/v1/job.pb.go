@@ -543,7 +543,7 @@ var File_gastrolog_v1_job_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_job_proto_rawDesc = "" +
 	"\n" +
-	"\x16gastrolog/v1/job.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe6\x04\n" +
+	"\x16gastrolog/v1/job.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18gastrolog/v1/authz.proto\"\xe6\x04\n" +
 	"\x03Job\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12/\n" +
@@ -583,12 +583,12 @@ const file_gastrolog_v1_job_proto_rawDesc = "" +
 	"\aJobKind\x12\x18\n" +
 	"\x14JOB_KIND_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rJOB_KIND_TASK\x10\x01\x12\x16\n" +
-	"\x12JOB_KIND_SCHEDULED\x10\x022\xec\x01\n" +
+	"\x12JOB_KIND_SCHEDULED\x10\x022\xfe\x01\n" +
 	"\n" +
-	"JobService\x12C\n" +
-	"\x06GetJob\x12\x1b.gastrolog.v1.GetJobRequest\x1a\x1c.gastrolog.v1.GetJobResponse\x12I\n" +
-	"\bListJobs\x12\x1d.gastrolog.v1.ListJobsRequest\x1a\x1e.gastrolog.v1.ListJobsResponse\x12N\n" +
-	"\tWatchJobs\x12\x1e.gastrolog.v1.WatchJobsRequest\x1a\x1f.gastrolog.v1.WatchJobsResponse0\x01B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"JobService\x12I\n" +
+	"\x06GetJob\x12\x1b.gastrolog.v1.GetJobRequest\x1a\x1c.gastrolog.v1.GetJobResponse\"\x04\x80\xb5\x18\x02\x12O\n" +
+	"\bListJobs\x12\x1d.gastrolog.v1.ListJobsRequest\x1a\x1e.gastrolog.v1.ListJobsResponse\"\x04\x80\xb5\x18\x02\x12T\n" +
+	"\tWatchJobs\x12\x1e.gastrolog.v1.WatchJobsRequest\x1a\x1f.gastrolog.v1.WatchJobsResponse\"\x04\x80\xb5\x18\x020\x01B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_job_proto_rawDescOnce sync.Once
@@ -644,6 +644,7 @@ func file_gastrolog_v1_job_proto_init() {
 	if File_gastrolog_v1_job_proto != nil {
 		return
 	}
+	file_gastrolog_v1_authz_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

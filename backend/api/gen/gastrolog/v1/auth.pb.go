@@ -1268,7 +1268,7 @@ var File_gastrolog_v1_auth_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_auth_proto_rawDesc = "" +
 	"\n" +
-	"\x17gastrolog/v1/auth.proto\x12\fgastrolog.v1\"<\n" +
+	"\x17gastrolog/v1/auth.proto\x12\fgastrolog.v1\x1a\x18gastrolog/v1/authz.proto\"<\n" +
 	"\x05Token\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1d\n" +
 	"\n" +
@@ -1336,23 +1336,23 @@ const file_gastrolog_v1_auth_proto_rawDesc = "" +
 	"\x12DeleteUserResponse\"4\n" +
 	"\rLogoutRequest\x12#\n" +
 	"\rrefresh_token\x18\x01 \x01(\tR\frefreshToken\"\x10\n" +
-	"\x0eLogoutResponse2\xe5\a\n" +
-	"\vAuthService\x12I\n" +
-	"\bRegister\x12\x1d.gastrolog.v1.RegisterRequest\x1a\x1e.gastrolog.v1.RegisterResponse\x12@\n" +
-	"\x05Login\x12\x1a.gastrolog.v1.LoginRequest\x1a\x1b.gastrolog.v1.LoginResponse\x12U\n" +
-	"\fRefreshToken\x12!.gastrolog.v1.RefreshTokenRequest\x1a\".gastrolog.v1.RefreshTokenResponse\x12[\n" +
-	"\x0eChangePassword\x12#.gastrolog.v1.ChangePasswordRequest\x1a$.gastrolog.v1.ChangePasswordResponse\x12X\n" +
-	"\rGetAuthStatus\x12\".gastrolog.v1.GetAuthStatusRequest\x1a#.gastrolog.v1.GetAuthStatusResponse\x12O\n" +
+	"\x0eLogoutResponse2\xad\b\n" +
+	"\vAuthService\x12O\n" +
+	"\bRegister\x12\x1d.gastrolog.v1.RegisterRequest\x1a\x1e.gastrolog.v1.RegisterResponse\"\x04\x80\xb5\x18\x01\x12F\n" +
+	"\x05Login\x12\x1a.gastrolog.v1.LoginRequest\x1a\x1b.gastrolog.v1.LoginResponse\"\x04\x80\xb5\x18\x01\x12[\n" +
+	"\fRefreshToken\x12!.gastrolog.v1.RefreshTokenRequest\x1a\".gastrolog.v1.RefreshTokenResponse\"\x04\x80\xb5\x18\x01\x12a\n" +
+	"\x0eChangePassword\x12#.gastrolog.v1.ChangePasswordRequest\x1a$.gastrolog.v1.ChangePasswordResponse\"\x04\x80\xb5\x18\x02\x12^\n" +
+	"\rGetAuthStatus\x12\".gastrolog.v1.GetAuthStatusRequest\x1a#.gastrolog.v1.GetAuthStatusResponse\"\x04\x80\xb5\x18\x01\x12U\n" +
 	"\n" +
-	"CreateUser\x12\x1f.gastrolog.v1.CreateUserRequest\x1a .gastrolog.v1.CreateUserResponse\x12L\n" +
-	"\tListUsers\x12\x1e.gastrolog.v1.ListUsersRequest\x1a\x1f.gastrolog.v1.ListUsersResponse\x12[\n" +
-	"\x0eUpdateUserRole\x12#.gastrolog.v1.UpdateUserRoleRequest\x1a$.gastrolog.v1.UpdateUserRoleResponse\x12X\n" +
-	"\rResetPassword\x12\".gastrolog.v1.ResetPasswordRequest\x1a#.gastrolog.v1.ResetPasswordResponse\x12O\n" +
+	"CreateUser\x12\x1f.gastrolog.v1.CreateUserRequest\x1a .gastrolog.v1.CreateUserResponse\"\x04\x80\xb5\x18\x03\x12R\n" +
+	"\tListUsers\x12\x1e.gastrolog.v1.ListUsersRequest\x1a\x1f.gastrolog.v1.ListUsersResponse\"\x04\x80\xb5\x18\x03\x12a\n" +
+	"\x0eUpdateUserRole\x12#.gastrolog.v1.UpdateUserRoleRequest\x1a$.gastrolog.v1.UpdateUserRoleResponse\"\x04\x80\xb5\x18\x03\x12^\n" +
+	"\rResetPassword\x12\".gastrolog.v1.ResetPasswordRequest\x1a#.gastrolog.v1.ResetPasswordResponse\"\x04\x80\xb5\x18\x03\x12U\n" +
 	"\n" +
-	"RenameUser\x12\x1f.gastrolog.v1.RenameUserRequest\x1a .gastrolog.v1.RenameUserResponse\x12O\n" +
+	"RenameUser\x12\x1f.gastrolog.v1.RenameUserRequest\x1a .gastrolog.v1.RenameUserResponse\"\x04\x80\xb5\x18\x03\x12U\n" +
 	"\n" +
-	"DeleteUser\x12\x1f.gastrolog.v1.DeleteUserRequest\x1a .gastrolog.v1.DeleteUserResponse\x12C\n" +
-	"\x06Logout\x12\x1b.gastrolog.v1.LogoutRequest\x1a\x1c.gastrolog.v1.LogoutResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"DeleteUser\x12\x1f.gastrolog.v1.DeleteUserRequest\x1a .gastrolog.v1.DeleteUserResponse\"\x04\x80\xb5\x18\x03\x12I\n" +
+	"\x06Logout\x12\x1b.gastrolog.v1.LogoutRequest\x1a\x1c.gastrolog.v1.LogoutResponse\"\x04\x80\xb5\x18\x02B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_auth_proto_rawDescOnce sync.Once
@@ -1439,6 +1439,7 @@ func file_gastrolog_v1_auth_proto_init() {
 	if File_gastrolog_v1_auth_proto != nil {
 		return
 	}
+	file_gastrolog_v1_authz_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
