@@ -47,7 +47,7 @@ func Load[T any](path string, decode func(data []byte) (T, error)) (T, error) {
 		return zero, ErrEmpty
 	}
 
-	data, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: int64→int safe on 64-bit
+	data, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {
 		return zero, fmt.Errorf("mmap %s: %w", path, err)
 	}

@@ -213,7 +213,7 @@ func dedupChunkReports(reports []chunkReport) []*apiv1.ChunkMeta {
 			c.ReplicaCount = math.MaxInt32
 		} else {
 			// replicas is capped; cluster node counts do not approach MaxInt32.
-			c.ReplicaCount = int32(replicas) //nolint:gosec // G115: bounded by branch above
+			c.ReplicaCount = int32(replicas)
 		}
 		// Populate the cluster-wide replica residency set so the
 		// inspector can show which nodes physically hold this chunk.

@@ -443,7 +443,7 @@ func localCopyAndPromoteGLCB(srcPath, destPath string, e vaultctlfsm.ManifestEnt
 		copyErr = closeErr
 	}
 	if copyErr != nil {
-		_ = os.Remove(tmp) //nolint:gosec // G703: CreateTemp name in our own chunk dir, not untrusted input
+		_ = os.Remove(tmp)
 		return copyErr
 	}
 	return verifyAndPromoteGLCB(tmp, destPath, e)

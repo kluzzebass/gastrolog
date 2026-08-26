@@ -103,7 +103,7 @@ func newFileUploadCmd() *cobra.Command {
 				req.Header.Set("Authorization", "Bearer "+token)
 			}
 
-			resp, err := http.DefaultClient.Do(req) //nolint:gosec // user-specified addr is the whole point
+			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				return err
 			}

@@ -57,13 +57,11 @@ func (ts *TokenService) Issue(userID, username, role string) (string, time.Time,
 	expiresAt := now.Add(sd.duration)
 
 	claims := Claims{
-		Role:   role,
-		UserID: userID,
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   username,
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(expiresAt),
-		},
+		Role:      role,
+		UserID:    userID,
+		Subject:   username,
+		IssuedAt:  jwt.NewNumericDate(now),
+		ExpiresAt: jwt.NewNumericDate(expiresAt),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

@@ -53,7 +53,7 @@ func (m *managedFileManager) OnPut(_ context.Context, fileID glid.GLID) {
 	}
 
 	// Pull from a peer in the background — don't block Raft apply.
-	go m.pullFromPeer(context.Background(), fid)
+	go m.pullFromPeer(context.Background(), fid) //nolint:gosec // G118: pull outlives FSM.Apply's context, which cancels on return
 }
 
 // OnDelete removes the managed file from local disk.

@@ -801,7 +801,7 @@ func (s *Server) redirectMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		httpsURL := "https://" + host + ":" + port + r.URL.RequestURI()
-		http.Redirect(w, r, httpsURL, http.StatusTemporaryRedirect)
+		http.Redirect(w, r, httpsURL, http.StatusTemporaryRedirect) //nolint:gosec // G710: host is the client-supplied Host header, reflected to preserve the visited name across the http->https bounce
 	})
 }
 

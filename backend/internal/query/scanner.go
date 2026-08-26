@@ -348,7 +348,7 @@ func (b *scannerBuilder) buildPositionScannerReverse(ctx context.Context, cursor
 	skipTB := b.skipTimeBounds
 
 	return func(yield func(recordWithRef, error) bool) {
-		for i := len(positions) - 1; i >= 0; i-- {
+		for i := range slices.Backward(positions) {
 			if err := checkCtxEvery(ctx, i); err != nil {
 				yield(recordWithRef{VaultID: vaultID}, err)
 				return

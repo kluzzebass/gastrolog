@@ -34,8 +34,8 @@ type Config struct {
 	TLS          bool
 	CleanSession bool
 	Username     string
-	Password     string //nolint:gosec // G117: config field, not a hardcoded credential
-	Version      int    // 3 or 5; default 3 (v3.1.1)
+	Password     string
+	Version      int // 3 or 5; default 3 (v3.1.1)
 	Logger       *slog.Logger
 }
 

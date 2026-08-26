@@ -272,7 +272,7 @@ func (o *Orchestrator) pullGLCBFromNode(ctx context.Context, node string, vaultI
 		pullErr = closeErr
 	}
 	if pullErr != nil {
-		_ = os.Remove(tmp) //nolint:gosec // G703: CreateTemp name in our own chunk dir, not untrusted input
+		_ = os.Remove(tmp)
 		return pullErr
 	}
 	return verifyAndPromoteGLCB(tmp, glcbPath, e)
@@ -286,14 +286,14 @@ func (o *Orchestrator) pullGLCBFromNode(ctx context.Context, node string, vaultI
 func verifyAndPromoteGLCB(tmp, glcbPath string, e vaultctlfsm.ManifestEntry) error {
 	res, err := chunking.BuildResultFromExistingGLCB(tmp, e.SealedAt)
 	if err != nil {
-		_ = os.Remove(tmp) //nolint:gosec // G703: CreateTemp name in our own chunk dir, not untrusted input
+		_ = os.Remove(tmp)
 		return fmt.Errorf("pulled GLCB failed verification: %w", err)
 	}
 	if int64(res.RecordCount) != e.RecordCount {
-		_ = os.Remove(tmp) //nolint:gosec // G703: CreateTemp name in our own chunk dir, not untrusted input
+		_ = os.Remove(tmp)
 		return fmt.Errorf("pulled GLCB record count %d != manifest %d", res.RecordCount, e.RecordCount)
 	}
-	return os.Rename(tmp, glcbPath) //nolint:gosec // G703: both paths derive from the local chunk root, not untrusted input
+	return os.Rename(tmp, glcbPath)
 }
 
 // retentionMootsPull reports whether pulling a missing GLCB is pointless:

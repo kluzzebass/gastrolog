@@ -117,7 +117,7 @@ func (c *CSV) Load(path string) error {
 		_ = srcFile.Close()
 		return fmt.Errorf("csv file %q is empty", path)
 	}
-	mmapData, err := syscall.Mmap(int(srcFile.Fd()), 0, int(info.Size()), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115
+	mmapData, err := syscall.Mmap(int(srcFile.Fd()), 0, int(info.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {
 		_ = srcFile.Close()
 		return fmt.Errorf("mmap csv file %q: %w", path, err)
@@ -148,30 +148,30 @@ func (c *CSV) Load(path string) error {
 	tmpPath := tmpFile.Name()
 	if _, err := tmpFile.Write(encoded); err != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("write bin lookup: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		_ = os.Remove(tmpPath)
 		return err
 	}
 
 	// Mmap the binary file.
 	binFile, err := os.Open(tmpPath) //nolint:gosec // path from CreateTemp
 	if err != nil {
-		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		_ = os.Remove(tmpPath)
 		return err
 	}
 	binInfo, err := binFile.Stat()
 	if err != nil {
 		_ = binFile.Close()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		_ = os.Remove(tmpPath)
 		return err
 	}
-	binMmap, err := syscall.Mmap(int(binFile.Fd()), 0, int(binInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115
+	binMmap, err := syscall.Mmap(int(binFile.Fd()), 0, int(binInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {
 		_ = binFile.Close()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("mmap bin lookup: %w", err)
 	}
 
@@ -180,14 +180,14 @@ func (c *CSV) Load(path string) error {
 	if err != nil {
 		_ = syscall.Munmap(binMmap)
 		_ = binFile.Close()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		_ = os.Remove(tmpPath)
 		return err
 	}
 	cols, err := decodeBinColumns(binMmap, newData.numCols)
 	if err != nil {
 		_ = syscall.Munmap(binMmap)
 		_ = binFile.Close()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		_ = os.Remove(tmpPath)
 		return err
 	}
 	newData.mmapData = binMmap

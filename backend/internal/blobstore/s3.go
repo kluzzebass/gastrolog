@@ -25,8 +25,8 @@ type S3Config struct {
 	Bucket    string
 	Region    string
 	Endpoint  string // Optional: for MinIO or other S3-compatible stores.
-	AccessKey string //nolint:gosec // config field, not a hardcoded secret
-	SecretKey string //nolint:gosec // config field, not a hardcoded secret
+	AccessKey string
+	SecretKey string
 	// Logger receives AWS SDK diagnostics via the blobstore.s3 component.
 	// Nil discards them (tests); production wiring threads the node logger
 	// so SDK output never bypasses the structured logging system.
@@ -126,12 +126,12 @@ func spoolReaderToTemp(r io.Reader) (*os.File, int64, error) {
 	n, err := io.Copy(tmp, r)
 	if err != nil {
 		_ = tmp.Close()
-		_ = os.Remove(tmp.Name()) //nolint:gosec // G703: path from os.CreateTemp
+		_ = os.Remove(tmp.Name())
 		return nil, 0, fmt.Errorf("spool upload body: %w", err)
 	}
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 		_ = tmp.Close()
-		_ = os.Remove(tmp.Name()) //nolint:gosec // G703: path from os.CreateTemp
+		_ = os.Remove(tmp.Name())
 		return nil, 0, fmt.Errorf("rewind spooled upload body: %w", err)
 	}
 	return tmp, n, nil
@@ -157,7 +157,7 @@ func (s *S3Store) Upload(ctx context.Context, key string, data io.Reader, metada
 		}
 		defer func() {
 			_ = tmp.Close()
-			_ = os.Remove(tmp.Name()) //nolint:gosec // G703: path from os.CreateTemp
+			_ = os.Remove(tmp.Name())
 		}()
 		body = tmp
 		contentLength = aws.Int64(n)
@@ -247,8 +247,7 @@ func (s *S3Store) List(ctx context.Context, prefix string, fn func(BlobInfo) err
 			// and the Head call (S3 eventual consistency). Skip it.
 			head, err := s.Head(ctx, info.Key)
 			if err != nil {
-				var nf *types.NotFound
-				if errors.As(err, &nf) {
+				if _, ok := errors.AsType[*types.NotFound](err); ok {
 					continue
 				}
 				return fmt.Errorf("head %s: %w", info.Key, err)
@@ -284,23 +283,21 @@ func (s *S3Store) Head(ctx context.Context, key string) (BlobInfo, error) {
 // isS3ArchivedError checks if an S3 error is InvalidObjectState, which occurs
 // when trying to GetObject on a blob in Glacier Flexible Retrieval or Deep Archive.
 func isS3ArchivedError(err error) bool {
-	var apiErr smithy.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
 		return apiErr.ErrorCode() == "InvalidObjectState"
 	}
 	// Also check for the typed error from the S3 SDK.
-	var invalidState *types.InvalidObjectState
-	return errors.As(err, &invalidState)
+	_, ok := errors.AsType[*types.InvalidObjectState](err)
+	return ok
 }
 
 // isS3NotFoundError checks if an S3 error is NoSuchKey (HTTP 404).
 func isS3NotFoundError(err error) bool {
-	var apiErr smithy.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
 		return apiErr.ErrorCode() == "NoSuchKey" || apiErr.ErrorCode() == "NotFound"
 	}
-	var nsk *types.NoSuchKey
-	return errors.As(err, &nsk)
+	_, ok := errors.AsType[*types.NoSuchKey](err)
+	return ok
 }
 
 // --- Archiver implementation ---

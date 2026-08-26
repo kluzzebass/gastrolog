@@ -303,23 +303,23 @@ func (idx *Indexer) writeIndex(chunkDir, fileName string, data []byte) error {
 
 	if err := tmpFile.Chmod(0o644); err != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("chmod: %w", err)
 	}
 
 	if _, err := tmpFile.Write(data); err != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("write: %w", err)
 	}
 
 	if err := tmpFile.Close(); err != nil {
-		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("close: %w", err)
 	}
 
-	if err := os.Rename(tmpName, filepath.Clean(target)); err != nil { //nolint:gosec // G703: both paths are from internal index path construction
-		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
+	if err := os.Rename(tmpName, filepath.Clean(target)); err != nil {
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("rename: %w", err)
 	}
 

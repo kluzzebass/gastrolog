@@ -19,12 +19,10 @@ type NoAuthInterceptor struct{}
 
 func noAuthClaims() *Claims {
 	return &Claims{
-		Role:   "admin",
-		UserID: "00000000-0000-0000-0000-000000000000",
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   "admin",
-			ExpiresAt: jwt.NewNumericDate(time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)),
-		},
+		Role:      "admin",
+		UserID:    "00000000-0000-0000-0000-000000000000",
+		Subject:   "admin",
+		ExpiresAt: jwt.NewNumericDate(time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)),
 	}
 }
 

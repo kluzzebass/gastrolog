@@ -32,7 +32,7 @@ func downloadDBWithURL(ctx context.Context, accountID, licenseKey, edition, dest
 	}
 	req.SetBasicAuth(accountID, licenseKey)
 
-	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL built from trusted server config, not user input
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("download %s: %w", edition, err)
 	}
@@ -69,8 +69,8 @@ func downloadDBWithURL(ctx context.Context, accountID, licenseKey, edition, dest
 
 	// Atomic rename to final location.
 	finalPath := filepath.Join(destDir, edition+".mmdb")
-	if err := os.Rename(mmdbPath, finalPath); err != nil { //nolint:gosec // paths from our own temp dir
-		_ = os.Remove(mmdbPath) //nolint:gosec // path from our own temp file
+	if err := os.Rename(mmdbPath, finalPath); err != nil {
+		_ = os.Remove(mmdbPath)
 		return fmt.Errorf("rename to final path: %w", err)
 	}
 
@@ -107,12 +107,12 @@ func extractMMDB(r io.Reader, destDir, edition string) (string, error) {
 
 		if _, err := io.Copy(tmpFile, io.LimitReader(tr, 256<<20)); err != nil { // 256 MiB limit
 			_ = tmpFile.Close()
-			_ = os.Remove(tmpFile.Name()) //nolint:gosec // path from our own temp file
+			_ = os.Remove(tmpFile.Name())
 			return "", fmt.Errorf("extract mmdb: %w", err)
 		}
 
 		if err := tmpFile.Close(); err != nil {
-			_ = os.Remove(tmpFile.Name()) //nolint:gosec // path from our own temp file
+			_ = os.Remove(tmpFile.Name())
 			return "", fmt.Errorf("close temp mmdb: %w", err)
 		}
 

@@ -46,7 +46,7 @@ func (m *Manager) dropGLCBMapEntryLocked(id chunk.ChunkID) {
 func (m *Manager) enforceGLCBMapLRULocked() {
 	for len(m.glcbMapLRU) > glcbMappedCap {
 		evicted := false
-		for i := len(m.glcbMapLRU) - 1; i >= 0; i-- {
+		for i := range slices.Backward(m.glcbMapLRU) {
 			evictID := m.glcbMapLRU[i]
 			blob := m.mappedGLCBBlob(evictID)
 			if blob == nil {

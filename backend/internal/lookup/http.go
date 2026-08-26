@@ -284,7 +284,7 @@ func (h *HTTP) doFetch(ctx context.Context, reqURL string) map[string]string {
 		req.Header.Set(k, v)
 	}
 
-	resp, err := h.client.Do(req) //nolint:gosec // URL is from admin-configured template
+	resp, err := h.client.Do(req)
 	if err != nil {
 		return nil
 	}

@@ -97,7 +97,7 @@ func (sf *File) buildSourceIndex(recordEnd uint32) error {
 		writeIdx++
 	}
 
-	data, err := syscall.Mmap(int(sf.f.Fd()), 0, int(sourceEnd), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED) //nolint:gosec // G115: file size bounded
+	data, err := syscall.Mmap(int(sf.f.Fd()), 0, int(sourceEnd), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
 	if err != nil {
 		return err
 	}

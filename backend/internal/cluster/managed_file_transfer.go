@@ -109,7 +109,7 @@ func (lt *ManagedFileTransferrer) PullFile(ctx context.Context, nodeID, fileID, 
 	}
 
 	finalPath := destPath
-	if err := os.Rename(tmpPath, finalPath); err != nil { //nolint:gosec // G703: paths from trusted peer + filename
+	if err := os.Rename(tmpPath, finalPath); err != nil {
 		return fmt.Errorf("rename to final path: %w", err)
 	}
 

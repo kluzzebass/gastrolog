@@ -63,7 +63,7 @@ func MapSection(blobPath string, sectionType byte) (TOCEntry, []byte, func() err
 	mapStart := entry.Offset - pageOffset
 	mapLen := mapStart + entry.Size
 
-	data, err := syscall.Mmap(int(f.Fd()), pageOffset, int(mapLen), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: int64→int safe on 64-bit
+	data, err := syscall.Mmap(int(f.Fd()), pageOffset, int(mapLen), syscall.PROT_READ, syscall.MAP_SHARED)
 	_ = f.Close()
 	if err != nil {
 		return TOCEntry{}, nil, nil, fmt.Errorf("mmap section 0x%02x in %s: %w", sectionType, blobPath, err)

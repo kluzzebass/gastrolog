@@ -716,12 +716,12 @@ func applyRecordSlice(records []chunk.Record, op *querylang.SliceOp) []chunk.Rec
 func applyRecordRename(records []chunk.Record, op *querylang.RenameOp) {
 	for i := range records {
 		for _, m := range op.Renames {
-			if v, ok := records[i].Attrs[m.Old]; ok {
-				if records[i].Attrs == nil {
-					records[i].Attrs = make(chunk.Attributes)
+			if v, ok := records[i].Attrs[m.Old]; ok { //nolint:gosec // G602: i is a range index over records, always in bounds
+				if records[i].Attrs == nil { //nolint:gosec // G602: i is a range index over records, always in bounds
+					records[i].Attrs = make(chunk.Attributes) //nolint:gosec // G602: i is a range index over records, always in bounds
 				}
-				records[i].Attrs[m.New] = v
-				delete(records[i].Attrs, m.Old)
+				records[i].Attrs[m.New] = v     //nolint:gosec // G602: i is a range index over records, always in bounds
+				delete(records[i].Attrs, m.Old) //nolint:gosec // G602: i is a range index over records, always in bounds
 			}
 		}
 	}
@@ -740,13 +740,13 @@ func applyRecordFields(records []chunk.Record, op *querylang.FieldsOp) {
 		if op.Drop {
 			for k := range records[i].Attrs {
 				if nameSet[k] {
-					delete(records[i].Attrs, k)
+					delete(records[i].Attrs, k) //nolint:gosec // G602: i is a range index over records, always in bounds
 				}
 			}
 		} else {
 			for k := range records[i].Attrs {
 				if !nameSet[k] {
-					delete(records[i].Attrs, k)
+					delete(records[i].Attrs, k) //nolint:gosec // G602: i is a range index over records, always in bounds
 				}
 			}
 		}
@@ -1130,8 +1130,8 @@ func materializeFields(records []chunk.Record) {
 			if k == "raw" {
 				continue
 			}
-			if _, exists := records[i].Attrs[k]; !exists {
-				records[i].Attrs[k] = v
+			if _, exists := records[i].Attrs[k]; !exists { //nolint:gosec // G602: i is a range index over records, always in bounds
+				records[i].Attrs[k] = v //nolint:gosec // G602: i is a range index over records, always in bounds
 			}
 		}
 	}

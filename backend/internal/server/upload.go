@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -43,7 +44,11 @@ func (s *Server) handleManagedFileUpload(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+	// ParseMultipartForm's argument only caps the in-memory buffer; parts
+	// beyond it still spill to disk unbounded. MaxBytesReader caps the total
+	// request body actually read.
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil { //nolint:gosec // G120: body is already bounded by MaxBytesReader above; the taint engine doesn't see it
 		http.Error(w, "file too large or invalid multipart form", http.StatusBadRequest)
 		return
 	}
@@ -145,14 +150,14 @@ func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) 
 	fileID := glid.New()
 	hd := home.New(s.homeDir)
 	fileDir := hd.ManagedFileDir(fileID.String())
-	if err := os.MkdirAll(fileDir, 0o750); err != nil { //nolint:gosec // G703: fileDir from trusted home + UUID
+	if err := os.MkdirAll(fileDir, 0o750); err != nil {
 		return system.ManagedFileConfig{}, fmt.Errorf("create dir: %w", err)
 	}
 
 	// Store with a fixed filename — user-supplied name stays in metadata only.
 	finalPath := hd.ManagedFilePath(fileID.String())
-	if err := os.Rename(srcPath, finalPath); err != nil { //nolint:gosec // G703: finalPath uses constant filename, srcPath from trusted temp
-		_ = os.RemoveAll(fileDir) //nolint:gosec // G703: cleanup our own dir
+	if err := os.Rename(srcPath, finalPath); err != nil {
+		_ = os.RemoveAll(fileDir)
 		return system.ManagedFileConfig{}, fmt.Errorf("move file: %w", err)
 	}
 
@@ -165,7 +170,7 @@ func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) 
 		UploadedAt: now,
 	}
 	if err := s.cfgStore.PutManagedFile(ctx, lf); err != nil {
-		_ = os.RemoveAll(fileDir) //nolint:gosec // G703: cleanup our own dir
+		_ = os.RemoveAll(fileDir)
 		return system.ManagedFileConfig{}, fmt.Errorf("commit metadata: %w", err)
 	}
 	s.configSignal.Notify()
@@ -193,7 +198,7 @@ func (s *Server) ResolveManagedFilePath(ctx context.Context, filename string) st
 		return ""
 	}
 	// Walk in reverse order (UUIDv7 sorted = creation order) to prefer the latest.
-	for i := len(files) - 1; i >= 0; i-- {
+	for i := range slices.Backward(files) {
 		if files[i].Name == filename {
 			path := s.managedFilePath(files[i].ID.String())
 			if _, err := os.Stat(path); err == nil {

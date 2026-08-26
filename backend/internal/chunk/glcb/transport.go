@@ -125,7 +125,7 @@ func transportSpans(toc BlobTOC, blobSize int64) ([]blobSpan, error) {
 // WrapForTransport reads the local blob at blobPath and streams the framed
 // cloud object to dst. Returns the object's total size.
 func WrapForTransport(dst io.Writer, blobPath string) (int64, error) {
-	f, err := os.Open(filepath.Clean(blobPath)) //nolint:gosec // G703: chunk-dir path from the manager, not user input
+	f, err := os.Open(filepath.Clean(blobPath))
 	if err != nil {
 		return 0, fmt.Errorf("open %s: %w", blobPath, err)
 	}

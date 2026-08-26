@@ -61,8 +61,7 @@ func SummaryJoin(errs ...error) error {
 // annotation wraps (fmt.Errorf %w chains, errors.Join sentinel attachments),
 // which stay whole for errors.Is.
 func Unpack(err error) []error {
-	var j *joined
-	if errors.As(err, &j) {
+	if j, ok := errors.AsType[*joined](err); ok {
 		return j.unwrap
 	}
 	return nil
