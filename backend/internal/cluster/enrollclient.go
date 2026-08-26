@@ -25,7 +25,7 @@ type EnrollResult struct {
 // Enroll connects to the leader's cluster port and enrolls this node.
 // The joinToken format is "<hex-secret>:<hex-sha256(CA DER)>".
 //
-// The client uses InsecureSkipVerify with a custom VerifyPeerCertificate
+// The client uses InsecureSkipVerify with a custom VerifyConnection
 // callback that checks the CA fingerprint from the token (TOFU model).
 func Enroll(ctx context.Context, leaderAddr, tokenSecret, caHash, nodeID, nodeAddr string) (*EnrollResult, error) {
 	expectedHash, err := hex.DecodeString(caHash)

@@ -20,10 +20,17 @@ import (
 	"gastrolog/internal/system"
 )
 
-const maxUploadSize = 256 << 20 // 256 MB
+const (
+	maxUploadSize = 256 << 20 // 256 MB: hard cap on the total request body.
+	// maxUploadMemory bounds how much of a part mime/multipart buffers in
+	// memory before spilling the rest to a temp file on disk; it is
+	// independent of maxUploadSize.
+	maxUploadMemory = 32 << 20 // 32 MB
+)
 
 // handleManagedFileUpload handles multipart file uploads for managed files.
-// The file is streamed to disk (never buffered in heap), then metadata is
+// Up to maxUploadMemory of the upload is buffered in memory; anything past
+// that spills to a temp file on disk. Once the file is on disk, metadata is
 // committed to Raft so all cluster nodes learn about the file.
 func (s *Server) handleManagedFileUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -48,8 +55,12 @@ func (s *Server) handleManagedFileUpload(w http.ResponseWriter, r *http.Request)
 	// beyond it still spill to disk unbounded. MaxBytesReader caps the total
 	// request body actually read.
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
-	if err := r.ParseMultipartForm(maxUploadSize); err != nil { //nolint:gosec // G120: body is already bounded by MaxBytesReader above; the taint engine doesn't see it
-		http.Error(w, "file too large or invalid multipart form", http.StatusBadRequest)
+	if err := r.ParseMultipartForm(maxUploadMemory); err != nil { //nolint:gosec // G120: body is already bounded by MaxBytesReader above; the taint engine doesn't see it
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "invalid multipart form", http.StatusBadRequest)
 		return
 	}
 
