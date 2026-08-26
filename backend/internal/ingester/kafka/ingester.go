@@ -29,7 +29,7 @@ const (
 type SASLConfig struct {
 	Mechanism string // "plain", "scram-sha-256", "scram-sha-512"
 	User      string
-	Password  string //nolint:gosec // G117: config field, not a hardcoded credential
+	Password  string
 }
 
 // Config holds Kafka ingester configuration.

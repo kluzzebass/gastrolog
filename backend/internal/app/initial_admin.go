@@ -62,7 +62,7 @@ var adminUsernameRe = regexp.MustCompile(`^[A-Za-z0-9_-]{3,64}$`)
 // the same struct.
 type initialAdminCreds struct {
 	Username string `json:"username"`
-	Password string `json:"password"` //nolint:gosec // G117: this IS the password field by design
+	Password string `json:"password"`
 }
 
 // provisionInitialAdmin creates an initial admin user from the file

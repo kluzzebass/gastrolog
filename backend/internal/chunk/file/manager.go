@@ -460,7 +460,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open lock file %s: %w", lockPath, err)
 	}
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil { //nolint:gosec // G115: uintptr->int is safe on 64-bit
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		_ = lockFile.Close()
 		return nil, fmt.Errorf("%w: %s", ErrDirectoryLocked, cfg.Dir)
 	}
@@ -1637,7 +1637,7 @@ func (m *Manager) loadDictionary(id chunk.ChunkID, dictFile *os.File) (*chunk.St
 	}
 	// mmap the entire file read-only; DecodeDictData copies strings so the
 	// mapping can be released immediately after decoding.
-	data, err := syscall.Mmap(int(dictFile.Fd()), 0, int(fileSize), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: int64→int safe on 64-bit
+	data, err := syscall.Mmap(int(dictFile.Fd()), 0, int(fileSize), syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {
 		return nil, fmt.Errorf("mmap attr_dict.log for chunk %s: %w", id, err)
 	}
@@ -1711,8 +1711,8 @@ func (m *Manager) rebuildBTrees(id chunk.ChunkID, idxFile *os.File, recordCount 
 	// Remove stale B+ tree files if they exist from a prior run.
 	ingestPath := m.ingestBTPath(id)
 	sourcePath := m.sourceBTPath(id)
-	_ = os.Remove(ingestPath) //nolint:gosec // G703: path is derived from chunk ID, not user input
-	_ = os.Remove(sourcePath) //nolint:gosec // G703: path is derived from chunk ID, not user input
+	_ = os.Remove(ingestPath)
+	_ = os.Remove(sourcePath)
 
 	ingestBT, err := btree.Create(ingestPath, btree.Int64Uint32)
 	if err != nil {
@@ -3159,7 +3159,7 @@ func (m *Manager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]t
 	var buf [8]byte
 
 	for i, pos := range positions {
-		offset := int64(IdxHeaderSize) + int64(pos)*int64(IdxEntrySize) + int64(idxWriteTSOffset)
+		offset := int64(IdxHeaderSize) + int64(pos)*int64(IdxEntrySize) + int64(idxWriteTSOffset) //nolint:gosec // G115: pos is a record position bounded by chunk RecordCount
 		if _, err := idxFile.ReadAt(buf[:], offset); err != nil {
 			return nil, fmt.Errorf("read WriteTS at position %d: %w", pos, err)
 		}
@@ -3841,17 +3841,17 @@ func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCur
 	if err := glcb.DownloadAndUnwrap(context.Background(), m.cfg.CloudStore, m.blobKey(id), tmp); err != nil {
 		m.trackCloudResult(err)
 		_ = tmp.Close()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath from CreateTemp in chunkDir
+		_ = os.Remove(tmpPath)
 		return nil, err
 	}
 	m.trackCloudResult(nil)
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		_ = os.Remove(tmpPath)
 		return nil, err
 	}
 	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		_ = os.Remove(tmpPath)
 		return nil, err
 	}
 
@@ -3862,7 +3862,7 @@ func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCur
 	// a clobbered S3 object, or a retention race. Reject so we don't seed
 	// the warm cache with bad bytes that would be re-served forever.
 	if err := m.verifyDownloadedBlob(id, tmpPath); err != nil {
-		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		_ = os.Remove(tmpPath)
 		return nil, err
 	}
 
@@ -3877,9 +3877,9 @@ func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCur
 	// same non-reentrant mutex.
 	chunkLock := m.chunkLockFor(id)
 	chunkLock.Lock()
-	if err := os.Rename(tmpPath, finalPath); err != nil { //nolint:gosec // G304: tmpPath is from os.CreateTemp inside chunkDir
+	if err := os.Rename(tmpPath, finalPath); err != nil {
 		chunkLock.Unlock()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		_ = os.Remove(tmpPath)
 		return nil, err
 	}
 	// The chunk is re-warmed — the cloud index's persisted diskBytes must

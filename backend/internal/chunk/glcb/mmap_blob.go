@@ -56,7 +56,7 @@ func OpenMappedBlob(path string) (*MappedBlob, error) {
 		_ = f.Close()
 		return nil, fmt.Errorf("GLCB too large to mmap: %s", path)
 	}
-	data, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: bounded by check above
+	data, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED)
 	_ = f.Close()
 	if err != nil {
 		return nil, fmt.Errorf("mmap %s: %w", path, err)

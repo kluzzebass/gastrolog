@@ -497,8 +497,7 @@ func (e *Engine) handleCloudPrimeError(ctx context.Context, err error, sc vaultC
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	var cre *chunkReadError
-	if errors.As(err, &cre) {
+	if cre, ok := errors.AsType[*chunkReadError](err); ok {
 		if e.logger != nil {
 			e.logger.Warn("search: skipping unreadable cloud-backed chunk",
 				"vault", cre.vaultID, "chunk", cre.chunkID, "error", cre.err)

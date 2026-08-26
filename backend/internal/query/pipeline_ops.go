@@ -715,13 +715,14 @@ func applyRecordSlice(records []chunk.Record, op *querylang.SliceOp) []chunk.Rec
 // applyRecordRename renames keys in record Attrs.
 func applyRecordRename(records []chunk.Record, op *querylang.RenameOp) {
 	for i := range records {
+		rec := &records[i]
 		for _, m := range op.Renames {
-			if v, ok := records[i].Attrs[m.Old]; ok {
-				if records[i].Attrs == nil {
-					records[i].Attrs = make(chunk.Attributes)
+			if v, ok := rec.Attrs[m.Old]; ok {
+				if rec.Attrs == nil {
+					rec.Attrs = make(chunk.Attributes)
 				}
-				records[i].Attrs[m.New] = v
-				delete(records[i].Attrs, m.Old)
+				rec.Attrs[m.New] = v
+				delete(rec.Attrs, m.Old)
 			}
 		}
 	}
@@ -734,19 +735,20 @@ func applyRecordFields(records []chunk.Record, op *querylang.FieldsOp) {
 		nameSet[n] = true
 	}
 	for i := range records {
-		if records[i].Attrs == nil {
+		rec := &records[i]
+		if rec.Attrs == nil {
 			continue
 		}
 		if op.Drop {
-			for k := range records[i].Attrs {
+			for k := range rec.Attrs {
 				if nameSet[k] {
-					delete(records[i].Attrs, k)
+					delete(rec.Attrs, k)
 				}
 			}
 		} else {
-			for k := range records[i].Attrs {
+			for k := range rec.Attrs {
 				if !nameSet[k] {
-					delete(records[i].Attrs, k)
+					delete(rec.Attrs, k)
 				}
 			}
 		}
@@ -1122,16 +1124,17 @@ func findColumnIndices(columns []string, fields []string) []int {
 // This ensures all pipeline operators see extracted fields, not just explicit attributes.
 func materializeFields(records []chunk.Record) {
 	for i := range records {
-		row := RecordToRow(records[i])
-		if records[i].Attrs == nil {
-			records[i].Attrs = make(chunk.Attributes, len(row))
+		rec := &records[i]
+		row := RecordToRow(*rec)
+		if rec.Attrs == nil {
+			rec.Attrs = make(chunk.Attributes, len(row))
 		}
 		for k, v := range row {
 			if k == "raw" {
 				continue
 			}
-			if _, exists := records[i].Attrs[k]; !exists {
-				records[i].Attrs[k] = v
+			if _, exists := rec.Attrs[k]; !exists {
+				rec.Attrs[k] = v
 			}
 		}
 	}

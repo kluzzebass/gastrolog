@@ -164,8 +164,8 @@ type CloudService struct {
 	Bucket           string    `json:"bucket"`
 	Region           string    `json:"region,omitempty"`
 	Endpoint         string    `json:"endpoint,omitempty"`
-	AccessKey        string    `json:"accessKey,omitempty"` //nolint:gosec // G117: config field, not a hardcoded credential
-	SecretKey        string    `json:"secretKey,omitempty"` //nolint:gosec // G117: config field, not a hardcoded credential
+	AccessKey        string    `json:"accessKey,omitempty"`
+	SecretKey        string    `json:"secretKey,omitempty"`
 	Container        string    `json:"container,omitempty"`
 	ConnectionString string    `json:"connectionString,omitempty"`
 	CredentialsJSON  string    `json:"credentialsJson,omitempty"`

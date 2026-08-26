@@ -110,7 +110,7 @@ func (h *staticHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", intToStr(len(data)))
 		w.WriteHeader(http.StatusOK)
 		if r.Method != http.MethodHead {
-			_, _ = w.Write(data) //nolint:gosec // G705: embedded static asset bytes
+			_, _ = w.Write(data)
 		}
 
 	case acceptsEncoding(ae, "gzip"):
@@ -139,7 +139,7 @@ func (h *staticHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", intToStr(len(plain)))
 		w.WriteHeader(http.StatusOK)
 		if r.Method != http.MethodHead {
-			_, _ = w.Write(plain) //nolint:gosec // G705: decompressed embedded static asset
+			_, _ = w.Write(plain)
 		}
 	}
 }

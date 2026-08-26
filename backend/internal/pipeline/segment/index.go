@@ -134,7 +134,7 @@ func (sf *File) BuildIndex() error {
 		return errors.New("record scan length mismatch")
 	}
 
-	data, err := syscall.Mmap(int(sf.f.Fd()), 0, int(newSize), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED) //nolint:gosec // G115: file size bounded
+	data, err := syscall.Mmap(int(sf.f.Fd()), 0, int(newSize), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
 	if err != nil {
 		return err
 	}

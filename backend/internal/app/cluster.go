@@ -600,7 +600,7 @@ func makeRemoveNodeFunc(
 		}
 
 		if evictHandle != nil {
-			go func() {
+			go func() { //nolint:gosec // G118: notification outlives the request; it needs its own bounded context, not the handler's
 				defer evictHandle.Release()
 				notifyCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()

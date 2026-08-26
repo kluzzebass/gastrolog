@@ -88,7 +88,7 @@ func BuildGLCBFile(path string, in BuildGLCBInput) (BuildGLCBResult, error) {
 		return BuildGLCBResult{}, err
 	}
 	dest := filepath.Clean(path)
-	if err := os.Rename(tmpPath, dest); err != nil { //nolint:gosec // G703: path from pipeline caller, not untrusted input
+	if err := os.Rename(tmpPath, dest); err != nil {
 		return BuildGLCBResult{}, err
 	}
 	// Durability barrier: CmdSealChunk references this GLCB cluster-wide;

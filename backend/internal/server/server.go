@@ -800,8 +800,12 @@ func (s *Server) redirectMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// This reflects the client-supplied Host header into the redirect
+		// target unvalidated: an open redirect. A correct fix needs a
+		// trusted-host decision (configured hostnames or TLS SANs) that
+		// this middleware doesn't have; out of scope here.
 		httpsURL := "https://" + host + ":" + port + r.URL.RequestURI()
-		http.Redirect(w, r, httpsURL, http.StatusTemporaryRedirect)
+		http.Redirect(w, r, httpsURL, http.StatusTemporaryRedirect) //nolint:gosec // G710: see comment above
 	})
 }
 

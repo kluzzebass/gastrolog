@@ -36,7 +36,7 @@ func loadDict(dictPath string) (chunk.DictReader, []byte, error) {
 	if fileSize < int64(format.HeaderSize) {
 		return nil, nil, fmt.Errorf("attr_dict %s too small (%d bytes)", dictPath, fileSize)
 	}
-	data, err := syscall.Mmap(int(f.Fd()), 0, int(fileSize), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: int64→int safe on 64-bit
+	data, err := syscall.Mmap(int(f.Fd()), 0, int(fileSize), syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {
 		return nil, nil, fmt.Errorf("mmap attr_dict %s: %w", dictPath, err)
 	}
@@ -126,7 +126,7 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 		}, nil
 	}
 
-	idxData, err := syscall.Mmap(int(idxFile.Fd()), 0, int(idxInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: uintptr->int and int64->int are safe on 64-bit
+	idxData, err := syscall.Mmap(int(idxFile.Fd()), 0, int(idxInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {
 		_ = idxFile.Close()
 		return nil, fmt.Errorf("mmap idx.log for chunk %s: %w", chunkID, err)
@@ -542,7 +542,7 @@ func scanAttrsSealed(idxPath, attrPath, dictPath string, startPos uint64, fn fun
 		return nil
 	}
 
-	idxData, err := syscall.Mmap(int(idxFile.Fd()), 0, int(idxInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: safe on 64-bit
+	idxData, err := syscall.Mmap(int(idxFile.Fd()), 0, int(idxInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {
 		return fmt.Errorf("mmap idx.log %s: %w", idxPath, err)
 	}
@@ -726,7 +726,7 @@ func openDataFile(path string) (data []byte, mmapRegion []byte, file *os.File, e
 		_ = file.Close()
 		return nil, nil, nil, fmt.Errorf("stat %s: %w", path, err)
 	}
-	mmapRegion, err = syscall.Mmap(int(file.Fd()), 0, int(info.Size()), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: uintptr->int and int64->int are safe on 64-bit
+	mmapRegion, err = syscall.Mmap(int(file.Fd()), 0, int(info.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {
 		_ = file.Close()
 		return nil, nil, nil, fmt.Errorf("mmap %s: %w", path, err)

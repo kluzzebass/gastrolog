@@ -1,9 +1,13 @@
 package raftwal
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -657,6 +661,403 @@ func TestDeleteRangeBeyondLastIndex(t *testing.T) {
 		if err := gs.GetLog(idx, &log); err != hraft.ErrLogNotFound {
 			t.Fatalf("GetLog(%d): want ErrLogNotFound, got %v", idx, err)
 		}
+	}
+}
+
+// A mask spanning the whole index space applies at the cost of the live
+// entries. hashicorp/raft issues one DeleteRange over the entire log after a
+// snapshot install, and walking every masked index instead would hold
+// stateMu.Lock for as many lookups as the range is wide — every group's reads
+// on the node stall behind it.
+func TestDeleteRangeWiderThanTheLiveIndexApplies(t *testing.T) {
+	t.Parallel()
+	w, _ := openTestWAL(t, Config{})
+	gs := w.GroupStore("grp")
+	const last = 50
+	for i := uint64(1); i <= last; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: make([]byte, 64)}); err != nil {
+			t.Fatalf("store %d: %v", i, err)
+		}
+	}
+
+	// lo above firstIndex keeps index 1 live, so the mask cannot be served by
+	// discarding the index wholesale: the surviving entry has to be found among
+	// the live ones rather than by walking the range.
+	if err := gs.DeleteRange(2, math.MaxUint64); err != nil {
+		t.Fatalf("delete range: %v", err)
+	}
+
+	first, err := gs.FirstIndex()
+	if err != nil {
+		t.Fatalf("FirstIndex: %v", err)
+	}
+	lastIdx, err := gs.LastIndex()
+	if err != nil {
+		t.Fatalf("LastIndex: %v", err)
+	}
+	if first != 1 || lastIdx != 1 {
+		t.Errorf("bounds first=%d last=%d, want 1..1", first, lastIdx)
+	}
+	var lg hraft.Log
+	if err := gs.GetLog(1, &lg); err != nil {
+		t.Errorf("GetLog(1): %v", err)
+	}
+	for _, idx := range []uint64{2, 25, last} {
+		if err := gs.GetLog(idx, &lg); !errors.Is(err, hraft.ErrLogNotFound) {
+			t.Errorf("GetLog(%d) = %v, want ErrLogNotFound", idx, err)
+		}
+	}
+	assertLiveBytesInvariant(t, w, "after a mask wider than the index")
+}
+
+// The whole-log truncation raft.MonotonicLogStore requires: the mask covers
+// every live index, so the group is left empty, its segments drain and
+// reclamation unlinks them, and replay of the mask lands on the same empty
+// bounds.
+func TestDeleteRangeWipesTheWholeIndex(t *testing.T) {
+	t.Parallel()
+	w, dir := openTestWAL(t, Config{})
+	gs := w.GroupStore("grp")
+	const last = 60
+	for i := uint64(1); i <= last; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: make([]byte, 64)}); err != nil {
+			t.Fatalf("store %d: %v", i, err)
+		}
+	}
+
+	// Premise: the wipe has a populated index and a populated recent window to
+	// clear, spread over several segments.
+	indexed, cached, _ := groupIndexCensus(t, w, gs)
+	if indexed != last {
+		t.Fatalf("indexed = %d before the wipe, want %d", indexed, last)
+	}
+	if cached == 0 {
+		t.Fatal("recent window empty before the wipe, so the wipe cannot be shown to clear it")
+	}
+	if rotated := segmentsRotated(t, w); rotated < 2 {
+		t.Fatalf("only %d segment(s) opened, so the census below proves nothing", rotated)
+	}
+
+	if err := gs.DeleteRange(1, last); err != nil {
+		t.Fatalf("delete range: %v", err)
+	}
+
+	first, err := gs.FirstIndex()
+	if err != nil {
+		t.Fatalf("FirstIndex: %v", err)
+	}
+	lastIdx, err := gs.LastIndex()
+	if err != nil {
+		t.Fatalf("LastIndex: %v", err)
+	}
+	if first != 0 || lastIdx != 0 {
+		t.Errorf("bounds first=%d last=%d after the wipe, want 0..0", first, lastIdx)
+	}
+	indexed, cached, cacheBytes := groupIndexCensus(t, w, gs)
+	if indexed != 0 || cached != 0 || cacheBytes != 0 {
+		t.Errorf("after the wipe: indexed=%d cached=%d cacheBytes=%d, want 0/0/0", indexed, cached, cacheBytes)
+	}
+	var lg hraft.Log
+	for _, idx := range []uint64{1, last / 2, last} {
+		if err := gs.GetLog(idx, &lg); !errors.Is(err, hraft.ErrLogNotFound) {
+			t.Errorf("GetLog(%d) = %v, want ErrLogNotFound", idx, err)
+		}
+	}
+	assertLiveBytesInvariant(t, w, "after the whole-index wipe")
+
+	// The drained segments carry nothing the index still references, so
+	// reclamation unlinks them; segment 1 holds the group registration.
+	triggerReclaim(t, w, gs)
+	if n := segmentFileCount(t, dir); n > 2 {
+		t.Errorf("%d data-bearing segments after the wipe, want <= 2", n)
+	}
+	assertLiveBytesInvariant(t, w, "after reclaiming the wiped segments")
+
+	// Replay applies the same mask against the rebuilt index and must land on
+	// the same empty bounds.
+	if err := w.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	w2, err := Open(dir, Config{SegmentTargetSize: 2048, ScavengeMaxLiveBytes: 128})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer w2.Close()
+	gs2 := w2.GroupStore("grp")
+	first, err = gs2.FirstIndex()
+	if err != nil {
+		t.Fatalf("FirstIndex after replay: %v", err)
+	}
+	lastIdx, err = gs2.LastIndex()
+	if err != nil {
+		t.Fatalf("LastIndex after replay: %v", err)
+	}
+	if first != 0 || lastIdx != 0 {
+		t.Errorf("replayed bounds first=%d last=%d, want 0..0", first, lastIdx)
+	}
+	if indexed, _, _ := groupIndexCensus(t, w2, gs2); indexed != 0 {
+		t.Errorf("replayed index holds %d entries, want 0", indexed)
+	}
+	assertLiveBytesInvariant(t, w2, "after replaying the wipe")
+}
+
+// A wipe followed by appends at a far higher index leaves a hole. A mask
+// spanning that hole must remove exactly the live entries inside it and leave
+// the survivors readable.
+func TestDeleteRangeSpanningAHole(t *testing.T) {
+	t.Parallel()
+	w, _ := openTestWAL(t, Config{})
+	gs := w.GroupStore("grp")
+	for i := uint64(1); i <= 50; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: make([]byte, 64)}); err != nil {
+			t.Fatalf("store %d: %v", i, err)
+		}
+	}
+	if err := gs.DeleteRange(1, 50); err != nil {
+		t.Fatalf("wipe: %v", err)
+	}
+	for i := uint64(1000); i <= 1010; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 2, Data: make([]byte, 64)}); err != nil {
+			t.Fatalf("store %d: %v", i, err)
+		}
+	}
+
+	if err := gs.DeleteRange(1, 1009); err != nil {
+		t.Fatalf("delete range: %v", err)
+	}
+
+	first, err := gs.FirstIndex()
+	if err != nil {
+		t.Fatalf("FirstIndex: %v", err)
+	}
+	last, err := gs.LastIndex()
+	if err != nil {
+		t.Fatalf("LastIndex: %v", err)
+	}
+	if first != 1010 || last != 1010 {
+		t.Errorf("bounds first=%d last=%d, want 1010..1010", first, last)
+	}
+	var lg hraft.Log
+	if err := gs.GetLog(1010, &lg); err != nil {
+		t.Errorf("GetLog(1010): %v", err)
+	}
+	for _, idx := range []uint64{1, 25, 1000, 1009} {
+		if err := gs.GetLog(idx, &lg); !errors.Is(err, hraft.ErrLogNotFound) {
+			t.Errorf("GetLog(%d) = %v, want ErrLogNotFound", idx, err)
+		}
+	}
+	if indexed, _, _ := groupIndexCensus(t, w, gs); indexed != 1 {
+		t.Errorf("index holds %d entries, want 1", indexed)
+	}
+	assertLiveBytesInvariant(t, w, "after a mask spanning a hole")
+}
+
+// groupIndexCensus reports the group's indexed-entry count, cached-payload
+// count and cached bytes.
+func groupIndexCensus(t *testing.T, w *WAL, gs *GroupStore) (indexed, cached int, cacheBytes int64) {
+	t.Helper()
+	w.stateMu.RLock()
+	defer w.stateMu.RUnlock()
+	state := w.groups[gs.groupID]
+	if state == nil {
+		return 0, 0, 0
+	}
+	return len(state.logs), len(state.cache), state.cacheBytes
+}
+
+var deleteRangePathNames = map[deleteRangePath]string{
+	deleteRangeByIndex: "byIndex",
+	deleteRangeByEntry: "byEntry",
+	deleteRangeWipe:    "wipe",
+}
+
+func pathNames(paths []deleteRangePath) string {
+	names := make([]string, len(paths))
+	for i, p := range paths {
+		names[i] = deleteRangePathNames[p]
+	}
+	return strings.Join(names, ", ")
+}
+
+func TestChooseDeleteRangePath(t *testing.T) {
+	t.Parallel()
+	populated := func(first, last uint64, indices ...uint64) *groupState {
+		gs := newGroupState()
+		for _, idx := range indices {
+			gs.logs[idx] = logLoc{seg: 1, off: 0, length: 8}
+		}
+		gs.firstIndex, gs.lastIndex = first, last
+		return gs
+	}
+	ten := func() *groupState {
+		return populated(1, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+	}
+	cases := []struct {
+		name   string
+		gs     *groupState
+		lo, hi uint64
+		want   deleteRangePath
+	}{
+		{"exact cover", ten(), 1, 10, deleteRangeWipe},
+		{"cover with slack on both ends", ten(), 1, 99, deleteRangeWipe},
+		{"prefix leaves a survivor", ten(), 1, 4, deleteRangeByIndex},
+		{"interior hole", ten(), 4, 6, deleteRangeByIndex},
+		{"width equal to the live count", ten(), 2, 11, deleteRangeByIndex},
+		{"width one past the live count", ten(), 2, 12, deleteRangeByEntry},
+		{"suffix wider than the index space", ten(), 2, math.MaxUint64, deleteRangeByEntry},
+		{"empty group", newGroupState(), 1, 10, deleteRangeByEntry},
+		// Width arithmetic on the whole index space must not wrap into a walk
+		// of every index: an empty group has no bounds to make this a wipe.
+		{"whole index space on an empty group", newGroupState(), 0, math.MaxUint64, deleteRangeByEntry},
+		{"mask spanning a hole", populated(1, 1000, 1, 2, 1000), 1, 999, deleteRangeByEntry},
+		{"mask covering across a hole", populated(1, 1000, 1, 2, 1000), 1, 1000, deleteRangeWipe},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := chooseDeleteRangePath(tc.gs, tc.lo, tc.hi); got != tc.want {
+				t.Errorf("path for [%d, %d] = %s, want %s",
+					tc.lo, tc.hi, deleteRangePathNames[got], deleteRangePathNames[tc.want])
+			}
+		})
+	}
+}
+
+// groupSnapshot is the state a mask may touch: the index, its bounds, the
+// recent window and the per-segment live-bytes counters.
+type groupSnapshot struct {
+	Logs       map[uint64]logLoc
+	FirstIndex uint64
+	LastIndex  uint64
+	Cache      map[uint64]string
+	CacheBytes int64
+	SegLive    map[int]int64
+}
+
+func snapshotGroup(t *testing.T, w *WAL, gs *GroupStore) groupSnapshot {
+	t.Helper()
+	w.stateMu.RLock()
+	defer w.stateMu.RUnlock()
+	state := w.groups[gs.groupID]
+	if state == nil {
+		t.Fatalf("group %d absent", gs.groupID)
+	}
+	snap := groupSnapshot{
+		Logs:       make(map[uint64]logLoc, len(state.logs)),
+		FirstIndex: state.firstIndex,
+		LastIndex:  state.lastIndex,
+		Cache:      make(map[uint64]string, len(state.cache)),
+		CacheBytes: state.cacheBytes,
+		SegLive:    make(map[int]int64, len(w.segLive)),
+	}
+	for idx, loc := range state.logs {
+		snap.Logs[idx] = loc
+	}
+	for idx, enc := range state.cache {
+		snap.Cache[idx] = string(enc)
+	}
+	for seq, bytes := range w.segLive {
+		snap.SegLive[seq] = bytes
+	}
+	return snap
+}
+
+// deleteRangeTwin builds a group whose entries span several segments with a
+// populated recent window. Scavenging is held off so the twins' record
+// locations depend only on the appends, which are identical.
+func deleteRangeTwin(t *testing.T, last uint64) (*WAL, *GroupStore) {
+	t.Helper()
+	w, _ := openTestWAL(t, Config{SegmentTargetSize: 2048, ScavengeMaxLiveBytes: 1})
+	gs := w.GroupStore("grp")
+	for i := uint64(1); i <= last; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: make([]byte, 64)}); err != nil {
+			t.Fatalf("store %d: %v", i, err)
+		}
+	}
+	return w, gs
+}
+
+// selectedDeleteRangePath reports the path production picks for the mask.
+func selectedDeleteRangePath(t *testing.T, w *WAL, gs *GroupStore, lo, hi uint64) deleteRangePath {
+	t.Helper()
+	w.stateMu.RLock()
+	defer w.stateMu.RUnlock()
+	return chooseDeleteRangePath(w.groups[gs.groupID], lo, hi)
+}
+
+// applyMaskThroughPath applies [lo, hi] to the group by the named path,
+// bypassing path selection, and reports the state before and after.
+func applyMaskThroughPath(t *testing.T, w *WAL, gs *GroupStore, path deleteRangePath, lo, hi uint64) (pre, post groupSnapshot) {
+	t.Helper()
+	pre = snapshotGroup(t, w, gs)
+	w.stateMu.Lock()
+	state := w.groups[gs.groupID]
+	switch path {
+	case deleteRangeWipe:
+		w.dropWholeIndex(state)
+	case deleteRangeByEntry:
+		w.dropRangeByEntry(state, lo, hi)
+	case deleteRangeByIndex:
+		w.dropRangeByIndex(state, lo, hi)
+	}
+	state.shrinkBounds(lo, hi)
+	w.stateMu.Unlock()
+	return pre, snapshotGroup(t, w, gs)
+}
+
+// The three application paths are one behavior expressed three ways: the same
+// mask must leave the same index, bounds, recent window and live-bytes
+// counters whichever one applies it. Only the cost differs.
+func TestDeleteRangeApplicationPathsAgree(t *testing.T) {
+	t.Parallel()
+	const last = 60
+	allPaths := []deleteRangePath{deleteRangeByIndex, deleteRangeByEntry, deleteRangeWipe}
+	partialPaths := []deleteRangePath{deleteRangeByIndex, deleteRangeByEntry}
+
+	cases := []struct {
+		name   string
+		lo, hi uint64
+		paths  []deleteRangePath
+	}{
+		{"whole index", 1, last, allPaths},
+		{"whole index with slack", 1, 4 * last, allPaths},
+		{"prefix", 1, last / 2, partialPaths},
+		{"suffix", last / 2, last, partialPaths},
+		{"interior", 20, 40, partialPaths},
+		{"single index", 33, 33, partialPaths},
+		{"past the end", last - 5, 4 * last, partialPaths},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var want groupSnapshot
+			var wantPre groupSnapshot
+			for i, path := range tc.paths {
+				w, gs := deleteRangeTwin(t, last)
+				// Selection and application must not drift apart: whatever
+				// production picks for this mask has to be one of the paths
+				// this case proves equivalent.
+				if selected := selectedDeleteRangePath(t, w, gs, tc.lo, tc.hi); !slices.Contains(tc.paths, selected) {
+					t.Fatalf("production selects %s for [%d, %d]; this case only compares %s",
+						deleteRangePathNames[selected], tc.lo, tc.hi, pathNames(tc.paths))
+				}
+				pre, post := applyMaskThroughPath(t, w, gs, path, tc.lo, tc.hi)
+				assertLiveBytesInvariant(t, w, "after the mask applied "+deleteRangePathNames[path])
+				if i == 0 {
+					wantPre, want = pre, post
+					continue
+				}
+				// Premise: the twins are built identically, so a post-state
+				// difference can only come from how the mask was applied.
+				if !reflect.DeepEqual(pre, wantPre) {
+					t.Fatalf("the %s twin differs before the mask:\n got %+v\nwant %+v",
+						deleteRangePathNames[path], pre, wantPre)
+				}
+				if !reflect.DeepEqual(post, want) {
+					t.Errorf("%s left:\n got %+v\nwant %+v", deleteRangePathNames[path], post, want)
+				}
+			}
+		})
 	}
 }
 

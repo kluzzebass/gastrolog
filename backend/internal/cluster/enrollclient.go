@@ -25,7 +25,7 @@ type EnrollResult struct {
 // Enroll connects to the leader's cluster port and enrolls this node.
 // The joinToken format is "<hex-secret>:<hex-sha256(CA DER)>".
 //
-// The client uses InsecureSkipVerify with a custom VerifyPeerCertificate
+// The client uses InsecureSkipVerify with a custom VerifyConnection
 // callback that checks the CA fingerprint from the token (TOFU model).
 func Enroll(ctx context.Context, leaderAddr, tokenSecret, caHash, nodeID, nodeAddr string) (*EnrollResult, error) {
 	expectedHash, err := hex.DecodeString(caHash)
@@ -34,34 +34,13 @@ func Enroll(ctx context.Context, leaderAddr, tokenSecret, caHash, nodeID, nodeAd
 	}
 
 	// TOFU TLS config: skip normal verification, verify CA fingerprint manually.
+	// VerifyConnection runs on every handshake, including a resumed one, so
+	// the fingerprint check can't be bypassed by session resumption the way
+	// a VerifyPeerCertificate-only check could.
 	tlsCfg := &tls.Config{
 		InsecureSkipVerify: true, //nolint:gosec // G402: intentional TOFU — we verify CA fingerprint below
-		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-			if len(rawCerts) == 0 {
-				return errors.New("server presented no certificates")
-			}
-			// Walk the chain to find the CA (self-signed) cert and check its fingerprint.
-			for _, raw := range rawCerts {
-				cert, err := x509.ParseCertificate(raw)
-				if err != nil {
-					continue
-				}
-				if cert.IsCA {
-					hash := sha256.Sum256(raw)
-					if hex.EncodeToString(hash[:]) == hex.EncodeToString(expectedHash) {
-						return nil
-					}
-				}
-			}
-			// If no CA cert found in chain, check the leaf's issuer by fingerprinting
-			// the raw DER of each cert in the chain.
-			for _, raw := range rawCerts {
-				hash := sha256.Sum256(raw)
-				if hex.EncodeToString(hash[:]) == hex.EncodeToString(expectedHash) {
-					return nil
-				}
-			}
-			return errors.New("CA fingerprint mismatch: server CA does not match join token")
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			return verifyCAFingerprint(cs.PeerCertificates, expectedHash)
 		},
 		MinVersion: tls.VersionTLS13,
 	}
@@ -90,4 +69,30 @@ func Enroll(ctx context.Context, leaderAddr, tokenSecret, caHash, nodeID, nodeAd
 		ClusterCertPEM: resp.GetClusterCertPem(),
 		ClusterKeyPEM:  resp.GetClusterKeyPem(),
 	}, nil
+}
+
+// verifyCAFingerprint checks that the peer's chain contains a certificate
+// whose SHA-256 fingerprint matches expectedHash (the CA hash from the join
+// token), per the TOFU model. It falls back to fingerprinting every cert in
+// the chain when none is marked as a CA, since self-signed leaf certs and
+// certs from minimal chains don't always set the CA basic constraint.
+func verifyCAFingerprint(peerCerts []*x509.Certificate, expectedHash []byte) error {
+	if len(peerCerts) == 0 {
+		return errors.New("server presented no certificates")
+	}
+	for _, cert := range peerCerts {
+		if cert.IsCA {
+			hash := sha256.Sum256(cert.Raw)
+			if hex.EncodeToString(hash[:]) == hex.EncodeToString(expectedHash) {
+				return nil
+			}
+		}
+	}
+	for _, cert := range peerCerts {
+		hash := sha256.Sum256(cert.Raw)
+		if hex.EncodeToString(hash[:]) == hex.EncodeToString(expectedHash) {
+			return nil
+		}
+	}
+	return errors.New("CA fingerprint mismatch: server CA does not match join token")
 }

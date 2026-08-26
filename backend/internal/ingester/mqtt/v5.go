@@ -44,40 +44,38 @@ func (ing *v5Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMes
 		OnConnectError: func(err error) {
 			ing.logger.Warn("mqtt connection attempt failed", "error", err)
 		},
-		ClientConfig: paho.ClientConfig{
-			ClientID: ing.cfg.ClientID,
-			OnPublishReceived: []func(paho.PublishReceived) (bool, error){
-				func(pr paho.PublishReceived) (bool, error) {
-					// Backpressure: block in the callback while pressure is
-					// elevated. Paho's inbound-packet handling then stalls,
-					// stopping reads from the broker — QoS 1/2 messages
-					// remain unACK'd, so nothing is lost. Wait only errors
-					// on ctx cancel; we check ctx afterward for clean exit.
-					if ing.pressureGate != nil {
-						_ = ing.pressureGate.Wait(ctx)
-						if ctx.Err() != nil {
-							return false, ctx.Err()
-						}
+		ClientID: ing.cfg.ClientID,
+		OnPublishReceived: []func(paho.PublishReceived) (bool, error){
+			func(pr paho.PublishReceived) (bool, error) {
+				// Backpressure: block in the callback while pressure is
+				// elevated. Paho's inbound-packet handling then stalls,
+				// stopping reads from the broker — QoS 1/2 messages
+				// remain unACK'd, so nothing is lost. Wait only errors
+				// on ctx cancel; we check ctx afterward for clean exit.
+				if ing.pressureGate != nil {
+					_ = ing.pressureGate.Wait(ctx)
+					if ctx.Err() != nil {
+						return false, ctx.Err()
 					}
-					msg := buildMessage(pr.Packet.Topic, pr.Packet.QoS, pr.Packet.Retain, pr.Packet.PacketID, pr.Packet.Payload, ing.cfg.ID, time.Now())
-
-					select {
-					case out <- msg:
-					case <-ctx.Done():
-					}
-					return true, nil
-				},
-			},
-			OnClientError: func(err error) {
-				ing.logger.Warn("mqtt client error", "error", err)
-			},
-			OnServerDisconnect: func(d *paho.Disconnect) {
-				if d.Properties != nil {
-					ing.logger.Warn("mqtt server disconnect", "reason", d.Properties.ReasonString)
-				} else {
-					ing.logger.Warn("mqtt server disconnect", "reason_code", d.ReasonCode)
 				}
+				msg := buildMessage(pr.Packet.Topic, pr.Packet.QoS, pr.Packet.Retain, pr.Packet.PacketID, pr.Packet.Payload, ing.cfg.ID, time.Now())
+
+				select {
+				case out <- msg:
+				case <-ctx.Done():
+				}
+				return true, nil
 			},
+		},
+		OnClientError: func(err error) {
+			ing.logger.Warn("mqtt client error", "error", err)
+		},
+		OnServerDisconnect: func(d *paho.Disconnect) {
+			if d.Properties != nil {
+				ing.logger.Warn("mqtt server disconnect", "reason", d.Properties.ReasonString)
+			} else {
+				ing.logger.Warn("mqtt server disconnect", "reason_code", d.ReasonCode)
+			}
 		},
 	}
 

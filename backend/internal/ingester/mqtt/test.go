@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/eclipse/paho.golang/autopaho"
-	"github.com/eclipse/paho.golang/paho"
 	pahov3 "github.com/eclipse/paho.mqtt.golang"
 )
 
@@ -106,9 +105,7 @@ func testV5(ctx context.Context, broker string, useTLS bool, params map[string]s
 		ServerUrls:                    []*url.URL{brokerURL},
 		KeepAlive:                     30,
 		CleanStartOnInitialConnection: true,
-		ClientConfig: paho.ClientConfig{
-			ClientID: clientID,
-		},
+		ClientID:                      clientID,
 	}
 
 	if useTLS {

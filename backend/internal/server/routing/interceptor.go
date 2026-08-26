@@ -181,8 +181,7 @@ func (ri *RoutingInterceptor) forwardUnary(ctx context.Context, target, procedur
 
 	respPayload, fwdErr := ri.forwarder.ForwardUnary(ctx, target, procedure, payload)
 	if fwdErr != nil {
-		var re *RemoteError
-		if errors.As(fwdErr, &re) {
+		if re, ok := errors.AsType[*RemoteError](fwdErr); ok {
 			return nil, connect.NewError(connect.Code(re.Code), fmt.Errorf("%s", re.Message))
 		}
 		return nil, connect.NewError(connect.CodeUnavailable, fwdErr)

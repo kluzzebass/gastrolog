@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -212,8 +213,7 @@ func startChild(lw *lineWriter, name, color, cmdStr string) *childProc {
 			lw.writeTo(os.Stderr, name, color, "exited")
 		} else {
 			code := 1
-			var exitErr *exec.ExitError
-			if errors.As(err, &exitErr) {
+			if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 				code = exitErr.ExitCode()
 			}
 			cp.exitCode = code
@@ -241,7 +241,7 @@ func forwardSignals(ctx context.Context, lw *lineWriter, children []*childProc, 
 	<-ctx.Done()
 
 	// Shut down in reverse order (last started → first stopped).
-	for i := len(children) - 1; i >= 0; i-- {
+	for i := range slices.Backward(children) {
 		cp := children[i]
 		if cp.proc == nil {
 			continue

@@ -97,9 +97,9 @@ func writeBootstrapTokenAtomic(path, token string) error {
 		cleanup()
 		return fmt.Errorf("close temp token file: %w", err)
 	}
-	// G703: path is operator-supplied via --write-bootstrap-token; the
-	// rename target IS the configured destination, by design.
-	if err := os.Rename(tmpPath, path); err != nil { //nolint:gosec // G703: path is operator config, intentional
+	// path is operator-supplied via --write-bootstrap-token; the rename
+	// target IS the configured destination, by design.
+	if err := os.Rename(tmpPath, path); err != nil {
 		cleanup()
 		return fmt.Errorf("rename temp token file: %w", err)
 	}
@@ -209,9 +209,9 @@ func fetchTokenOnce(ctx context.Context, client *http.Client, url, secret string
 		return "", true, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set(bootstrapTokenSecretHeader, secret)
-	// G704: url is operator-supplied via --bootstrap-token-url; the
-	// fetch IS targeting the configured endpoint, by design.
-	resp, err := client.Do(req) //nolint:gosec // G704: url is operator config, intentional
+	// url is operator-supplied via --bootstrap-token-url; the fetch IS
+	// targeting the configured endpoint, by design.
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", false, err
 	}

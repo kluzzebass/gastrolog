@@ -65,7 +65,7 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	// Resolve output format.
 	format, _ := cmd.Flags().GetString("format")
 	if format == "" {
-		if term.IsTerminal(int(os.Stdout.Fd())) { //nolint:gosec // G115: Fd() fits in int on 64-bit
+		if term.IsTerminal(int(os.Stdout.Fd())) {
 			format = "text"
 		} else {
 			format = "json"

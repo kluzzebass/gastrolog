@@ -76,7 +76,7 @@ type Config struct {
 
 // AuthConfig holds configuration for user authentication.
 type AuthConfig struct {
-	JWTSecret            string         `json:"jwt_secret,omitempty"`             //nolint:gosec // G117: config field, not a hardcoded credential
+	JWTSecret            string         `json:"jwt_secret,omitempty"`
 	TokenDuration        string         `json:"token_duration,omitempty"`         // Go duration, e.g. "168h"
 	RefreshTokenDuration string         `json:"refresh_token_duration,omitempty"` // Go duration, e.g. "168h"
 	PasswordPolicy       PasswordPolicy `json:"password_policy,omitzero"`

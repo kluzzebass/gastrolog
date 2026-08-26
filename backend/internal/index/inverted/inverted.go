@@ -100,7 +100,7 @@ func EncodeKeyIndex[T KeyEntry](entries []T, headerBytes []byte, entryCountOffse
 		stringCursor += PostingCountSize
 
 		for _, pos := range e.GetPositions() {
-			binary.LittleEndian.PutUint32(buf[postingCursor:], uint32(pos))
+			binary.LittleEndian.PutUint32(buf[postingCursor:], uint32(pos)) //nolint:gosec // G115: pos is a record position bounded by chunk record count
 			postingCursor += PositionSize
 		}
 
@@ -144,7 +144,7 @@ func EncodeValueIndex[T ValueEntry](entries []T, headerBytes []byte, entryCountO
 		stringCursor += PostingCountSize
 
 		for _, pos := range e.GetPositions() {
-			binary.LittleEndian.PutUint32(buf[postingCursor:], uint32(pos))
+			binary.LittleEndian.PutUint32(buf[postingCursor:], uint32(pos)) //nolint:gosec // G115: pos is a record position bounded by chunk record count
 			postingCursor += PositionSize
 		}
 
@@ -194,7 +194,7 @@ func EncodeKVIndex[T KVEntry](entries []T, headerBytes []byte, entryCountOffset 
 		stringCursor += PostingCountSize
 
 		for _, pos := range e.GetPositions() {
-			binary.LittleEndian.PutUint32(buf[postingCursor:], uint32(pos))
+			binary.LittleEndian.PutUint32(buf[postingCursor:], uint32(pos)) //nolint:gosec // G115: pos is a record position bounded by chunk record count
 			postingCursor += PositionSize
 		}
 

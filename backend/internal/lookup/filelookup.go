@@ -180,7 +180,7 @@ func (j *FileLookup) Load(path string) error {
 		_ = os.Remove(tmpPath)
 		return err
 	}
-	mmapData, err := syscall.Mmap(int(f.Fd()), 0, int(info.Size()), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115
+	mmapData, err := syscall.Mmap(int(f.Fd()), 0, int(info.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {
 		_ = f.Close()
 		_ = os.Remove(tmpPath)
@@ -251,7 +251,7 @@ func (j *FileLookup) transformToBin(path string) (tmpPath string, duplicates int
 		_ = srcFile.Close()
 		return "", 0, fmt.Errorf("%s file %q is %d bytes (max %d); use CSV format for large files", j.format, path, size, maxStructuredFileSize)
 	}
-	mmapData, err := syscall.Mmap(int(srcFile.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115
+	mmapData, err := syscall.Mmap(int(srcFile.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {
 		_ = srcFile.Close()
 		return "", 0, fmt.Errorf("mmap %q: %w", path, err)
@@ -289,11 +289,11 @@ func (j *FileLookup) transformToBin(path string) (tmpPath string, duplicates int
 	tmpPath = tmpFile.Name()
 	if _, err := tmpFile.Write(encoded); err != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		_ = os.Remove(tmpPath)
 		return "", 0, fmt.Errorf("write bin lookup: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		_ = os.Remove(tmpPath)
 		return "", 0, err
 	}
 

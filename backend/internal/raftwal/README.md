@@ -23,7 +23,8 @@ WAL throughput is nearly constant regardless of group count. BoltDB scales linea
 // Open or create a WAL in a directory.
 wal, err := raftwal.Open("/data/node1/raft/wal")
 
-// Get a per-group handle (implements raft.LogStore + raft.StableStore).
+// Get a per-group handle (implements raft.LogStore + raft.StableStore
+// + raft.MonotonicLogStore).
 gs := wal.GroupStore("my-group")
 
 // Use with hashicorp/raft.
@@ -35,6 +36,8 @@ wal.Close()
 ```
 
 `GroupStore` is safe for concurrent use by multiple goroutines. The WAL handles all synchronization internally.
+
+`GroupStore` also reports `IsMonotonic() == true`, so hashicorp/raft clears a group's whole log in one `DeleteRange` after a snapshot install or restore instead of retaining a `TrailingLogs` tail below the snapshot index. A follower that catches up by InstallSnapshot is left with an empty log rather than a dead island of entries pinning WAL segments. Applying a mask costs the smaller of the range width and the live entry count: a mask covering the whole index replaces the index and recent window outright, a mask wider than the live count is applied by walking the live entries, and only a mask narrower than the index walks the range.
 
 ---
 
@@ -304,7 +307,7 @@ Reads never wait on fsync; the batch writer holds the write lock only for the in
 
 ## Test Coverage
 
-- Unit tests covering happy path, edge cases, isolation, crash recovery, concurrency, segment reclamation (drained unlink, scavenge, oldest-first discipline, verification-scan quarantine) after `DeleteRange`, batched `StoreLogs` atomicity (torn/corrupt batch replay), and recent-window retention (eviction, disk-served reads, budget accounting)
+- Unit tests covering happy path, edge cases, isolation, crash recovery, concurrency, segment reclamation (drained unlink, scavenge, oldest-first discipline, verification-scan quarantine) after `DeleteRange`, mask application (path selection, equivalence of the three application paths, whole-index wipe, masks spanning a hole or the whole index space), batched `StoreLogs` atomicity (torn/corrupt batch replay), and recent-window retention (eviction, disk-served reads, budget accounting)
 - 6 fuzz targets for encode/decode round-trips (including `entryLogBatch`) and corrupt segment replay
 - 2 hashicorp/raft integration tests (election + apply, snapshot + restore)
 - 2 benchmarks (WAL vs boltdb at 1/4/16/64 concurrent groups)

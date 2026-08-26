@@ -286,7 +286,7 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 	// Use a fresh background context with the same timeout discipline
 	// as scheduleCatchupForNode — the RPC's caller-supplied ctx ends as
 	// soon as we return, which would abort transfers mid-stream.
-	go func() {
+	go func() { //nolint:gosec // G118: pushes outlive the RPC; the caller's ctx ends as soon as it returns
 		defer o.endCatchupPush(pushKey)
 		ctxBg, cancel := context.WithTimeout(context.Background(), cluster.CatchupTimeout)
 		defer cancel()

@@ -54,7 +54,7 @@ func DownloadAndUnwrap(ctx context.Context, store blobstore.Store, key string, d
 	}
 	defer func() {
 		_ = spill.Close()
-		_ = os.Remove(spill.Name()) //nolint:gosec // G703: temp path from os.CreateTemp, not user input
+		_ = os.Remove(spill.Name())
 	}()
 	objSize, err := io.Copy(spill, rc)
 	if err != nil {

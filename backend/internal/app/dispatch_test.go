@@ -1457,13 +1457,13 @@ func TestShouldRunIngesterParallelEmptyNodeIDs(t *testing.T) {
 // registered type has SingletonSupported=true.
 func singletonTestIngester(ingID glid.GLID, nodeIDs ...string) (*system.IngesterConfig, orchestrator.IngesterRegistration) {
 	return &system.IngesterConfig{
-			ID: ingID, Type: "test", Enabled: true, NodeIDs: nodeIDs, Singleton: true,
-		}, orchestrator.IngesterRegistration{
-			Factory: func(glid.GLID, map[string]string, *slog.Logger) (ingestion.Ingester, error) {
-				return noopIngester{}, nil
-			},
-			SingletonSupported: true,
-		}
+		ID: ingID, Type: "test", Enabled: true, NodeIDs: nodeIDs, Singleton: true,
+	}, orchestrator.IngesterRegistration{
+		Factory: func(glid.GLID, map[string]string, *slog.Logger) (ingestion.Ingester, error) {
+			return noopIngester{}, nil
+		},
+		SingletonSupported: true,
+	}
 }
 
 func TestHandleIngesterAssignmentStartsLocally(t *testing.T) {

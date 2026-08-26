@@ -124,21 +124,21 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 
 	if err := tmpFile.Chmod(0o644); err != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("chmod temp index: %w", err)
 	}
 
 	// Truncate to final size to pre-allocate space.
 	if err := tmpFile.Truncate(totalFileSize); err != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("truncate index file: %w", err)
 	}
 
 	// Write header.
 	if err := writeIndexHeader(tmpFile, uint32(len(sortedTokens))); err != nil { //nolint:gosec // G115: token count bounded by index budget
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("write header: %w", err)
 	}
 
@@ -147,7 +147,7 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	for _, tok := range sortedTokens {
 		if err := writeKeyEntry(tmpFile, tok, postingOffset, counts[tok]); err != nil {
 			_ = tmpFile.Close()
-			_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
+			_ = os.Remove(tmpName)
 			return fmt.Errorf("write key entry: %w", err)
 		}
 		postingOffset += counts[tok] * positionSize
@@ -157,18 +157,18 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	pass2Start := time.Now()
 	if err := t.fillPostingsToFile(ctx, chunkID, intern, tmpFile, fileOffset, writeIdx, totalFileSize); err != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("pass 2 (fill): %w", err)
 	}
 	pass2Duration := time.Since(pass2Start)
 
 	if err := tmpFile.Close(); err != nil {
-		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("close temp index: %w", err)
 	}
 
-	if err := os.Rename(tmpName, filepath.Clean(target)); err != nil { //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
-		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
+	if err := os.Rename(tmpName, filepath.Clean(target)); err != nil {
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("rename index: %w", err)
 	}
 
@@ -362,7 +362,7 @@ func (t *Indexer) fillPostingsToFile(ctx context.Context, chunkID chunk.ChunkID,
 	defer func() { _ = cursor.Close() }()
 
 	// Mmap the file for writing.
-	data, err := syscall.Mmap(int(f.Fd()), 0, int(fileSize), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED) //nolint:gosec // G115: uintptr->int is safe on 64-bit; fileSize checked above
+	data, err := syscall.Mmap(int(f.Fd()), 0, int(fileSize), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
 	if err != nil {
 		return fmt.Errorf("mmap: %w", err)
 	}

@@ -56,7 +56,6 @@ func decodeAppendEntriesRequest(m *gastrologv1.MultiRaftAppendEntriesRequest) *r
 	return &raft.AppendEntriesRequest{
 		RPCHeader:         decodeRPCHeader(m.GetRpcHeader()),
 		Term:              m.GetTerm(),
-		Leader:            m.GetRpcHeader().GetAddr(),
 		PrevLogEntry:      m.GetPrevLogEntry(),
 		PrevLogTerm:       m.GetPrevLogTerm(),
 		Entries:           decodeLogs(m.GetEntries()),
@@ -78,7 +77,6 @@ func decodeRequestVoteRequest(m *gastrologv1.MultiRaftRequestVoteRequest) *raft.
 	return &raft.RequestVoteRequest{
 		RPCHeader:          decodeRPCHeader(m.GetRpcHeader()),
 		Term:               m.GetTerm(),
-		Candidate:          m.GetRpcHeader().GetAddr(),
 		LastLogIndex:       m.GetLastLogIndex(),
 		LastLogTerm:        m.GetLastLogTerm(),
 		LeadershipTransfer: m.GetLeadershipTransfer(),

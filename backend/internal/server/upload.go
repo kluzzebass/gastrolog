@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,10 +20,17 @@ import (
 	"gastrolog/internal/system"
 )
 
-const maxUploadSize = 256 << 20 // 256 MB
+const (
+	maxUploadSize = 256 << 20 // 256 MB: hard cap on the total request body.
+	// maxUploadMemory bounds how much of a part mime/multipart buffers in
+	// memory before spilling the rest to a temp file on disk; it is
+	// independent of maxUploadSize.
+	maxUploadMemory = 32 << 20 // 32 MB
+)
 
 // handleManagedFileUpload handles multipart file uploads for managed files.
-// The file is streamed to disk (never buffered in heap), then metadata is
+// Up to maxUploadMemory of the upload is buffered in memory; anything past
+// that spills to a temp file on disk. Once the file is on disk, metadata is
 // committed to Raft so all cluster nodes learn about the file.
 func (s *Server) handleManagedFileUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -43,8 +51,16 @@ func (s *Server) handleManagedFileUpload(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
-		http.Error(w, "file too large or invalid multipart form", http.StatusBadRequest)
+	// ParseMultipartForm's argument only caps the in-memory buffer; parts
+	// beyond it still spill to disk unbounded. MaxBytesReader caps the total
+	// request body actually read.
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+	if err := r.ParseMultipartForm(maxUploadMemory); err != nil { //nolint:gosec // G120: body is already bounded by MaxBytesReader above; the taint engine doesn't see it
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "invalid multipart form", http.StatusBadRequest)
 		return
 	}
 
@@ -145,14 +161,14 @@ func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) 
 	fileID := glid.New()
 	hd := home.New(s.homeDir)
 	fileDir := hd.ManagedFileDir(fileID.String())
-	if err := os.MkdirAll(fileDir, 0o750); err != nil { //nolint:gosec // G703: fileDir from trusted home + UUID
+	if err := os.MkdirAll(fileDir, 0o750); err != nil {
 		return system.ManagedFileConfig{}, fmt.Errorf("create dir: %w", err)
 	}
 
 	// Store with a fixed filename — user-supplied name stays in metadata only.
 	finalPath := hd.ManagedFilePath(fileID.String())
-	if err := os.Rename(srcPath, finalPath); err != nil { //nolint:gosec // G703: finalPath uses constant filename, srcPath from trusted temp
-		_ = os.RemoveAll(fileDir) //nolint:gosec // G703: cleanup our own dir
+	if err := os.Rename(srcPath, finalPath); err != nil {
+		_ = os.RemoveAll(fileDir)
 		return system.ManagedFileConfig{}, fmt.Errorf("move file: %w", err)
 	}
 
@@ -165,7 +181,7 @@ func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) 
 		UploadedAt: now,
 	}
 	if err := s.cfgStore.PutManagedFile(ctx, lf); err != nil {
-		_ = os.RemoveAll(fileDir) //nolint:gosec // G703: cleanup our own dir
+		_ = os.RemoveAll(fileDir)
 		return system.ManagedFileConfig{}, fmt.Errorf("commit metadata: %w", err)
 	}
 	s.configSignal.Notify()
@@ -193,7 +209,7 @@ func (s *Server) ResolveManagedFilePath(ctx context.Context, filename string) st
 		return ""
 	}
 	// Walk in reverse order (UUIDv7 sorted = creation order) to prefer the latest.
-	for i := len(files) - 1; i >= 0; i-- {
+	for i := range slices.Backward(files) {
 		if files[i].Name == filename {
 			path := s.managedFilePath(files[i].ID.String())
 			if _, err := os.Stat(path); err == nil {

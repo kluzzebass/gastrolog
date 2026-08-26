@@ -152,7 +152,7 @@ func (p *SizeRetentionPolicy) Apply(state VaultState) []ChunkID {
 	// claim of 0, e.g. an evicted cloud-backed chunk) always fits and is
 	// always kept — deleting it would reclaim nothing, so the trigger has
 	// no reason to touch it.
-	for i := len(state.Chunks) - 1; i >= 0; i-- {
+	for i := range slices.Backward(state.Chunks) {
 		meta := state.Chunks[i]
 		claim := state.Claims[meta.ID]
 		if budget+claim <= p.maxBytes {

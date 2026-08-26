@@ -303,24 +303,24 @@ func BuildTLSConfig(params map[string]string, certMgr *cert.Manager) (*tls.Confi
 
 		// Optional CN-based ACL.
 		if pattern := params["tls_allowed_cn"]; pattern != "" {
-			cfg.VerifyPeerCertificate = buildCNVerifier(pattern)
+			// VerifyConnection instead of VerifyPeerCertificate: it runs on
+			// every handshake, including a resumed one, so the CN check
+			// can't be skipped by session resumption.
+			cfg.VerifyConnection = buildCNVerifier(pattern)
 		}
 	}
 
 	return cfg, nil
 }
 
-// buildCNVerifier returns a VerifyPeerCertificate function that checks
-// the client certificate's Common Name against a wildcard pattern.
-func buildCNVerifier(pattern string) func([][]byte, [][]*x509.Certificate) error {
-	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-		if len(rawCerts) == 0 {
+// buildCNVerifier returns a VerifyConnection function that checks the
+// client certificate's Common Name against a wildcard pattern.
+func buildCNVerifier(pattern string) func(tls.ConnectionState) error {
+	return func(cs tls.ConnectionState) error {
+		if len(cs.PeerCertificates) == 0 {
 			return errors.New("relp: no client certificate provided")
 		}
-		cert, err := x509.ParseCertificate(rawCerts[0])
-		if err != nil {
-			return fmt.Errorf("relp: parse client certificate: %w", err)
-		}
+		cert := cs.PeerCertificates[0]
 		matched, err := filepath.Match(pattern, cert.Subject.CommonName)
 		if err != nil {
 			return fmt.Errorf("relp: invalid CN pattern %q: %w", pattern, err)

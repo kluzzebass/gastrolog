@@ -62,8 +62,7 @@ func logClientRPCError(logger *slog.Logger, procedure string, err error) {
 	if logger == nil || err == nil {
 		return
 	}
-	var ce *connect.Error
-	if errors.As(err, &ce) {
+	if ce, ok := errors.AsType[*connect.Error](err); ok {
 		// Normal client disconnect / timeout; avoid log noise.
 		if ce.Code() == connect.CodeCanceled || ce.Code() == connect.CodeDeadlineExceeded {
 			return

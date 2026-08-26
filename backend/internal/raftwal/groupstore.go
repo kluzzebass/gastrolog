@@ -17,8 +17,9 @@ type GroupStore struct {
 
 // Compile-time interface checks.
 var (
-	_ hraft.LogStore    = (*GroupStore)(nil)
-	_ hraft.StableStore = (*GroupStore)(nil)
+	_ hraft.LogStore          = (*GroupStore)(nil)
+	_ hraft.StableStore       = (*GroupStore)(nil)
+	_ hraft.MonotonicLogStore = (*GroupStore)(nil)
 )
 
 // --- LogStore ---
@@ -93,6 +94,14 @@ func (g *GroupStore) StoreLogs(logs []*hraft.Log) error {
 		})
 	}
 }
+
+// IsMonotonic tells hashicorp/raft not to leave this store with an index gap.
+// A snapshot install or restore then clears the whole log in one DeleteRange
+// instead of retaining a TrailingLogs tail below the snapshot index: no dead
+// island pinning WAL segments, and no later truncation spanning the hole.
+// applyDeleteRange serves the whole-log case at the cost of the live entries,
+// which is what the interface asks of it.
+func (g *GroupStore) IsMonotonic() bool { return true }
 
 func (g *GroupStore) DeleteRange(lo, hi uint64) error {
 	return g.wal.submit(writeOp{

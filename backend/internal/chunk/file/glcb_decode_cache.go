@@ -49,7 +49,7 @@ func (m *Manager) dropGLCBDecodeEntry(id chunk.ChunkID) {
 func (m *Manager) enforceGLCBDecodeLRULocked() {
 	for len(m.glcbDecodeLRU) > m.glcbDecodeCap {
 		evicted := false
-		for i := len(m.glcbDecodeLRU) - 1; i >= 0; i-- {
+		for i := range slices.Backward(m.glcbDecodeLRU) {
 			evictID := m.glcbDecodeLRU[i]
 			blob := m.mappedGLCBBlob(evictID)
 			if blob == nil || !blob.TryReleaseRecordTables() {
