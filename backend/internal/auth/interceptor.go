@@ -136,6 +136,15 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator Tok
 			gastrologv1connect.SystemServicePauseVaultProcedure:            true,
 			gastrologv1connect.SystemServiceResumeVaultProcedure:           true,
 			gastrologv1connect.SystemServiceTriggerIngesterProcedure:       true,
+			// ConfigService — storage. Cloud service credentials are
+			// write-only, so a caller able to rewrite a service redirects an
+			// operator's stored keys at an endpoint of their choosing, which
+			// the vault's uploader then spends on the next seal; the
+			// connection test spends them directly.
+			gastrologv1connect.SystemServicePutCloudServiceProcedure:      true,
+			gastrologv1connect.SystemServiceDeleteCloudServiceProcedure:   true,
+			gastrologv1connect.SystemServiceTestCloudServiceProcedure:     true,
+			gastrologv1connect.SystemServiceSetNodeStorageConfigProcedure: true,
 			// ConfigService — certificates
 			gastrologv1connect.SystemServiceListCertificatesProcedure:  true,
 			gastrologv1connect.SystemServiceGetCertificateProcedure:    true,

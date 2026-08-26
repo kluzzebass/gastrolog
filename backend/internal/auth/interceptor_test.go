@@ -433,3 +433,55 @@ func TestCreateUser_RequiresAdmin(t *testing.T) {
 		t.Errorf("expected InvalidArgument, got %v", connect.CodeOf(err))
 	}
 }
+
+// TestStorageMutations_RequireAdmin — a cloud service's credentials are
+// write-only, so anyone who can rewrite the service points the operator's
+// stored keys at an endpoint of their own and the vault's uploader spends
+// them there on the next seal. The connection test spends them outright.
+// Reaching these verbs at all is admin-only.
+func TestStorageMutations_RequireAdmin(t *testing.T) {
+	t.Parallel()
+	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
+	userToken, _, err := tokens.Issue("uid-alice", "alice", "user")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	s := newTestSetup(t, &mockCounter{count: 1})
+	client := gastrologv1connect.NewSystemServiceClient(http.DefaultClient, s.server.URL, withBearer(userToken))
+	ctx := context.Background()
+
+	calls := map[string]func() error{
+		"PutCloudService": func() error {
+			_, err := client.PutCloudService(ctx, connect.NewRequest(&apiv1.PutCloudServiceRequest{
+				Config: &apiv1.CloudService{Name: "archive", Provider: "s3", Bucket: "attacker-bucket", Endpoint: "https://attacker.example.net"},
+			}))
+			return err
+		},
+		"DeleteCloudService": func() error {
+			_, err := client.DeleteCloudService(ctx, connect.NewRequest(&apiv1.DeleteCloudServiceRequest{Id: []byte("id")}))
+			return err
+		},
+		"TestCloudService": func() error {
+			_, err := client.TestCloudService(ctx, connect.NewRequest(&apiv1.TestCloudServiceRequest{Type: "file"}))
+			return err
+		},
+		"SetNodeStorageConfig": func() error {
+			_, err := client.SetNodeStorageConfig(ctx, connect.NewRequest(&apiv1.SetNodeStorageConfigRequest{
+				Config: &apiv1.NodeStorageConfig{NodeId: []byte("node")},
+			}))
+			return err
+		},
+	}
+	for name, call := range calls {
+		t.Run(name, func(t *testing.T) {
+			err := call()
+			if err == nil {
+				t.Fatalf("%s succeeded for a non-admin", name)
+			}
+			if connect.CodeOf(err) != connect.CodePermissionDenied {
+				t.Errorf("%s: code = %v, want PermissionDenied", name, connect.CodeOf(err))
+			}
+		})
+	}
+}

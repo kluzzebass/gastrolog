@@ -7,6 +7,7 @@ import {
 } from "../../api/hooks";
 import { useTestCloudService } from "../../api/hooks/useVaults";
 import { useEditState } from "../../hooks/useEditState";
+import { useThemeClass } from "../../hooks/useThemeClass";
 import { endpointBlocked } from "../../utils/endpointScheme";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { SettingsCard } from "./SettingsCard";
@@ -69,6 +70,27 @@ interface CloudServiceEdit {
  * out exactly as typed: an empty one was never displayed and never changed,
  * and the server reads that as "keep the stored credential".
  */
+/** Whether the operator typed credentials for a connection test to use. */
+function testCredentialsTyped(e: CloudServiceEdit): boolean {
+  return (
+    e.accessKey !== "" ||
+    e.secretKey !== "" ||
+    e.connectionString !== "" ||
+    e.credentialsJson !== ""
+  );
+}
+
+/** Whether an unsaved edit changes where a connection test would go. */
+function destinationEdited(service: CloudService, e: CloudServiceEdit): boolean {
+  return (
+    e.provider !== service.provider ||
+    e.bucket !== service.bucket ||
+    e.region !== service.region ||
+    e.endpoint !== service.endpoint ||
+    e.container !== service.container
+  );
+}
+
 export function cloudServiceSaveRequest(id: string, e: CloudServiceEdit) {
   return {
     id,
@@ -101,6 +123,7 @@ export function CloudServiceCard({
   expanded,
   onToggle,
 }: Readonly<CloudServiceCardProps>) {
+  const c = useThemeClass(dark);
   const putCloudService = usePutCloudService();
   const deleteCloudService = useDeleteCloudService();
   const testCloud = useTestCloudService();
@@ -135,6 +158,12 @@ export function CloudServiceCard({
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
   const edit = getEdit(encode(service.id));
   const endpointInvalid = endpointBlocked(edit.provider, edit.endpoint);
+  // A test that supplies no credentials of its own runs against the saved
+  // service in full — destination included — so unsaved destination edits
+  // are not what got tested. Say so rather than let a green result be read
+  // as a verdict on the changes on screen.
+  const testIgnoresEdits =
+    !testCredentialsTyped(edit) && destinationEdited(service, edit);
 
   const { handleSave, handleDelete } = useCrudHandlers({
     mutation: putCloudService,
@@ -161,9 +190,10 @@ export function CloudServiceCard({
               testCloud.mutate(
                 {
                   type: "file",
-                  // Naming the saved service lets the server fill in the
-                  // credentials the browser was never given, as long as the
-                  // endpoint still matches the one it stored them against.
+                  // Naming the saved service tests it as saved, using the
+                  // credentials the browser was never given. Supplying
+                  // credentials below instead tests exactly what was typed,
+                  // against the destination typed with them.
                   cloudServiceId: encode(service.id),
                   params: {
                     sealed_backing: edit.provider,
@@ -187,6 +217,11 @@ export function CloudServiceCard({
           >
             {testCloud.isPending ? "Testing..." : "Test Connection"}
           </Button>
+          {testIgnoresEdits && !testResult && (
+            <span className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
+              Tests the saved configuration — enter credentials to test these changes.
+            </span>
+          )}
           {testResult && (
             <span className={`text-[0.8em] ${testResult.success ? "text-green-400" : "text-severity-error"}`}>
               {testResult.message}

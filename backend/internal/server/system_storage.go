@@ -64,7 +64,6 @@ func (s *SystemServer) PutCloudService(
 		cfg = cfg.WithPreservedCredentials(*existing)
 	}
 	cfg = cfg.WithoutUnusedCredentials()
-	s.logCloudCredentialChange(existing, cfg)
 
 	// Config-accept validation: reject configs that would fail blobstore store
 	// creation at vault init, so a bad provider config (bare endpoint, missing
@@ -80,6 +79,7 @@ func (s *SystemServer) PutCloudService(
 	if err := s.sysStore.PutCloudService(ctx, cfg); err != nil {
 		return nil, errInternal(err)
 	}
+	s.logCloudCredentialChange(existing, cfg)
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyCloudServicePut, ID: id})
 
 	fullCfg, err := s.buildFullSystem(ctx)
@@ -90,12 +90,19 @@ func (s *SystemServer) PutCloudService(
 }
 
 // logCloudCredentialChange records credential material leaving a cloud
-// service. Credentials are write-only, so the log is the only place the
-// change is visible at all — and a service that quietly stops carrying
-// credentials degrades to whatever ambient chain the provider finds, which
-// is a change an operator must be able to find after the fact.
+// service, after the write it describes has succeeded. Credentials are
+// write-only, so the log is the only place the change is visible at all —
+// and a service that quietly stops carrying credentials degrades to
+// whatever ambient chain the provider finds, which is a change an operator
+// must be able to find after the fact.
+//
+// Any credential material leaving counts, not just a complete set: an S3
+// service holding only an access key still has a secret to lose.
 func (s *SystemServer) logCloudCredentialChange(prev *system.CloudService, next system.CloudService) {
-	if s.logger == nil || prev == nil || !prev.HasCredentials() || next.HasCredentials() {
+	if s.logger == nil || prev == nil {
+		return
+	}
+	if !carriesCredentials(prev.StoreParams()) || carriesCredentials(next.StoreParams()) {
 		return
 	}
 	s.logger.Warn("cloud service credentials removed",

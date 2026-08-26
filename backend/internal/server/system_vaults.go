@@ -528,8 +528,10 @@ func carriesCredentials(params map[string]string) bool {
 // would hand any caller a probe that writes, reads and lists in a bucket of
 // their choosing under the operator's cloud identity, which is precisely
 // what redacting the credentials exists to prevent. For the same reason,
-// spending stored credentials at all is admin-only. Mixing is refused in
-// both directions: half a supplied key pair completed from the store would
+// spending stored credentials at all is admin-only.
+//
+// The two cases never mix. A request that supplies half a key pair is run
+// as given, with the other half empty — completing it from the store would
 // report whether the missing half was guessed correctly.
 func (s *SystemServer) cloudTestParams(ctx context.Context, msg *apiv1.TestCloudServiceRequest) (map[string]string, *connect.Error) {
 	params := make(map[string]string, len(msg.Params))
@@ -549,7 +551,7 @@ func (s *SystemServer) cloudTestParams(ctx context.Context, msg *apiv1.TestCloud
 	if stored == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("cloud service not found"))
 	}
-	if stored.HasCredentials() && !isAdmin(ctx) {
+	if carriesCredentials(stored.StoreParams()) && !isAdmin(ctx) {
 		return nil, connect.NewError(connect.CodePermissionDenied,
 			errors.New("testing a cloud service against its stored credentials requires the admin role"))
 	}

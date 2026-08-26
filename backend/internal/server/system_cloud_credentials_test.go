@@ -14,9 +14,12 @@ package server_test
 // and every mutation echo regardless of caller, is redacted.
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
@@ -46,6 +49,21 @@ func newConfigTestSetupWithCloudTester(t *testing.T, tester server.CloudServiceT
 	srv := server.New(orch, cfgStore, factories, nil, server.Config{
 		CloudTesters: map[string]server.CloudServiceTester{"file": tester},
 	})
+	httpClient := &http.Client{Transport: &embeddedTransport{handler: srv.Handler()}}
+	return gastrologv1connect.NewSystemServiceClient(httpClient, "http://embedded"), cfgStore, orch
+}
+
+// newConfigTestSetupWithLogger is newConfigTestSetup with the server's
+// structured logger captured, so a test can assert on what it recorded.
+func newConfigTestSetupWithLogger(t *testing.T, logger *slog.Logger) (gastrologv1connect.SystemServiceClient, system.Store, *orchestrator.Orchestrator) {
+	t.Helper()
+
+	cfgStore := sysmem.NewStore()
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore, SegmentsDir: filepath.Join(t.TempDir(), "segments")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := server.New(orch, cfgStore, orchestrator.Factories{VaultsDir: t.TempDir()}, nil, server.Config{Logger: logger})
 	httpClient := &http.Client{Transport: &embeddedTransport{handler: srv.Handler()}}
 	return gastrologv1connect.NewSystemServiceClient(httpClient, "http://embedded"), cfgStore, orch
 }
@@ -201,6 +219,52 @@ func TestPutCloudServiceClearsCredentialsOnRequest(t *testing.T) {
 	}
 }
 
+// TestCloudCredentialRemovalIsLoggedOnlyWhenItHappens — credentials are
+// write-only, so this log line is the only record that a service stopped
+// carrying them. A line for a write that was rejected would make the one
+// auditable surface of this change untrustworthy.
+func TestCloudCredentialRemovalIsLoggedOnlyWhenItHappens(t *testing.T) {
+	var logged bytes.Buffer
+	client, cfgStore, _ := newConfigTestSetupWithLogger(t, slog.New(slog.NewTextHandler(&logged, nil)))
+	ctx := adminContext(context.Background())
+
+	id := glid.New()
+	// Only an access key: partial material still counts as something to lose.
+	if err := putCloudService(ctx, client, &gastrologv1.CloudService{
+		Id: id.ToProto(), Name: "half", Provider: "s3",
+		Bucket: "chunks", Region: "us-east-1", AccessKey: "AKIAEXAMPLE",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// A write that would have removed the credentials but is rejected: the
+	// merge has already computed a credential-less config by the time
+	// ValidateConfig refuses it for the missing region.
+	rejected := getCloudService(t, ctx, client, id, false)
+	rejected.Region = ""
+	if _, err := client.PutCloudService(ctx, connect.NewRequest(&gastrologv1.PutCloudServiceRequest{
+		Config: rejected, ClearCredentials: true,
+	})); err == nil {
+		t.Fatal("a config missing a required parameter was accepted")
+	}
+	if stored, err := cfgStore.GetCloudService(ctx, id); err != nil || stored == nil || stored.AccessKey != "AKIAEXAMPLE" {
+		t.Fatalf("the rejected write reached the store: %+v (%v)", stored, err)
+	}
+	if strings.Contains(logged.String(), "credentials removed") {
+		t.Fatalf("a rejected write logged a credential removal:\n%s", logged.String())
+	}
+
+	// The real thing does log.
+	if _, err := client.PutCloudService(ctx, connect.NewRequest(&gastrologv1.PutCloudServiceRequest{
+		Config: getCloudService(t, ctx, client, id, false), ClearCredentials: true,
+	})); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if !strings.Contains(logged.String(), "credentials removed") {
+		t.Fatalf("removing partial credentials was not logged:\n%s", logged.String())
+	}
+}
+
 // TestGetSystemRedactsCloudCredentials pins who sees credential material.
 func TestGetSystemRedactsCloudCredentials(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
@@ -303,8 +367,10 @@ func TestPutCloudServiceEchoNeverCarriesCredentials(t *testing.T) {
 }
 
 // TestCloudServiceConnectionTestUsesStoredCredentials — a connection test on
-// a saved service runs against credentials the caller was never given, but
-// only against the endpoint those credentials were stored for.
+// a saved service runs against credentials the caller was never given, and
+// only against the destination those credentials were stored for: every
+// bucket, region, container and endpoint comes from the stored service, not
+// from the request.
 func TestCloudServiceConnectionTestUsesStoredCredentials(t *testing.T) {
 	var seen map[string]string
 	client, _, _ := newConfigTestSetupWithCloudTester(t, func(_ context.Context, params map[string]string) (string, error) {
@@ -411,6 +477,30 @@ func TestCloudServiceConnectionTestUsesStoredCredentials(t *testing.T) {
 		}
 	})
 
+	// Partial credentials are still credentials to spend: the gate asks
+	// whether any material is stored, not whether a complete set is.
+	t.Run("a partially credentialed service is still admin-only", func(t *testing.T) {
+		partialID := glid.New()
+		if err := putCloudService(ctx, client, &gastrologv1.CloudService{
+			Id: partialID.ToProto(), Name: "half", Provider: "s3",
+			Bucket: "chunks", Region: "us-east-1", AccessKey: "AKIAEXAMPLE",
+		}); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		seen = nil
+		_, err := client.TestCloudService(userContext(context.Background()), connect.NewRequest(&gastrologv1.TestCloudServiceRequest{
+			Type:           "file",
+			CloudServiceId: partialID.ToProto(),
+			Params:         map[string]string{"sealed_backing": "s3", "bucket": "chunks"},
+		}))
+		if connect.CodeOf(err) != connect.CodePermissionDenied {
+			t.Fatalf("code = %v, want PermissionDenied", connect.CodeOf(err))
+		}
+		if seen != nil {
+			t.Fatalf("the tester ran anyway with %v", seen)
+		}
+	})
+
 	t.Run("a caller supplying its own credentials needs no service and no role", func(t *testing.T) {
 		seen = nil
 		if _, err := client.TestCloudService(userContext(context.Background()), connect.NewRequest(&gastrologv1.TestCloudServiceRequest{
@@ -462,14 +552,17 @@ func TestPutCloudServiceDropsCredentialsTheProviderCannotUse(t *testing.T) {
 	}
 }
 
-// TestClusterPutCloudServicePreservesCredentials runs the round trip through
-// the cluster request path — routing interceptor and forwarder wired, config
-// store replicated across nodes.
+// TestClusterPutCloudServicePreservesCredentials runs the round trip on a
+// multi-node harness: several orchestrators, the routing interceptor
+// attached, and clear_credentials carried as a request field rather than as
+// part of the config.
 //
-// PutCloudService is RouteLeader, which forwards the Raft apply but runs the
-// handler on whichever node received the request: the merge reads that node's
-// replicated view of the service, not the leader's. So the preservation has to
-// hold against a replicated read, not just a local one.
+// What it does NOT cover, so nobody reads more into it than is there: the
+// harness gives every node the same in-memory config store object, so there
+// is no Raft, no replication lag and no per-node view, and PutCloudService is
+// RouteLeader, which the routing interceptor passes through without
+// forwarding. A save arriving at a node whose replicated state is behind is
+// therefore untested here.
 func TestClusterPutCloudServicePreservesCredentials(t *testing.T) {
 	t.Parallel()
 	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"}, WithoutVault("coord"))
