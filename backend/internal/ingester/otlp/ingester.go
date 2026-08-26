@@ -29,6 +29,7 @@ import (
 	"gastrolog/internal/ingester/bodyutil"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
+	"gastrolog/internal/panicguard"
 	"gastrolog/internal/pipeline/ingestion"
 )
 
@@ -110,7 +111,11 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 	}()
 	ing.logger.Info("otlp http listening", "addr", httpLn.Addr().String())
 
-	grpcSrv := grpc.NewServer()
+	// grpc-go does not recover panics raised inside a service handler, so
+	// without this interceptor a panic in Export ends the process. The
+	// service exposes only unary methods; a stream interceptor would guard
+	// nothing.
+	grpcSrv := grpc.NewServer(grpc.UnaryInterceptor(ing.recoverUnary))
 	collogspb.RegisterLogsServiceServer(grpcSrv, &logsServiceServer{ing: ing})
 
 	go func() {
@@ -178,6 +183,20 @@ func (ing *Ingester) handleHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/x-protobuf")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(respData)
+}
+
+// recoverUnary turns a panic inside a gRPC handler into an Internal status
+// for that one call, so a hostile export costs the caller its request and
+// not the node its process.
+func (ing *Ingester) recoverUnary(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
+	defer func() {
+		if v := recover(); v != nil {
+			panicguard.Log(ing.logger, "OTLP gRPC handler", v, "method", info.FullMethod)
+			resp = nil
+			err = status.Error(codes.Internal, "internal error")
+		}
+	}()
+	return handler(ctx, req)
 }
 
 // errBackpressure signals the queue is near capacity.

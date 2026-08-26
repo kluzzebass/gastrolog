@@ -10,6 +10,7 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/panicguard"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
 )
@@ -107,31 +108,7 @@ func (s *QueryServer) startRemoteFollows(ctx context.Context, q query.Query) <-c
 		wg.Add(1)
 		go func(nodeID string, vaultBytes [][]byte) {
 			defer wg.Done()
-
-			recCh, errCh := s.remoteSearcher.Follow(ctx, nodeID, &apiv1.ForwardFollowRequest{
-				VaultIds: vaultBytes,
-				Query:    queryExpr,
-			})
-
-			for {
-				select {
-				case rec, ok := <-recCh:
-					if !ok {
-						// Check for error after channel closes.
-						if err := <-errCh; err != nil {
-							s.logger.Warn("follow: remote stream error", "node", nodeID, "err", err)
-						}
-						return
-					}
-					select {
-					case merged <- exportToRecord(rec):
-					case <-ctx.Done():
-						return
-					}
-				case <-ctx.Done():
-					return
-				}
-			}
+			s.pumpRemoteFollow(ctx, nodeID, vaultBytes, queryExpr, merged)
 		}(nodeID, vaultBytes)
 	}
 
@@ -142,6 +119,45 @@ func (s *QueryServer) startRemoteFollows(ctx context.Context, q query.Query) <-c
 	}()
 
 	return merged
+}
+
+// pumpRemoteFollow forwards one remote node's follow stream into the merge
+// channel until the stream ends or ctx is done. A panic while decoding a
+// remote record costs the follow that node's records; the caller's wg.Done
+// still runs, so the merge channel is still closed when the rest finish.
+func (s *QueryServer) pumpRemoteFollow(
+	ctx context.Context,
+	nodeID string,
+	vaultBytes [][]byte,
+	queryExpr string,
+	merged chan<- *apiv1.Record,
+) {
+	defer panicguard.Recover(s.logger, "follow remote stream", "node", nodeID)
+
+	recCh, errCh := s.remoteSearcher.Follow(ctx, nodeID, &apiv1.ForwardFollowRequest{
+		VaultIds: vaultBytes,
+		Query:    queryExpr,
+	})
+
+	for {
+		select {
+		case rec, ok := <-recCh:
+			if !ok {
+				// Check for error after channel closes.
+				if err := <-errCh; err != nil {
+					s.logger.Warn("follow: remote stream error", "node", nodeID, "err", err)
+				}
+				return
+			}
+			select {
+			case merged <- exportToRecord(rec):
+			case <-ctx.Done():
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // mergeFollowStreams interleaves local follow records with remote records
@@ -160,16 +176,7 @@ func (s *QueryServer) mergeFollowStreams(
 
 	// Both local and remote: run local in a goroutine, merge via channel.
 	localCh := make(chan localFollowMsg, 64)
-	go func() {
-		defer close(localCh)
-		for rec, err := range localIter {
-			select {
-			case localCh <- localFollowMsg{rec: rec, err: err}:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	go func() { s.pumpLocalFollow(ctx, localIter, localCh) }()
 
 	for {
 		select {
@@ -196,6 +203,27 @@ func (s *QueryServer) mergeFollowStreams(
 type localFollowMsg struct {
 	rec chunk.Record
 	err error
+}
+
+// pumpLocalFollow drains the local follow iterator into localCh and closes it
+// when the iterator ends. A panic inside the iterator ends the follow for
+// this one client: localCh still closes, so the merge loop finishes the
+// stream from the remote side instead of the node dying mid-tail.
+func (s *QueryServer) pumpLocalFollow(
+	ctx context.Context,
+	localIter iter.Seq2[chunk.Record, error],
+	localCh chan<- localFollowMsg,
+) {
+	defer close(localCh)
+	defer panicguard.Recover(s.logger, "follow local iterator")
+
+	for rec, err := range localIter {
+		select {
+		case localCh <- localFollowMsg{rec: rec, err: err}:
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // streamLocalFollow streams all records from a local follow iterator.

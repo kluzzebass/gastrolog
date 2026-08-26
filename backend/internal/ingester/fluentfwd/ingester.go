@@ -22,6 +22,7 @@ import (
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
+	"gastrolog/internal/panicguard"
 	"gastrolog/internal/pipeline/ingestion"
 )
 
@@ -124,7 +125,11 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 			continue
 		}
 
+		remote := conn.RemoteAddr().String()
 		wg.Go(func() {
+			// A panic on a hostile record costs this connection, not the
+			// node and every other vault and ingester running on it.
+			defer panicguard.Recover(ing.logger, "fluent forward connection", "remote", remote)
 			ing.handleConn(ctx, conn)
 		})
 	}

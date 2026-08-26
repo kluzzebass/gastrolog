@@ -15,6 +15,7 @@ import (
 	"gastrolog/internal/ingester/syslogparse"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
+	"gastrolog/internal/panicguard"
 	"gastrolog/internal/pipeline/ingestion"
 )
 
@@ -82,9 +83,13 @@ func (r *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage
 	errCh := make(chan error, 2)
 
 	// Start UDP listener if configured.
+	// A panic in a listener loop is reported as a run failure rather than
+	// swallowed: the ingester manager retries a failed run, so the listener
+	// comes back instead of going quietly deaf.
 	if r.udpAddr != "" {
 		wg.Go(func() {
-			if err := r.runUDP(ctx); err != nil {
+			err := panicguard.Call(r.logger, "syslog UDP listener", func() error { return r.runUDP(ctx) })
+			if err != nil {
 				errCh <- err
 			}
 		})
@@ -93,7 +98,8 @@ func (r *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage
 	// Start TCP listener if configured.
 	if r.tcpAddr != "" {
 		wg.Go(func() {
-			if err := r.runTCP(ctx); err != nil {
+			err := panicguard.Call(r.logger, "syslog TCP listener", func() error { return r.runTCP(ctx) })
+			if err != nil {
 				errCh <- err
 			}
 		})
@@ -240,8 +246,12 @@ func (r *Ingester) runTCP(ctx context.Context) error {
 			continue
 		}
 
+		remote := conn.RemoteAddr().String()
 		wg.Go(func() {
 			defer func() { _ = conn.Close() }()
+			// A panic on a hostile frame costs this connection, not the
+			// node and every other vault and ingester running on it.
+			defer panicguard.Recover(r.logger, "syslog TCP connection", "remote", remote)
 			r.handleTCPConn(ctx, conn)
 		})
 	}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chanwatch"
+	"gastrolog/internal/panicguard"
 	"gastrolog/internal/pipeline/ingestion"
 )
 
@@ -90,11 +91,14 @@ func streamOnce(
 
 	go func() {
 		defer close(entries)
-		if isTTY || info.IsTTY {
-			streamErr <- readRaw(body, entries)
-		} else {
-			streamErr <- readMultiplexed(body, entries)
-		}
+		// A panic on a malformed frame is reported as a stream error so
+		// this container's stream reconnects, rather than ending the node.
+		streamErr <- panicguard.Call(logger, "docker frame reader", func() error {
+			if isTTY || info.IsTTY {
+				return readRaw(body, entries)
+			}
+			return readMultiplexed(body, entries)
+		})
 	}()
 
 	attrs := map[string]string{

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chanwatch"
+	"gastrolog/internal/panicguard"
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/querylang"
 )
@@ -116,12 +117,14 @@ func (ing *ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 
 	// Launch events listener.
 	wg.Go(func() {
+		defer panicguard.Recover(ing.logger, "docker event loop")
 		ing.eventLoop(ctx, out, &wg)
 	})
 
 	// Launch poll ticker.
 	if ing.pollInterval > 0 {
 		wg.Go(func() {
+			defer panicguard.Recover(ing.logger, "docker poll loop")
 			ing.pollLoop(ctx, out, &wg)
 		})
 	}
@@ -208,7 +211,13 @@ func (ing *ingester) startContainer(ctx context.Context, info containerInfo, out
 	logger := ing.logger
 	gate := ing.pressureGate
 	wg.Go(func() {
-		streamContainer(cctx, ing.client, info, since, ing.stdout, ing.stderr, ing.id, logger, out, ing.updateTimestamp, gate)
+		// The guard wraps only the stream: a container that stopped
+		// streaming must leave the tracking map either way, or the poll
+		// loop never restarts it.
+		func() {
+			defer panicguard.Recover(logger, "docker log stream", "container", info.ID)
+			streamContainer(cctx, ing.client, info, since, ing.stdout, ing.stderr, ing.id, logger, out, ing.updateTimestamp, gate)
+		}()
 		ing.mu.Lock()
 		delete(ing.containers, info.ID)
 		ing.mu.Unlock()
