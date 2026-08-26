@@ -482,18 +482,22 @@ func (ing *Ingester) processRecord(ctx context.Context, tag string, ts time.Time
 			dropped++
 		}
 	}
-	if dropped > 0 {
-		if n, ok := ing.refusedLog.Allow("record-attrs"); ok {
-			ing.logger.Warn("fluent record attributes dropped: over ceiling",
-				"tag", tag, "dropped", dropped, "max_attrs", limits.Records.Count, "suppressed", n)
-		}
-	}
-
 	// The ingester's own attributes are set last and outside the budget:
 	// they identify where the record came from, so a field flood must
-	// neither crowd them out nor be able to forge them.
-	attrs["tag"] = tag
-	attrs["ingester_type"] = "fluentfwd"
+	// neither crowd them out nor forge them. "tag" is a plausible field
+	// name, so a record can lose one this way — which is counted, because
+	// a field that vanishes without a word is indistinguishable to the
+	// sender from one that never arrived.
+	displaced := setOwnAttr(attrs, "tag", tag)
+	displaced += setOwnAttr(attrs, "ingester_type", "fluentfwd")
+
+	if dropped > 0 || displaced > 0 {
+		if n, ok := ing.refusedLog.Allow("record-attrs"); ok {
+			ing.logger.Warn("fluent record attributes dropped",
+				"tag", tag, "dropped", dropped, "displaced", displaced,
+				"max_attrs", limits.Records.Count, "suppressed", n)
+		}
+	}
 
 	msg := ingestion.IngesterMessage{
 		Attrs:      attrs,
@@ -510,6 +514,18 @@ func (ing *Ingester) processRecord(ctx context.Context, tag string, ts time.Time
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// setOwnAttr writes one of the ingester's own attributes over whatever the
+// record had under that name, reporting whether it displaced a different
+// value.
+func setOwnAttr(attrs map[string]string, key, value string) int {
+	displaced := 0
+	if existing, ok := attrs[key]; ok && existing != value {
+		displaced = 1
+	}
+	attrs[key] = value
+	return displaced
 }
 
 // decodeTime decodes a msgpack value as a timestamp.

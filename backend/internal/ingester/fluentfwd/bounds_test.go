@@ -2,8 +2,8 @@ package fluentfwd
 
 import (
 	"bytes"
+	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -33,55 +33,166 @@ func startBoundedFluent(t *testing.T) (string, chan ingestion.IngesterMessage, *
 	return addr, out, logs
 }
 
+// floodKey names a field in the flood. The keys are zero-padded so that
+// sorted order — the order the ceiling keeps — is also numeric order, and
+// the test can name the survivors.
+func floodKey(i int) string { return "k" + fmt.Sprintf("%05d", i) }
+
+// messageModeRecord encodes a message-mode frame carrying record.
+func messageModeRecord(tag string, record map[string]any) []byte {
+	var buf bytes.Buffer
+	enc := msgpack.NewEncoder(&buf)
+	_ = enc.EncodeArrayLen(3)
+	_ = enc.EncodeString(tag)
+	_ = enc.EncodeInt(time.Now().Unix())
+	_ = enc.EncodeMap(record)
+	return buf.Bytes()
+}
+
 // TestRecordFieldFloodIsBounded proves a record carrying tens of thousands
 // of fields cannot explode the attribute map — or, downstream, index
 // cardinality. The log line itself still lands: fields are dropped, the
 // record is not.
+//
+// It also pins WHICH fields survive. msgpack hands the record over as a Go
+// map, whose iteration order is randomized, so dropping whatever the range
+// happened to reach last would ingest two identical records differently and
+// the same record differently on the next process. The survivors are the
+// first Count in sorted order, every time.
 func TestRecordFieldFloodIsBounded(t *testing.T) {
 	t.Parallel()
 	addr, out, logs := startBoundedFluent(t)
 
 	record := map[string]any{"message": "the log line"}
 	for i := range 50_000 {
-		record["k"+strconv.Itoa(i)] = "v"
+		record[floodKey(i)] = "v"
 	}
-
-	var buf bytes.Buffer
-	enc := msgpack.NewEncoder(&buf)
-	_ = enc.EncodeArrayLen(3)
-	_ = enc.EncodeString("app.log")
-	_ = enc.EncodeInt(time.Now().Unix())
-	_ = enc.EncodeMap(record)
+	frame := messageModeRecord("app.log", record)
 
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 	defer conn.Close()
-	if _, err := conn.Write(buf.Bytes()); err != nil {
+
+	// The same record twice: the two passes must agree, or the vault sees
+	// two different records for one input.
+	if _, err := conn.Write(frame); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := conn.Write(frame); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
-	select {
-	case msg := <-out:
-		fromProducer := 0
-		for k := range msg.Attrs {
-			if strings.HasPrefix(k, "k") {
-				fromProducer++
-			}
+	first := recvBounded(t, out)
+	second := recvBounded(t, out)
+
+	fromProducer := 0
+	for k := range first.Attrs {
+		if strings.HasPrefix(k, "k") {
+			fromProducer++
 		}
-		if fromProducer > limits.Records.Count {
-			t.Errorf("stored %d producer attributes, past the %d ceiling", fromProducer, limits.Records.Count)
+	}
+	if fromProducer != limits.Records.Count {
+		t.Errorf("stored %d producer fields, want exactly the %d the ceiling allows", fromProducer, limits.Records.Count)
+	}
+	for i := range limits.Records.Count {
+		if _, ok := first.Attrs[floodKey(i)]; !ok {
+			t.Fatalf("%s was dropped; the survivors are not the first %d in sorted order",
+				floodKey(i), limits.Records.Count)
 		}
-		if string(msg.Raw) != "the log line" {
-			t.Errorf("the record's payload was lost: %q", msg.Raw)
+	}
+	if _, ok := first.Attrs[floodKey(limits.Records.Count)]; ok {
+		t.Errorf("%s survived past the ceiling", floodKey(limits.Records.Count))
+	}
+	if string(first.Raw) != "the log line" {
+		t.Errorf("the record's payload was lost: %q", first.Raw)
+	}
+
+	if len(second.Attrs) != len(first.Attrs) {
+		t.Fatalf("field count differed between passes: %d then %d", len(first.Attrs), len(second.Attrs))
+	}
+	for k, v := range first.Attrs {
+		if second.Attrs[k] != v {
+			t.Fatalf("field %q survived one pass and not the other", k)
 		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("the record was dropped entirely; only its excess fields should have been")
 	}
 
 	if !logs.Wait(5*time.Second, "fluent record attributes dropped", "max_attrs") {
 		t.Errorf("attributes were dropped silently: %s", logs)
+	}
+}
+
+// TestRecordFieldsCannotForgeTheIngestersOwnAttributes proves a producer
+// cannot overwrite the attributes that say where a record came from — and
+// that a record field displaced this way is reported rather than vanishing.
+// "tag" is a plausible field name, so this is a real record losing a real
+// field, not only an attack.
+func TestRecordFieldsCannotForgeTheIngestersOwnAttributes(t *testing.T) {
+	t.Parallel()
+	addr, out, logs := startBoundedFluent(t)
+
+	frame := messageModeRecord("app.log", map[string]any{
+		"message":       "line",
+		"tag":           "somewhere-else",
+		"ingester_type": "syslog",
+	})
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	if _, err := conn.Write(frame); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	msg := recvBounded(t, out)
+	if msg.Attrs["tag"] != "app.log" {
+		t.Errorf("a record field forged the tag: %q", msg.Attrs["tag"])
+	}
+	if msg.Attrs["ingester_type"] != "fluentfwd" {
+		t.Errorf("a record field forged ingester_type: %q", msg.Attrs["ingester_type"])
+	}
+
+	if !logs.Wait(5*time.Second, "fluent record attributes dropped", "displaced=2") {
+		t.Errorf("displaced fields vanished without a word: %s", logs)
+	}
+}
+
+// TestUncontestedFieldsAreNotReportedAsDisplaced proves the accounting does
+// not cry wolf: a record whose fields do not collide reports nothing.
+func TestUncontestedFieldsAreNotReportedAsDisplaced(t *testing.T) {
+	t.Parallel()
+	addr, out, logs := startBoundedFluent(t)
+
+	frame := messageModeRecord("app.log", map[string]any{"message": "line", "level": "info"})
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	if _, err := conn.Write(frame); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	if msg := recvBounded(t, out); msg.Attrs["level"] != "info" {
+		t.Errorf("field lost: %v", msg.Attrs)
+	}
+	if logs.Contains("fluent record attributes dropped") {
+		t.Errorf("a conforming record was reported as lossy: %s", logs)
+	}
+}
+
+func recvBounded(t *testing.T, out chan ingestion.IngesterMessage) ingestion.IngesterMessage {
+	t.Helper()
+	select {
+	case msg := <-out:
+		return msg
+	case <-time.After(10 * time.Second):
+		t.Fatal("the record was dropped entirely; only its excess fields should have been")
+		return ingestion.IngesterMessage{}
 	}
 }
 
@@ -136,21 +247,14 @@ func TestConformingRecordsAreUntouched(t *testing.T) {
 	addr, out, logs := startBoundedFluent(t)
 
 	stack := strings.Repeat("frame\n", 500)
-	record := map[string]any{"message": "line", "level": "error", "stack": stack}
-
-	var buf bytes.Buffer
-	enc := msgpack.NewEncoder(&buf)
-	_ = enc.EncodeArrayLen(3)
-	_ = enc.EncodeString("app.log")
-	_ = enc.EncodeInt(time.Now().Unix())
-	_ = enc.EncodeMap(record)
+	frame := messageModeRecord("app.log", map[string]any{"message": "line", "level": "error", "stack": stack})
 
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 	defer conn.Close()
-	if _, err := conn.Write(buf.Bytes()); err != nil {
+	if _, err := conn.Write(frame); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
