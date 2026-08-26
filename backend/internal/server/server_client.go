@@ -10,12 +10,21 @@ import (
 	"connectrpc.com/connect"
 
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
+	"gastrolog/internal/auth"
 	"gastrolog/internal/system"
 )
 
 // tokenValidator adapts system.Store to auth.TokenValidator.
 type tokenValidator struct {
 	cfgStore system.Store
+}
+
+// apiVerifier returns the authorization verifier for API callers. The Connect
+// interceptor and the plain HTTP routes both authorize through it, so a role
+// claim is checked against the same revocation state everywhere: a demoted,
+// logged-out or deleted user is rejected on every entry point at once.
+func (s *Server) apiVerifier() *auth.Verifier {
+	return auth.NewVerifier(s.tokens, &tokenValidator{cfgStore: s.cfgStore})
 }
 
 func (tv *tokenValidator) IsTokenValid(ctx context.Context, userID string, issuedAt time.Time) (bool, error) {
@@ -34,6 +43,22 @@ func (tv *tokenValidator) IsTokenValid(ctx context.Context, userID string, issue
 		return false, nil // token issued before invalidation
 	}
 	return true, nil
+}
+
+// writeAuthError maps an authorization error onto the HTTP status a route that
+// does not speak Connect should return. The caller of a denied request learns
+// only whether they need to authenticate or need a different role.
+func writeAuthError(w http.ResponseWriter, err error) {
+	code := connect.CodeOf(err)
+	if code == connect.CodeUnauthenticated {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if code == connect.CodePermissionDenied {
+		http.Error(w, "admin role required", http.StatusForbidden)
+		return
+	}
+	http.Error(w, "authorization check failed", http.StatusInternalServerError)
 }
 
 // Client creates a set of Connect clients for the given base URL.

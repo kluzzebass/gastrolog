@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -52,31 +51,23 @@ type UserCounter interface {
 	CountUsers(ctx context.Context) (int, error)
 }
 
-// TokenValidator checks whether a token is still valid after JWT verification.
-// This is used for server-side token revocation (e.g. after logout, password
-// change, or role change).
-type TokenValidator interface {
-	IsTokenValid(ctx context.Context, userID string, issuedAt time.Time) (bool, error)
-}
-
-// AuthInterceptor is a Connect interceptor that validates JWT tokens
-// and enforces the authorization level each RPC declares in its proto.
+// AuthInterceptor is a Connect interceptor that enforces the authorization
+// level each RPC declares in its proto.
 type AuthInterceptor struct {
-	tokens    *TokenService
-	counter   UserCounter
-	validator TokenValidator
-	levels    map[string]apiv1.AuthLevel
+	verifier *Verifier
+	counter  UserCounter
+	levels   map[string]apiv1.AuthLevel
 }
 
 // NewAuthInterceptor creates an interceptor that enforces the level each RPC
 // declares through the auth_level method option. A procedure that declares no
-// level is denied. validator may be nil (token revocation is skipped).
-func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator TokenValidator) *AuthInterceptor {
+// level is denied. The verifier is shared with any non-Connect route that
+// authorizes callers, so both apply the same checks.
+func NewAuthInterceptor(verifier *Verifier, counter UserCounter) *AuthInterceptor {
 	return &AuthInterceptor{
-		tokens:    tokens,
-		counter:   counter,
-		validator: validator,
-		levels:    procedureLevels(),
+		verifier: verifier,
+		counter:  counter,
+		levels:   procedureLevels(),
 	}
 }
 
@@ -107,9 +98,9 @@ func (i *AuthInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) 
 	return next
 }
 
-// authenticate checks the token and declared level for a procedure.
-// Returns the (possibly enriched) context or a Connect error.
-func (i *AuthInterceptor) authenticate(ctx context.Context, procedure string, headers interface{ Get(string) string }) (context.Context, error) {
+// authenticate checks the declared level for a procedure and resolves the
+// caller. Returns the (possibly enriched) context or a Connect error.
+func (i *AuthInterceptor) authenticate(ctx context.Context, procedure string, headers HeaderGetter) (context.Context, error) {
 	// Authorization is part of an RPC's contract: a procedure that declares no
 	// level is denied, so an RPC added without one is unreachable rather than
 	// open to everyone.
@@ -118,73 +109,30 @@ func (i *AuthInterceptor) authenticate(ctx context.Context, procedure string, he
 		return ctx, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("procedure %s declares no authorization level", procedure))
 	}
 
-	// Public endpoints need no auth but still benefit from knowing WHO is
-	// calling (e.g. GetSettings returns more data to authenticated users).
-	// Best-effort: parse the token if present, ignore failures.
-	if level == apiv1.AuthLevel_AUTH_LEVEL_PUBLIC {
-		return i.bestEffortClaims(ctx, headers), nil
-	}
-
-	// First-boot: if no users exist, allow Register (so the first admin
-	// can be created) but block everything else.
-	count, err := i.counter.CountUsers(ctx)
-	if err != nil {
-		return ctx, connect.NewError(connect.CodeInternal, fmt.Errorf("check user count: %w", err))
-	}
-	if count == 0 {
-		if procedure == gastrologv1connect.AuthServiceRegisterProcedure {
-			return ctx, nil
+	// First-boot: if no users exist, allow Register (so the first admin can be
+	// created) but block everything else. Public procedures skip the gate —
+	// they are what a browser needs before anyone can log in.
+	if level != apiv1.AuthLevel_AUTH_LEVEL_PUBLIC {
+		count, err := i.counter.CountUsers(ctx)
+		if err != nil {
+			return ctx, connect.NewError(connect.CodeInternal, fmt.Errorf("check user count: %w", err))
 		}
-		return ctx, connect.NewError(connect.CodeUnauthenticated, errors.New("no users registered; call Register to create the first user"))
+		if count == 0 {
+			if procedure == gastrologv1connect.AuthServiceRegisterProcedure {
+				return ctx, nil
+			}
+			return ctx, connect.NewError(connect.CodeUnauthenticated, errors.New("no users registered; call Register to create the first user"))
+		}
 	}
 
-	// Extract, verify, and validate the token.
-	claims, err := i.verifiedClaims(ctx, headers)
+	// A public procedure resolves whoever is calling without requiring it: a
+	// handler such as GetSettings returns more to a known caller.
+	claims, err := i.verifier.Authorize(ctx, level, headers)
 	if err != nil {
 		return ctx, err
 	}
-
-	if level == apiv1.AuthLevel_AUTH_LEVEL_ADMIN && claims.Role != "admin" {
-		return ctx, connect.NewError(connect.CodePermissionDenied, errors.New("admin role required"))
+	if claims == nil {
+		return ctx, nil
 	}
-
 	return WithClaims(ctx, claims), nil
-}
-
-// verifiedClaims extracts a Bearer token from headers, verifies its signature,
-// and checks server-side revocation. Returns the parsed claims or a Connect error.
-func (i *AuthInterceptor) verifiedClaims(ctx context.Context, headers interface{ Get(string) string }) (*Claims, error) {
-	authHeader := headers.Get("Authorization")
-	if authHeader == "" {
-		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("missing authorization header"))
-	}
-	token, ok := strings.CutPrefix(authHeader, "Bearer ")
-	if !ok {
-		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authorization header must use Bearer scheme"))
-	}
-	claims, err := i.tokens.Verify(token)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid token: %w", err))
-	}
-	if i.validator != nil && claims.IssuedAt != nil {
-		valid, err := i.validator.IsTokenValid(ctx, claims.UserID, claims.IssuedAt.Time)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("validate token: %w", err))
-		}
-		if !valid {
-			return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("token has been revoked"))
-		}
-	}
-	return claims, nil
-}
-
-// bestEffortClaims tries to extract and verify claims from the Authorization
-// header. On any failure (missing header, bad token, expired, revoked) it
-// returns the original context unchanged — the caller proceeds as anonymous.
-func (i *AuthInterceptor) bestEffortClaims(ctx context.Context, headers interface{ Get(string) string }) context.Context {
-	claims, err := i.verifiedClaims(ctx, headers)
-	if err != nil {
-		return ctx
-	}
-	return WithClaims(ctx, claims)
 }

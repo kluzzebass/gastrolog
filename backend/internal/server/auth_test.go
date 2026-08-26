@@ -46,7 +46,7 @@ func newAuthTestClientWithInterceptor(t *testing.T) (gastrologv1connect.AuthServ
 	cfgStore := sysmem.NewStore()
 	tokens := auth.NewTokenService([]byte("test-secret-32-bytes-long-key!!"), 7*24*time.Hour)
 	authServer := server.NewAuthServer(cfgStore, tokens, nil, false)
-	interceptor := auth.NewAuthInterceptor(tokens, cfgStore, alwaysValidTokenValidator{})
+	interceptor := auth.NewAuthInterceptor(auth.NewVerifier(tokens, alwaysValidTokenValidator{}), cfgStore)
 
 	_, handler := gastrologv1connect.NewAuthServiceHandler(authServer,
 		connect.WithInterceptors(interceptor),

@@ -1112,9 +1112,9 @@ Live on `Config` directly (not as entities):
   zero-or-more refresh tokens. Managed via `SystemCommand_CreateUser`,
   `UpdatePassword`, etc.
 
-- **Role** — coarse permission set. Today: `admin`, `operator`,
-  `viewer` (exact set is in
-  [`auth/roles.go`](../backend/internal/auth/roles.go)).
+- **Role** — coarse permission set carried on `User.Role` and in the JWT.
+  Two values: `admin` and `user`, enforced where a role is written
+  ([`server/auth.go`](../backend/internal/server/auth.go)).
 
 - **AuthLevel** — the authorization an RPC requires, declared on the
   method itself via the `auth_level` option in

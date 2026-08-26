@@ -85,6 +85,13 @@ func TestOperatorProceduresRequireAdmin(t *testing.T) {
 		"/gastrolog.v1.VaultService/RetryUnreadableChunks",
 		"/gastrolog.v1.VaultService/ArchiveChunk",
 		"/gastrolog.v1.VaultService/RestoreChunk",
+		// Cloud service destinations hold write-only credentials: a caller able
+		// to rewrite one redirects the operator's keys at an endpoint of their
+		// choosing, and the connection test spends them.
+		"/gastrolog.v1.SystemService/PutCloudService",
+		"/gastrolog.v1.SystemService/DeleteCloudService",
+		"/gastrolog.v1.SystemService/TestCloudService",
+		"/gastrolog.v1.SystemService/SetNodeStorageConfig",
 	}
 	for _, procedure := range operator {
 		if levels[procedure] != apiv1.AuthLevel_AUTH_LEVEL_ADMIN {
@@ -111,7 +118,7 @@ func TestUndeclaredProcedureIsDenied(t *testing.T) {
 			reached = true
 			return connect.NewResponse(&apiv1.LoginResponse{}), nil
 		},
-		connect.WithInterceptors(NewAuthInterceptor(tokens, &countingUsers{count: 1}, nil)),
+		connect.WithInterceptors(NewAuthInterceptor(NewVerifier(tokens, nil), &countingUsers{count: 1})),
 	)
 	mux := http.NewServeMux()
 	mux.Handle(procedure, handler)
@@ -131,6 +138,58 @@ func TestUndeclaredProcedureIsDenied(t *testing.T) {
 	}
 	if reached {
 		t.Error("handler ran for an undeclared procedure")
+	}
+}
+
+// TestUnrecognizedLevelIsDenied covers a level this build does not know: a
+// value added to the schema ahead of the code enforces as denial, not as the
+// weakest known level.
+func TestUnrecognizedLevelIsDenied(t *testing.T) {
+	t.Parallel()
+	tokens := NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
+	adminToken, _, err := tokens.Issue("uid-admin", "admin", "admin")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	headers := http.Header{"Authorization": []string{"Bearer " + adminToken}}
+	verifier := NewVerifier(tokens, nil)
+
+	// A level past the last one this build names, and the unspecified zero
+	// value. An admin token is the strongest credential available, so a denial
+	// here is the level's doing and not the caller's.
+	for _, level := range []apiv1.AuthLevel{apiv1.AuthLevel(99), apiv1.AuthLevel_AUTH_LEVEL_UNSPECIFIED} {
+		claims, err := verifier.Authorize(context.Background(), level, headers)
+		if err == nil {
+			t.Errorf("level %d: allowed, want denied", int32(level))
+			continue
+		}
+		if connect.CodeOf(err) != connect.CodePermissionDenied {
+			t.Errorf("level %d: code %v, want PermissionDenied", int32(level), connect.CodeOf(err))
+		}
+		if claims != nil {
+			t.Errorf("level %d: returned claims %+v, want none", int32(level), claims)
+		}
+	}
+
+	// The interceptor must not route around the switch: a procedure whose table
+	// entry carries an unknown level is denied too.
+	const procedure = "/gastrolog.v1.SystemService/GetSystem"
+	interceptor := &AuthInterceptor{
+		verifier: verifier,
+		counter:  &countingUsers{count: 1},
+		levels:   map[string]apiv1.AuthLevel{procedure: apiv1.AuthLevel(99)},
+	}
+	if _, err := interceptor.authenticate(context.Background(), procedure, headers); err == nil {
+		t.Error("interceptor allowed an unknown level")
+	} else if connect.CodeOf(err) != connect.CodePermissionDenied {
+		t.Errorf("interceptor code %v, want PermissionDenied", connect.CodeOf(err))
+	}
+
+	// Premise: the same interceptor allows the same caller at a known level, so
+	// the denials above are the level and not the harness.
+	interceptor.levels[procedure] = apiv1.AuthLevel_AUTH_LEVEL_ADMIN
+	if _, err := interceptor.authenticate(context.Background(), procedure, headers); err != nil {
+		t.Errorf("admin at ADMIN level: %v, want allowed", err)
 	}
 }
 
