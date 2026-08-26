@@ -54,11 +54,11 @@ export function scatterTooltipHtml(
   params: any,
   xLabel: string,
   yLabel: string,
-  pointLabels: string[],
+  points: readonly { label: string }[],
 ): string {
   const p = Array.isArray(params) ? params[0] : params;
   const [x, y] = p.value as [number, number];
-  const label = pointLabels[p.dataIndex as number];
+  const label = points[p.dataIndex as number]?.label;
   const lines: string[] = [];
   if (label) lines.push(header(label));
   lines.push(

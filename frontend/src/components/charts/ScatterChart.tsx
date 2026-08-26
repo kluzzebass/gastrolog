@@ -70,8 +70,7 @@ export function ScatterChart({ columns, rows, dark }: Readonly<ScatterChartProps
     tooltip: {
       ...theme.tooltip as object,
       trigger: "item",
-      formatter: (params: any) =>
-        scatterTooltipHtml(params, xLabel, yLabel, data.map((d) => d.label)),
+      formatter: (params: any) => scatterTooltipHtml(params, xLabel, yLabel, data),
     },
     series: [
       {

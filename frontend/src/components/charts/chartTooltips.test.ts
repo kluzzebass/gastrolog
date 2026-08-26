@@ -16,6 +16,15 @@ import type { HistogramData } from "../../utils/histogramData";
 const HOSTILE = `<img src=x onerror=alert(1)>`;
 
 /**
+ * A payload made of quotes rather than angle brackets. No builder interpolates
+ * a log-derived value into an attribute today, so this cannot execute — it is
+ * here so that dropping quote escaping fails a test instead of passing one, and
+ * so the next builder that does reach attribute position inherits a helper
+ * already known to close it.
+ */
+const QUOTED_HOSTILE = `" onmouseover="alert(1)`;
+
+/**
  * Render tooltip HTML the way ECharts does and report what the browser made
  * of it: the visible text, and whether any element was constructed.
  */
@@ -62,6 +71,18 @@ function expectInert(html: string) {
   expect(host.textContent).toContain(HOSTILE);
 }
 
+/** Assert quotes were escaped, so the value cannot close an attribute. */
+function expectQuotesClosed(html: string) {
+  const host = document.createElement("div");
+  host.innerHTML = html;
+  expect(html).toContain("&quot;");
+  expect(html).not.toContain(`"alert(1)`);
+  for (const el of host.querySelectorAll("*")) {
+    expect(el.hasAttribute("onmouseover")).toBe(false);
+  }
+  expect(host.textContent).toContain(QUOTED_HOSTILE);
+}
+
 describe("barTooltipHtml", () => {
   test("renders a hostile category label inert", () => {
     const html = barTooltipHtml({ name: HOSTILE, color: "#c97", value: 12 }, ["host", "count"]);
@@ -71,6 +92,11 @@ describe("barTooltipHtml", () => {
   test("a hostile column header cannot break out either", () => {
     const html = barTooltipHtml({ name: "web-1", color: "#c97", value: 12 }, ["host", HOSTILE]);
     expectInert(html);
+  });
+
+  test("a quote-bearing category label cannot close an attribute", () => {
+    const html = barTooltipHtml({ name: QUOTED_HOSTILE, color: "#c97", value: 12 }, ["host", "count"]);
+    expectQuotesClosed(html);
   });
 
   test("benign values keep their displayed text and markup", () => {
@@ -130,16 +156,16 @@ describe("heatmapTooltipHtml", () => {
 
 describe("scatterTooltipHtml", () => {
   test("renders a hostile point label inert", () => {
-    expectInert(scatterTooltipHtml({ value: [1, 2], dataIndex: 0 }, "latency", "count", [HOSTILE]));
+    expectInert(scatterTooltipHtml({ value: [1, 2], dataIndex: 0 }, "latency", "count", [{ label: HOSTILE }]));
   });
 
   test("renders a hostile axis name inert", () => {
-    expectInert(scatterTooltipHtml({ value: [1, 2], dataIndex: 0 }, HOSTILE, "count", ["web-1"]));
+    expectInert(scatterTooltipHtml({ value: [1, 2], dataIndex: 0 }, HOSTILE, "count", [{ label: "web-1" }]));
   });
 
   test("benign values keep their text", () => {
     const { text } = render(
-      scatterTooltipHtml({ value: [1, 2], dataIndex: 0 }, "latency", "count", ["web-1"]),
+      scatterTooltipHtml({ value: [1, 2], dataIndex: 0 }, "latency", "count", [{ label: "web-1" }]),
     );
     expect(text).toBe("web-1latency 1count 2");
   });
@@ -206,6 +232,10 @@ describe("timeSeriesTooltipHtml", () => {
 describe("histogramTooltipHtml", () => {
   test("renders a hostile group key inert", () => {
     expectInert(histogramTooltipHtml([{ dataIndex: 0 }], deps({ [HOSTILE]: 4 })));
+  });
+
+  test("a quote-bearing group key cannot close the style attribute it sits beside", () => {
+    expectQuotesClosed(histogramTooltipHtml([{ dataIndex: 0 }], deps({ [QUOTED_HOSTILE]: 4 })));
   });
 
   test("a hovered hostile group is still escaped in its bold line", () => {

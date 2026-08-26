@@ -735,6 +735,14 @@ func (s *Server) loadQueryConfig() (queryTimeout, maxFollowDuration time.Duratio
 	return queryTimeout, maxFollowDuration, maxResultCount
 }
 
+// wrapMiddleware applies the serving middleware chain to a mux:
+// tracking → CORS → security headers → rate limit → compression → mux.
+// Every listener — HTTP, HTTPS, and the Unix socket — serves through this, so
+// the security headers cover the embedded frontend as well as the RPC surface.
+func (s *Server) wrapMiddleware(mux http.Handler) http.Handler {
+	return s.trackingMiddleware(s.corsMiddleware(securityHeadersMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(s.logger, mux)))))
+}
+
 // Serve starts the server on the given listener.
 // HTTP is always on; HTTPS is started when TLS enabled and default cert exists.
 // It blocks until the server is stopped or an error occurs.
@@ -749,9 +757,8 @@ func (s *Server) Serve(listener net.Listener) error {
 	s.rl.startCleanup(rlCtx, &s.rlWG, 3*time.Minute, 5*time.Minute)
 
 	// Build the core handler once — reused by both HTTP and HTTPS.
-	// Chain: tracking → CORS → securityHeaders → rateLimit → compress → mux
 	mux := s.buildMux()
-	s.handler = s.trackingMiddleware(s.corsMiddleware(securityHeadersMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(s.logger, mux)))))
+	s.handler = s.wrapMiddleware(mux)
 
 	// HTTP adds redirect-to-HTTPS + h2c (HTTP/2 without TLS).
 	redirectHandler := s.redirectMiddleware(s.handler)
