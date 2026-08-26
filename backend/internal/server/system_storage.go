@@ -63,6 +63,8 @@ func (s *SystemServer) PutCloudService(
 	if existing != nil && !req.Msg.ClearCredentials {
 		cfg = cfg.WithPreservedCredentials(*existing)
 	}
+	cfg = cfg.WithoutUnusedCredentials()
+	s.logCloudCredentialChange(existing, cfg)
 
 	// Config-accept validation: reject configs that would fail blobstore store
 	// creation at vault init, so a bad provider config (bare endpoint, missing
@@ -85,6 +87,19 @@ func (s *SystemServer) PutCloudService(
 		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.PutCloudServiceResponse{System: fullCfg}), nil
+}
+
+// logCloudCredentialChange records credential material leaving a cloud
+// service. Credentials are write-only, so the log is the only place the
+// change is visible at all — and a service that quietly stops carrying
+// credentials degrades to whatever ambient chain the provider finds, which
+// is a change an operator must be able to find after the fact.
+func (s *SystemServer) logCloudCredentialChange(prev *system.CloudService, next system.CloudService) {
+	if s.logger == nil || prev == nil || !prev.HasCredentials() || next.HasCredentials() {
+		return
+	}
+	s.logger.Warn("cloud service credentials removed",
+		"cloud_service", next.ID, "name", next.Name, "provider", next.Provider)
 }
 
 // DeleteCloudService removes a cloud service.

@@ -56,5 +56,5 @@ When Credentials JSON is empty, the GCS client uses ADC: the `GOOGLE_APPLICATION
 - Each sealed chunk is stored as a single blob in GLCB format (seekable zstd compression).
 - Queries read cloud-backed chunks via HTTP range requests — only the needed frames are downloaded, not the entire blob.
 - Cloud services are configured in the [Storage settings](help:storage-config) tab and referenced by name on a file vault's **Cloud Storage** field to make it cloud-backed.
-- Use the **Test Connection** button in cloud service settings to verify credentials. On a saved service it runs against the stored credentials, so there is nothing to retype.
+- Use the **Test Connection** button in cloud service settings to verify credentials. On a saved service it runs against the saved configuration and its stored credentials, so there is nothing to retype — enter credentials to test an unsaved change instead.
 - Follower replicas keep a local compressed copy for queries — they do not upload to the cloud (only the leader uploads).

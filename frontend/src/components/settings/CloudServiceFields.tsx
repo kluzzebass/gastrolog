@@ -116,6 +116,7 @@ export function CloudServiceFields({
             <TextInput
               value={values.accessKey}
               onChange={(v) => onChange({ accessKey: v })}
+              disabled={values.clearCredentials}
               dark={dark}
               mono
             />
@@ -124,6 +125,7 @@ export function CloudServiceFields({
             <TextInput
               value={values.secretKey}
               onChange={(v) => onChange({ secretKey: v })}
+              disabled={values.clearCredentials}
               dark={dark}
               mono
             />
@@ -139,6 +141,7 @@ export function CloudServiceFields({
             <TextInput
               value={values.connectionString}
               onChange={(v) => onChange({ connectionString: v })}
+              disabled={values.clearCredentials}
               dark={dark}
               mono
             />
@@ -154,6 +157,7 @@ export function CloudServiceFields({
             <TextArea
               value={values.credentialsJson}
               onChange={(v) => onChange({ credentialsJson: v })}
+              disabled={values.clearCredentials}
               dark={dark}
               rows={4}
             />
@@ -216,7 +220,15 @@ function CredentialNotice({
       </p>
       <Checkbox
         checked={values.clearCredentials}
-        onChange={(v) => onChange({ clearCredentials: v })}
+        onChange={(v) =>
+          // Discards anything typed: "remove" that leaves a credential in
+          // place would be a lie, and the fields are disabled while it is on.
+          onChange(
+            v
+              ? { clearCredentials: true, accessKey: "", secretKey: "", connectionString: "", credentialsJson: "" }
+              : { clearCredentials: false },
+          )
+        }
         label="Remove the stored credentials"
         dark={dark}
       />

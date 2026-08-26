@@ -76,6 +76,42 @@ describe("CloudServiceFields credential state", () => {
     }
   });
 
+  test("choosing removal discards anything typed, so 'remove' removes", () => {
+    const patches: Array<Partial<CloudServiceFieldValues>> = [];
+    const { container } = render(
+      <CloudServiceFields
+        values={values({ credentialsConfigured: true, secretKey: "typed-but-abandoned" })}
+        onChange={(p) => patches.push(p)}
+        dark={true}
+      />,
+    );
+    const checkbox = Array.from(container.querySelectorAll("div")).find(
+      (d) => d.textContent === "Remove the stored credentials",
+    );
+    expect(checkbox).toBeTruthy();
+    checkbox!.click();
+    expect(patches).toHaveLength(1);
+    expect(patches[0]).toEqual({
+      clearCredentials: true,
+      accessKey: "",
+      secretKey: "",
+      connectionString: "",
+      credentialsJson: "",
+    });
+  });
+
+  test("credential inputs are disabled once removal is chosen", () => {
+    const { container } = render(
+      <CloudServiceFields
+        values={values({ credentialsConfigured: true, clearCredentials: true })}
+        onChange={() => {}}
+        dark={true}
+      />,
+    );
+    expect(inputForLabel(container, "Access Key").disabled).toBe(true);
+    expect(inputForLabel(container, "Secret Key").disabled).toBe(true);
+  });
+
   test("an unconfigured s3 service names the fallback credential chain", () => {
     const { container } = render(
       <CloudServiceFields

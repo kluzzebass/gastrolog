@@ -217,6 +217,24 @@ func (cs CloudService) WithPreservedCredentials(prior CloudService) CloudService
 	return cs
 }
 
+// WithoutUnusedCredentials drops credential material the service's provider
+// does not read. Switching an S3 service to GCS would otherwise leave its
+// access and secret key sitting in the config store forever, unreachable
+// and unauditable, since nothing reads them and no edit can clear them.
+func (cs CloudService) WithoutUnusedCredentials() CloudService {
+	if cs.Provider != "s3" {
+		cs.AccessKey = ""
+		cs.SecretKey = ""
+	}
+	if cs.Provider != "azure" {
+		cs.ConnectionString = ""
+	}
+	if cs.Provider != "gcs" {
+		cs.CredentialsJSON = ""
+	}
+	return cs
+}
+
 // StoreParams returns this cloud service's blobstore factory params — the
 // exact key/value shape blobstore.CreateStore and blobstore.ValidateConfig
 // consume. Empty fields are omitted. This is the single mapping from the

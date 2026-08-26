@@ -320,17 +320,12 @@ func TestCloudServiceConnectionTestUsesStoredCredentials(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	t.Run("matching endpoint fills the stored credentials", func(t *testing.T) {
+	t.Run("no credentials supplied tests the stored service as stored", func(t *testing.T) {
 		seen = nil
 		resp, err := client.TestCloudService(ctx, connect.NewRequest(&gastrologv1.TestCloudServiceRequest{
 			Type:           "file",
 			CloudServiceId: id.ToProto(),
-			Params: map[string]string{
-				"sealed_backing": "s3",
-				"bucket":         "chunks",
-				"region":         "us-east-1",
-				"endpoint":       "https://minio.example.com:9000",
-			},
+			Params:         map[string]string{"sealed_backing": "s3", "bucket": "chunks"},
 		}))
 		if err != nil {
 			t.Fatalf("TestCloudService: %v", err)
@@ -341,31 +336,42 @@ func TestCloudServiceConnectionTestUsesStoredCredentials(t *testing.T) {
 		if seen["access_key"] != "AKIAEXAMPLE" || seen["secret_key"] != "s3cr3t-key-value" {
 			t.Fatalf("stored credentials were not used: %v", seen)
 		}
-	})
-
-	t.Run("a different endpoint is refused rather than credited", func(t *testing.T) {
-		seen = nil
-		_, err := client.TestCloudService(ctx, connect.NewRequest(&gastrologv1.TestCloudServiceRequest{
-			Type:           "file",
-			CloudServiceId: id.ToProto(),
-			Params: map[string]string{
-				"sealed_backing": "s3",
-				"bucket":         "chunks",
-				"endpoint":       "https://attacker.example.net",
-			},
-		}))
-		if err == nil {
-			t.Fatal("test against a different endpoint was allowed")
-		}
-		if connect.CodeOf(err) != connect.CodeInvalidArgument {
-			t.Fatalf("code = %v, want InvalidArgument", connect.CodeOf(err))
-		}
-		if seen != nil {
-			t.Fatalf("the tester ran anyway with %v", seen)
+		if seen["endpoint"] != "https://minio.example.com:9000" || seen["region"] != "us-east-1" {
+			t.Fatalf("the test did not run against the stored destination: %v", seen)
 		}
 	})
 
-	t.Run("a supplied credential is not overwritten by the stored one", func(t *testing.T) {
+	// The destination is the whole exposure: stored credentials spent on a
+	// caller-named bucket or endpoint confirm the credentials work, under the
+	// operator's cloud identity, in storage the caller controls.
+	t.Run("caller-named destinations do not redirect stored credentials", func(t *testing.T) {
+		for _, override := range []map[string]string{
+			{"endpoint": "https://attacker.example.net"},
+			{"bucket": "attacker-bucket"},
+			{"region": "eu-central-1"},
+			{"container": "attacker-container"},
+		} {
+			seen = nil
+			params := map[string]string{"sealed_backing": "s3", "bucket": "chunks"}
+			for k, v := range override {
+				params[k] = v
+			}
+			if _, err := client.TestCloudService(ctx, connect.NewRequest(&gastrologv1.TestCloudServiceRequest{
+				Type: "file", CloudServiceId: id.ToProto(), Params: params,
+			})); err != nil {
+				t.Fatalf("TestCloudService %v: %v", override, err)
+			}
+			for k, v := range override {
+				if seen[k] == v {
+					t.Fatalf("stored credentials were spent on a caller-supplied %s = %q", k, v)
+				}
+			}
+		}
+	})
+
+	// Half a supplied key pair completed from the store would answer
+	// "was the missing half right?" — an online guessing oracle.
+	t.Run("a partial credential is never completed from the store", func(t *testing.T) {
 		seen = nil
 		if _, err := client.TestCloudService(ctx, connect.NewRequest(&gastrologv1.TestCloudServiceRequest{
 			Type:           "file",
@@ -374,15 +380,160 @@ func TestCloudServiceConnectionTestUsesStoredCredentials(t *testing.T) {
 				"sealed_backing": "s3",
 				"bucket":         "chunks",
 				"endpoint":       "https://minio.example.com:9000",
-				"secret_key":     "typed-secret",
+				"secret_key":     "guessed-secret",
 			},
 		})); err != nil {
 			t.Fatalf("TestCloudService: %v", err)
 		}
-		if seen["secret_key"] != "typed-secret" {
-			t.Fatalf("supplied credential was replaced: %v", seen["secret_key"])
+		if seen["secret_key"] != "guessed-secret" {
+			t.Fatalf("supplied credential was replaced: %q", seen["secret_key"])
+		}
+		if seen["access_key"] != "" {
+			t.Fatalf("the missing half was completed from the store: %q", seen["access_key"])
 		}
 	})
+
+	t.Run("spending stored credentials requires the admin role", func(t *testing.T) {
+		seen = nil
+		_, err := client.TestCloudService(userContext(context.Background()), connect.NewRequest(&gastrologv1.TestCloudServiceRequest{
+			Type:           "file",
+			CloudServiceId: id.ToProto(),
+			Params:         map[string]string{"sealed_backing": "s3", "bucket": "chunks"},
+		}))
+		if err == nil {
+			t.Fatal("a non-admin spent the stored credentials")
+		}
+		if connect.CodeOf(err) != connect.CodePermissionDenied {
+			t.Fatalf("code = %v, want PermissionDenied", connect.CodeOf(err))
+		}
+		if seen != nil {
+			t.Fatalf("the tester ran anyway with %v", seen)
+		}
+	})
+
+	t.Run("a caller supplying its own credentials needs no service and no role", func(t *testing.T) {
+		seen = nil
+		if _, err := client.TestCloudService(userContext(context.Background()), connect.NewRequest(&gastrologv1.TestCloudServiceRequest{
+			Type: "file",
+			Params: map[string]string{
+				"sealed_backing": "s3",
+				"bucket":         "my-own-bucket",
+				"access_key":     "my-own-key",
+				"secret_key":     "my-own-secret",
+			},
+		})); err != nil {
+			t.Fatalf("TestCloudService: %v", err)
+		}
+		if seen["bucket"] != "my-own-bucket" || seen["access_key"] != "my-own-key" {
+			t.Fatalf("the caller's own configuration was not used: %v", seen)
+		}
+	})
+}
+
+// TestPutCloudServiceDropsCredentialsTheProviderCannotUse — a provider
+// switch must not leave the old provider's secrets behind, unreachable by
+// any read and unclearable by any edit.
+func TestPutCloudServiceDropsCredentialsTheProviderCannotUse(t *testing.T) {
+	client, cfgStore, _ := newConfigTestSetup(t)
+	ctx := adminContext(context.Background())
+
+	id := glid.New()
+	if err := putCloudService(ctx, client, s3ServiceWithCredentials(id.ToProto(), "archive")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	switched := getCloudService(t, ctx, client, id, false)
+	switched.Provider = "gcs"
+	switched.Region = ""
+	switched.CredentialsJson = "{}"
+	if err := putCloudService(ctx, client, switched); err != nil {
+		t.Fatalf("switch provider: %v", err)
+	}
+
+	after, err := cfgStore.GetCloudService(ctx, id)
+	if err != nil || after == nil {
+		t.Fatalf("reload service: %v", err)
+	}
+	if after.AccessKey != "" || after.SecretKey != "" {
+		t.Fatalf("the old provider's credentials were left behind: access=%q secret=%q", after.AccessKey, after.SecretKey)
+	}
+	if after.CredentialsJSON != "{}" {
+		t.Fatalf("the new provider's credential was not stored: %q", after.CredentialsJSON)
+	}
+}
+
+// TestClusterPutCloudServicePreservesCredentials runs the round trip through
+// the cluster request path — routing interceptor and forwarder wired, config
+// store replicated across nodes.
+//
+// PutCloudService is RouteLeader, which forwards the Raft apply but runs the
+// handler on whichever node received the request: the merge reads that node's
+// replicated view of the service, not the leader's. So the preservation has to
+// hold against a replicated read, not just a local one.
+func TestClusterPutCloudServicePreservesCredentials(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"}, WithoutVault("coord"))
+	ctx := adminContext(context.Background())
+
+	id := glid.New()
+	if _, err := h.configClient.PutCloudService(ctx, connect.NewRequest(&gastrologv1.PutCloudServiceRequest{
+		Config: s3ServiceWithCredentials(id.ToProto(), "archive"),
+	})); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	stored, err := h.cfgStore.GetCloudService(ctx, id)
+	if err != nil || stored == nil || !stored.HasCredentials() {
+		t.Fatalf("credentials were not stored on create: %+v (%v)", stored, err)
+	}
+
+	sys, err := h.configClient.GetSystem(ctx, connect.NewRequest(&gastrologv1.GetSystemRequest{}))
+	if err != nil {
+		t.Fatalf("GetSystem: %v", err)
+	}
+	var redacted *gastrologv1.CloudService
+	for _, cs := range sys.Msg.CloudServices {
+		if glid.FromBytes(cs.Id) == id {
+			redacted = cs
+		}
+	}
+	if redacted == nil {
+		t.Fatal("cloud service missing from the cluster config read")
+	}
+	if redacted.AccessKey != "" || redacted.SecretKey != "" {
+		t.Fatalf("cluster read returned credentials: access=%q", redacted.AccessKey)
+	}
+
+	redacted.Region = "eu-west-1"
+	if _, err := h.configClient.PutCloudService(ctx, connect.NewRequest(&gastrologv1.PutCloudServiceRequest{
+		Config: redacted,
+	})); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	after, err := h.cfgStore.GetCloudService(ctx, id)
+	if err != nil || after == nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if after.AccessKey != "AKIAEXAMPLE" || after.SecretKey != "s3cr3t-key-value" {
+		t.Fatalf("cluster save wiped credentials: access=%q secret=%q", after.AccessKey, after.SecretKey)
+	}
+	if after.Region != "eu-west-1" {
+		t.Fatalf("cluster save did not apply the edit: region=%q", after.Region)
+	}
+
+	// clear_credentials must survive the same path — it is a request field,
+	// not part of the replicated config, so nothing carries it implicitly.
+	if _, err := h.configClient.PutCloudService(ctx, connect.NewRequest(&gastrologv1.PutCloudServiceRequest{
+		Config: redacted, ClearCredentials: true,
+	})); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	cleared, err := h.cfgStore.GetCloudService(ctx, id)
+	if err != nil || cleared == nil {
+		t.Fatalf("reload after clear: %v", err)
+	}
+	if cleared.HasCredentials() {
+		t.Fatalf("clear_credentials did not survive the cluster path: access=%q", cleared.AccessKey)
+	}
 }
 
 // TestGetSettingsSecretsRequireAdmin — the MaxMind license key is the same

@@ -172,6 +172,15 @@ func newCloudServiceDeleteCmd() *cobra.Command {
 	}
 }
 
+// credentialsSummary says whether the service carries credentials of its
+// own, which is all the API reports — the values are write-only.
+func credentialsSummary(cs *v1.CloudService) string {
+	if cs.GetCredentialsConfigured() {
+		return "configured"
+	}
+	return "not configured (provider's ambient credential chain)"
+}
+
 func printCloudService(cmd *cobra.Command, cs *v1.CloudService) error {
 	p := newPrinter(outputFormat(cmd))
 	if outputFormat(cmd) == "json" {
@@ -184,6 +193,7 @@ func printCloudService(cmd *cobra.Command, cs *v1.CloudService) error {
 		{"Bucket", cs.Bucket},
 		{"Region", cs.Region},
 		{"Endpoint", cs.Endpoint},
+		{"Credentials", credentialsSummary(cs)},
 	}
 	if cs.StorageClass > 0 {
 		pairs = append(pairs, [2]string{"Storage Class", strconv.FormatUint(uint64(cs.StorageClass), 10)})

@@ -12,6 +12,7 @@ import (
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/blobstore"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
@@ -496,20 +497,44 @@ func protoToVaultConfig(p *apiv1.VaultConfig) (system.VaultConfig, error) {
 // CloudServiceTester validates connectivity for a cloud storage configuration.
 type CloudServiceTester func(ctx context.Context, params map[string]string) (string, error)
 
-// credentialParams are the store params that carry secret material — the
-// ones a test request may leave empty and have filled from a stored service.
-var credentialParams = []string{"access_key", "secret_key", "connection_string", "credentials_json"}
+// credentialParams are the store params that carry secret material.
+var credentialParams = []string{
+	blobstore.ParamAccessKey,
+	blobstore.ParamSecretKey,
+	blobstore.ParamConnectionString,
+	blobstore.ParamCredentialsJSON,
+}
 
-// cloudTestParams resolves the params a connection test runs with. When the
-// request names an existing cloud service, credentials the caller left empty
-// are filled from that service, so an operator can test a saved service
-// without retyping secrets the API never returned. The fallback requires the
-// request's endpoint to match the stored one: otherwise the test would spend
-// an admin's credentials against a destination the caller picked.
+// carriesCredentials reports whether a test request supplies credential
+// material of its own.
+func carriesCredentials(params map[string]string) bool {
+	for _, k := range credentialParams {
+		if params[k] != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// cloudTestParams resolves the params a connection test runs with.
+//
+// A request carrying credentials of its own is tested exactly as given: the
+// caller is proving credentials they already hold, against whatever
+// destination they name. A request that names a saved service and supplies
+// none is testing that service, so it runs against the service's stored
+// configuration in full — credentials and destination together.
+//
+// Taking the destination from the caller while spending stored credentials
+// would hand any caller a probe that writes, reads and lists in a bucket of
+// their choosing under the operator's cloud identity, which is precisely
+// what redacting the credentials exists to prevent. For the same reason,
+// spending stored credentials at all is admin-only. Mixing is refused in
+// both directions: half a supplied key pair completed from the store would
+// report whether the missing half was guessed correctly.
 func (s *SystemServer) cloudTestParams(ctx context.Context, msg *apiv1.TestCloudServiceRequest) (map[string]string, *connect.Error) {
 	params := make(map[string]string, len(msg.Params))
 	maps.Copy(params, msg.Params)
-	if len(msg.CloudServiceId) == 0 {
+	if len(msg.CloudServiceId) == 0 || carriesCredentials(params) {
 		return params, nil
 	}
 
@@ -524,18 +549,14 @@ func (s *SystemServer) cloudTestParams(ctx context.Context, msg *apiv1.TestCloud
 	if stored == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("cloud service not found"))
 	}
-	if params["endpoint"] != stored.Endpoint {
-		return nil, errInvalidArg(fmt.Errorf(
-			"testing cloud service %q against a different endpoint requires supplying its credentials", stored.Name))
+	if stored.HasCredentials() && !isAdmin(ctx) {
+		return nil, connect.NewError(connect.CodePermissionDenied,
+			errors.New("testing a cloud service against its stored credentials requires the admin role"))
 	}
 
 	storedParams := stored.StoreParams()
-	for _, k := range credentialParams {
-		if params[k] == "" {
-			params[k] = storedParams[k]
-		}
-	}
-	return params, nil
+	storedParams[blobstore.ParamProvider] = stored.Provider
+	return storedParams, nil
 }
 
 // TestCloudService tests connectivity for a cloud storage configuration without saving it.
