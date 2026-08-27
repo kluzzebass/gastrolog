@@ -159,7 +159,7 @@ func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.P
 	if err != nil {
 		return nil, err
 	}
-	ctx = lookup.WithOutboundBudget(ctx, lookup.MaxOutboundPerQuery)
+	ctx = lookup.EnsureOutboundBudget(ctx)
 
 	if ph.timechartOp != nil {
 		return e.runTimechartPipeline(ctx, q, ph)
@@ -318,7 +318,7 @@ func (e *Engine) RunPipelineOnRecords(ctx context.Context, q Query, pipeline *qu
 	if err != nil {
 		return nil, err
 	}
-	ctx = lookup.WithOutboundBudget(ctx, lookup.MaxOutboundPerQuery)
+	ctx = lookup.EnsureOutboundBudget(ctx)
 
 	// Timechart with extra records is not supported yet (would need bucket
 	// merging). Fall back to local-only for now.

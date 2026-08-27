@@ -10,10 +10,13 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/safefetch"
 	"gastrolog/internal/system"
 
 	"connectrpc.com/connect"
@@ -122,36 +125,50 @@ func TestPutLookupSettingsStoresWhatItAccepts(t *testing.T) {
 	}
 }
 
-// The lookup test procedure fetches a caller-supplied URL, so it is bound by
-// the same destination policy as a configured lookup: it must not become a way
-// to read the node's own network or the cloud instance metadata endpoint.
-func TestTestHTTPLookupRefusesInternalDestinations(t *testing.T) {
+// The lookup test procedure fetches a caller-supplied URL. The request's own
+// allow-private flag must not be believed: only a stored lookup can carry the
+// operator's word that a destination on their own network is intended.
+func TestTestHTTPLookupIgnoresWirePrivateFlag(t *testing.T) {
 	client, _, _ := newConfigTestSetupWithIngesters(t)
 	ctx := context.Background()
 
-	for _, target := range []string{
-		"http://169.254.169.254/latest/meta-data/iam/security-credentials/",
-		"http://127.0.0.1:9/{value}",
-		"http://10.0.0.1/{value}",
-	} {
-		resp, err := client.TestHTTPLookup(ctx, connect.NewRequest(&gastrologv1.TestHTTPLookupRequest{
-			Config: &gastrologv1.HTTPLookupEntry{Name: "probe", UrlTemplate: target, Timeout: "1s"},
-			Values: map[string]string{"value": "x"},
-		}))
-		if err != nil {
-			continue // refused outright, which is also a safe outcome
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"team":"platform"}`))
+	}))
+	defer srv.Close()
+
+	resp, err := client.TestHTTPLookup(ctx, connect.NewRequest(&gastrologv1.TestHTTPLookupRequest{
+		Config: &gastrologv1.HTTPLookupEntry{
+			Name:                     "probe",
+			UrlTemplate:              srv.URL + "/{value}",
+			Timeout:                  "5s",
+			AllowPrivateDestinations: true, // the caller asserting it for themselves
+		},
+		Values: map[string]string{"value": "x"},
+	}))
+	if err != nil {
+		t.Fatalf("TestHTTPLookup: %v", err)
+	}
+	if !strings.Contains(resp.Msg.GetError(), safefetch.ErrBlockedDestination.Error()) {
+		t.Fatalf("error = %q, want the destination policy's refusal", resp.Msg.GetError())
+	}
+	for _, r := range resp.Msg.GetResults() {
+		if len(r.GetFields()) > 0 {
+			t.Errorf("probe returned fields %v", r.GetFields())
 		}
-		for _, r := range resp.Msg.GetResults() {
-			if len(r.GetFields()) > 0 {
-				t.Errorf("probe of %q returned fields %v", target, r.GetFields())
-			}
-		}
+	}
+	if n := requests.Load(); n != 0 {
+		t.Fatalf("the probe reached the endpoint %d times", n)
 	}
 }
 
-// The escape hatch has to work, or an operator with a lookup service on their
-// own network has no way to configure it.
-func TestTestHTTPLookupAllowsPrivateWhenPermitted(t *testing.T) {
+// Once the lookup is saved with the operator's opt-in, testing that same lookup
+// works — otherwise a private lookup service could never be configured. The
+// opt-in is tied to the saved URL, so an unsaved edit does not inherit it.
+func TestTestHTTPLookupUsesStoredPrivateFlag(t *testing.T) {
 	client, _, _ := newConfigTestSetupWithIngesters(t)
 	ctx := context.Background()
 
@@ -161,28 +178,46 @@ func TestTestHTTPLookupAllowsPrivateWhenPermitted(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := &gastrologv1.HTTPLookupEntry{Name: "probe", UrlTemplate: srv.URL + "/{value}", Timeout: "5s"}
+	stored := &gastrologv1.HTTPLookupEntry{
+		Name:                     "probe",
+		UrlTemplate:              srv.URL + "/{value}",
+		AllowPrivateDestinations: true,
+	}
+	if _, err := client.PutLookupSettings(ctx, connect.NewRequest(&gastrologv1.PutLookupSettingsRequest{
+		Lookup: &gastrologv1.PutLookupSettings{HttpLookups: []*gastrologv1.HTTPLookupEntry{stored}},
+	})); err != nil {
+		t.Fatalf("PutLookupSettings: %v", err)
+	}
 
 	resp, err := client.TestHTTPLookup(ctx, connect.NewRequest(&gastrologv1.TestHTTPLookupRequest{
-		Config: cfg,
+		Config: stored,
 		Values: map[string]string{"value": "x"},
 	}))
 	if err != nil {
 		t.Fatalf("TestHTTPLookup: %v", err)
 	}
-	if fields := resp.Msg.GetResults()[0].GetFields(); len(fields) != 0 {
-		t.Fatalf("loopback fetch succeeded without the operator opting in: %v", fields)
-	}
-
-	cfg.AllowPrivateDestinations = true
-	resp, err = client.TestHTTPLookup(ctx, connect.NewRequest(&gastrologv1.TestHTTPLookupRequest{
-		Config: cfg,
-		Values: map[string]string{"value": "x"},
-	}))
-	if err != nil {
-		t.Fatalf("TestHTTPLookup with the escape hatch: %v", err)
+	if resp.Msg.GetError() != "" {
+		t.Fatalf("error = %q, want the stored opt-in to permit the fetch", resp.Msg.GetError())
 	}
 	if got := resp.Msg.GetResults()[0].GetFields()["team"]; got != "platform" {
 		t.Fatalf("fields = %v, want the served object", resp.Msg.GetResults()[0].GetFields())
+	}
+
+	// An unsaved edit of the URL is a different destination and loses the opt-in.
+	edited := &gastrologv1.HTTPLookupEntry{
+		Name:                     "probe",
+		UrlTemplate:              "http://127.0.0.1:9/{value}",
+		Timeout:                  "1s",
+		AllowPrivateDestinations: true,
+	}
+	resp, err = client.TestHTTPLookup(ctx, connect.NewRequest(&gastrologv1.TestHTTPLookupRequest{
+		Config: edited,
+		Values: map[string]string{"value": "x"},
+	}))
+	if err != nil {
+		t.Fatalf("TestHTTPLookup (edited): %v", err)
+	}
+	if !strings.Contains(resp.Msg.GetError(), safefetch.ErrBlockedDestination.Error()) {
+		t.Fatalf("edited error = %q, want the destination policy's refusal", resp.Msg.GetError())
 	}
 }

@@ -1105,8 +1105,9 @@ Live on `Config` directly (not as entities):
 - **LookupConfig** — external lookup table configuration (HTTP, SQLite).
 - **Destination policy** — the rule deciding which resolved addresses an
   outbound fetch may reach (`internal/safefetch`). Denies everything outside
-  public unicast; a lookup's `AllowPrivateDestinations` is the operator's
-  opt-in for a service on their own network.
+  public unicast; a stored lookup's `AllowPrivateDestinations` is the
+  operator's opt-in for a service on their own network, and never reaches
+  link-local or address-translation ranges.
 - **ClusterConfig** — broadcast interval override; other cluster tunables.
 - **MaxMindConfig** — GeoIP database location.
 

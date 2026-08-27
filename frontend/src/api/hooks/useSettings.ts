@@ -216,7 +216,6 @@ type TestHTTPLookupArgs = {
     timeout?: string;
     cacheTtl?: string;
     cacheSize?: number;
-    allowPrivateDestinations?: boolean;
   };
   values: Record<string, string>;
 };

@@ -81,7 +81,7 @@ export function HttpAddForm({
       <FormField label="Headers" description="Custom HTTP headers (e.g. Authorization)." dark={dark}>
         <ParamsEditor params={draft.headers} onChange={(v) => setDraft((d) => ({ ...d, headers: v }))} dark={dark} />
       </FormField>
-      <FormField label="Destinations" description="Outbound lookups reach public addresses only. Enable this for a lookup service on your own network — loopback, 10.x, 172.16–31.x, 192.168.x. Link-local addresses (169.254.x, fe80::) stay blocked either way." dark={dark}>
+      <FormField label="Destinations" description="Outbound lookups reach public addresses only. Enable this for a lookup service on your own network — loopback, 10.x, 172.16–31.x, 192.168.x, 100.64–127.x or an IPv6 unique-local address — then save: Test uses the saved setting, not this form. Link-local (169.254.x, fe80::) and address-translation ranges stay blocked either way." dark={dark}>
         <Checkbox
           checked={draft.allowPrivateDestinations}
           onChange={(v) => setDraft((d) => ({ ...d, allowPrivateDestinations: v }))}
@@ -164,7 +164,7 @@ export function HttpCards({
             <FormField label="Headers" description="Custom HTTP headers (e.g. Authorization)." dark={dark}>
               <ParamsEditor params={h.headers} onChange={(v) => onUpdate(i, { headers: v })} dark={dark} />
             </FormField>
-            <FormField label="Destinations" description="Outbound lookups reach public addresses only. Enable this for a lookup service on your own network — loopback, 10.x, 172.16–31.x, 192.168.x. Link-local addresses (169.254.x, fe80::) stay blocked either way." dark={dark}>
+            <FormField label="Destinations" description="Outbound lookups reach public addresses only. Enable this for a lookup service on your own network — loopback, 10.x, 172.16–31.x, 192.168.x, 100.64–127.x or an IPv6 unique-local address — then save: Test uses the saved setting, not this form. Link-local (169.254.x, fe80::) and address-translation ranges stay blocked either way." dark={dark}>
               <Checkbox
                 checked={h.allowPrivateDestinations}
                 onChange={(v) => onUpdate(i, { allowPrivateDestinations: v })}
@@ -219,7 +219,9 @@ export function HttpCards({
                           timeout: h.timeout || undefined,
                           cacheTtl: h.cacheTtl || undefined,
                           cacheSize: h.cacheSize || undefined,
-                          allowPrivateDestinations: h.allowPrivateDestinations,
+                          // Private destinations come from the saved lookup, not
+                          // from this form: the server ignores the flag on a test
+                          // request.
                         },
                         values: testValues[i] ?? {},
                       },

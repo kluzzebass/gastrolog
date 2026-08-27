@@ -40,7 +40,23 @@ func TestPolicyAllows(t *testing.T) {
 		{"broadcast v4", "255.255.255.255", false, false},
 		{"public v4", "93.184.216.34", true, true},
 		{"public v6", "2606:2800:220:1:248:1893:25c8:1946", true, true},
-		{"carrier-grade nat", "100.64.0.1", true, true},
+		// Carrier-grade NAT holds one vendor's metadata service and some pod
+		// networks, so it is site-local, not public.
+		{"carrier-grade nat", "100.64.0.1", false, true},
+		{"carrier-grade nat metadata", "100.100.100.200", false, true},
+		// Ranges that embed another destination or address the local
+		// infrastructure stay denied whatever the operator asks for.
+		{"nat64", "64:ff9b::a9fe:a9fe", false, false},
+		{"nat64 local use", "64:ff9b:1::a9fe:a9fe", false, false},
+		{"6to4", "2002:0a00:0001::1", false, false},
+		{"teredo", "2001:0:53aa:64c:0:0:0:1", false, false},
+		{"ipv4-compatible v6", "::a9fe:a9fe", false, false},
+		{"protocol assignments", "192.0.0.170", false, false},
+		{"benchmarking", "198.18.0.1", false, false},
+		{"6to4 relay anycast", "192.88.99.1", false, false},
+		{"site-local v6", "fec0::1", false, false},
+		{"reserved 240/4", "240.0.0.1", false, false},
+		{"documentation v6", "2001:db8::1", false, false},
 	}
 
 	for _, tt := range tests {

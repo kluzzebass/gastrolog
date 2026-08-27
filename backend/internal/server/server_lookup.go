@@ -147,6 +147,8 @@ func (s *Server) registerHTTPLookups(cfg system.LookupConfig, registry lookup.Re
 			Parameters:               paramNames,
 			CacheSize:                hcfg.CacheSize,
 			AllowPrivateDestinations: hcfg.AllowPrivateDestinations,
+			Name:                     hcfg.Name,
+			Logger:                   s.logger,
 		}
 		if hcfg.Timeout != "" {
 			if d, err := time.ParseDuration(hcfg.Timeout); err == nil {

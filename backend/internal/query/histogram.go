@@ -764,7 +764,7 @@ func timechartChunkGroupsWideSpan(
 func (e *Engine) timechartScanPath(ctx context.Context, q Query, preOps []querylang.PipeOp, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy, hasPreOps bool, counts []int64, groupCounts []map[string]int64) (bool, error) {
 	orderBy := q.OrderBy
 	q.Limit = 0
-	ctx = lookup.WithOutboundBudget(ctx, lookup.MaxOutboundPerQuery)
+	ctx = lookup.EnsureOutboundBudget(ctx)
 	iter, _ := e.Search(ctx, q, nil)
 
 	if hasPreOps {
