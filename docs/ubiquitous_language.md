@@ -1117,11 +1117,21 @@ Live on `Config` directly (not as entities):
   [`auth/roles.go`](../backend/internal/auth/roles.go)).
 
 - **JWT** (access token) — short-lived bearer token. Carries claims:
-  `sub` (username), `role`, `exp`, `iat`.
+  `sub` (username), `role`, `sid` (session), `exp`, `iat`, and `iat_ns`
+  (issue time at the precision revocation ranks against).
 
-- **RefreshToken** — long-lived credential, stored in the cluster-ctl Raft.
-  Used to mint a new JWT without re-entering password. Expires on
-  password change or logout via `DeleteUserRefreshTokens`.
+- **Session** — one login on one device. Identified by the ID of its
+  refresh-token row, which the access token names in its `sid` claim.
+  Rotation keeps the session; logout deletes the row, which ends the
+  refresh token and the access token together, leaving the user's other
+  sessions alone.
+
+- **RefreshToken** — long-lived credential, stored in the cluster-ctl Raft,
+  one row per session. Exchanged for a new JWT without re-entering the
+  password; the exchange is a single Raft entry, so concurrent use of one
+  token yields one live session, not two. A password change, rename, role
+  change, or user delete ends every session via
+  `DeleteUserRefreshTokens`.
 
 - **Cluster TLS** — mTLS material (`CA`, `Node cert`, `Node key`)
   generated at cluster-init. Used exclusively for intra-cluster gRPC.

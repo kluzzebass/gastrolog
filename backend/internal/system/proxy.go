@@ -547,6 +547,24 @@ func (p *StoreProxy) CreateRefreshToken(ctx context.Context, token RefreshToken)
 	return p.inner.CreateRefreshToken(ctx, token)
 }
 
+func (p *StoreProxy) GetRefreshToken(ctx context.Context, id glid.GLID) (*RefreshToken, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return nil, err
+	}
+	return p.inner.GetRefreshToken(ctx, id)
+}
+
+func (p *StoreProxy) RotateRefreshToken(ctx context.Context, oldTokenHash string, next RefreshToken) (bool, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return false, err
+	}
+	return p.inner.RotateRefreshToken(ctx, oldTokenHash, next)
+}
+
 func (p *StoreProxy) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (*RefreshToken, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

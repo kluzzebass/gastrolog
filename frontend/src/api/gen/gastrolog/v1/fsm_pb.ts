@@ -263,6 +263,12 @@ export class SystemCommand extends Message<SystemCommand> {
      */
     value: CatchupBarrierCommand;
     case: "catchupBarrier";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.RotateRefreshTokenCommand rotate_refresh_token = 41;
+     */
+    value: RotateRefreshTokenCommand;
+    case: "rotateRefreshToken";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<SystemCommand>) {
@@ -313,6 +319,7 @@ export class SystemCommand extends Message<SystemCommand> {
     { no: 38, name: "put_log_levels", kind: "message", T: PutLogLevelsCommand, oneof: "command" },
     { no: 39, name: "set_node_state", kind: "message", T: SetNodeStateCommand, oneof: "command" },
     { no: 40, name: "catchup_barrier", kind: "message", T: CatchupBarrierCommand, oneof: "command" },
+    { no: 41, name: "rotate_refresh_token", kind: "message", T: RotateRefreshTokenCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemCommand {
@@ -1432,6 +1439,54 @@ export class DeleteRefreshTokenCommand extends Message<DeleteRefreshTokenCommand
 
   static equals(a: DeleteRefreshTokenCommand | PlainMessage<DeleteRefreshTokenCommand> | undefined, b: DeleteRefreshTokenCommand | PlainMessage<DeleteRefreshTokenCommand> | undefined): boolean {
     return proto3.util.equals(DeleteRefreshTokenCommand, a, b);
+  }
+}
+
+/**
+ * RotateRefreshTokenCommand exchanges the refresh token whose hash is
+ * old_token_hash for `next` in a single applied entry. Committing the
+ * consume and the replacement together is what stops two concurrent
+ * refreshes of the same token from both being handed a live session.
+ *
+ * @generated from message gastrolog.v1.RotateRefreshTokenCommand
+ */
+export class RotateRefreshTokenCommand extends Message<RotateRefreshTokenCommand> {
+  /**
+   * @generated from field: string old_token_hash = 1;
+   */
+  oldTokenHash = "";
+
+  /**
+   * @generated from field: gastrolog.v1.CreateRefreshTokenCommand next = 2;
+   */
+  next?: CreateRefreshTokenCommand;
+
+  constructor(data?: PartialMessage<RotateRefreshTokenCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RotateRefreshTokenCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "old_token_hash", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "next", kind: "message", T: CreateRefreshTokenCommand },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RotateRefreshTokenCommand {
+    return new RotateRefreshTokenCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RotateRefreshTokenCommand {
+    return new RotateRefreshTokenCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RotateRefreshTokenCommand {
+    return new RotateRefreshTokenCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RotateRefreshTokenCommand | PlainMessage<RotateRefreshTokenCommand> | undefined, b: RotateRefreshTokenCommand | PlainMessage<RotateRefreshTokenCommand> | undefined): boolean {
+    return proto3.util.equals(RotateRefreshTokenCommand, a, b);
   }
 }
 

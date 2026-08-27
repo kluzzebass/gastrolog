@@ -111,8 +111,14 @@ type Store interface {
 
 	// Refresh tokens
 	CreateRefreshToken(ctx context.Context, token RefreshToken) error
+	GetRefreshToken(ctx context.Context, id glid.GLID) (*RefreshToken, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (*RefreshToken, error)
 	ListRefreshTokens(ctx context.Context) ([]RefreshToken, error)
+	// RotateRefreshToken exchanges the token whose hash is oldTokenHash for
+	// next in one indivisible step and reports whether this caller is the one
+	// that consumed it. Concurrent callers presenting the same token see
+	// exactly one true.
+	RotateRefreshToken(ctx context.Context, oldTokenHash string, next RefreshToken) (bool, error)
 	DeleteRefreshToken(ctx context.Context, id glid.GLID) error
 	DeleteUserRefreshTokens(ctx context.Context, userID glid.GLID) error
 

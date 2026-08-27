@@ -1393,6 +1393,97 @@ func testAuth(t *testing.T, newStore func(t *testing.T) system.Store) {
 		}
 	})
 
+	t.Run("GetRefreshTokenByID", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		tokenID := newID()
+		rt := system.RefreshToken{
+			ID:        tokenID,
+			UserID:    newID(),
+			TokenHash: "hash-by-id",
+			ExpiresAt: time.Now().Add(time.Hour),
+			CreatedAt: time.Now(),
+		}
+		if err := s.CreateRefreshToken(ctx, rt); err != nil {
+			t.Fatalf("CreateRefreshToken: %v", err)
+		}
+
+		got, err := s.GetRefreshToken(ctx, tokenID)
+		if err != nil {
+			t.Fatalf("GetRefreshToken: %v", err)
+		}
+		if got == nil || got.TokenHash != "hash-by-id" {
+			t.Fatalf("expected the stored token, got %+v", got)
+		}
+
+		missing, err := s.GetRefreshToken(ctx, newID())
+		if err != nil {
+			t.Fatalf("GetRefreshToken unknown: %v", err)
+		}
+		if missing != nil {
+			t.Fatalf("expected nil for unknown ID, got %+v", missing)
+		}
+	})
+
+	t.Run("RotateRefreshTokenConsumesOnce", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		sessionID := newID()
+		userID := newID()
+		if err := s.CreateRefreshToken(ctx, system.RefreshToken{
+			ID:        sessionID,
+			UserID:    userID,
+			TokenHash: "hash-gen-0",
+			ExpiresAt: time.Now().Add(time.Hour),
+			CreatedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("CreateRefreshToken: %v", err)
+		}
+
+		next := func(hash string) system.RefreshToken {
+			return system.RefreshToken{
+				ID:        sessionID,
+				UserID:    userID,
+				TokenHash: hash,
+				ExpiresAt: time.Now().Add(time.Hour),
+				CreatedAt: time.Now(),
+			}
+		}
+
+		rotated, err := s.RotateRefreshToken(ctx, "hash-gen-0", next("hash-gen-1"))
+		if err != nil {
+			t.Fatalf("RotateRefreshToken: %v", err)
+		}
+		if !rotated {
+			t.Fatal("first rotation should report that it consumed the token")
+		}
+
+		// Presenting the same token again must not produce a second live
+		// session — this is the concurrent-refresh loser's outcome.
+		rotated, err = s.RotateRefreshToken(ctx, "hash-gen-0", next("hash-gen-2"))
+		if err != nil {
+			t.Fatalf("RotateRefreshToken replay: %v", err)
+		}
+		if rotated {
+			t.Fatal("replaying a consumed token should not rotate")
+		}
+
+		if got, err := s.GetRefreshTokenByHash(ctx, "hash-gen-2"); err != nil {
+			t.Fatalf("GetRefreshTokenByHash: %v", err)
+		} else if got != nil {
+			t.Fatalf("a losing rotation must not store its replacement, got %+v", got)
+		}
+		if got, err := s.GetRefreshTokenByHash(ctx, "hash-gen-1"); err != nil {
+			t.Fatalf("GetRefreshTokenByHash: %v", err)
+		} else if got == nil {
+			t.Fatal("the winning rotation's replacement should be the live token")
+		} else if got.ID != sessionID {
+			t.Fatalf("rotation should keep the session ID %s, got %s", sessionID, got.ID)
+		}
+	})
+
 	t.Run("DeleteUserRefreshTokens", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()

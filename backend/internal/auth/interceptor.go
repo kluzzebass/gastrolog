@@ -52,10 +52,11 @@ type UserCounter interface {
 }
 
 // TokenValidator checks whether a token is still valid after JWT verification.
-// This is used for server-side token revocation (e.g. after logout, password
-// change, or role change).
+// This is used for server-side token revocation: logout ends the token's
+// session, and password change, rename, or role change invalidates every token
+// the user holds.
 type TokenValidator interface {
-	IsTokenValid(ctx context.Context, userID string, issuedAt time.Time) (bool, error)
+	IsTokenValid(ctx context.Context, claims *Claims) (bool, error)
 }
 
 // AuthInterceptor is a Connect interceptor that validates JWT tokens
@@ -229,8 +230,8 @@ func (i *AuthInterceptor) verifiedClaims(ctx context.Context, headers interface{
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid token: %w", err))
 	}
-	if i.validator != nil && claims.IssuedAt != nil {
-		valid, err := i.validator.IsTokenValid(ctx, claims.UserID, claims.IssuedAt.Time)
+	if i.validator != nil {
+		valid, err := i.validator.IsTokenValid(ctx, claims)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("validate token: %w", err))
 		}

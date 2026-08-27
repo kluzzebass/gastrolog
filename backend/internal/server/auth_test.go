@@ -34,7 +34,7 @@ func newAuthTestClient(t *testing.T) (gastrologv1connect.AuthServiceClient, *sys
 // alwaysValidTokenValidator satisfies auth.TokenValidator for tests.
 type alwaysValidTokenValidator struct{}
 
-func (alwaysValidTokenValidator) IsTokenValid(context.Context, string, time.Time) (bool, error) {
+func (alwaysValidTokenValidator) IsTokenValid(context.Context, *auth.Claims) (bool, error) {
 	return true, nil
 }
 

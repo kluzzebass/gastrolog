@@ -9,7 +9,7 @@ func TestIssueAndVerify(t *testing.T) {
 	t.Parallel()
 	ts := NewTokenService([]byte("test-secret-key-for-testing-only"), 7*24*time.Hour)
 
-	token, expiresAt, err := ts.Issue("user-001", "alice", "admin")
+	token, expiresAt, err := ts.Issue("user-001", "alice", "admin", "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestVerifyExpiredToken(t *testing.T) {
 	// Token that expired 1 hour ago.
 	ts := NewTokenService([]byte("test-secret"), -1*time.Hour)
 
-	token, _, err := ts.Issue("user-002", "bob", "user")
+	token, _, err := ts.Issue("user-002", "bob", "user", "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestVerifyWrongSecret(t *testing.T) {
 	ts1 := NewTokenService([]byte("secret-one"), 7*24*time.Hour)
 	ts2 := NewTokenService([]byte("secret-two"), 7*24*time.Hour)
 
-	token, _, err := ts1.Issue("user-003", "carol", "user")
+	token, _, err := ts1.Issue("user-003", "carol", "user", "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
