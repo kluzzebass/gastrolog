@@ -19,8 +19,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
@@ -753,10 +751,19 @@ func (s *Server) Serve(listener net.Listener) error {
 	mux := s.buildMux()
 	s.handler = s.trackingMiddleware(s.corsMiddleware(securityHeadersMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(s.logger, mux)))))
 
-	// HTTP adds redirect-to-HTTPS + h2c (HTTP/2 without TLS).
+	// HTTP adds redirect-to-HTTPS + unencrypted HTTP/2 (h2c) alongside HTTP/1.
 	redirectHandler := s.redirectMiddleware(s.handler)
+	var protocols http.Protocols
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
 	s.server = &http.Server{
-		Handler:           h2c.NewHandler(redirectHandler, &http2.Server{}),
+		Handler: redirectHandler,
+		// Protocols enables h2c without a separate http2.Server value: Go's
+		// native HTTP/2 support reads this http.Server's own IdleTimeout
+		// field (falling back to ReadTimeout) for the h2 idle timeout, so
+		// IdleTimeout set anywhere on this struct is load-bearing for h2c
+		// connections too — it is not dead config left over from HTTP/1.
+		Protocols:         &protocols,
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
@@ -905,6 +912,5 @@ func (s *Server) initiateShutdown(drain bool) {
 // This is useful for testing or embedding in another server.
 func (s *Server) Handler() http.Handler {
 	mux := s.buildMux()
-	handler := h2c.NewHandler(mux, &http2.Server{})
-	return s.trackingMiddleware(handler)
+	return s.trackingMiddleware(mux)
 }
