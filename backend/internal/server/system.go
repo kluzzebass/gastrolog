@@ -1068,6 +1068,8 @@ func httpLookupsToProto(lookups []system.HTTPLookupConfig) []*apiv1.HTTPLookupEn
 			Timeout:       l.Timeout,
 			CacheTtl:      l.CacheTTL,
 			CacheSize:     int32(l.CacheSize), //nolint:gosec // reasonable config value
+
+			AllowPrivateDestinations: l.AllowPrivateDestinations,
 		}
 	}
 	return out
@@ -1092,6 +1094,8 @@ func httpLookupsFromProto(entries []*apiv1.HTTPLookupEntry) []system.HTTPLookupC
 			Timeout:       e.Timeout,
 			CacheTTL:      e.CacheTtl,
 			CacheSize:     int(e.CacheSize),
+
+			AllowPrivateDestinations: e.AllowPrivateDestinations,
 		})
 	}
 	return out
@@ -1391,6 +1395,10 @@ func validateSubmittedLookups(l *apiv1.PutLookupSettings) *connect.Error {
 			return connect.NewError(connect.CodeInvalidArgument,
 				fmt.Errorf("http lookup %q: url_template is required", e.GetName()))
 		}
+		if err := lookup.ValidateURLTemplate(e.GetUrlTemplate()); err != nil {
+			return connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("http lookup %q: %w", e.GetName(), err))
+		}
 	}
 	for _, e := range l.GetJsonFileLookups() {
 		if connErr := validateFileLookup("json file", e.GetName(), e.GetFileId()); connErr != nil {
@@ -1489,10 +1497,11 @@ func (s *SystemServer) TestHTTPLookup(
 	}
 
 	lcfg := lookup.HTTPConfig{
-		URLTemplate:   cfg.UrlTemplate,
-		Headers:       cfg.Headers,
-		ResponsePaths: cfg.ResponsePaths,
-		CacheSize:     int(cfg.CacheSize),
+		URLTemplate:              cfg.UrlTemplate,
+		Headers:                  cfg.Headers,
+		ResponsePaths:            cfg.ResponsePaths,
+		CacheSize:                int(cfg.CacheSize),
+		AllowPrivateDestinations: cfg.AllowPrivateDestinations,
 	}
 	if cfg.Timeout != "" {
 		d, err := time.ParseDuration(cfg.Timeout)
@@ -1504,7 +1513,12 @@ func (s *SystemServer) TestHTTPLookup(
 		lcfg.Timeout = d
 	}
 
-	h := lookup.NewHTTP(lcfg)
+	h, err := lookup.NewHTTP(lcfg)
+	if err != nil {
+		return connect.NewResponse(&apiv1.TestHTTPLookupResponse{
+			Error: fmt.Sprintf("invalid url template %q: %v", cfg.UrlTemplate, err),
+		}), nil
+	}
 	result := h.TestFetch(ctx, req.Msg.Values)
 
 	return connect.NewResponse(&apiv1.TestHTTPLookupResponse{

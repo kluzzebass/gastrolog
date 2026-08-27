@@ -8,6 +8,8 @@ package server_test
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
@@ -45,6 +47,14 @@ func TestPutLookupSettingsRejectsUnstorableEntries(t *testing.T) {
 		}},
 		{"mmdb without name", &gastrologv1.PutLookupSettings{
 			MmdbLookups: []*gastrologv1.MMDBLookupEntry{{DbType: "city"}},
+		}},
+		// A placeholder in the host lets an ingested field pick the destination,
+		// so the template is refused where it is configured.
+		{"http with a placeholder in the host", &gastrologv1.PutLookupSettings{
+			HttpLookups: []*gastrologv1.HTTPLookupEntry{{Name: "api", UrlTemplate: "http://{tenant}.internal/x"}},
+		}},
+		{"http with a non-fetchable scheme", &gastrologv1.PutLookupSettings{
+			HttpLookups: []*gastrologv1.HTTPLookupEntry{{Name: "api", UrlTemplate: "file:///etc/{v}"}},
 		}},
 	}
 	for _, tc := range cases {
@@ -109,5 +119,70 @@ func TestPutLookupSettingsStoresWhatItAccepts(t *testing.T) {
 	}
 	if len(ss.Lookup.CSVLookups) != 1 || ss.Lookup.CSVLookups[0].Name != "assets" {
 		t.Fatalf("stored csv lookups = %+v, want the one submitted", ss.Lookup.CSVLookups)
+	}
+}
+
+// The lookup test procedure fetches a caller-supplied URL, so it is bound by
+// the same destination policy as a configured lookup: it must not become a way
+// to read the node's own network or the cloud instance metadata endpoint.
+func TestTestHTTPLookupRefusesInternalDestinations(t *testing.T) {
+	client, _, _ := newConfigTestSetupWithIngesters(t)
+	ctx := context.Background()
+
+	for _, target := range []string{
+		"http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+		"http://127.0.0.1:9/{value}",
+		"http://10.0.0.1/{value}",
+	} {
+		resp, err := client.TestHTTPLookup(ctx, connect.NewRequest(&gastrologv1.TestHTTPLookupRequest{
+			Config: &gastrologv1.HTTPLookupEntry{Name: "probe", UrlTemplate: target, Timeout: "1s"},
+			Values: map[string]string{"value": "x"},
+		}))
+		if err != nil {
+			continue // refused outright, which is also a safe outcome
+		}
+		for _, r := range resp.Msg.GetResults() {
+			if len(r.GetFields()) > 0 {
+				t.Errorf("probe of %q returned fields %v", target, r.GetFields())
+			}
+		}
+	}
+}
+
+// The escape hatch has to work, or an operator with a lookup service on their
+// own network has no way to configure it.
+func TestTestHTTPLookupAllowsPrivateWhenPermitted(t *testing.T) {
+	client, _, _ := newConfigTestSetupWithIngesters(t)
+	ctx := context.Background()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"team":"platform"}`))
+	}))
+	defer srv.Close()
+
+	cfg := &gastrologv1.HTTPLookupEntry{Name: "probe", UrlTemplate: srv.URL + "/{value}", Timeout: "5s"}
+
+	resp, err := client.TestHTTPLookup(ctx, connect.NewRequest(&gastrologv1.TestHTTPLookupRequest{
+		Config: cfg,
+		Values: map[string]string{"value": "x"},
+	}))
+	if err != nil {
+		t.Fatalf("TestHTTPLookup: %v", err)
+	}
+	if fields := resp.Msg.GetResults()[0].GetFields(); len(fields) != 0 {
+		t.Fatalf("loopback fetch succeeded without the operator opting in: %v", fields)
+	}
+
+	cfg.AllowPrivateDestinations = true
+	resp, err = client.TestHTTPLookup(ctx, connect.NewRequest(&gastrologv1.TestHTTPLookupRequest{
+		Config: cfg,
+		Values: map[string]string{"value": "x"},
+	}))
+	if err != nil {
+		t.Fatalf("TestHTTPLookup with the escape hatch: %v", err)
+	}
+	if got := resp.Msg.GetResults()[0].GetFields()["team"]; got != "platform" {
+		t.Fatalf("fields = %v, want the served object", resp.Msg.GetResults()[0].GetFields())
 	}
 }

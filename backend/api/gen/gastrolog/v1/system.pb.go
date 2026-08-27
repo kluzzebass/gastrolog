@@ -3261,17 +3261,18 @@ func (x *HTTPLookupParam) GetDescription() string {
 
 // HTTPLookupEntry defines an HTTP API lookup table for field enrichment.
 type HTTPLookupEntry struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                                                                 // registry name (e.g. "users")
-	UrlTemplate   string                 `protobuf:"bytes,2,opt,name=url_template,json=urlTemplate,proto3" json:"url_template,omitempty"`                                                // e.g. "http://api/users/{value}"
-	Headers       map[string]string      `protobuf:"bytes,3,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // optional auth/custom headers
-	Timeout       string                 `protobuf:"bytes,4,opt,name=timeout,proto3" json:"timeout,omitempty"`                                                                           // Go duration string, optional
-	CacheTtl      string                 `protobuf:"bytes,5,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`                                                         // Go duration string, optional
-	CacheSize     int32                  `protobuf:"varint,6,opt,name=cache_size,json=cacheSize,proto3" json:"cache_size,omitempty"`                                                     // optional, default 10000
-	ResponsePaths []string               `protobuf:"bytes,7,rep,name=response_paths,json=responsePaths,proto3" json:"response_paths,omitempty"`                                          // jq expressions, e.g. "$.data.user"
-	Parameters    []*HTTPLookupParam     `protobuf:"bytes,8,rep,name=parameters,proto3" json:"parameters,omitempty"`                                                                     // ordered param definitions for URL template
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                    protoimpl.MessageState `protogen:"open.v1"`
+	Name                     string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                                                                 // registry name (e.g. "users")
+	UrlTemplate              string                 `protobuf:"bytes,2,opt,name=url_template,json=urlTemplate,proto3" json:"url_template,omitempty"`                                                // e.g. "http://api/users/{value}"
+	Headers                  map[string]string      `protobuf:"bytes,3,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // optional auth/custom headers
+	Timeout                  string                 `protobuf:"bytes,4,opt,name=timeout,proto3" json:"timeout,omitempty"`                                                                           // Go duration string, optional
+	CacheTtl                 string                 `protobuf:"bytes,5,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`                                                         // Go duration string, optional
+	CacheSize                int32                  `protobuf:"varint,6,opt,name=cache_size,json=cacheSize,proto3" json:"cache_size,omitempty"`                                                     // optional, default 10000
+	ResponsePaths            []string               `protobuf:"bytes,7,rep,name=response_paths,json=responsePaths,proto3" json:"response_paths,omitempty"`                                          // jq expressions, e.g. "$.data.user"
+	Parameters               []*HTTPLookupParam     `protobuf:"bytes,8,rep,name=parameters,proto3" json:"parameters,omitempty"`                                                                     // ordered param definitions for URL template
+	AllowPrivateDestinations bool                   `protobuf:"varint,9,opt,name=allow_private_destinations,json=allowPrivateDestinations,proto3" json:"allow_private_destinations,omitempty"`      // reach loopback / private / unique-local targets, denied by default (never link-local)
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *HTTPLookupEntry) Reset() {
@@ -3358,6 +3359,13 @@ func (x *HTTPLookupEntry) GetParameters() []*HTTPLookupParam {
 		return x.Parameters
 	}
 	return nil
+}
+
+func (x *HTTPLookupEntry) GetAllowPrivateDestinations() bool {
+	if x != nil {
+		return x.AllowPrivateDestinations
+	}
+	return false
 }
 
 // JSONFileLookupEntry defines a JSON file-backed lookup table for field enrichment.
@@ -9306,7 +9314,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\afile_id\x18\x03 \x01(\fR\x06fileId\"G\n" +
 	"\x0fHTTPLookupParam\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
-	"\vdescription\x18\x02 \x01(\tR\vdescription\"\x86\x03\n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\"\xc4\x03\n" +
 	"\x0fHTTPLookupEntry\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
 	"\furl_template\x18\x02 \x01(\tR\vurlTemplate\x12D\n" +
@@ -9318,7 +9326,8 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0eresponse_paths\x18\a \x03(\tR\rresponsePaths\x12=\n" +
 	"\n" +
 	"parameters\x18\b \x03(\v2\x1d.gastrolog.v1.HTTPLookupParamR\n" +
-	"parameters\x1a:\n" +
+	"parameters\x12<\n" +
+	"\x1aallow_private_destinations\x18\t \x01(\bR\x18allowPrivateDestinations\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9c\x01\n" +

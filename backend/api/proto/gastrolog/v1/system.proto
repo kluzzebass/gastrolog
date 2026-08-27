@@ -636,6 +636,7 @@ message HTTPLookupEntry {
   int32 cache_size = 6;     // optional, default 10000
   repeated string response_paths = 7; // jq expressions, e.g. "$.data.user"
   repeated HTTPLookupParam parameters = 8; // ordered param definitions for URL template
+  bool allow_private_destinations = 9; // reach loopback / private / unique-local targets, denied by default (never link-local)
 }
 
 // JSONFileLookupEntry defines a JSON file-backed lookup table for field enrichment.

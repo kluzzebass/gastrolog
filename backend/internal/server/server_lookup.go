@@ -141,11 +141,12 @@ func (s *Server) registerHTTPLookups(cfg system.LookupConfig, registry lookup.Re
 			paramNames[j] = p.Name
 		}
 		lcfg := lookup.HTTPConfig{
-			URLTemplate:   hcfg.URLTemplate,
-			Headers:       hcfg.Headers,
-			ResponsePaths: hcfg.ResponsePaths,
-			Parameters:    paramNames,
-			CacheSize:     hcfg.CacheSize,
+			URLTemplate:              hcfg.URLTemplate,
+			Headers:                  hcfg.Headers,
+			ResponsePaths:            hcfg.ResponsePaths,
+			Parameters:               paramNames,
+			CacheSize:                hcfg.CacheSize,
+			AllowPrivateDestinations: hcfg.AllowPrivateDestinations,
 		}
 		if hcfg.Timeout != "" {
 			if d, err := time.ParseDuration(hcfg.Timeout); err == nil {
@@ -158,7 +159,12 @@ func (s *Server) registerHTTPLookups(cfg system.LookupConfig, registry lookup.Re
 			}
 		}
 
-		registry[hcfg.Name] = lookup.NewHTTP(lcfg)
+		table, err := lookup.NewHTTP(lcfg)
+		if err != nil {
+			s.logger.Warn("skipped HTTP lookup table", "name", hcfg.Name, "url", hcfg.URLTemplate, "error", err)
+			continue
+		}
+		registry[hcfg.Name] = table
 		s.logger.Info("registered HTTP lookup table", "name", hcfg.Name, "url", hcfg.URLTemplate)
 	}
 }

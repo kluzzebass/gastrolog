@@ -7,19 +7,25 @@ import (
 	"maps"
 	"mime"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/itchyny/gojq"
+
+	"gastrolog/internal/safefetch"
 )
 
 const (
 	defaultHTTPTimeout  = 5 * time.Second
 	defaultHTTPCacheTTL = 5 * time.Minute
 	defaultHTTPCacheMax = 10_000
+
+	// maxConcurrentFetches bounds the requests one lookup table has in flight
+	// at once, so concurrent queries cannot multiply into a burst at the
+	// configured endpoint.
+	maxConcurrentFetches = 8
 )
 
 // HTTPConfig configures an HTTP API lookup table.
@@ -31,6 +37,11 @@ type HTTPConfig struct {
 	Timeout       time.Duration     // 0 = default 5s
 	CacheTTL      time.Duration     // 0 = default 5min
 	CacheSize     int               // 0 = default 10000
+
+	// AllowPrivateDestinations lets this table reach loopback, private and
+	// unique-local addresses, which the destination policy denies by default.
+	// Link-local space stays out of reach either way.
+	AllowPrivateDestinations bool
 }
 
 // httpEntry is a cached HTTP lookup result.
@@ -144,21 +155,29 @@ func jqSelectN(code *gojq.Code, input any, maxResults int) []any {
 // optionally navigates into the response via a JSONPath expression, and flattens
 // top-level scalar fields into the result map.
 type HTTP struct {
-	urlTemplate   string
+	urlTemplate   *urlTemplate
 	responsePaths []httpPath // parsed JSONPath expressions; nil/empty = use root object
 	parameters    []string   // ordered parameter names; empty = legacy {value} mode
 	client        *http.Client
 	headers       map[string]string
 	cacheTTL      time.Duration
 	cacheSize     int
+	inFlight      chan struct{} // capacity bounds concurrent outbound requests
 
 	mu       sync.Mutex
 	cache    map[string]httpEntry
 	suffixes []string // discovered from first successful response
 }
 
-// NewHTTP creates an HTTP API lookup table.
-func NewHTTP(cfg HTTPConfig) *HTTP {
+// NewHTTP creates an HTTP API lookup table. It fails when the URL template
+// cannot be fetched safely — an unsupported scheme, or a placeholder in the
+// host, which would let a record value pick the destination.
+func NewHTTP(cfg HTTPConfig) (*HTTP, error) {
+	tmpl, err := parseURLTemplate(cfg.URLTemplate)
+	if err != nil {
+		return nil, err
+	}
+
 	timeout := cfg.Timeout
 	if timeout <= 0 {
 		timeout = defaultHTTPTimeout
@@ -186,16 +205,18 @@ func NewHTTP(cfg HTTPConfig) *HTTP {
 		params = []string{"value"}
 	}
 
+	policy := safefetch.Policy{AllowPrivate: cfg.AllowPrivateDestinations}
 	return &HTTP{
-		urlTemplate:   cfg.URLTemplate,
+		urlTemplate:   tmpl,
 		responsePaths: paths,
 		parameters:    params,
-		client:        &http.Client{Timeout: timeout},
+		client:        safefetch.Client(policy, timeout),
 		headers:       cfg.Headers,
 		cacheTTL:      cacheTTL,
 		cacheSize:     cacheSize,
+		inFlight:      make(chan struct{}, maxConcurrentFetches),
 		cache:         make(map[string]httpEntry),
-	}
+	}, nil
 }
 
 // Suffixes returns the output suffixes discovered from the first successful response.
@@ -238,10 +259,15 @@ func (h *HTTP) LookupValues(ctx context.Context, values map[string]string) map[s
 	}
 	h.mu.Unlock()
 
-	// Build URL with all parameter substitutions.
-	reqURL := h.urlTemplate
-	for k, v := range values {
-		reqURL = strings.ReplaceAll(reqURL, "{"+k+"}", url.PathEscape(v))
+	reqURL, err := h.urlTemplate.expand(values)
+	if err != nil {
+		return nil
+	}
+
+	// A cache miss is what costs an outbound request, so it is what the
+	// per-query budget pays for.
+	if !spendOutbound(ctx) {
+		return nil
 	}
 	result := h.doFetch(ctx, reqURL)
 
@@ -266,15 +292,21 @@ func (h *HTTP) LookupValues(ctx context.Context, values map[string]string) map[s
 // TestFetch makes a single HTTP request, bypassing the empty-value guard and cache.
 // Values are substituted as {key} placeholders in the URL template.
 func (h *HTTP) TestFetch(ctx context.Context, values map[string]string) map[string]string {
-	reqURL := h.urlTemplate
-	for k, v := range values {
-		reqURL = strings.ReplaceAll(reqURL, "{"+k+"}", url.PathEscape(v))
+	reqURL, err := h.urlTemplate.expand(values)
+	if err != nil {
+		return nil
 	}
 	return h.doFetch(ctx, reqURL)
 }
 
 // doFetch makes the HTTP GET request and parses the JSON response.
 func (h *HTTP) doFetch(ctx context.Context, reqURL string) map[string]string {
+	select {
+	case h.inFlight <- struct{}{}:
+		defer func() { <-h.inFlight }()
+	case <-ctx.Done():
+		return nil
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
