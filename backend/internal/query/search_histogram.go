@@ -68,10 +68,14 @@ func (e *Engine) computeHistogram(ctx context.Context, q Query, numBuckets int, 
 	}
 
 	hasFilter := q.BoolExpr != nil
-	_, _ = e.runTimechartStrategy(ctx, q, nil, selectedVaults,
+	if _, err := e.runTimechartStrategy(ctx, q, nil, selectedVaults,
 		start, end, bucketWidth, numBuckets,
 		hasFilter, false, groupByLevel, histogramGroupField,
-		acc, e.newBudget())
+		acc, e.newBudget()); err != nil {
+		// Partial counts would understate volume while looking authoritative.
+		e.logger.Warn("histogram abandoned", "error", err)
+		return nil
+	}
 
 	return buildHistogramBuckets(start, bucketWidth, numBuckets, acc.counts, acc.groupCounts, acc.cloudFlags, acc.cloudCounts)
 }
@@ -113,10 +117,14 @@ func (e *Engine) computeHistogramForVaults(ctx context.Context, q Query, numBuck
 	}
 
 	hasFilter := q.BoolExpr != nil
-	_, _ = e.runTimechartStrategy(ctx, q, nil, vaultIDs,
+	if _, err := e.runTimechartStrategy(ctx, q, nil, vaultIDs,
 		start, end, bucketWidth, numBuckets,
 		hasFilter, false, groupByLevel, histogramGroupField,
-		acc, e.newBudget())
+		acc, e.newBudget()); err != nil {
+		// Partial counts would understate volume while looking authoritative.
+		e.logger.Warn("histogram abandoned", "error", err)
+		return nil
+	}
 
 	return buildHistogramBuckets(start, bucketWidth, numBuckets, acc.counts, acc.groupCounts, acc.cloudFlags, acc.cloudCounts)
 }

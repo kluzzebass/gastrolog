@@ -38,6 +38,7 @@ const (
 	consumerRecordBuffer   = "record buffer"
 	consumerSortBuffer     = "sort buffer"
 	consumerTimechartState = "timechart group state"
+	consumerDedupState     = "dedup seen-event set"
 )
 
 // Byte sizes the Go runtime retains beyond the payload of a string, a map
@@ -58,6 +59,11 @@ const (
 
 	// float64Bytes is one median sample.
 	float64Bytes = 8
+
+	// dedupEntryBytes is one entry in a dedup tracker: an EventID key (two
+	// GLIDs, a timestamp, a sequence number), a time.Time value, and the map
+	// slot holding them.
+	dedupEntryBytes = 112
 )
 
 // MemoryLimitError reports that a query's working set outgrew the per-node
@@ -70,6 +76,9 @@ type MemoryLimitError struct {
 }
 
 func (e *MemoryLimitError) Error() string {
+	if e.Limit <= 0 {
+		return "query reached its " + e.Consumer + " with no memory budget installed: refusing to run it unbounded"
+	}
 	return fmt.Sprintf("query exceeded the %d MiB per-node query memory budget while building its %s: narrow the time range, add | head N, or group by a lower-cardinality field",
 		e.Limit>>20, e.Consumer)
 }
@@ -112,13 +121,24 @@ func (e *Engine) newBudget() *Budget {
 
 // Charge accounts n bytes against the budget and fails when the ceiling is
 // crossed. consumer names the structure being grown.
+//
+// It fails closed on a nil Budget. Every materializing path is required to
+// carry one, so arriving here without a budget is a wiring bug, and running
+// the query unbounded is precisely the failure this type exists to prevent.
+// A zero-value Budget resolves to the standard ceiling rather than rejecting
+// everything, so an engine assembled without going through newBudget is
+// bounded rather than broken.
 func (b *Budget) Charge(consumer string, n int64) error {
 	if b == nil {
-		return nil
+		return &MemoryLimitError{Consumer: consumer}
+	}
+	limit := b.limit
+	if limit <= 0 {
+		limit = MaxQueryMemoryBytes
 	}
 	b.used += n
-	if b.used > b.limit {
-		return &MemoryLimitError{Consumer: consumer, Limit: b.limit}
+	if b.used > limit {
+		return &MemoryLimitError{Consumer: consumer, Limit: limit}
 	}
 	return nil
 }

@@ -119,7 +119,7 @@ func Bootstrap(ctx context.Context, store Store) error {
 	queryCfg := QueryConfig{
 		Timeout:           "30s",
 		MaxFollowDuration: "4h",
-		MaxResultCount:    defaultMaxResultCount,
+		MaxResultCount:    DefaultMaxResultCount,
 	}
 	if err := store.SaveServerSettings(ctx, ServerSettings{Auth: authCfg, Query: queryCfg}); err != nil {
 		return err
@@ -144,7 +144,7 @@ func BootstrapMinimal(ctx context.Context, store Store) error {
 	queryCfg := QueryConfig{
 		Timeout:           "30s",
 		MaxFollowDuration: "4h",
-		MaxResultCount:    defaultMaxResultCount,
+		MaxResultCount:    DefaultMaxResultCount,
 	}
 	return store.SaveServerSettings(ctx, ServerSettings{Auth: authCfg, Query: queryCfg})
 }

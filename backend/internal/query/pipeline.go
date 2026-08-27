@@ -120,7 +120,7 @@ func (e *Engine) runStreamingAggregation(ctx context.Context, it iter.Seq2[chunk
 	if err != nil {
 		return nil, err
 	}
-	sf := newStreamFilter(ctx, ph.preOps, e.lookupResolver)
+	sf := newStreamFilter(ctx, ph.preOps, e.lookupResolver, budget)
 	for rec, recErr := range it {
 		if recErr != nil {
 			return nil, recErr
@@ -358,10 +358,24 @@ func (e *Engine) RunPipelineOnRecords(ctx context.Context, q Query, pipeline *qu
 			return nil, err
 		}
 		rec = rec.Copy()
+		// Charge AFTER materializing: extracted JSON/logfmt fields land in
+		// Attrs and are most of what a buffered record retains.
+		materializeRecord(&rec)
 		if err := budget.ChargeRecord(consumerRecordBuffer, rec); err != nil {
 			return nil, err
 		}
 		records = append(records, rec)
+	}
+
+	// The caller charged each remote record as it gathered it, before any
+	// field extraction. Materializing them now grows what they retain, so
+	// charge the difference rather than the whole record again.
+	for i := range extraRecords {
+		before := RecordFootprint(extraRecords[i])
+		materializeRecord(&extraRecords[i])
+		if err := budget.Charge(consumerRecordBuffer, RecordFootprint(extraRecords[i])-before); err != nil {
+			return nil, err
+		}
 	}
 
 	// Merge in extra (remote) records.
@@ -376,15 +390,14 @@ func (e *Engine) RunPipelineOnRecords(ctx context.Context, q Query, pipeline *qu
 		return a.IngestTS.Compare(b.IngestTS)
 	})
 
-	// Materialize fields and apply pre-stats ops.
-	materializeFields(records)
+	// Every record was materialized as it was charged above.
 	eval := querylang.NewEvaluator()
 	for _, op := range ph.preOps {
 		switch o := op.(type) {
 		case *querylang.WhereOp:
 			records = applyRecordWhere(records, o)
 		case *querylang.DedupOp:
-			records = applyRecordDedup(records, parseDedupWindow(o.Window))
+			records, err = applyRecordDedup(records, parseDedupWindow(o.Window), budget)
 		case *querylang.EvalOp:
 			records, err = applyRecordEval(records, o, eval)
 		case *querylang.SortOp:

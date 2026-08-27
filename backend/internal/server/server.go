@@ -731,7 +731,7 @@ func (s *Server) loadQueryConfig() (queryTimeout, maxFollowDuration time.Duratio
 			maxFollowDuration = d
 		}
 	}
-	maxResultCount = int64(ss.Query.MaxResultCount)
+	maxResultCount = int64(system.EffectiveMaxResultCount(ss.Query.MaxResultCount))
 	return queryTimeout, maxFollowDuration, maxResultCount
 }
 

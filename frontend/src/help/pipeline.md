@@ -29,7 +29,9 @@ dcount distinct-value set: narrow the time range, add | head N, or group by a
 lower-cardinality field
 ```
 
-The query fails rather than returning a partial answer — a half-computed aggregate presented as a result is worse than no result.
+Hitting the budget fails the query rather than trimming the result to fit — a half-computed aggregate presented as a finished one is worse than no result.
+
+Two separate caps do return a partial table, and both mark it truncated in the result so you can see it happened: `stats` stops admitting new groups past 10,000 distinct groups, and `bin()` gap-filling stops padding empty time bins once it would cross that cap. If a result comes back flagged as truncated, group by something coarser or widen the bin.
 
 The budget is **per query, per node**. A query that fans out across a cluster gets its own budget on each node that runs part of it, plus the coordinator's own share for the records it gathers back; there is no cluster-wide total. Each node bounds only what it holds itself, which is what keeps any one node from being exhausted by a single query.
 

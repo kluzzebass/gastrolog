@@ -448,7 +448,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
 
               <FormField
                 label="Max Result Count"
-                description="Maximum number of records a single search request can return. Set to 0 for unlimited."
+                description="Maximum number of records a single search request can return. Leave at 0 to use the default of 10,000."
                 dark={dark}
               >
                 <NumberInput

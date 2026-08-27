@@ -309,11 +309,20 @@ without changing the answer.
 
 Every path that retains data charges it: the record buffer behind an uncapped
 sort, the top-N working set behind a capped one, the slot array a `tail`/`slice`
-declares, stats group state, and the collections inside `dcount`, `median`,
-`values`, `first`, and `last`. Exceeding it fails the query with a
-`query.MemoryLimitError` naming the structure that overflowed and the ceiling;
-the RPC layer surfaces it as `ResourceExhausted`. Results are never silently
-truncated to fit.
+declares, the dedup seen-event set, stats group state, and the collections
+inside `dcount`, `median`, `values`, `first`, and `last`. Records are charged
+*after* field extraction, since the JSON/logfmt fields that materialization
+moves into `Attrs` are most of what a buffered record retains. Exceeding the
+budget fails the query with a `query.MemoryLimitError` naming the structure that
+overflowed and the ceiling; the RPC layer surfaces it as `ResourceExhausted`.
+The budget never trims a result to fit.
+
+Two older caps do produce a partial table, and both label it: exceeding
+`MaxGroupCardinality` stops admitting new `stats` groups, and gap-fill stops
+padding empty bins when it would exhaust the cardinality cap or the budget.
+Both set `TableResult.Truncated`, which travels to the client, so the partial
+result is flagged rather than silent — but it is still partial, which is a
+different contract from the budget's outright failure.
 
 The budget is **per query, per node**. Each node executing part of a fan-out
 gets its own, and the coordinator additionally charges the records it gathers

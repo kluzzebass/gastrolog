@@ -40,7 +40,7 @@ func batchReference(t *testing.T, records []chunk.Record, ops []querylang.PipeOp
 	for i, r := range records {
 		copies[i] = r.Copy()
 	}
-	out, err := applyBatchOps(context.Background(), copies, ops, nil)
+	out, err := applyBatchOps(context.Background(), copies, ops, nil, NewBudget())
 	if err != nil {
 		t.Fatalf("batch reference: %v", err)
 	}

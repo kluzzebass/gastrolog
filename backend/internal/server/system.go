@@ -269,7 +269,10 @@ func (s *SystemServer) buildFullSettingsResponse(ctx context.Context, includeSec
 		Query: &apiv1.QuerySettings{
 			Timeout:           ss.Query.Timeout,
 			MaxFollowDuration: ss.Query.MaxFollowDuration,
-			MaxResultCount:    int32(ss.Query.MaxResultCount), //nolint:gosec // G115
+			// Report what the query path enforces, not the stored value: an
+			// unset field resolves to the default, and showing 0 would tell
+			// the operator results are uncapped when they are not.
+			MaxResultCount: int32(system.EffectiveMaxResultCount(ss.Query.MaxResultCount)), //nolint:gosec // G115
 		},
 		Scheduler: &apiv1.SchedulerSettings{
 			MaxConcurrentJobs: maxJobs,

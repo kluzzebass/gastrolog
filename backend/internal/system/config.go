@@ -102,16 +102,32 @@ type QueryConfig struct {
 	// Uses Go duration format (e.g., "4h"). Empty disables the limit.
 	MaxFollowDuration string `json:"max_follow_duration,omitempty"`
 
-	// MaxResultCount caps the number of records a single Search request can return.
-	// 0 means unlimited (no cap). Bootstrap writes defaultMaxResultCount.
+	// MaxResultCount caps the number of records a single Search request can
+	// return. Unset (0) resolves to DefaultMaxResultCount — see
+	// EffectiveMaxResultCount.
 	MaxResultCount int `json:"max_result_count,omitempty"`
 }
 
-// defaultMaxResultCount is the result cap a fresh install starts with. It also
-// bounds what a pipeline materializes: a sort with no cap of its own uses the
-// result cap as its top-N working set, so leaving this unset makes an uncapped
-// sort pull every matching record into memory.
-const defaultMaxResultCount = 10_000
+// DefaultMaxResultCount is the result cap that applies when settings do not
+// carry one. It also bounds what a pipeline materializes: a sort with no cap
+// of its own uses the result cap as its top-N working set, so an unset value
+// makes an uncapped sort pull every matching record into memory.
+const DefaultMaxResultCount = 10_000
+
+// EffectiveMaxResultCount resolves a stored MaxResultCount to the value the
+// query path should enforce.
+//
+// The field is `omitempty`, so a settings document written before it existed
+// is indistinguishable from one that stores 0. Resolving the default at read
+// time rather than only at bootstrap is what makes an already-running cluster
+// pick it up: with 0 the bounded-sort planner has no cap to work from and an
+// uncapped sort falls back to full materialization.
+func EffectiveMaxResultCount(stored int) int {
+	if stored <= 0 {
+		return DefaultMaxResultCount
+	}
+	return stored
+}
 
 // SchedulerConfig holds configuration for the job scheduler.
 type SchedulerConfig struct {

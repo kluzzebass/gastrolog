@@ -163,3 +163,53 @@ func TestSaveServerSettingsOverwritePreservesLatest(t *testing.T) {
 		t.Errorf("got %q, want %q", ss.Auth.JWTSecret, "second")
 	}
 }
+
+// A settings document written before max_result_count existed is
+// indistinguishable from one storing 0, because the field is omitempty. If the
+// default only applied at bootstrap, every already-running cluster would keep
+// an uncapped result count — and with it an uncapped sort working set.
+func TestEffectiveMaxResultCountResolvesUnsetToDefault(t *testing.T) {
+	tests := []struct {
+		name   string
+		stored int
+		want   int
+	}{
+		{"unset settings document", 0, system.DefaultMaxResultCount},
+		{"negative is not a licence to be unbounded", -1, system.DefaultMaxResultCount},
+		{"an operator's explicit cap is honoured", 250, 250},
+		{"an operator may raise it", 1_000_000, 1_000_000},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := system.EffectiveMaxResultCount(tc.stored); got != tc.want {
+				t.Errorf("EffectiveMaxResultCount(%d) = %d, want %d", tc.stored, got, tc.want)
+			}
+		})
+	}
+}
+
+// Bootstrap writes the cap so a fresh install is capped without relying on the
+// read-time fallback.
+func TestBootstrapWritesMaxResultCount(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		boot func(context.Context, system.Store) error
+	}{
+		{"full", system.Bootstrap},
+		{"minimal", system.BootstrapMinimal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := memory.NewStore()
+			if err := tc.boot(context.Background(), store); err != nil {
+				t.Fatalf("bootstrap: %v", err)
+			}
+			ss, err := store.LoadServerSettings(context.Background())
+			if err != nil {
+				t.Fatalf("load settings: %v", err)
+			}
+			if ss.Query.MaxResultCount != system.DefaultMaxResultCount {
+				t.Errorf("MaxResultCount = %d, want %d", ss.Query.MaxResultCount, system.DefaultMaxResultCount)
+			}
+		})
+	}
+}
