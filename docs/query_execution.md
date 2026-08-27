@@ -298,6 +298,36 @@ selection-based merging across N streams (N is typically 1–3 vaults per node).
 remote vault tokens are opaque blobs forwarded back to their originating nodes
 on the next page request.
 
+## Query Memory Budget
+
+Pipeline operators control their own result limits, so `RunPipeline` clears the
+incoming `Limit` before scanning: a scan limit would cut an aggregator's or a
+sort's *input*, making `| stats count` report the count of an arbitrary prefix
+and `| sort` order one. What bounds the work instead is a per-query memory
+budget (`query.MaxQueryMemoryBytes`, 256 MiB), which bounds retained bytes
+without changing the answer.
+
+Every path that retains data charges it: the record buffer behind an uncapped
+sort, the top-N working set behind a capped one, the slot array a `tail`/`slice`
+declares, stats group state, and the collections inside `dcount`, `median`,
+`values`, `first`, and `last`. Exceeding it fails the query with a
+`query.MemoryLimitError` naming the structure that overflowed and the ceiling;
+the RPC layer surfaces it as `ResourceExhausted`. Results are never silently
+truncated to fit.
+
+The budget is **per query, per node**. Each node executing part of a fan-out
+gets its own, and the coordinator additionally charges the records it gathers
+back from peers against the same account the pipeline then runs under, so the
+gather and the pipeline share one ledger. There is no cluster-wide total: the
+exhaustion being prevented is a node running out of memory, a per-node
+resource, and a shared counter would need a cluster round trip on the
+per-record path.
+
+The ceiling is a fixed constant rather than a setting. A node runs queries for
+every vault it leads, so raising it to make one query fit would re-arm the same
+exhaustion for every other vault on that node; the remedy for a query that does
+not fit belongs in the query.
+
 ## Merge Loop
 
 ```mermaid

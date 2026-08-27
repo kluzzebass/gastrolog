@@ -348,6 +348,10 @@ type Engine struct {
 	// Lookup enrichment resolver (optional). Set via SetLookupResolver.
 	lookupResolver lookup.Resolver
 
+	// memLimit is the per-query working-set ceiling this engine hands to
+	// every budget it creates. Zero means MaxQueryMemoryBytes.
+	memLimit int64
+
 	// Logger for this engine instance.
 	// Scoped with component="query-engine" at construction time.
 	logger *slog.Logger

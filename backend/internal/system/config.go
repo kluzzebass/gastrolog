@@ -103,9 +103,15 @@ type QueryConfig struct {
 	MaxFollowDuration string `json:"max_follow_duration,omitempty"`
 
 	// MaxResultCount caps the number of records a single Search request can return.
-	// 0 means unlimited (no cap). Default: 10000.
+	// 0 means unlimited (no cap). Bootstrap writes defaultMaxResultCount.
 	MaxResultCount int `json:"max_result_count,omitempty"`
 }
+
+// defaultMaxResultCount is the result cap a fresh install starts with. It also
+// bounds what a pipeline materializes: a sort with no cap of its own uses the
+// result cap as its top-N working set, so leaving this unset makes an uncapped
+// sort pull every matching record into memory.
+const defaultMaxResultCount = 10_000
 
 // SchedulerConfig holds configuration for the job scheduler.
 type SchedulerConfig struct {

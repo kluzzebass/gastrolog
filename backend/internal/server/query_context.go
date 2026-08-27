@@ -74,7 +74,7 @@ func (s *QueryServer) GetContext(
 		IsReverse: true,
 	}, before, isAnchor)
 	if err != nil {
-		return nil, errInternal(err)
+		return nil, errQueryExecution(err)
 	}
 	slices.Reverse(beforeRecs) // newest-first → oldest-first
 
@@ -83,7 +83,7 @@ func (s *QueryServer) GetContext(
 		Limit: after + 1,
 	}, after, isAnchor)
 	if err != nil {
-		return nil, errInternal(err)
+		return nil, errQueryExecution(err)
 	}
 
 	return connect.NewResponse(&apiv1.GetContextResponse{
@@ -136,6 +136,11 @@ func (s *QueryServer) searchContext(
 	localIter, _ := eng.Search(ctx, q, nil)
 	remoteIter, _, _ := s.collectRemote(ctx, q, nil)
 
+	// The context window comes from the client, so the records held while
+	// merging local and remote sides are bounded by the same per-query budget
+	// as any other materializing work.
+	budget := query.NewBudget()
+
 	reverse := q.Reverse()
 	isBefore := func(a, b time.Time) bool {
 		if reverse {
@@ -144,7 +149,10 @@ func (s *QueryServer) searchContext(
 		return a.Before(b)
 	}
 
-	remote := drainIterToProto(remoteIter)
+	remote, err := drainIterToProto(remoteIter, budget)
+	if err != nil {
+		return nil, err
+	}
 
 	ri := 0
 	var result []*apiv1.Record
@@ -152,6 +160,9 @@ func (s *QueryServer) searchContext(
 	for rec, err := range localIter {
 		if err != nil {
 			return result, err
+		}
+		if err := budget.ChargeRecord("context window", rec); err != nil {
+			return nil, err
 		}
 		// Drain remote records that sort before this local record.
 		for ri < len(remote) && isBefore(remote[ri].GetWriteTs().AsTime(), rec.WriteTS) {
@@ -189,18 +200,21 @@ func (s *QueryServer) searchContext(
 
 // drainIterToProto collects all records from an iterator into a slice of
 // proto records. Returns nil if the iterator is nil.
-func drainIterToProto(it iter.Seq2[chunk.Record, error]) []*apiv1.Record {
+func drainIterToProto(it iter.Seq2[chunk.Record, error], budget *query.Budget) ([]*apiv1.Record, error) {
 	if it == nil {
-		return nil
+		return nil, nil
 	}
 	var out []*apiv1.Record
 	for rec, err := range it {
 		if err != nil {
 			break
 		}
+		if err := budget.ChargeRecord("context window", rec); err != nil {
+			return nil, err
+		}
 		out = append(out, recordToProto(rec))
 	}
-	return out
+	return out, nil
 }
 
 // remoteNodeForVault returns the owning node ID if the vault is remote,

@@ -81,8 +81,8 @@ func classifyPipes(pipeline *querylang.Pipeline) (*pipelinePhases, error) {
 }
 
 // runTimechartPipeline handles the timechart fast path.
-func (e *Engine) runTimechartPipeline(ctx context.Context, q Query, ph *pipelinePhases) (*PipelineResult, error) {
-	table, err := e.runTimechart(ctx, q, ph.timechartOp, ph.preOps)
+func (e *Engine) runTimechartPipeline(ctx context.Context, q Query, ph *pipelinePhases, budget *Budget) (*PipelineResult, error) {
+	table, err := e.runTimechart(ctx, q, ph.timechartOp, ph.preOps, budget)
 	if err != nil {
 		return nil, err
 	}
@@ -94,8 +94,8 @@ func (e *Engine) runTimechartPipeline(ctx context.Context, q Query, ph *pipeline
 }
 
 // runAggregation feeds records into a stats aggregator and returns a table.
-func (e *Engine) runAggregation(ctx context.Context, records []chunk.Record, ph *pipelinePhases, q Query) (*PipelineResult, error) {
-	agg, err := NewAggregator(ph.statsOp)
+func (e *Engine) runAggregation(ctx context.Context, records []chunk.Record, ph *pipelinePhases, q Query, budget *Budget) (*PipelineResult, error) {
+	agg, err := NewAggregator(ph.statsOp, budget)
 	if err != nil {
 		return nil, err
 	}
@@ -115,8 +115,8 @@ func (e *Engine) runAggregation(ctx context.Context, records []chunk.Record, ph 
 // runStreamingAggregation applies streamable pre-stats operators per-record
 // and feeds survivors directly into the aggregator, so the search result is
 // never materialized. Only aggregator group state is held in memory.
-func (e *Engine) runStreamingAggregation(ctx context.Context, it iter.Seq2[chunk.Record, error], ph *pipelinePhases, q Query) (*PipelineResult, error) {
-	agg, err := NewAggregator(ph.statsOp)
+func (e *Engine) runStreamingAggregation(ctx context.Context, it iter.Seq2[chunk.Record, error], ph *pipelinePhases, q Query, budget *Budget) (*PipelineResult, error) {
+	agg, err := NewAggregator(ph.statsOp, budget)
 	if err != nil {
 		return nil, err
 	}
@@ -159,13 +159,23 @@ func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.P
 		return nil, err
 	}
 
+	// Every materializing path charges what it retains against this budget, so
+	// a pipeline whose working set outgrows the node fails with a named limit
+	// instead of allocating until the process dies.
+	budget := e.newBudget()
+
 	if ph.timechartOp != nil {
-		return e.runTimechartPipeline(ctx, q, ph)
+		return e.runTimechartPipeline(ctx, q, ph, budget)
 	}
 
 	// Pipeline operators control their own result limits (head, tail, slice).
-	// Save the incoming limit so we can reapply it if the pipeline doesn't
-	// have its own cap; then clear it so Search returns all matching records.
+	// A limit applied to the scan would cut the aggregator's or the sort's
+	// input, not its output: "| stats count" over a limited scan counts the
+	// first N records and reports a wrong total, and "| sort" would order an
+	// arbitrary prefix. Save the incoming limit so we can reapply it to the
+	// final records if the pipeline has no cap of its own; then clear it so
+	// Search returns all matching records. What bounds the work is the memory
+	// budget, which bounds retained bytes without changing the answer.
 	origLimit := q.Limit
 	q.Limit = 0
 
@@ -182,7 +192,7 @@ func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.P
 	// Aggregating pipeline with streamable pre-ops: feed records straight
 	// into the aggregator instead of materializing the search result.
 	if ph.statsOp != nil && opsStreamable(ph.preOps) {
-		return e.runStreamingAggregation(ctx, it, ph, q)
+		return e.runStreamingAggregation(ctx, it, ph, q, budget)
 	}
 
 	// When the pipeline has no explicit cap, RunPipeline truncates the final
@@ -193,7 +203,7 @@ func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.P
 		implicitLimit = origLimit
 	}
 
-	records, err := applyRecordOpsLimit(ctx, it, ph.preOps, e.lookupResolver, implicitLimit)
+	records, err := applyRecordOpsLimit(ctx, it, ph.preOps, e.lookupResolver, implicitLimit, budget)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +224,7 @@ func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.P
 		return &PipelineResult{Records: records}, nil
 	}
 
-	return e.runAggregation(ctx, records, ph, q)
+	return e.runAggregation(ctx, records, ph, q, budget)
 }
 
 // hasExplicitCap returns true if the pipeline contains a head, tail, or slice
@@ -311,7 +321,11 @@ func hasNonDistributiveAgg(op *querylang.StatsOp) bool {
 // from remote cluster nodes) are merged with the local search results before
 // pipeline operators run. This enables correct head/tail/slice + stats on a
 // coordinator: gather raw records globally, then apply the pipeline once.
-func (e *Engine) RunPipelineOnRecords(ctx context.Context, q Query, pipeline *querylang.Pipeline, extraRecords []chunk.Record) (*PipelineResult, error) {
+//
+// The caller supplies the budget because it has already buffered extraRecords
+// on this node; passing its own account in keeps the gather and the pipeline
+// on one ledger instead of two that each allow the full ceiling.
+func (e *Engine) RunPipelineOnRecords(ctx context.Context, q Query, pipeline *querylang.Pipeline, extraRecords []chunk.Record, budget *Budget) (*PipelineResult, error) {
 	ph, err := classifyPipes(pipeline)
 	if err != nil {
 		return nil, err
@@ -320,10 +334,15 @@ func (e *Engine) RunPipelineOnRecords(ctx context.Context, q Query, pipeline *qu
 	// Timechart with extra records is not supported yet (would need bucket
 	// merging). Fall back to local-only for now.
 	if ph.timechartOp != nil {
-		return e.runTimechartPipeline(ctx, q, ph)
+		return e.runTimechartPipeline(ctx, q, ph, budget)
 	}
 
-	// Clear incoming limit — pipeline operators control their own caps.
+	if err := chargeDeclaredCaps(ph.preOps, budget); err != nil {
+		return nil, err
+	}
+
+	// Clear incoming limit — pipeline operators control their own caps; see
+	// RunPipeline for why a scan limit would corrupt the answer.
 	origLimit := q.Limit
 	q.Limit = 0
 	if ph.statsOp == nil {
@@ -338,7 +357,11 @@ func (e *Engine) RunPipelineOnRecords(ctx context.Context, q Query, pipeline *qu
 		if err != nil {
 			return nil, err
 		}
-		records = append(records, rec.Copy())
+		rec = rec.Copy()
+		if err := budget.ChargeRecord(consumerRecordBuffer, rec); err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
 	}
 
 	// Merge in extra (remote) records.
@@ -396,7 +419,7 @@ func (e *Engine) RunPipelineOnRecords(ctx context.Context, q Query, pipeline *qu
 		return &PipelineResult{Records: records}, nil
 	}
 
-	return e.runAggregation(ctx, records, ph, q)
+	return e.runAggregation(ctx, records, ph, q, budget)
 }
 
 // recordsToTable converts a slice of records into a flat TableResult.

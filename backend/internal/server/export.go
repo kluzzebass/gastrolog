@@ -139,15 +139,25 @@ func (s *QueryServer) runExportJob(
 
 	var records []chunk.Record
 
+	// An export buffers every matching record on this node before appending
+	// them to the target, so it is bounded by the same per-query budget as any
+	// other materializing work. An export too large to hold at once fails with
+	// a named limit and can be re-run over narrower time ranges.
+	budget := query.NewBudget()
+
 	// Drain all remote records by paginating through collectRemote.
 	// Each call returns up to one batch per vault; loop until exhausted.
-	remoteRecords := s.drainRemoteRecords(ctx, q)
+	remoteRecords, err := s.drainRemoteRecords(ctx, q, budget)
+	if err != nil {
+		job.Fail(s.now(), fmt.Sprintf("gather cluster records: %v", err))
+		return
+	}
 
 	hasMaterializingPipeline := pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline)
 	hasStreamingPipeline := pipeline != nil && len(pipeline.Pipes) > 0 && !hasMaterializingPipeline
 
 	if hasMaterializingPipeline {
-		result, err := eng.RunPipelineOnRecords(ctx, q, pipeline, remoteRecords)
+		result, err := eng.RunPipelineOnRecords(ctx, q, pipeline, remoteRecords, budget)
 		if err != nil {
 			job.Fail(s.now(), fmt.Sprintf("pipeline execution: %v", err))
 			return
@@ -157,6 +167,10 @@ func (s *QueryServer) runExportJob(
 		localIter, _ := eng.Search(ctx, q, nil)
 		for rec, err := range localIter {
 			if err != nil {
+				job.Fail(s.now(), fmt.Sprintf("search: %v", err))
+				return
+			}
+			if err := budget.ChargeRecord("export record buffer", rec); err != nil {
 				job.Fail(s.now(), fmt.Sprintf("search: %v", err))
 				return
 			}
@@ -270,19 +284,22 @@ func (s *QueryServer) resolveVaultByID(ctx context.Context, id glid.GLID, target
 
 // drainRemoteRecords collects all remote records into a slice by draining
 // the streaming iterator returned by collectRemote.
-func (s *QueryServer) drainRemoteRecords(ctx context.Context, q query.Query) []chunk.Record {
+func (s *QueryServer) drainRemoteRecords(ctx context.Context, q query.Query, budget *query.Budget) ([]chunk.Record, error) {
 	remoteIter, _, _ := s.collectRemote(ctx, q, nil)
 	if remoteIter == nil {
-		return nil
+		return nil, nil
 	}
 	var all []chunk.Record
 	for rec, err := range remoteIter {
 		if err != nil {
 			break
 		}
+		if err := budget.ChargeRecord("gathered cluster records", rec); err != nil {
+			return nil, err
+		}
 		all = append(all, rec)
 	}
-	return all
+	return all, nil
 }
 
 // excludeTargetVault ensures the target vault is not searched as a source.

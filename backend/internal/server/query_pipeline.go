@@ -34,7 +34,7 @@ func (s *QueryServer) searchPipeline(
 	}
 	result, err := eng.RunPipeline(ctx, q, pipeline)
 	if err != nil {
-		return errInternal(err)
+		return errQueryExecution(err)
 	}
 	// Compute local histogram to include alongside pipeline results.
 	histogram := HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
@@ -86,6 +86,11 @@ func (s *QueryServer) searchPipelineGlobal(
 		q.Limit = int(s.maxResultCount)
 	}
 
+	// The gathered remote records and the pipeline that consumes them share one
+	// memory account: buffering every node's records here is part of the same
+	// working set the pipeline then sorts or aggregates.
+	budget := query.NewBudget()
+
 	// Collect raw records from remote nodes (no pipeline — just the base query).
 	remoteIter, remoteHist, _ := s.collectRemote(ctx, q, nil)
 	var extraRecords []chunk.Record
@@ -94,13 +99,16 @@ func (s *QueryServer) searchPipelineGlobal(
 			if iterErr != nil {
 				return connect.NewError(connect.CodeInternal, iterErr)
 			}
+			if err := budget.ChargeRecord("gathered cluster records", rec); err != nil {
+				return errQueryExecution(err)
+			}
 			extraRecords = append(extraRecords, rec)
 		}
 	}
 
-	result, err := eng.RunPipelineOnRecords(ctx, q, pipeline, extraRecords)
+	result, err := eng.RunPipelineOnRecords(ctx, q, pipeline, extraRecords, budget)
 	if err != nil {
-		return errInternal(err)
+		return errQueryExecution(err)
 	}
 
 	// Compute and merge histogram.
@@ -248,7 +256,7 @@ func pipeOpNote(op querylang.PipeOp) string {
 				fields[i] = f.Name + " (asc)"
 			}
 		}
-		return fmt.Sprintf("Sorts all results by %s. Buffers all records in memory on the coordinator.", strings.Join(fields, ", "))
+		return fmt.Sprintf("Sorts all results by %s. Buffers records in memory on the coordinator, up to the per-query memory budget.", strings.Join(fields, ", "))
 	case *querylang.HeadOp:
 		return fmt.Sprintf("Returns only the first %d records. Stops scanning early once the limit is reached.", o.N)
 	case *querylang.TailOp:

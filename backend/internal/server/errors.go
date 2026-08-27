@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"connectrpc.com/connect"
+
+	"gastrolog/internal/query"
 )
 
 // errRequired returns an InvalidArgument connect error for a missing
@@ -50,6 +52,17 @@ func errAlreadyExists(err error) *connect.Error {
 // errUnauthenticated wraps an error as a CodeUnauthenticated connect error.
 func errUnauthenticated(err error) *connect.Error {
 	return connect.NewError(connect.CodeUnauthenticated, err)
+}
+
+// errQueryExecution wraps a query execution failure. A query that outgrew its
+// memory budget is reported as ResourceExhausted rather than Internal: the
+// query asked for more than a node will give it, which the caller can act on
+// by narrowing the query, and which monitoring should not read as a node fault.
+func errQueryExecution(err error) *connect.Error {
+	if _, ok := errors.AsType[*query.MemoryLimitError](err); ok {
+		return connect.NewError(connect.CodeResourceExhausted, err)
+	}
+	return connect.NewError(connect.CodeInternal, err)
 }
 
 // errRequiredMsg returns an InvalidArgument error with a custom message.

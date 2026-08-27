@@ -634,7 +634,7 @@ func TestStreamingTailBasic(t *testing.T) {
 	records := makeTestRecords(1000, nil)
 	ops := []querylang.PipeOp{&querylang.TailOp{N: 10}}
 
-	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOps: %v", err)
 	}
@@ -654,7 +654,7 @@ func TestStreamingTailFewerRecordsThanN(t *testing.T) {
 	records := makeTestRecords(5, nil)
 	ops := []querylang.PipeOp{&querylang.TailOp{N: 100}}
 
-	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOps: %v", err)
 	}
@@ -678,7 +678,7 @@ func TestStreamingTailWithWhere(t *testing.T) {
 		&querylang.TailOp{N: 3},
 	}
 
-	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOps: %v", err)
 	}
@@ -695,7 +695,7 @@ func TestStreamingSliceBasic(t *testing.T) {
 	records := makeTestRecords(100, nil)
 	ops := []querylang.PipeOp{&querylang.SliceOp{Start: 5, End: 10}}
 
-	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOps: %v", err)
 	}
@@ -722,7 +722,7 @@ func TestStreamingSliceWithWhere(t *testing.T) {
 		&querylang.SliceOp{Start: 2, End: 4},
 	}
 
-	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOps: %v", err)
 	}
@@ -750,7 +750,7 @@ func TestStreamingSliceEarlyExit(t *testing.T) {
 	}
 	ops := []querylang.PipeOp{&querylang.SliceOp{Start: 1, End: 3}}
 
-	result, err := applyRecordOps(context.Background(), countingIter, ops, nil)
+	result, err := applyRecordOps(context.Background(), countingIter, ops, nil, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOps: %v", err)
 	}
@@ -773,7 +773,7 @@ func TestSortBeforeTailFallsBackToMaterialization(t *testing.T) {
 	}
 
 	// Should not panic or error — falls back to batch path.
-	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOps: %v", err)
 	}

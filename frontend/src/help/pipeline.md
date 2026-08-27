@@ -19,6 +19,22 @@ Pipeline operators fall into different categories based on how they process data
 | **Visualization** | `linechart`, `barchart`, `donut`, `heatmap`, `scatter`, `map`, `raw` | No | Control how results are displayed but do not transform data. Must appear at the end of a pipeline, after `stats` or `timechart`. See [Visualizations](help:visualizations). |
 | **Sink** | `export` | No | Materializes results into a target vault as a background job. Must be the last operator. |
 
+## Query Memory Budget
+
+Materializing work grows with the data a query touches, not with the size of its result: `sort` holds every matching record, `dcount` holds every distinct value, `median` holds one sample per record. Each query gets a fixed working-set budget of **256 MiB per node**, and a query that would grow past it fails with an error naming what overflowed:
+
+```
+query exceeded the 256 MiB per-node query memory budget while building its
+dcount distinct-value set: narrow the time range, add | head N, or group by a
+lower-cardinality field
+```
+
+The query fails rather than returning a partial answer — a half-computed aggregate presented as a result is worse than no result.
+
+The budget is **per query, per node**. A query that fans out across a cluster gets its own budget on each node that runs part of it, plus the coordinator's own share for the records it gathers back; there is no cluster-wide total. Each node bounds only what it holds itself, which is what keeps any one node from being exhausted by a single query.
+
+If a query hits the budget, narrow it rather than retrying: a shorter time range, a tighter filter, a `head` cap, or grouping by a field with fewer distinct values.
+
 ## Stats Operator
 
 The `stats` operator aggregates matching records into a table. It requires at least one aggregation function, and optionally groups results with a `by` clause.

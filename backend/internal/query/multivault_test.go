@@ -462,7 +462,7 @@ func TestRunPipelineOnRecords(t *testing.T) {
 		End:   t0.Add(60 * time.Minute),
 	}
 
-	result, err := eng.RunPipelineOnRecords(context.Background(), q, pipeline, extra)
+	result, err := eng.RunPipelineOnRecords(context.Background(), q, pipeline, extra, query.NewBudget())
 	if err != nil {
 		t.Fatalf("RunPipelineOnRecords: %v", err)
 	}

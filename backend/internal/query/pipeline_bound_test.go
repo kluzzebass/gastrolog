@@ -73,7 +73,7 @@ func assertSameRecords(t *testing.T, got, want []chunk.Record) {
 // bound collection but is not required to truncate itself.
 func runOpsEquivalence(t *testing.T, records []chunk.Record, ops []querylang.PipeOp, implicitLimit int) {
 	t.Helper()
-	got, err := applyRecordOpsLimit(context.Background(), recordIter(records), ops, nil, implicitLimit)
+	got, err := applyRecordOpsLimit(context.Background(), recordIter(records), ops, nil, implicitLimit, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOpsLimit: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestSortlessImplicitLimitStopsEarly(t *testing.T) {
 	ops := []querylang.PipeOp{
 		&querylang.WhereOp{Expr: &querylang.PredicateExpr{Kind: querylang.PredKV, Key: "n", Value: "0"}},
 	}
-	result, err := applyRecordOpsLimit(context.Background(), countingIter, ops, nil, 25)
+	result, err := applyRecordOpsLimit(context.Background(), countingIter, ops, nil, 25, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOpsLimit: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestBoundedSortDoesNotMaterialize(t *testing.T) {
 	testBoundedSortObserver = func(n int) { maxItems = n }
 	defer func() { testBoundedSortObserver = nil }()
 
-	got, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	got, err := applyRecordOps(context.Background(), recordIter(records), ops, nil, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOps: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestBoundedSortEmptyInput(t *testing.T) {
 		&querylang.SortOp{Fields: []querylang.SortField{{Name: "n"}}},
 		&querylang.HeadOp{N: 10},
 	}
-	got, err := applyRecordOps(context.Background(), recordIter(nil), ops, nil)
+	got, err := applyRecordOps(context.Background(), recordIter(nil), ops, nil, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOps: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestBoundedSortIterError(t *testing.T) {
 		&querylang.SortOp{Fields: []querylang.SortField{{Name: "raw"}}},
 		&querylang.HeadOp{N: 3},
 	}
-	if _, err := applyRecordOps(context.Background(), errIter, ops, nil); err == nil {
+	if _, err := applyRecordOps(context.Background(), errIter, ops, nil, NewBudget()); err == nil {
 		t.Fatal("expected iterator error to propagate")
 	}
 }

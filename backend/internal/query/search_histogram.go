@@ -71,7 +71,7 @@ func (e *Engine) computeHistogram(ctx context.Context, q Query, numBuckets int, 
 	_, _ = e.runTimechartStrategy(ctx, q, nil, selectedVaults,
 		start, end, bucketWidth, numBuckets,
 		hasFilter, false, groupByLevel, histogramGroupField,
-		acc)
+		acc, e.newBudget())
 
 	return buildHistogramBuckets(start, bucketWidth, numBuckets, acc.counts, acc.groupCounts, acc.cloudFlags, acc.cloudCounts)
 }
@@ -116,7 +116,7 @@ func (e *Engine) computeHistogramForVaults(ctx context.Context, q Query, numBuck
 	_, _ = e.runTimechartStrategy(ctx, q, nil, vaultIDs,
 		start, end, bucketWidth, numBuckets,
 		hasFilter, false, groupByLevel, histogramGroupField,
-		acc)
+		acc, e.newBudget())
 
 	return buildHistogramBuckets(start, bucketWidth, numBuckets, acc.counts, acc.groupCounts, acc.cloudFlags, acc.cloudCounts)
 }
