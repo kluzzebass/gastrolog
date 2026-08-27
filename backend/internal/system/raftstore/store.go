@@ -39,6 +39,7 @@ type Store struct {
 	raft         *raft.Raft
 	applyTimeout time.Duration
 	forwarder    Forwarder // nil for single-node
+	barriers     barrierGate
 }
 
 // New creates a new Store.
@@ -192,9 +193,16 @@ func (s *Store) ApplyRaw(data []byte) (uint64, error) {
 // this blocks on the tracker until the local FSM applies up to the barrier's
 // committed index — no polling. The barrier is an ordinary LogCommand (not a
 // raft LogBarrier) so it flows through FSM.Apply, which the FSM-fed tracker
-// requires to advance. Used by startup FSM catch-up; bound the wait by
-// passing a ctx with a deadline.
+// requires to advance. Used by startup FSM catch-up and by readers that must
+// not mistake replication lag for absence; bound the wait by passing a ctx
+// with a deadline.
+//
+// Callers arriving together share one commit — see barrierGate.
 func (s *Store) Barrier(ctx context.Context) error {
+	return s.barriers.Do(ctx, s.commitBarrier)
+}
+
+func (s *Store) commitBarrier(ctx context.Context) error {
 	data, err := command.Marshal(command.NewCatchupBarrier())
 	if err != nil {
 		return fmt.Errorf("marshal catchup barrier: %w", err)

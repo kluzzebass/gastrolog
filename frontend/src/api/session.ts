@@ -47,15 +47,42 @@ export type Install = (token: string | null, refreshToken: string) => void;
 
 const REFRESH_LOCK = "gastrolog_refresh";
 
+/** How long to defer to another tab's refresh before going ahead regardless. */
+const LOCK_WAIT_MS = 10_000;
+
 /**
  * Runs fn with no other tab of this origin refreshing at the same time.
- * Web Locks is missing outside a secure context and in some test DOMs; there
- * the exchange runs unserialized and the losing tab recovers instead.
+ *
+ * Web Locks is `[SecureContext]`-gated, so it is absent over plain HTTP —
+ * which includes a NodePort deployment reached by IP, the very setup where
+ * tabs are most likely to land on different nodes. There, and in test DOMs,
+ * the exchange runs unserialized: two tabs can still collide, leaving a
+ * window of about one round-trip in which the loser sees a refused exchange
+ * before the winner's result reaches storage. The recovery below handles the
+ * rest of that window; it does not close this part of it.
+ *
+ * The wait is bounded. A tab whose refresh never settles keeps the lock —
+ * aborting the wait does not revoke a granted lock — and every other tab's
+ * refresh is awaited inside the response interceptor, so waiting forever
+ * would hang them with no error to show. Losing the race is recoverable;
+ * hanging is not.
  */
-function withRefreshLock(fn: () => Promise<boolean>): Promise<boolean> {
+async function withRefreshLock(fn: () => Promise<boolean>): Promise<boolean> {
   const { locks } = globalThis.navigator as { locks?: LockManager };
   if (!locks) return fn();
-  return locks.request(REFRESH_LOCK, fn).then(Boolean, () => false);
+
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), LOCK_WAIT_MS);
+  try {
+    // An outcome means fn ran to completion under the lock. Null means the
+    // wait was abandoned before it was granted — so go ahead unserialized.
+    const outcome = await locks
+      .request(REFRESH_LOCK, { signal: abort.signal }, async () => ({ live: await fn() }))
+      .catch(() => null);
+    return outcome ? outcome.live : await fn();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
