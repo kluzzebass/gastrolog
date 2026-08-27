@@ -681,41 +681,21 @@ func (s *AuthServer) Logout(
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("no claims in context"))
 	}
 
-	sessionID, ok, err := s.resolveSession(ctx, claims.SessionID, req.Msg.RefreshToken)
-	if err != nil {
-		return nil, err
+	// Synthetic claims from a listener that skips authentication name no
+	// session, so there is nothing to end.
+	if claims.SessionID == "" {
+		return connect.NewResponse(&apiv1.LogoutResponse{}), nil
 	}
-	if ok {
-		if err := s.cfgStore.DeleteRefreshToken(ctx, sessionID); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete refresh token: %w", err))
-		}
+
+	sessionID, err := glid.ParseUUID(claims.SessionID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid session claim"))
+	}
+	if err := s.cfgStore.DeleteRefreshToken(ctx, sessionID); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete refresh token: %w", err))
 	}
 
 	return connect.NewResponse(&apiv1.LogoutResponse{}), nil
-}
-
-// resolveSession names the session to end. The access token's session claim is
-// authoritative; the presented refresh token identifies the session for a token
-// issued without one.
-func (s *AuthServer) resolveSession(ctx context.Context, claimed, refreshToken string) (glid.GLID, bool, error) {
-	if claimed != "" {
-		id, err := glid.ParseUUID(claimed)
-		if err != nil {
-			return glid.GLID{}, false, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid session claim"))
-		}
-		return id, true, nil
-	}
-	if refreshToken == "" {
-		return glid.GLID{}, false, nil
-	}
-	stored, err := s.cfgStore.GetRefreshTokenByHash(ctx, auth.HashRefreshToken(refreshToken))
-	if err != nil {
-		return glid.GLID{}, false, connect.NewError(connect.CodeInternal, fmt.Errorf("lookup refresh token: %w", err))
-	}
-	if stored == nil {
-		return glid.GLID{}, false, nil
-	}
-	return stored.ID, true, nil
 }
 
 // userToProto converts a system.User to a proto UserInfo, stripping the password hash.

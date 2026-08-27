@@ -1482,6 +1482,19 @@ func testAuth(t *testing.T, newStore func(t *testing.T) system.Store) {
 		} else if got.ID != sessionID {
 			t.Fatalf("rotation should keep the session ID %s, got %s", sessionID, got.ID)
 		}
+
+		// A replacement naming a different session would overwrite whatever
+		// lives at that ID, so it is refused rather than applied.
+		other := next("hash-gen-3")
+		other.ID = newID()
+		if _, err := s.RotateRefreshToken(ctx, "hash-gen-1", other); err == nil {
+			t.Fatal("rotating into a different session ID should be refused")
+		}
+		if got, err := s.GetRefreshTokenByHash(ctx, "hash-gen-1"); err != nil {
+			t.Fatalf("GetRefreshTokenByHash: %v", err)
+		} else if got == nil {
+			t.Fatal("a refused rotation must leave the session's token in place")
+		}
 	})
 
 	t.Run("DeleteUserRefreshTokens", func(t *testing.T) {

@@ -97,6 +97,10 @@ func (s *Store) isEmpty() bool {
 		s.logLevels == nil
 }
 
+// Barrier is a no-op: this store is the state, so there is nothing it could
+// be lagging behind.
+func (s *Store) Barrier(ctx context.Context) error { return nil }
+
 // Load returns the full configuration.
 // Returns nil if no entities exist.
 func (s *Store) Load(ctx context.Context) (*system.System, error) {
@@ -933,6 +937,8 @@ func (s *Store) ListRefreshTokens(ctx context.Context) ([]system.RefreshToken, e
 // RotateRefreshToken finds the token by hash, replaces it with next, and
 // reports whether it was there to consume — all under one lock hold, so a
 // second caller presenting the same token finds nothing left and gets false.
+// next must name the session being rotated; writing it anywhere else would
+// overwrite an unrelated session.
 func (s *Store) RotateRefreshToken(ctx context.Context, oldTokenHash string, next system.RefreshToken) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -941,8 +947,10 @@ func (s *Store) RotateRefreshToken(ctx context.Context, oldTokenHash string, nex
 		if rt.TokenHash != oldTokenHash {
 			continue
 		}
-		delete(s.refreshTokens, id)
-		s.refreshTokens[next.ID] = next
+		if next.ID != id {
+			return false, fmt.Errorf("rotate refresh token: session %q cannot be replaced by %q", id, next.ID)
+		}
+		s.refreshTokens[id] = next
 		return true, nil
 	}
 	return false, nil

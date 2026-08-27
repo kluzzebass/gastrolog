@@ -44,10 +44,10 @@ func (tv *tokenValidator) IsTokenValid(ctx context.Context, claims *auth.Claims)
 
 // sessionLive reports whether the session a token names still exists. Logout
 // deletes the session's refresh-token row, and that is what stops the access
-// token issued from it. A token carrying no session ID has nothing to check.
+// token issued from it.
 func (tv *tokenValidator) sessionLive(ctx context.Context, sessionID string, userID glid.GLID) (bool, error) {
 	if sessionID == "" {
-		return true, nil
+		return false, nil // a token naming no session cannot be logged out
 	}
 	sid, err := glid.ParseUUID(sessionID)
 	if err != nil {
@@ -58,6 +58,19 @@ func (tv *tokenValidator) sessionLive(ctx context.Context, sessionID string, use
 	rt, err := tv.cfgStore.GetRefreshToken(ctx, sid)
 	if err != nil {
 		return false, err
+	}
+	if rt == nil {
+		// A miss on local state is not proof the session is gone: any node
+		// serves any request, and this one may not have applied the login
+		// that opened the session. Catch up before rejecting, or a freshly
+		// logged-in user is bounced back to the login page.
+		if err := tv.cfgStore.Barrier(ctx); err != nil {
+			return false, fmt.Errorf("confirm session %s: %w", sid, err)
+		}
+		rt, err = tv.cfgStore.GetRefreshToken(ctx, sid)
+		if err != nil {
+			return false, err
+		}
 	}
 	if rt == nil || rt.UserID != userID {
 		return false, nil

@@ -14,6 +14,7 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
 )
 
@@ -115,9 +116,7 @@ func TestLogoutRevokesAccessToken(t *testing.T) {
 		t.Fatalf("token should work before logout: %v", err)
 	}
 
-	if _, err := h.as(tokenA).Logout(context.Background(), connect.NewRequest(&apiv1.LogoutRequest{
-		RefreshToken: refreshA,
-	})); err != nil {
+	if _, err := h.as(tokenA).Logout(context.Background(), connect.NewRequest(&apiv1.LogoutRequest{})); err != nil {
 		t.Fatalf("Logout: %v", err)
 	}
 
@@ -127,6 +126,12 @@ func TestLogoutRevokesAccessToken(t *testing.T) {
 	}
 	if connect.CodeOf(err) != connect.CodeUnauthenticated {
 		t.Fatalf("expected Unauthenticated after logout, got %v (%v)", connect.CodeOf(err), err)
+	}
+
+	if _, err := h.client.RefreshToken(context.Background(), connect.NewRequest(&apiv1.RefreshTokenRequest{
+		RefreshToken: refreshA,
+	})); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("refresh token should die with the session, got %v (%v)", connect.CodeOf(err), err)
 	}
 
 	if err := h.authenticatedCall(tokenB); err != nil {
@@ -221,6 +226,108 @@ func TestConcurrentRefreshExchangesTokenOnce(t *testing.T) {
 				t.Fatalf("winner's refresh token should work: %v", err)
 			}
 		}
+	}
+}
+
+// laggingStore models a node that has not yet applied the entry which opened a
+// session: the row is invisible to local reads until a barrier catches it up.
+type laggingStore struct {
+	system.Store
+	mu       sync.Mutex
+	caughtUp bool
+	barriers int
+}
+
+func (s *laggingStore) Barrier(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.barriers++
+	s.caughtUp = true
+	return nil
+}
+
+func (s *laggingStore) GetRefreshToken(ctx context.Context, id glid.GLID) (*system.RefreshToken, error) {
+	s.mu.Lock()
+	caughtUp := s.caughtUp
+	s.mu.Unlock()
+	if !caughtUp {
+		return nil, nil
+	}
+	return s.Store.GetRefreshToken(ctx, id)
+}
+
+func (s *laggingStore) barrierCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.barriers
+}
+
+// TestSessionMissConfirmedAgainstReplicatedState proves a node that trails the
+// login does not mistake its own lag for a logout. Any node serves any request,
+// so the node the client lands on next may not have applied the entry that
+// opened the session; rejecting on that read would bounce a user who just
+// logged in straight back to the login page.
+func TestSessionMissConfirmedAgainstReplicatedState(t *testing.T) {
+	t.Parallel()
+	h := newSessionHarness(t)
+
+	token, _ := h.register(t, "admin", "password123")
+	claims, err := h.tokens.Verify(token)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	lagging := &laggingStore{Store: h.cfgStore}
+	validator := &tokenValidator{cfgStore: lagging}
+	ctx := context.Background()
+
+	valid, err := validator.IsTokenValid(ctx, claims)
+	if err != nil {
+		t.Fatalf("IsTokenValid: %v", err)
+	}
+	if !valid {
+		t.Fatal("a session the node has not caught up to yet was treated as revoked")
+	}
+	if got := lagging.barrierCount(); got != 1 {
+		t.Fatalf("expected the miss to force one catch-up, got %d", got)
+	}
+
+	// Once current, a session that really is gone stays rejected — the
+	// catch-up must not turn the check into a rubber stamp.
+	sessionID, err := glid.ParseUUID(claims.SessionID)
+	if err != nil {
+		t.Fatalf("ParseUUID: %v", err)
+	}
+	if err := h.cfgStore.DeleteRefreshToken(ctx, sessionID); err != nil {
+		t.Fatalf("DeleteRefreshToken: %v", err)
+	}
+	valid, err = validator.IsTokenValid(ctx, claims)
+	if err != nil {
+		t.Fatalf("IsTokenValid after delete: %v", err)
+	}
+	if valid {
+		t.Fatal("a deleted session should stay rejected after catching up")
+	}
+}
+
+// TestTokenWithoutSessionIsRejected pins the fail-closed direction: a token
+// naming no session cannot be logged out, so it is not honoured.
+func TestTokenWithoutSessionIsRejected(t *testing.T) {
+	t.Parallel()
+	h := newSessionHarness(t)
+
+	token, _ := h.register(t, "admin", "password123")
+	claims, err := h.tokens.Verify(token)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	sessionless, _, err := h.tokens.Issue(claims.UserID, claims.Username(), claims.Role, "")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if err := h.authenticatedCall(sessionless); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("expected Unauthenticated for a session-less token, got %v (%v)", connect.CodeOf(err), err)
 	}
 }
 

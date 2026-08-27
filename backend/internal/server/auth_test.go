@@ -345,10 +345,8 @@ func TestLogout_RevokesOnlyCurrentSession(t *testing.T) {
 		t.Fatal("expected refresh token B to exist before logout")
 	}
 
-	// Logout session A — sending its refresh token.
-	logoutReq := connect.NewRequest(&apiv1.LogoutRequest{
-		RefreshToken: refreshA,
-	})
+	// Logout session A — identified by the access token it presents.
+	logoutReq := connect.NewRequest(&apiv1.LogoutRequest{})
 	logoutReq.Header().Set("Authorization", "Bearer "+tokenA)
 	_, err = client.Logout(ctx, logoutReq)
 	if err != nil {

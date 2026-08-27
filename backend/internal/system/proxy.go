@@ -547,6 +547,15 @@ func (p *StoreProxy) CreateRefreshToken(ctx context.Context, token RefreshToken)
 	return p.inner.CreateRefreshToken(ctx, token)
 }
 
+func (p *StoreProxy) Barrier(ctx context.Context) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return err
+	}
+	return p.inner.Barrier(ctx)
+}
+
 func (p *StoreProxy) GetRefreshToken(ctx context.Context, id glid.GLID) (*RefreshToken, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

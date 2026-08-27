@@ -26,6 +26,13 @@ type Store interface {
 	// Load reads the full system state (config + runtime). Returns nil if nothing exists (bootstrap signal).
 	Load(ctx context.Context) (*System, error)
 
+	// Barrier blocks until this node's view reflects every write committed
+	// cluster-wide before the call. Reads are otherwise served from local
+	// state, which on a replicated store may lag a write made elsewhere; a
+	// reader that must not mistake lag for absence calls this before
+	// concluding a record does not exist.
+	Barrier(ctx context.Context) error
+
 	// Filters have no CRUD: they are not a separate entity. Match
 	// expressions live inline on RouteConfig.Stages[].Match.Expression.
 
@@ -117,7 +124,8 @@ type Store interface {
 	// RotateRefreshToken exchanges the token whose hash is oldTokenHash for
 	// next in one indivisible step and reports whether this caller is the one
 	// that consumed it. Concurrent callers presenting the same token see
-	// exactly one true.
+	// exactly one true. Rotation replaces a session's token in place, so
+	// next.ID must be the ID of the row holding oldTokenHash.
 	RotateRefreshToken(ctx context.Context, oldTokenHash string, next RefreshToken) (bool, error)
 	DeleteRefreshToken(ctx context.Context, id glid.GLID) error
 	DeleteUserRefreshTokens(ctx context.Context, userID glid.GLID) error
