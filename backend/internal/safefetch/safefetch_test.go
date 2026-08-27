@@ -57,6 +57,21 @@ func TestPolicyAllows(t *testing.T) {
 		{"site-local v6", "fec0::1", false, false},
 		{"reserved 240/4", "240.0.0.1", false, false},
 		{"documentation v6", "2001:db8::1", false, false},
+		{"orchidv2", "2001:20::1", false, false},
+		{"documentation 3fff/20", "3fff::1", false, false},
+		{"siit ipv4-translated", "::ffff:0:7f00:1", false, false},
+		// A zone identifier makes an address local to one interface, and makes
+		// prefix tests match nothing — so every family needs a zoned row.
+		{"zoned loopback v6", "::1%lo0", false, false},
+		{"zoned unique local", "fc00::1%en0", false, false},
+		{"zoned unique local fd", "fd00::1%en0", false, false},
+		{"zoned link-local v6", "fe80::1%en0", false, false},
+		{"zoned nat64", "64:ff9b::a9fe:a9fe%en0", false, false},
+		{"zoned ipv4-compatible v6", "::a9fe:a9fe%en0", false, false},
+		{"zoned teredo", "2001::1%en0", false, false},
+		{"zoned site-local v6", "fec0::1%en0", false, false},
+		{"zoned multicast v6", "ff02::1%en0", false, false},
+		{"zoned public v6", "2606:2800:220:1:248:1893:25c8:1946%en0", false, false},
 	}
 
 	for _, tt := range tests {
@@ -90,6 +105,28 @@ func TestCheckAddrRejectsUnresolved(t *testing.T) {
 	}
 }
 
+// TestCheckAddrRejectsZonedDestination covers the address form the dialer
+// actually hands the Control hook for a URL like http://[fc00::1%25en0]/ —
+// the zone survives resolution, and no policy may let it through.
+func TestCheckAddrRejectsZonedDestination(t *testing.T) {
+	t.Parallel()
+
+	for _, addr := range []string{
+		"[fc00::1%en0]:80",
+		"[fd00::1%en0]:80",
+		"[64:ff9b::a9fe:a9fe%en0]:80",
+		"[::a9fe:a9fe%en0]:80",
+		"[2001::1%en0]:80",
+		"[::1%lo0]:80",
+	} {
+		for _, p := range []Policy{{}, {AllowPrivate: true}} {
+			if err := p.CheckAddr(addr); !errors.Is(err, ErrBlockedDestination) {
+				t.Errorf("Policy{AllowPrivate:%v}.CheckAddr(%q) = %v, want ErrBlockedDestination", p.AllowPrivate, addr, err)
+			}
+		}
+	}
+}
+
 func TestCheckURLScheme(t *testing.T) {
 	t.Parallel()
 
@@ -106,6 +143,17 @@ func TestCheckURLScheme(t *testing.T) {
 		u, _ := url.Parse(raw)
 		if err := CheckURL(u); err != nil {
 			t.Errorf("CheckURL(%q) = %v, want nil", raw, err)
+		}
+	}
+
+	// A zoned literal is refused before the request is ever built.
+	for _, raw := range []string{"http://[fc00::1%25en0]/x", "https://[fe80::1%25lo0]:8080/x"} {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatalf("parse %q: %v", raw, err)
+		}
+		if err := CheckURL(u); !errors.Is(err, ErrBlockedDestination) {
+			t.Errorf("CheckURL(%q) = %v, want ErrBlockedDestination", raw, err)
 		}
 	}
 }

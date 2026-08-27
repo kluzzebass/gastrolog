@@ -64,13 +64,16 @@ var neverAllowed = []netip.Prefix{
 	netip.MustParsePrefix("203.0.113.0/24"),  // TEST-NET-3
 	netip.MustParsePrefix("240.0.0.0/4"),     // reserved, incl. 255.255.255.255
 	netip.MustParsePrefix("::/96"),           // IPv4-compatible IPv6
+	netip.MustParsePrefix("::ffff:0:0:0/96"), // SIIT IPv4-translated
 	netip.MustParsePrefix("64:ff9b::/96"),    // NAT64: embeds any IPv4 destination
 	netip.MustParsePrefix("64:ff9b:1::/48"),  // local-use NAT64
 	netip.MustParsePrefix("100::/64"),        // discard-only
 	netip.MustParsePrefix("2001::/32"),       // Teredo: embeds an IPv4 destination
 	netip.MustParsePrefix("2001:10::/28"),    // ORCHID
+	netip.MustParsePrefix("2001:20::/28"),    // ORCHIDv2
 	netip.MustParsePrefix("2001:db8::/32"),   // documentation
 	netip.MustParsePrefix("2002::/16"),       // 6to4: embeds an IPv4 destination
+	netip.MustParsePrefix("3fff::/20"),       // documentation
 	netip.MustParsePrefix("fe80::/10"),       // link-local, incl. fe80::a9fe:a9fe
 	netip.MustParsePrefix("fec0::/10"),       // deprecated site-local
 }
@@ -101,6 +104,11 @@ func CheckURL(u *url.URL) error {
 	if u.Host == "" {
 		return fmt.Errorf("%w: no host", ErrUnsupportedScheme)
 	}
+	if ip, err := netip.ParseAddr(u.Hostname()); err == nil && ip.Zone() != "" {
+		// Refused here as well as at dial time, so a zoned literal fails when
+		// the URL is configured rather than silently on every fetch.
+		return fmt.Errorf("%w: %s names a local interface", ErrBlockedDestination, u.Hostname())
+	}
 	return nil
 }
 
@@ -128,6 +136,13 @@ func (p Policy) Allows(ip netip.Addr) bool {
 	ip = ip.Unmap()
 	switch {
 	case !ip.IsValid(), ip.IsUnspecified(), ip.IsMulticast():
+		return false
+	case ip.Zone() != "":
+		// A zone identifier names one of this node's interfaces, so the
+		// address is reachable only on the link that interface sits on — never
+		// a destination on the public internet. It is refused rather than
+		// stripped: prefix tests treat a zoned address as matching nothing, so
+		// a zone must not be allowed to decide anything here.
 		return false
 	case inAny(siteLocal, ip):
 		// Checked first because ::1 sits inside the IPv4-compatible ::/96

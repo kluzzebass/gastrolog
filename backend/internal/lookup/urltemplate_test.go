@@ -21,6 +21,7 @@ func TestParseURLTemplateRejects(t *testing.T) {
 		{"no scheme", "api.example.com/{value}"},
 		{"file scheme", "file:///etc/{value}"},
 		{"no host", "http:///{value}"},
+		{"zoned host literal", "http://[fc00::1%25en0]/{value}"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
