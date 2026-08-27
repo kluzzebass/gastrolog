@@ -357,8 +357,11 @@ func requireTimeouts(t *testing.T, name string, srv *http.Server) {
 // TestServerTimeouts_WiringMatchesProductionConstants exercises the real
 // Serve/reconfigureTLS/ListenUnix call sites end to end and asserts each
 // resulting *http.Server (main HTTP, HTTPS, Unix socket) carries the
-// production timeout constants — the same three call sites C1 found one
-// of silently missing IdleTimeout at the http2 layer.
+// production timeout constants — catching a listener that regresses to a
+// bare &http.Server{} or gains a WriteTimeout it shouldn't have. It checks
+// only *http.Server fields; it would not catch the main listener's
+// http2.Server-level IdleTimeout regressing (see
+// TestIdleTimeout_H2C_ClosesIdleConnection for that).
 func TestServerTimeouts_WiringMatchesProductionConstants(t *testing.T) {
 	t.Parallel()
 

@@ -801,13 +801,18 @@ func (s *Server) Serve(listener net.Listener) error {
 
 	// Start rate-limiter cleanup goroutine.
 	rlCtx, rlCancel := context.WithCancel(context.Background())
+	s.mu.Lock()
 	s.rlCancel = rlCancel
+	s.mu.Unlock()
 	s.rl.startCleanup(rlCtx, &s.rlWG, 3*time.Minute, 5*time.Minute)
 
 	// Build the core handler once — reused by both HTTP and HTTPS.
 	// Chain: tracking → CORS → securityHeaders → rateLimit → compress → mux
 	mux := s.buildMux()
-	s.handler = s.trackingMiddleware(s.corsMiddleware(securityHeadersMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(s.logger, mux)))))
+	handler := s.trackingMiddleware(s.corsMiddleware(securityHeadersMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(s.logger, mux)))))
+	s.mu.Lock()
+	s.handler = handler
+	s.mu.Unlock()
 
 	// HTTP adds redirect-to-HTTPS + h2c (HTTP/2 without TLS). h2c.NewHandler
 	// never calls http2.ConfigureServer, so the *http.Server's IdleTimeout
@@ -815,9 +820,11 @@ func (s *Server) Serve(listener net.Listener) error {
 	// *http2.Server directly — golang.org/x/net/http2 reads its own
 	// IdleTimeout field, not the outer http.Server's, for the idle-hold
 	// bound on this listener's h2c connections.
-	redirectHandler := s.redirectMiddleware(s.handler)
+	redirectHandler := s.redirectMiddleware(handler)
 	srv := newTimedServer(h2c.NewHandler(redirectHandler, &http2.Server{IdleTimeout: idleTimeout}), readHeaderTimeout, readTimeout, idleTimeout)
+	s.mu.Lock()
 	s.server = srv
+	s.mu.Unlock()
 
 	// Initial TLS config: start HTTPS if enabled
 	s.reconfigureTLS()
@@ -831,10 +838,9 @@ func (s *Server) Serve(listener net.Listener) error {
 
 	s.logger.Info("server starting", "addr", listener.Addr().String())
 
-	// Serve on the local srv, not s.server: a concurrent Stop() nils
-	// s.server, and this call can start after that race window (TLS/Unix
-	// socket setup above takes real time) even though it was assigned
-	// before them.
+	// Block on the local srv rather than s.server: it's the same value we
+	// just assigned under s.mu, and reading it back here would mean
+	// re-acquiring the lock for no reason.
 	err := srv.Serve(listener)
 	if err == http.ErrServerClosed {
 		return nil
@@ -896,13 +902,8 @@ func (s *Server) ServeTCP(addr string) error {
 
 // Stop gracefully stops the server.
 func (s *Server) Stop(ctx context.Context) error {
-	// Stop rate-limiter cleanup goroutine.
-	if s.rlCancel != nil {
-		s.rlCancel()
-		s.rlWG.Wait()
-	}
-
 	s.mu.Lock()
+	rlCancel := s.rlCancel
 	server := s.server
 	httpsServer := s.httpsServer
 	s.httpsServer = nil
@@ -913,6 +914,12 @@ func (s *Server) Stop(ctx context.Context) error {
 	s.unixListener = nil
 	s.unixPath = ""
 	s.mu.Unlock()
+
+	// Stop rate-limiter cleanup goroutine.
+	if rlCancel != nil {
+		rlCancel()
+		s.rlWG.Wait()
+	}
 
 	if unixServer != nil {
 		_ = unixServer.Shutdown(ctx)

@@ -60,9 +60,13 @@ func (s *Server) handleManagedFileUpload(w http.ResponseWriter, r *http.Request)
 	// The server's global ReadTimeout is sized for ordinary API calls, not
 	// a 256 MiB file transfer, so it would kill a legitimate slow upload
 	// well before MaxBytesReader's byte cap is ever reached. Clear it for
-	// this handler alone: MaxBytesReader still bounds how much a stalled
-	// or trickling upload can cost in bytes, same as any other endpoint,
-	// it just isn't bounded in time.
+	// this handler alone: MaxBytesReader is now the only bound on how much
+	// a stalled or trickling upload can cost, in bytes rather than time,
+	// same as any other endpoint. This requires compressWriter (compress.go)
+	// to implement Unwrap — every real client sends a compressible
+	// Accept-Encoding, so the ResponseWriter reaching this handler is a
+	// compressWriter, and without Unwrap, ResponseController can't reach
+	// the underlying connection to clear the deadline at all.
 	if err := http.NewResponseController(w).SetReadDeadline(time.Time{}); err != nil {
 		s.logger.Warn("upload: clear read deadline failed", "error", err)
 	}
