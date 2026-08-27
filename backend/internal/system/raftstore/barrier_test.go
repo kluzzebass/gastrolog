@@ -7,26 +7,33 @@ import (
 	"testing"
 )
 
+// commitCall is one round's commit, captured mid-flight: the context it was
+// handed, and the channel the test finishes it through.
+type commitCall struct {
+	ctx    context.Context
+	finish chan error
+}
+
 // commitRecorder stands in for the Raft commit a barrier round performs. Each
-// round hands back a channel the test completes by hand, so the sequencing is
+// round hands back a handle the test completes by hand, so the sequencing is
 // driven by the test rather than by timing.
 type commitRecorder struct {
-	started chan chan error
+	started chan commitCall
 }
 
 func newCommitRecorder() *commitRecorder {
-	return &commitRecorder{started: make(chan chan error, 8)}
+	return &commitRecorder{started: make(chan commitCall, 8)}
 }
 
 func (c *commitRecorder) commit(ctx context.Context) error {
-	finish := make(chan error)
-	c.started <- finish
-	return <-finish
+	call := commitCall{ctx: ctx, finish: make(chan error)}
+	c.started <- call
+	return <-call.finish
 }
 
-// awaitRound blocks until the next round starts and returns its handle.
+// awaitRound blocks until the next round starts and returns its finish channel.
 func (c *commitRecorder) awaitRound() chan error {
-	return <-c.started
+	return (<-c.started).finish
 }
 
 // noRoundStarted reports that nothing has begun committing. Sound only at a
@@ -49,7 +56,7 @@ func TestBarrierGateCoalescesConcurrentCallers(t *testing.T) {
 	if !start {
 		t.Fatal("the first caller must start a round")
 	}
-	go g.run(context.Background(), first, commits.commit)
+	go g.run(first, commits.commit)
 	firstFinish := commits.awaitRound()
 
 	// Everyone arriving while that round is in flight joins the next one.
@@ -101,7 +108,7 @@ func TestBarrierGateSharesTheRoundsError(t *testing.T) {
 	var g barrierGate
 
 	first, _ := g.join()
-	go g.run(context.Background(), first, commits.commit)
+	go g.run(first, commits.commit)
 	firstFinish := commits.awaitRound()
 
 	joined, _ := g.join()
@@ -134,8 +141,64 @@ func TestBarrierGateRunsAgainAfterQuiescing(t *testing.T) {
 				t.Errorf("round %d: %v", round, err)
 			}
 		}()
-		(<-commits.started) <- nil
+		(<-commits.started).finish <- nil
 		wg.Wait()
+	}
+}
+
+// TestBarrierGateRoundRunsOnNoCallersContext proves the round is detached from
+// whichever caller happened to start it. A round bound to that caller's
+// context would fail the moment the caller gave up — and because the same
+// context would carry into every round of the handoff chain, it would keep
+// rejecting live sessions for the whole busy period.
+func TestBarrierGateRoundRunsOnNoCallersContext(t *testing.T) {
+	t.Parallel()
+	commits := newCommitRecorder()
+	var g barrierGate
+
+	starter, cancel := context.WithCancel(context.Background())
+	go func() { _ = g.Do(starter, commits.commit) }()
+	first := <-commits.started
+
+	// A caller queued behind the starter, so the handoff chain continues past
+	// the round the abandoning caller kicked off.
+	queued, start := g.join()
+	if start {
+		t.Fatal("the queued caller should not have started a round")
+	}
+
+	cancel()
+	if err := first.ctx.Err(); err != nil {
+		t.Fatalf("the round died with the caller that started it: %v", err)
+	}
+
+	first.finish <- nil
+	second := <-commits.started
+	if err := second.ctx.Err(); err != nil {
+		t.Fatalf("the round after it inherited the same dead context: %v", err)
+	}
+	second.finish <- nil
+	<-queued.done
+	if queued.err != nil {
+		t.Fatalf("queued caller: %v", queued.err)
+	}
+}
+
+// TestBarrierGateWaitPrefersAFinishedRound proves a round that has already
+// committed is reported as such even when the caller's context expired in the
+// same breath — a spurious cancellation here rejects a live session.
+func TestBarrierGateWaitPrefersAFinishedRound(t *testing.T) {
+	t.Parallel()
+	var g barrierGate
+
+	r, _ := g.join()
+	close(r.done)
+
+	expired, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := g.wait(expired, r); err != nil {
+		t.Fatalf("a committed round reported %v", err)
 	}
 }
 
@@ -149,7 +212,7 @@ func TestBarrierGateCallerGivesUpWithoutCancellingTheRound(t *testing.T) {
 	abandoned, cancel := context.WithCancel(context.Background())
 	gaveUp := make(chan error, 1)
 	go func() { gaveUp <- g.Do(abandoned, commits.commit) }()
-	finish := <-commits.started
+	finish := (<-commits.started).finish
 
 	cancel()
 	if err := <-gaveUp; !errors.Is(err, context.Canceled) {

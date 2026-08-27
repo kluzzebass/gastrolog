@@ -46,13 +46,15 @@ func (g *barrierGate) join() (*barrierRound, bool) {
 	return r, true
 }
 
-// run commits one round, then hands off to whoever queued behind it. base
-// carries the starting caller's context values with its cancellation stripped:
-// a caller that gives up must not cancel the round its peers wait on, and with
-// no deadline of its own commit falls back to the store's apply timeout.
-func (g *barrierGate) run(base context.Context, r *barrierRound, commit func(context.Context) error) {
+// run commits one round, then hands off to whoever queued behind it.
+func (g *barrierGate) run(r *barrierRound, commit func(context.Context) error) {
 	for {
-		r.err = commit(base)
+		// A round belongs to every caller enrolled in it, not to whichever one
+		// happened to start it, so it runs on no caller's context: one caller
+		// giving up must not cancel a commit its peers are waiting on, and the
+		// rounds that follow must not inherit a request that has since ended.
+		// commit bounds itself with the store's apply timeout.
+		r.err = commit(context.Background())
 		close(r.done)
 
 		g.mu.Lock()
@@ -73,7 +75,20 @@ func (g *barrierGate) run(base context.Context, r *barrierRound, commit func(con
 func (g *barrierGate) Do(ctx context.Context, commit func(context.Context) error) error {
 	r, start := g.join()
 	if start {
-		go g.run(context.WithoutCancel(ctx), r, commit)
+		go g.run(r, commit) //nolint:gosec // G118: the round must not ride a caller's context — see run
+	}
+	return g.wait(ctx, r)
+}
+
+// wait blocks for the round, or for the caller's context to end first.
+func (g *barrierGate) wait(ctx context.Context, r *barrierRound) error {
+	// A finished round wins over a spent context: with both ready the select
+	// below picks at random, and reporting a cancellation for a commit that
+	// already succeeded rejects a session that is perfectly live.
+	select {
+	case <-r.done:
+		return r.err
+	default:
 	}
 	select {
 	case <-r.done:

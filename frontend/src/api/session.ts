@@ -74,12 +74,14 @@ async function withRefreshLock(fn: () => Promise<boolean>): Promise<boolean> {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), LOCK_WAIT_MS);
   try {
-    // An outcome means fn ran to completion under the lock. Null means the
-    // wait was abandoned before it was granted — so go ahead unserialized.
-    const outcome = await locks
-      .request(REFRESH_LOCK, { signal: abort.signal }, async () => ({ live: await fn() }))
-      .catch(() => null);
-    return outcome ? outcome.live : await fn();
+    return await locks.request(REFRESH_LOCK, { signal: abort.signal }, fn);
+  } catch (err) {
+    // AbortError is the one rejection that means the lock was never granted,
+    // so fn has yet to run and goes ahead unserialized. Every other rejection
+    // came from fn itself: running it again would spend a second refresh
+    // token, and letting it escape would skip the caller's own recovery.
+    if (err instanceof DOMException && err.name === "AbortError") return await fn();
+    return false;
   } finally {
     clearTimeout(timer);
   }

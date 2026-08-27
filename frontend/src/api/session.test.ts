@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, mock } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import {
   refreshSharedSession,
   readStoredToken,
@@ -12,6 +12,11 @@ import {
 function install(token: string | null, refreshToken: string) {
   if (token) writeStoredToken(token);
   writeStoredRefreshToken(refreshToken);
+}
+
+/** Stands in for a storage write that fails after the exchange has happened. */
+function throwingInstall(): never {
+  throw new Error("localStorage quota exceeded");
 }
 
 beforeEach(() => {
@@ -95,5 +100,64 @@ describe("refreshSharedSession", () => {
 
     expect(await refreshSharedSession(exchange, install)).toBe(false);
     expect(calls).toBe(2);
+  });
+});
+
+/**
+ * Web Locks is absent from the test DOM, so the lock path needs a stand-in.
+ * Each shape below is one way a real LockManager can behave.
+ */
+type LockCallback = () => Promise<boolean>;
+
+function stubLocks(request: (fn: LockCallback) => Promise<boolean>) {
+  Object.defineProperty(globalThis.navigator, "locks", {
+    configurable: true,
+    value: {
+      request: (_name: string, _options: unknown, fn: LockCallback) => request(fn),
+    },
+  });
+}
+
+afterEach(() => {
+  Reflect.deleteProperty(globalThis.navigator, "locks");
+});
+
+describe("refreshSharedSession under a lock manager", () => {
+  test("runs the exchange once when the lock is granted", async () => {
+    stubLocks((fn) => fn());
+    const exchange = mock(
+      (): Promise<RotatedSession> =>
+        Promise.resolve({ token: "a.fresh.token", refreshToken: "refresh-1" }),
+    );
+
+    expect(await refreshSharedSession(exchange, install)).toBe(true);
+    expect(exchange).toHaveBeenCalledTimes(1);
+    expect(readStoredToken()).toBe("a.fresh.token");
+  });
+
+  test("goes ahead unserialized when the wait is abandoned before the grant", async () => {
+    // The lock was never granted, so the exchange has yet to run.
+    stubLocks(() => Promise.reject(new DOMException("aborted", "AbortError")));
+    const exchange = mock(
+      (): Promise<RotatedSession> =>
+        Promise.resolve({ token: "a.fresh.token", refreshToken: "refresh-1" }),
+    );
+
+    expect(await refreshSharedSession(exchange, install)).toBe(true);
+    expect(exchange).toHaveBeenCalledTimes(1);
+    expect(readStoredRefreshToken()).toBe("refresh-1");
+  });
+
+  test("reports failure without a second exchange when the callback throws under the lock", async () => {
+    // Whatever fn threw with — a storage write failing, say — the token it
+    // presented is already spent. Retrying would spend another, and letting
+    // the rejection escape would skip the caller's redirect to login.
+    stubLocks((fn) => fn());
+    const exchange = mock(
+      (): Promise<RotatedSession> =>
+        Promise.resolve({ token: "a.fresh.token", refreshToken: "refresh-1" }),
+    );
+    expect(await refreshSharedSession(exchange, throwingInstall)).toBe(false);
+    expect(exchange).toHaveBeenCalledTimes(1);
   });
 });
