@@ -78,6 +78,9 @@ type multiNodeHarness struct {
 	// routingFwd is the in-process ForwardRPC stand-in; tests can remove a
 	// node's handler to simulate an unreachable raiser.
 	routingFwd *directUnaryForwarder
+	// remoteSearcher is the in-process ForwardSearch stand-in; tests can
+	// remove a node from it to simulate a search fan-out that fails.
+	remoteSearcher *directRemoteSearcher
 }
 
 // Node returns the test node by ID, fataling if not found.
@@ -366,6 +369,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		peerStorageStats:  peerStorageStats,
 		alerts:            alertsByNode,
 		routingFwd:        routingFwd,
+		remoteSearcher:    remoteSearcher,
 	}
 }
 
@@ -2011,6 +2015,47 @@ func TestMultiNode_NonDistributiveAggregatesAreGlobal(t *testing.T) {
 				t.Errorf("%s = %q, want %q", tc.expr, got, tc.want)
 			}
 		})
+	}
+}
+
+// An export moves data. When a node holding part of the match set cannot be
+// reached, the job must fail — writing whatever arrived and reporting the
+// export Complete hands back a target vault quietly missing records, with
+// nothing in the result to say so.
+func TestMultiNode_ExportFailsWhenASourceNodeIsUnreachable(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"})
+
+	// Every source record lives on data-1; the coordinator's own vault is the
+	// export target, so excludeTargetVault leaves data-1 as the only source.
+	addMNRecords(t, h.Node(t, "data-1"), "one", 20, map[string]string{"src": "one"})
+	target := h.Node(t, "coord").vaultID
+
+	// Premise: the coordinator really does reach data-1 for this query, so the
+	// export below has something to lose.
+	if got := len(searchAll(t, h.client, "src=one")); got != 20 {
+		t.Fatalf("coordinator sees %d records, want 20 — the fan-out under test is not happening", got)
+	}
+
+	delete(h.remoteSearcher.nodes, "data-1")
+
+	resp, err := h.client.ExportToVault(context.Background(), connect.NewRequest(&gastrologv1.ExportToVaultRequest{
+		Expression: "src=one",
+		Target:     target.String(),
+	}))
+	if err != nil {
+		t.Fatalf("ExportToVault: %v", err)
+	}
+	job := waitForJob(t, h.jobSrv, resp.Msg.JobId)
+
+	if job.Status != gastrologv1.JobStatus_JOB_STATUS_FAILED {
+		t.Fatalf("export reported %v with a source node unreachable; it must fail rather than write a partial vault", job.Status)
+	}
+	if !strings.Contains(job.Error, "gather cluster records") {
+		t.Errorf("export error %q does not name the failed cluster gather", job.Error)
+	}
+	if job.RecordsDone != 0 {
+		t.Errorf("export wrote %d records before failing; the gather must fail before anything is appended", job.RecordsDone)
 	}
 }
 

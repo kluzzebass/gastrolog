@@ -8,9 +8,13 @@ import (
 )
 
 // mergeOrdered interleaves two record streams that are each already ordered by
-// orderBy into a single stream in that same order. Ties yield the first
-// stream's record, so a merge whose second stream is empty reproduces the
-// first stream exactly.
+// orderBy into a single stream in that same order.
+//
+// Ties yield the first stream's record. Which side wins a tie is arbitrary —
+// records sharing a timestamp have no defined relative order — but it must be
+// deterministic, and the server's own local/remote merge breaks ties the other
+// way, so neither is the cluster's canonical tie order. Nothing may depend on
+// which of two equal-timestamp records comes first.
 //
 // A stream is advanced only after its current record has been consumed, so a
 // source that reuses its record buffer between yields cannot overwrite a

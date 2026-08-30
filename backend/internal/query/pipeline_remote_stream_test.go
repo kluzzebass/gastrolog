@@ -213,7 +213,6 @@ func TestClusterCapSelectsAcrossSources(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.expr, func(t *testing.T) {
-			eng, remote := eng, remote
 			got := raws(runClusterQuery(t, eng, remote, tc.expr, NewBudget()))
 			if !slices.Equal(got, tc.want) {
 				t.Errorf("%s = %v, want %v", tc.expr, got, tc.want)
@@ -271,8 +270,25 @@ func TestMergeOrderedInterleavesBothDirections(t *testing.T) {
 // silently answering from the records that did arrive: a partial aggregate is
 // a wrong number presented as an authoritative one.
 func TestClusterStreamErrorFailsTheQuery(t *testing.T) {
-	eng, _ := clusterHalves(t, 10)
-	broken := func(yield func(chunk.Record, error) bool) {
+	eng, remote := clusterHalves(t, 10)
+
+	// The stream delivers real records and only then fails, which is the case
+	// that matters: an error on the first pull leaves nothing to answer from,
+	// but a mid-flight failure leaves a plausible partial set behind.
+	truncated := func(yield func(chunk.Record, error) bool) {
+		delivered := 0
+		for rec, err := range remote {
+			if err != nil || delivered == 5 {
+				break
+			}
+			if !yield(rec, nil) {
+				return
+			}
+			delivered++
+		}
+		if delivered != 5 {
+			t.Errorf("premise: stream failed after %d records, want 5", delivered)
+		}
 		yield(chunk.Record{}, fmt.Errorf("remote vault unreachable"))
 	}
 
@@ -280,9 +296,9 @@ func TestClusterStreamErrorFailsTheQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	_, err = eng.RunPipelineWithRemote(context.Background(), Query{}, pipeline, broken, NewBudget())
+	_, err = eng.RunPipelineWithRemote(context.Background(), Query{}, pipeline, truncated, NewBudget())
 	if err == nil {
-		t.Fatal("a failed remote stream must fail the pipeline, not produce a partial answer")
+		t.Fatal("a remote stream that failed mid-flight must fail the pipeline, not answer from the records that arrived")
 	}
 	if !strings.Contains(err.Error(), "unreachable") {
 		t.Errorf("error %q does not carry the remote failure", err)

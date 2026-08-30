@@ -296,6 +296,11 @@ func (s *QueryServer) resolveVaultByID(ctx context.Context, id glid.GLID, target
 
 // drainRemoteRecords collects all remote records into a slice by draining
 // the streaming iterator returned by collectRemote.
+//
+// A stream failure fails the export. Export moves data: writing the records
+// that happened to arrive and reporting the job Complete hands back a target
+// vault that is quietly missing whatever the failed node held, with nothing
+// in the result to say so.
 func (s *QueryServer) drainRemoteRecords(ctx context.Context, q query.Query, budget *query.Budget) ([]chunk.Record, error) {
 	remoteIter, _, _ := s.collectRemote(ctx, q, nil)
 	if remoteIter == nil {
@@ -304,7 +309,7 @@ func (s *QueryServer) drainRemoteRecords(ctx context.Context, q query.Query, bud
 	var all []chunk.Record
 	for rec, err := range remoteIter {
 		if err != nil {
-			break
+			return nil, err
 		}
 		if err := budget.ChargeRecord("gathered cluster records", rec); err != nil {
 			return nil, err

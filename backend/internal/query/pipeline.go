@@ -184,10 +184,12 @@ func (e *Engine) runPipeline(ctx context.Context, q Query, pipeline *querylang.P
 	}
 
 	if ph.timechartOp != nil {
-		// A timechart bins from chunk metadata rather than from a record
-		// stream, so remote records have nothing to feed and these buckets
-		// cover local data only. The cluster-wide form merges per-node
-		// timechart tables instead of routing through here.
+		// KNOWN GAP: a timechart bins from this node's chunk metadata and
+		// index positions, not from a record stream, so remote is dropped
+		// here. A capped timechart ("| head 6 | timechart 3") routes to this
+		// line on a coordinator and answers from local data alone, with no
+		// Truncated flag to say so. Merging remote buckets needs a bucket
+		// path that a record stream can feed.
 		return e.runTimechartPipeline(ctx, q, ph, budget)
 	}
 

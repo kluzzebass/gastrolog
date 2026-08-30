@@ -627,6 +627,11 @@ func pullPending(next func() (chunk.Record, error, bool)) *mergePending {
 
 // pickWinner selects the next record between local and remote
 // pendings, advancing the corresponding iter.
+//
+// A timestamp tie goes to remote here and to local in the engine's own
+// two-way merge. Records sharing a timestamp have no defined relative order,
+// so either is correct and neither is canonical — but nothing may be built on
+// which one appears first.
 func pickWinner(local, remote *mergePending, orderBy query.OrderBy, reverse bool, localNext, remoteNext func() (chunk.Record, error, bool)) (rec chunk.Record, fromLocal bool, newLocal, newRemote *mergePending) {
 	switch {
 	case local == nil:
