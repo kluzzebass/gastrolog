@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1869,6 +1870,147 @@ func TestMultiNode_PipelineGlobalHistogram(t *testing.T) {
 	}
 	if len(histogram) == 0 {
 		t.Error("expected histogram in pipeline global response, got none")
+	}
+}
+
+// addMNRoundRobin appends count records to node, one every stride seconds
+// starting at t0+offset. Three nodes seeded with stride 3 and offsets 0/1/2
+// produce a cluster whose records interleave one for one in time, so any
+// cluster-wide cap has exactly one right answer and a cap applied per node
+// has a visibly wrong one.
+func addMNRoundRobin(node multinodeTestNode, prefix string, count int, t0 time.Time, offset, stride int) {
+	for i := range count {
+		ts := t0.Add(time.Duration(offset+i*stride) * time.Second)
+		node.vault.CM.Append(chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "%s-%d", prefix, i),
+		})
+	}
+}
+
+// setupInterleavedCluster seeds a coordinator and two data nodes with
+// per-node records whose timestamps interleave, and returns the raw messages
+// in cluster-wide order.
+func setupInterleavedCluster(t *testing.T, perNode int) (*multiNodeHarness, []string) {
+	t.Helper()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"})
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	prefixes := []string{"coord", "one", "two"}
+	nodes := []string{"coord", "data-1", "data-2"}
+	for i, id := range nodes {
+		addMNRoundRobin(h.Node(t, id), prefixes[i], perNode, t0, i, len(nodes))
+	}
+	var order []string
+	for i := range perNode {
+		for _, p := range prefixes {
+			order = append(order, fmt.Sprintf("%s-%d", p, i))
+		}
+	}
+	return h, order
+}
+
+func rawsOf(records []*gastrologv1.Record) []string {
+	out := make([]string, len(records))
+	for i, r := range records {
+		out[i] = string(r.Raw)
+	}
+	return out
+}
+
+// A cap is a cluster-wide operator. head, tail and slice must select from the
+// merged record stream, so each returns exactly its window of the cluster's
+// order — never one node's window, and never one window per node.
+func TestMultiNode_ClusterWideCapSelectsAcrossNodes(t *testing.T) {
+	t.Parallel()
+	const perNode = 10
+	h, order := setupInterleavedCluster(t, perNode)
+	total := perNode * 3
+
+	// Premise: all three nodes really do contribute. Without this the cap
+	// assertions below would pass against a coordinator that never fanned out.
+	if got := len(searchAll(t, h.client, "")); got != total {
+		t.Fatalf("cluster holds %d records, not %d — the fan-out under test is not happening", got, total)
+	}
+
+	tests := []struct {
+		expr string
+		want []string
+	}{
+		{"| head 5", order[:5]},
+		{"| tail 5", order[total-5:]},
+		{"| slice 3 7", order[2:7]},
+	}
+	for _, tc := range tests {
+		t.Run(tc.expr, func(t *testing.T) {
+			got := rawsOf(searchAll(t, h.client, tc.expr))
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("%s returned %v, want %v", tc.expr, got, tc.want)
+			}
+		})
+	}
+
+	// The same caps feeding an aggregate: the count must be the cap, not the
+	// cap once per node.
+	for _, expr := range []string{"| head 5 | stats count", "| tail 5 | stats count", "| slice 3 7 | stats count"} {
+		t.Run(expr, func(t *testing.T) {
+			table := searchTable(t, h.client, expr)
+			if table == nil || len(table.Rows) != 1 {
+				t.Fatalf("%s: expected one row, got %v", expr, table)
+			}
+			if got := table.Rows[0].Values[0]; got != "5" {
+				t.Errorf("%s = %s, want 5 (a per-node cap would give %d)", expr, got, 5*3)
+			}
+		})
+	}
+}
+
+// Aggregates that cannot be recombined from per-node partials are computed
+// once, on the coordinator, over every node's records. The answers must be
+// the global ones.
+func TestMultiNode_NonDistributiveAggregatesAreGlobal(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"})
+
+	// Values 1..12 dealt round-robin across the three nodes, with timestamps
+	// that put them back in ascending order cluster-wide.
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	nodes := []string{"coord", "data-1", "data-2"}
+	for v := 1; v <= 12; v++ {
+		node := h.Node(t, nodes[(v-1)%3])
+		ts := t0.Add(time.Duration(v) * time.Second)
+		node.vault.CM.Append(chunk.Record{
+			IngestTS: ts, WriteTS: ts,
+			Raw:   fmt.Appendf(nil, "val=%d", v),
+			Attrs: map[string]string{"val": fmt.Sprintf("%d", v)},
+		})
+	}
+
+	tests := []struct {
+		expr string
+		col  string
+		want string
+	}{
+		{"| stats count", "count", "12"},
+		{"| stats avg(val)", "avg_val", "6.5"},
+		{"| stats dcount(val)", "dcount_val", "12"},
+		{"| stats median(val)", "median_val", "6.5"},
+		{"| stats values(val)", "values_val", "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.expr, func(t *testing.T) {
+			table := searchTable(t, h.client, tc.expr)
+			if table == nil || len(table.Rows) != 1 {
+				t.Fatalf("expected one row, got %v", table)
+			}
+			idx := slices.Index(table.Columns, tc.col)
+			if idx < 0 {
+				t.Fatalf("no column %q in %v", tc.col, table.Columns)
+			}
+			if got := table.Rows[0].Values[idx]; got != tc.want {
+				t.Errorf("%s = %q, want %q", tc.expr, got, tc.want)
+			}
+		})
 	}
 }
 

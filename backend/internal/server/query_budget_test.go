@@ -96,9 +96,9 @@ func TestSearchWithinMemoryBudgetStillSucceeds(t *testing.T) {
 	}
 }
 
-// Fan-out queries gather every node's records on the coordinator before the
-// pipeline runs. The budget covers that gather and the pipeline as one
-// account, and normal cluster aggregation still works.
+// A fan-out query streams every node's records through the coordinator's
+// pipeline. The budget bounds what that pipeline retains, and normal cluster
+// aggregation still works.
 func TestSearchMemoryBudgetAcrossNodes(t *testing.T) {
 	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"})
 	addMNRecords(t, h.Node(t, "coord"), "coord", 50, map[string]string{"host": "a"})
@@ -106,7 +106,7 @@ func TestSearchMemoryBudgetAcrossNodes(t *testing.T) {
 	addMNRecords(t, h.Node(t, "data-2"), "two", 50, map[string]string{"host": "c"})
 
 	// A cap larger than any node can hold is refused on the coordinator, which
-	// is where the gathered cluster records land.
+	// is where the cluster stream converges.
 	err := searchExpectingError(t, h.client, "| tail 200000000")
 	if got := connect.CodeOf(err); got != connect.CodeResourceExhausted {
 		t.Errorf("code: got %v, want %v (err: %v)", got, connect.CodeResourceExhausted, err)

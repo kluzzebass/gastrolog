@@ -325,12 +325,21 @@ result is flagged rather than silent — but it is still partial, which is a
 different contract from the budget's outright failure.
 
 The budget is **per query, per node**. Each node executing part of a fan-out
-gets its own, and the coordinator additionally charges the records it gathers
-back from peers against the same account the pipeline then runs under, so the
-gather and the pipeline share one ledger. There is no cluster-wide total: the
-exhaustion being prevented is a node running out of memory, a per-node
-resource, and a shared counter would need a cluster round trip on the
+gets its own, and the coordinator runs its whole share — the local scan and the
+records streaming back from peers — on one ledger. There is no cluster-wide
+total: the exhaustion being prevented is a node running out of memory, a
+per-node resource, and a shared counter would need a cluster round trip on the
 per-record path.
+
+A pipeline the cluster cannot answer by merging per-node results — a `head`,
+`tail`, or `slice` that would otherwise apply once per node, or an aggregate
+like `avg`/`dcount`/`median`/`values` that cannot be recombined from partials —
+runs once on the coordinator over every node's records. Those records are
+*streamed* through it, merged with the local scan in query order, not collected
+first: the coordinator retains only what the pipeline's own operators hold, so
+memory tracks the answer rather than the match set. An uncapped `sort` is the
+one shape that genuinely has to hold every record, and the budget is what
+bounds it.
 
 The ceiling is a fixed constant rather than a setting. A node runs queries for
 every vault it leads, so raising it to make one query fit would re-arm the same

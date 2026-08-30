@@ -1,9 +1,62 @@
 package query
 
 import (
+	"iter"
+
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 )
+
+// mergeOrdered interleaves two record streams that are each already ordered by
+// orderBy into a single stream in that same order. Ties yield the first
+// stream's record, so a merge whose second stream is empty reproduces the
+// first stream exactly.
+//
+// A stream is advanced only after its current record has been consumed, so a
+// source that reuses its record buffer between yields cannot overwrite a
+// record the consumer still holds.
+func mergeOrdered(a, b iter.Seq2[chunk.Record, error], orderBy OrderBy, reverse bool) iter.Seq2[chunk.Record, error] {
+	return func(yield func(chunk.Record, error) bool) {
+		aNext, aStop := iter.Pull2(a)
+		defer aStop()
+		bNext, bStop := iter.Pull2(b)
+		defer bStop()
+
+		aRec, aErr, aOK := aNext()
+		bRec, bErr, bOK := bNext()
+		for aOK || bOK {
+			if aOK && aErr != nil {
+				yield(chunk.Record{}, aErr)
+				return
+			}
+			if bOK && bErr != nil {
+				yield(chunk.Record{}, bErr)
+				return
+			}
+
+			takeA := aOK
+			if aOK && bOK {
+				at, bt := orderBy.RecordTS(aRec), orderBy.RecordTS(bRec)
+				if reverse {
+					takeA = !at.Before(bt)
+				} else {
+					takeA = !at.After(bt)
+				}
+			}
+			if takeA {
+				if !yield(aRec, nil) {
+					return
+				}
+				aRec, aErr, aOK = aNext()
+				continue
+			}
+			if !yield(bRec, nil) {
+				return
+			}
+			bRec, bErr, bOK = bNext()
+		}
+	}
+}
 
 // cursorEntry represents a cursor with its current record in the merge heap.
 type cursorEntry struct {

@@ -154,17 +154,40 @@ func (e *Engine) runStreamingAggregation(ctx context.Context, it iter.Seq2[chunk
 // Without stats, returns records; with stats, returns a table.
 // The raw operator forces all results into a flat table.
 func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.Pipeline) (*PipelineResult, error) {
+	// Every materializing path charges what it retains against this budget, so
+	// a pipeline whose working set outgrows the node fails with a named limit
+	// instead of allocating until the process dies.
+	return e.runPipeline(ctx, q, pipeline, nil, e.newBudget())
+}
+
+// RunPipelineWithRemote executes a pipeline over the union of this node's
+// search results and a stream of records from the rest of the cluster. The
+// remote stream is merged in query order and flows through the same operators
+// as the local one, so a cap or an aggregate sees every cluster record exactly
+// once and in order while the coordinator retains only what the pipeline
+// itself holds — a window, a top-N working set, or accumulator state.
+//
+// remote must already yield records in q's order; the merge assumes it and
+// does not re-sort. A nil remote runs the pipeline against local data alone.
+//
+// The caller supplies the budget so its own share of the query and the
+// pipeline's stay on one ledger instead of two that each allow the full
+// ceiling.
+func (e *Engine) RunPipelineWithRemote(ctx context.Context, q Query, pipeline *querylang.Pipeline, remote iter.Seq2[chunk.Record, error], budget *Budget) (*PipelineResult, error) {
+	return e.runPipeline(ctx, q, pipeline, remote, budget)
+}
+
+func (e *Engine) runPipeline(ctx context.Context, q Query, pipeline *querylang.Pipeline, remote iter.Seq2[chunk.Record, error], budget *Budget) (*PipelineResult, error) {
 	ph, err := classifyPipes(pipeline)
 	if err != nil {
 		return nil, err
 	}
 
-	// Every materializing path charges what it retains against this budget, so
-	// a pipeline whose working set outgrows the node fails with a named limit
-	// instead of allocating until the process dies.
-	budget := e.newBudget()
-
 	if ph.timechartOp != nil {
+		// A timechart bins from chunk metadata rather than from a record
+		// stream, so remote records have nothing to feed and these buckets
+		// cover local data only. The cluster-wide form merges per-node
+		// timechart tables instead of routing through here.
 		return e.runTimechartPipeline(ctx, q, ph, budget)
 	}
 
@@ -188,6 +211,9 @@ func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.P
 	}
 
 	it, _ := e.Search(ctx, q, nil)
+	if remote != nil {
+		it = mergeOrdered(it, remote, q.OrderBy, q.Reverse())
+	}
 
 	// Aggregating pipeline with streamable pre-ops: feed records straight
 	// into the aggregator instead of materializing the search result.
@@ -259,8 +285,9 @@ func headOnlyLimit(ops []querylang.PipeOp) int {
 	return headN
 }
 
-// PipelineNeedsGlobalRecords reports whether a pipeline query must gather raw
-// records from all cluster nodes before running the pipeline on the coordinator.
+// PipelineNeedsGlobalRecords reports whether a pipeline query must see every
+// cluster node's raw records on the coordinator, rather than merging the
+// per-node results of running the pipeline on each of them.
 // This is true when:
 //   - The pipeline contains a non-distributive ordering operator (tail, sort,
 //     slice) that requires all records to produce a correct result, OR
@@ -315,124 +342,6 @@ func hasNonDistributiveAgg(op *querylang.StatsOp) bool {
 		}
 	}
 	return false
-}
-
-// RunPipelineOnRecords executes a pipeline query where extra records (typically
-// from remote cluster nodes) are merged with the local search results before
-// pipeline operators run. This enables correct head/tail/slice + stats on a
-// coordinator: gather raw records globally, then apply the pipeline once.
-//
-// The caller supplies the budget because it has already buffered extraRecords
-// on this node; passing its own account in keeps the gather and the pipeline
-// on one ledger instead of two that each allow the full ceiling.
-func (e *Engine) RunPipelineOnRecords(ctx context.Context, q Query, pipeline *querylang.Pipeline, extraRecords []chunk.Record, budget *Budget) (*PipelineResult, error) {
-	ph, err := classifyPipes(pipeline)
-	if err != nil {
-		return nil, err
-	}
-
-	// Timechart with extra records is not supported yet (would need bucket
-	// merging). Fall back to local-only for now.
-	if ph.timechartOp != nil {
-		return e.runTimechartPipeline(ctx, q, ph, budget)
-	}
-
-	if err := chargeDeclaredCaps(ph.preOps, budget); err != nil {
-		return nil, err
-	}
-
-	// Clear incoming limit — pipeline operators control their own caps; see
-	// RunPipeline for why a scan limit would corrupt the answer.
-	origLimit := q.Limit
-	q.Limit = 0
-	if ph.statsOp == nil {
-		if n := headOnlyLimit(ph.preOps); n > 0 {
-			q.Limit = n
-		}
-	}
-
-	iter, _ := e.Search(ctx, q, nil)
-	var records []chunk.Record
-	for rec, err := range iter {
-		if err != nil {
-			return nil, err
-		}
-		rec = rec.Copy()
-		// Charge AFTER materializing: extracted JSON/logfmt fields land in
-		// Attrs and are most of what a buffered record retains.
-		materializeRecord(&rec)
-		if err := budget.ChargeRecord(consumerRecordBuffer, rec); err != nil {
-			return nil, err
-		}
-		records = append(records, rec)
-	}
-
-	// The caller charged each remote record as it gathered it, before any
-	// field extraction. Materializing them now grows what they retain, so
-	// charge the difference rather than the whole record again.
-	for i := range extraRecords {
-		before := RecordFootprint(extraRecords[i])
-		materializeRecord(&extraRecords[i])
-		if err := budget.Charge(consumerRecordBuffer, RecordFootprint(extraRecords[i])-before); err != nil {
-			return nil, err
-		}
-	}
-
-	// Merge in extra (remote) records.
-	records = append(records, extraRecords...)
-
-	// Sort merged records by IngestTS to match the expected stream order.
-	reverse := q.Reverse()
-	slices.SortStableFunc(records, func(a, b chunk.Record) int {
-		if reverse {
-			return b.IngestTS.Compare(a.IngestTS)
-		}
-		return a.IngestTS.Compare(b.IngestTS)
-	})
-
-	// Every record was materialized as it was charged above.
-	eval := querylang.NewEvaluator()
-	for _, op := range ph.preOps {
-		switch o := op.(type) {
-		case *querylang.WhereOp:
-			records = applyRecordWhere(records, o)
-		case *querylang.DedupOp:
-			records, err = applyRecordDedup(records, parseDedupWindow(o.Window), budget)
-		case *querylang.EvalOp:
-			records, err = applyRecordEval(records, o, eval)
-		case *querylang.SortOp:
-			applyRecordSort(records, o)
-		case *querylang.HeadOp:
-			records = applyRecordHead(records, o)
-		case *querylang.TailOp:
-			records = applyRecordTail(records, o)
-		case *querylang.SliceOp:
-			records = applyRecordSlice(records, o)
-		case *querylang.RenameOp:
-			applyRecordRename(records, o)
-		case *querylang.FieldsOp:
-			applyRecordFields(records, o)
-		case *querylang.LookupOp:
-			applyRecordLookup(ctx, records, o, e.lookupResolver)
-		}
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if ph.statsOp == nil {
-		if ph.hasRaw {
-			return &PipelineResult{Table: recordsToTable(records)}, nil
-		}
-		if len(ph.preOps) > 0 && origLimit > 0 && !hasExplicitCap(ph.preOps) {
-			if len(records) > origLimit {
-				records = records[:origLimit]
-			}
-		}
-		return &PipelineResult{Records: records}, nil
-	}
-
-	return e.runAggregation(ctx, records, ph, q, budget)
 }
 
 // recordsToTable converts a slice of records into a flat TableResult.
