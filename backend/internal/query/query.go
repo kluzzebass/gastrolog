@@ -54,6 +54,32 @@ func (o OrderBy) RecordTS(rec chunk.Record) time.Time {
 	return rec.IngestTS
 }
 
+// CompareRecords returns -1, 0, or +1 placing a and b in the cluster's
+// canonical record order: the ordering timestamp first, then EventID's own
+// total order. reverse negates the whole comparison, so reverse iteration
+// yields the exact reverse sequence.
+//
+// This is the ONE order every merge must use — the engine's fan-in across a
+// node's vaults, the coordinator's fan-in across remote vaults, and the
+// local/remote merge on top of them. A timestamp tie is not an edge case:
+// under order=source_ts, syslog second-granularity puts thousands of records
+// on one timestamp, so a head/tail cutoff lands inside a tie group as a matter
+// of course. Any merge that broke ties by which side happened to be "local",
+// or by vault placement, would return a different window depending on which
+// node received the query and on how routing fanned copies across vaults.
+// EventID's fields are intrinsic to the event and identical on every copy of
+// it, so every node ranks the same two records the same way.
+func (o OrderBy) CompareRecords(a, b chunk.Record, reverse bool) int {
+	c := o.RecordTS(a).Compare(o.RecordTS(b))
+	if c == 0 {
+		c = a.EventID.Compare(b.EventID)
+	}
+	if reverse {
+		return -c
+	}
+	return c
+}
+
 // KeyValueFilter represents a key=value filter that searches both
 // record attributes and key=value pairs extracted from the message body.
 // The filter matches if the key=value pair is found in either location.

@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -648,6 +649,16 @@ func (p *mnPeerStorageStats) FindStorageState(storageID string) *gastrologv1.Sto
 // simulating ForwardSearch/ForwardFollow/ForwardExplain RPCs without gRPC.
 type directRemoteSearcher struct {
 	nodes map[string]*orchestrator.Orchestrator
+	// streamers tracks the per-vault SearchStream producer goroutines so a
+	// test can wait for them to exit. Production's producer is released by
+	// request-context cancellation; without something to wait on, a leak is
+	// indistinguishable from a prompt exit.
+	streamers sync.WaitGroup
+	// batchesSent counts record batches this stand-in pushed into a stream's
+	// channel. A consumer that stops early leaves the producer parked on a
+	// full channel, so a count short of the total says it never had to drain
+	// the whole match set.
+	batchesSent atomic.Int64
 }
 
 func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *gastrologv1.ForwardSearchRequest) (*gastrologv1.ForwardSearchResponse, error) {
@@ -824,7 +835,9 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 	}
 
 	// Stream records in batches.
+	d.streamers.Add(1)
 	go func() {
+		defer d.streamers.Done()
 		defer close(recCh)
 		defer close(errCh)
 
@@ -839,6 +852,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 			if len(batch) >= batchSize {
 				select {
 				case recCh <- batch:
+					d.batchesSent.Add(1)
 				case <-ctx.Done():
 					return
 				}
@@ -848,6 +862,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		if len(batch) > 0 {
 			select {
 			case recCh <- batch:
+				d.batchesSent.Add(1)
 			case <-ctx.Done():
 			}
 		}
@@ -2015,6 +2030,134 @@ func TestMultiNode_NonDistributiveAggregatesAreGlobal(t *testing.T) {
 				t.Errorf("%s = %q, want %q", tc.expr, got, tc.want)
 			}
 		})
+	}
+}
+
+// addMNTieGroup appends records to node that all share one ordering timestamp
+// but carry distinct event identities, so only EventID separates them. Two
+// nodes seeded from interleaved seqs hold one tie group split across the
+// cluster.
+func addMNTieGroup(node multinodeTestNode, ts time.Time, ingesterID glid.GLID, seqs []int) {
+	for _, seq := range seqs {
+		node.vault.CM.Append(chunk.Record{
+			SourceTS: ts,
+			IngestTS: ts,
+			WriteTS:  ts,
+			EventID:  chunk.EventID{IngesterID: ingesterID, IngestTS: ts, IngestSeq: uint32(seq)}, //nolint:gosec // G115: small non-negative test sequence
+			Raw:      fmt.Appendf(nil, "evt-%02d", seq),
+		})
+	}
+}
+
+// The window a cap returns must not depend on which node the client happened
+// to connect to. A tie-break that favoured whichever vaults were local would
+// hand two nodes two different answers to the same query — and a timestamp
+// tie is ordinary, not exotic: a whole second of syslog shares one source
+// timestamp, so a cutoff lands inside a tie group as a matter of course.
+//
+// The tie here is on ingest_ts because memory-backed vaults expose no
+// source-TS rank index, so order=source_ts cannot run through this harness at
+// all. The merge compares whichever timestamp OrderBy names and then the same
+// EventID key either way; the source_ts tie group is covered directly against
+// the merge in internal/query.
+func TestMultiNode_CapInsideATieGroupIsCoordinatorIndependent(t *testing.T) {
+	t.Parallel()
+	ts := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	ingesterID := glid.New()
+	// evt-00..evt-07, dealt alternately so any correct window draws from both.
+	evens := []int{0, 2, 4, 6}
+	odds := []int{1, 3, 5, 7}
+
+	// The same cluster viewed from each side: in the first harness the
+	// even-numbered records are local to the coordinator, in the second the
+	// odd-numbered ones are.
+	answer := func(t *testing.T, coordSeqs, peerSeqs []int) string {
+		t.Helper()
+		h := setupMultiNode(t, []string{"coord", "peer"})
+		addMNTieGroup(h.Node(t, "coord"), ts, ingesterID, coordSeqs)
+		addMNTieGroup(h.Node(t, "peer"), ts, ingesterID, peerSeqs)
+
+		// Premise: both sides contribute and nothing is deduped away, so the
+		// tie-break is what decides the window.
+		if got := len(searchAll(t, h.client, "")); got != 8 {
+			t.Fatalf("coordinator sees %d records, want 8", got)
+		}
+
+		// values() reports its distinct values in stream order, so the table
+		// shows the exact merged order the cap selected from.
+		table := searchTable(t, h.client, "| head 3 | stats values(raw)")
+		if table == nil || len(table.Rows) != 1 {
+			t.Fatalf("expected one row, got %v", table)
+		}
+		return table.Rows[0].Values[0]
+	}
+
+	fromEvens := answer(t, evens, odds)
+	fromOdds := answer(t, odds, evens)
+
+	if fromEvens != fromOdds {
+		t.Errorf("head 3 inside a tie group returned %q from one coordinator and %q from the other", fromEvens, fromOdds)
+	}
+	if want := "evt-00, evt-01, evt-02"; fromEvens != want {
+		t.Errorf("head 3 = %q, want %q (canonical event order)", fromEvens, want)
+	}
+}
+
+// A consumer that stops early must release the fan-out, not leave a peer
+// streaming the rest of the match set into a channel nobody reads.
+//
+// Two properties, both observable rather than timed: the peer's producer
+// goroutine has exited by the time the request is over (the WaitGroup returns;
+// a goroutine still running hangs the test and names itself in the dump), and
+// it pushed only a fraction of the match set (it parks on a full channel
+// instead of draining 4000 records to reach the end). The teardown itself is
+// belt-and-braces in the server — the request context releases both the
+// engine iterator inside the producer and its channel send — so this asserts
+// the outcome, not which of the two fires; the iterator-level teardown at the
+// break is pinned directly in internal/query.
+func TestMultiNode_EarlyTerminationReleasesTheFanOut(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+
+	// More records than the stand-in's channel can hold (16 batches of 200),
+	// so the producer must park rather than run to completion on its own.
+	const remoteRecords = 4000
+	const batchSize = 200
+	addMNRecords(t, h.Node(t, "data-1"), "one", remoteRecords, nil)
+
+	// "| head 10 | stats count" runs the streaming aggregation over the merged
+	// stream and breaks out of it after ten records.
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, err := h.client.Search(ctx, connect.NewRequest(&gastrologv1.SearchRequest{
+		Query: &gastrologv1.Query{Expression: "| head 10 | stats count"},
+	}))
+	if err != nil {
+		cancel()
+		t.Fatalf("Search: %v", err)
+	}
+	var count string
+	for stream.Receive() {
+		if tbl := stream.Msg().TableResult; tbl != nil && len(tbl.Rows) > 0 {
+			count = tbl.Rows[0].Values[0]
+		}
+	}
+	if err := stream.Err(); err != nil && err != io.EOF {
+		cancel()
+		t.Fatalf("stream error: %v", err)
+	}
+	if count != "10" {
+		cancel()
+		t.Fatalf("count = %q, want 10 — the query did not terminate early, so this proves nothing", count)
+	}
+
+	// The request is over; production cancels its context here.
+	cancel()
+	h.remoteSearcher.streamers.Wait()
+
+	// Parked, not drained: had the merge kept pulling, every batch would have
+	// gone through.
+	if sent := h.remoteSearcher.batchesSent.Load(); sent >= remoteRecords/batchSize {
+		t.Errorf("peer streamed %d of %d batches after the consumer stopped at 10 records", sent, remoteRecords/batchSize)
 	}
 }
 

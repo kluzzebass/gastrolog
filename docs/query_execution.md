@@ -294,6 +294,22 @@ The coordinator determines which vaults live on peer nodes via
 is opened. Results flow back without buffering — `kWayMerge()` performs
 selection-based merging across N streams (N is typically 1–3 vaults per node).
 
+**Every merge uses one order**: `OrderBy.CompareRecords` — the ordering
+timestamp, then `chunk.EventID`'s own total order (IngestTS, NodeID,
+IngesterID, IngestSeq), with `reverse` negating the whole comparison. That
+applies at all three levels: a node's `tsHeap` fan-in across its own vaults and
+chunks, the coordinator's `kWayMerge` fan-in across remote vaults, and the
+local/remote merge on top of them.
+
+A timestamp tie is ordinary rather than exotic — under `order=source_ts` a
+whole second of syslog shares one timestamp, so a `head`/`tail` cutoff lands
+inside a tie group as a matter of course. Ranking such records by which side
+was "local", by vault ID, or by an entry's position in a concurrently-built
+merge slice would make the same query return a different window depending on
+which node the client connected to and on how routing fanned copies across
+vaults. EventID's fields are intrinsic to the event and identical on every copy
+of it, so every node ranks any two records the same way.
+
 **Resume tokens** are split: local chunk positions stay on the coordinator,
 remote vault tokens are opaque blobs forwarded back to their originating nodes
 on the next page request.

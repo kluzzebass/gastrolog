@@ -304,3 +304,207 @@ func TestClusterStreamErrorFailsTheQuery(t *testing.T) {
 		t.Errorf("error %q does not carry the remote failure", err)
 	}
 }
+
+// tieGroup builds n records that all share one ordering timestamp under
+// orderBy but carry distinct event identities, so only EventID separates them.
+// EventID's leading field is IngestTS, so ascending seq gives ascending
+// canonical rank in both orderings.
+func tieGroup(orderBy OrderBy, n int) []chunk.Record {
+	base := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	ingesterID := glid.New()
+	out := make([]chunk.Record, n)
+	for i := range n {
+		// Distinct IngestTS gives each record a distinct canonical rank; under
+		// order=source_ts every record still shares the one SourceTS, which is
+		// what the merge compares first.
+		ingest := base.Add(time.Duration(i) * time.Millisecond)
+		rec := chunk.Record{
+			IngestTS: ingest,
+			WriteTS:  ingest,
+			SourceTS: base,
+			EventID:  chunk.EventID{IngesterID: ingesterID, IngestTS: ingest, IngestSeq: uint32(i)}, //nolint:gosec // G115: loop index is small and non-negative
+			Raw:      fmt.Appendf(nil, "evt-%02d", i),
+		}
+		if orderBy == OrderByIngestTS {
+			// A tie under ingest_ts too: one shared IngestTS, ranks then
+			// separated by IngestSeq alone.
+			rec.IngestTS = base
+			rec.WriteTS = base
+			rec.EventID.IngestTS = base
+		}
+		out[i] = rec
+	}
+	return out
+}
+
+func recordSeqOf(records []chunk.Record) iter.Seq2[chunk.Record, error] {
+	return func(yield func(chunk.Record, error) bool) {
+		for _, rec := range records {
+			if !yield(rec, nil) {
+				return
+			}
+		}
+	}
+}
+
+func rawsFromIter(it iter.Seq2[chunk.Record, error]) []string {
+	var out []string
+	for rec, err := range it {
+		if err != nil {
+			out = append(out, "err")
+			continue
+		}
+		out = append(out, string(rec.Raw))
+	}
+	return out
+}
+
+// A timestamp tie must not be resolved by which stream a record arrived on.
+// "Local" is whichever vaults live on the node that received the query, so a
+// side-dependent tie-break makes the same query return a different window
+// from a different node — and under order=source_ts, where a whole second of
+// syslog shares one timestamp, a head/tail cutoff lands inside a tie group as
+// a matter of course rather than as an edge case.
+func TestCanonicalOrderIgnoresWhichStreamCarriesTheRecord(t *testing.T) {
+	const n = 8
+
+	// Every way of splitting the same tie group across two streams. Each
+	// partition still feeds both streams in canonical order, which is all
+	// mergeOrdered requires of its inputs.
+	partitions := map[string]func(i int) bool{
+		"all on a":         func(int) bool { return true },
+		"all on b":         func(int) bool { return false },
+		"alternating":      func(i int) bool { return i%2 == 0 },
+		"alternating swap": func(i int) bool { return i%2 == 1 },
+		"front half on a":  func(i int) bool { return i < n/2 },
+		"back half on a":   func(i int) bool { return i >= n/2 },
+	}
+
+	for _, orderBy := range []OrderBy{OrderByIngestTS, OrderBySourceTS} {
+		t.Run(orderBy.String(), func(t *testing.T) {
+			group := tieGroup(orderBy, n)
+
+			// Canonical order is ascending seq by construction.
+			var canonical []string
+			for _, rec := range group {
+				canonical = append(canonical, string(rec.Raw))
+			}
+			reversed := slices.Clone(canonical)
+			slices.Reverse(reversed)
+
+			for name, onA := range partitions {
+				t.Run(name, func(t *testing.T) {
+					var a, b []chunk.Record
+					for i, rec := range group {
+						if onA(i) {
+							a = append(a, rec)
+						} else {
+							b = append(b, rec)
+						}
+					}
+
+					got := rawsFromIter(mergeOrdered(recordSeqOf(a), recordSeqOf(b), orderBy, false))
+					if !slices.Equal(got, canonical) {
+						t.Errorf("forward merge = %v, want %v (the split across streams changed the order)", got, canonical)
+					}
+
+					// Reverse negates the whole comparison, so reverse
+					// iteration must yield the exact reverse sequence.
+					ra, rb := slices.Clone(a), slices.Clone(b)
+					slices.Reverse(ra)
+					slices.Reverse(rb)
+					gotRev := rawsFromIter(mergeOrdered(recordSeqOf(ra), recordSeqOf(rb), orderBy, true))
+					if !slices.Equal(gotRev, reversed) {
+						t.Errorf("reverse merge = %v, want %v", gotRev, reversed)
+					}
+				})
+			}
+		})
+	}
+}
+
+// A cap whose cutoff falls inside a tie group must take the same records
+// wherever those records happen to live. Under order=source_ts the whole
+// group shares one timestamp, so every record in it is a candidate and only
+// the canonical order decides.
+func TestCapInsideATieGroupIsStreamIndependent(t *testing.T) {
+	const n = 8
+	group := tieGroup(OrderBySourceTS, n)
+
+	head := func(a, b []chunk.Record, keep int) []string {
+		var out []string
+		for rec, err := range mergeOrdered(recordSeqOf(a), recordSeqOf(b), OrderBySourceTS, false) {
+			if err != nil {
+				t.Fatalf("merge: %v", err)
+			}
+			out = append(out, string(rec.Raw))
+			if len(out) == keep {
+				break
+			}
+		}
+		return out
+	}
+
+	// Cutoff at 3 sits inside the group in every split below.
+	want := []string{"evt-00", "evt-01", "evt-02"}
+	splits := [][2][]chunk.Record{
+		{group[:4], group[4:]},
+		{group[4:], group[:4]},
+		{group, nil},
+		{nil, group},
+		{[]chunk.Record{group[0], group[2], group[4], group[6]}, []chunk.Record{group[1], group[3], group[5], group[7]}},
+		{[]chunk.Record{group[1], group[3], group[5], group[7]}, []chunk.Record{group[0], group[2], group[4], group[6]}},
+	}
+	for i, split := range splits {
+		if got := head(split[0], split[1], 3); !slices.Equal(got, want) {
+			t.Errorf("split %d: head 3 = %v, want %v", i, got, want)
+		}
+	}
+}
+
+// Breaking out of the merged range early must release both sources. An
+// unbounded generator that runs its deferred cleanup can only have been
+// stopped — nothing else ends it — so the flag is proof of teardown rather
+// than of natural exhaustion.
+func TestMergeOrderedStopsBothSourcesOnEarlyBreak(t *testing.T) {
+	base := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	endless := func(offset int, released *bool, delivered *int) iter.Seq2[chunk.Record, error] {
+		return func(yield func(chunk.Record, error) bool) {
+			defer func() { *released = true }()
+			for i := 0; ; i++ {
+				ts := base.Add(time.Duration(2*i+offset) * time.Second)
+				if !yield(chunk.Record{IngestTS: ts, WriteTS: ts}, nil) {
+					return
+				}
+				*delivered++
+			}
+		}
+	}
+
+	var aReleased, bReleased bool
+	var aDelivered, bDelivered int
+	merged := mergeOrdered(
+		endless(0, &aReleased, &aDelivered),
+		endless(1, &bReleased, &bDelivered),
+		OrderByIngestTS, false)
+
+	seen := 0
+	for range merged {
+		seen++
+		if seen == 5 {
+			break
+		}
+	}
+
+	if seen != 5 {
+		t.Fatalf("consumed %d records, want 5", seen)
+	}
+	if !aReleased || !bReleased {
+		t.Errorf("early break left a source running (a released=%v, b released=%v)", aReleased, bReleased)
+	}
+	// Both generators are infinite, so a bounded delivery count is what says
+	// the break actually cut them short.
+	if aDelivered > seen || bDelivered > seen {
+		t.Errorf("sources kept producing past the break (a=%d, b=%d, consumed=%d)", aDelivered, bDelivered, seen)
+	}
+}

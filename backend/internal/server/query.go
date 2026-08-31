@@ -626,12 +626,11 @@ func pullPending(next func() (chunk.Record, error, bool)) *mergePending {
 }
 
 // pickWinner selects the next record between local and remote
-// pendings, advancing the corresponding iter.
-//
-// A timestamp tie goes to remote here and to local in the engine's own
-// two-way merge. Records sharing a timestamp have no defined relative order,
-// so either is correct and neither is canonical — but nothing may be built on
-// which one appears first.
+// pendings, advancing the corresponding iter, in the cluster's canonical
+// record order (query.OrderBy.CompareRecords). Which side a record arrived on
+// carries no weight — "local" means whichever vaults happen to live on the
+// node serving this query, so ranking by it would make the same query return
+// a different window from a different node.
 func pickWinner(local, remote *mergePending, orderBy query.OrderBy, reverse bool, localNext, remoteNext func() (chunk.Record, error, bool)) (rec chunk.Record, fromLocal bool, newLocal, newRemote *mergePending) {
 	switch {
 	case local == nil:
@@ -639,13 +638,7 @@ func pickWinner(local, remote *mergePending, orderBy query.OrderBy, reverse bool
 	case remote == nil:
 		return local.rec, true, pullPending(localNext), remote
 	}
-	la := orderBy.RecordTS(local.rec)
-	rb := orderBy.RecordTS(remote.rec)
-	localFirst := la.Before(rb)
-	if reverse {
-		localFirst = la.After(rb)
-	}
-	if localFirst {
+	if orderBy.CompareRecords(local.rec, remote.rec, reverse) <= 0 {
 		return local.rec, true, pullPending(localNext), remote
 	}
 	return remote.rec, false, local, pullPending(remoteNext)
