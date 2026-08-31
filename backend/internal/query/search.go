@@ -51,7 +51,7 @@ type mergeState struct {
 	h              heap.Interface
 	scanners       []activeScanner
 	chunkPositions map[mergeKey]uint64
-	chunkResumeTS  map[mergeKey]time.Time // IngestTS-based resume for reordered chunks
+	chunkResumeTS  map[mergeKey]time.Time // OrderBy-timestamp resume for reordered chunks
 	lastRefs       *[]MultiVaultPosition
 
 	// Lazy heap priming: chunks are opened on demand instead of all at once.

@@ -8,8 +8,8 @@ import (
 )
 
 // mergeOrdered interleaves two record streams that are each already in
-// OrderBy.CompareRecords order into a single stream in that same order. Which
-// stream a record arrived on never affects where it lands.
+// OrderBy.CompareRecords order into a single stream in that same order — so
+// which stream a record arrived on never affects where it lands.
 //
 // A stream is advanced only after its current record has been consumed, so a
 // source that reuses its record buffer between yields cannot overwrite a
@@ -54,11 +54,14 @@ func mergeOrdered(a, b iter.Seq2[chunk.Record, error], orderBy OrderBy, reverse 
 
 // cursorEntry represents a cursor with its current record in the merge heap.
 type cursorEntry struct {
-	vaultID   glid.GLID
-	chunkID   chunk.ChunkID
-	rec       chunk.Record
-	ref       chunk.RecordRef
-	reordered bool // true when chunk was scanned without TS index (resume by IngestTS, not position)
+	vaultID glid.GLID
+	chunkID chunk.ChunkID
+	rec     chunk.Record
+	ref     chunk.RecordRef
+	// reordered is true when the record came from rank-based TS index
+	// scanning, which yields in timestamp order rather than physical write
+	// order — so this chunk resumes by timestamp, not by position.
+	reordered bool
 }
 
 // tsHeap is a heap of cursor entries in the cluster's canonical record order.
@@ -67,12 +70,9 @@ type tsHeap struct {
 	less    func(a, b *cursorEntry) bool
 }
 
-// newTSHeap creates a heap that orders entries by OrderBy.CompareRecords.
-// When reverse is true, the heap yields newest-first (max-heap).
-//
-// This is a node's fan-in across its own vaults and chunks, and it uses the
-// same order as the merges above it: a tie must not resolve by heap shape,
-// or a record's rank would depend on how many vaults happened to be local.
+// newTSHeap creates a heap that orders entries by OrderBy.CompareRecords —
+// the cluster's one record order, ties included. When reverse is true, the
+// heap yields newest-first (max-heap).
 func newTSHeap(orderBy OrderBy, reverse bool, capacity int) *tsHeap {
 	return &tsHeap{
 		entries: make([]*cursorEntry, 0, capacity),

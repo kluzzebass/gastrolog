@@ -301,15 +301,8 @@ func stopAll(states []mergeState) {
 	}
 }
 
-// buildMergeLess returns a comparison function for merge entries in the
-// cluster's canonical record order.
-//
-// Comparing timestamps alone left ties to be broken by an entry's index in
-// the merge slice, and that slice is filled by concurrent fan-out goroutines
-// — so two records sharing a timestamp came back in a different order from
-// one run to the next. The outer local/remote merge tolerated that (its own
-// input only has to be non-strictly ordered on the timestamp), but a
-// head/tail cutoff landing inside a tie group did not.
+// buildMergeLess orders merge entries by query.OrderBy.CompareRecords — ties
+// included, since this slice's own order is goroutine-completion order.
 func buildMergeLess(orderBy query.OrderBy, reverse bool) func(a, b mergeEntry) bool {
 	return func(a, b mergeEntry) bool {
 		return orderBy.CompareRecords(a.rec, b.rec, reverse) < 0

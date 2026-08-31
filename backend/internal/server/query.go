@@ -625,12 +625,9 @@ func pullPending(next func() (chunk.Record, error, bool)) *mergePending {
 	return &mergePending{rec: rec, err: err}
 }
 
-// pickWinner selects the next record between local and remote
-// pendings, advancing the corresponding iter, in the cluster's canonical
-// record order (query.OrderBy.CompareRecords). Which side a record arrived on
-// carries no weight — "local" means whichever vaults happen to live on the
-// node serving this query, so ranking by it would make the same query return
-// a different window from a different node.
+// pickWinner selects the next record between local and remote pendings,
+// advancing the corresponding iter, in query.OrderBy.CompareRecords order —
+// ties included, so which side a record arrived on carries no weight.
 func pickWinner(local, remote *mergePending, orderBy query.OrderBy, reverse bool, localNext, remoteNext func() (chunk.Record, error, bool)) (rec chunk.Record, fromLocal bool, newLocal, newRemote *mergePending) {
 	switch {
 	case local == nil:

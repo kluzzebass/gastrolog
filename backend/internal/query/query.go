@@ -268,7 +268,7 @@ type MultiVaultPosition struct {
 	VaultID  glid.GLID
 	ChunkID  chunk.ChunkID
 	Position uint64
-	ResumeTS time.Time // non-zero for reordered chunks (no TS index)
+	ResumeTS time.Time // non-zero for chunks that resume by timestamp, not position
 }
 
 // ResumeToken allows resuming a query from where it left off.

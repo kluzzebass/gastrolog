@@ -2109,20 +2109,32 @@ func TestMultiNode_CapInsideATieGroupIsCoordinatorIndependent(t *testing.T) {
 // Two properties, both observable rather than timed: the peer's producer
 // goroutine has exited by the time the request is over (the WaitGroup returns;
 // a goroutine still running hangs the test and names itself in the dump), and
-// it pushed only a fraction of the match set (it parks on a full channel
-// instead of draining 4000 records to reach the end). The teardown itself is
-// belt-and-braces in the server — the request context releases both the
-// engine iterator inside the producer and its channel send — so this asserts
-// the outcome, not which of the two fires; the iterator-level teardown at the
-// break is pinned directly in internal/query.
+// it parked instead of draining the match set (it cannot push past one
+// consumed batch plus a full channel — a ceiling derived from those
+// capacities below, not from how producer and consumer race).
+//
+// The teardown itself is belt-and-braces in the server — the request context
+// releases both the engine iterator inside the producer and its channel send —
+// so this asserts the outcome, not which of the two fires. The iterator-level
+// teardown at the break is pinned directly in internal/query.
 func TestMultiNode_EarlyTerminationReleasesTheFanOut(t *testing.T) {
 	t.Parallel()
 	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
 
-	// More records than the stand-in's channel can hold (16 batches of 200),
-	// so the producer must park rather than run to completion on its own.
-	const remoteRecords = 4000
-	const batchSize = 200
+	// Far more records than the stand-in's channel can hold, so the producer
+	// must park rather than run to completion on its own.
+	const (
+		remoteRecords = 4000
+		batchSize     = 200
+		channelSlots  = 16 // directRemoteSearcher's recCh capacity
+		totalBatches  = remoteRecords / batchSize
+		// The consumer takes ten records plus the merge's one-record
+		// pull-ahead, all inside the first batch, so exactly one batch ever
+		// leaves the channel. The producer therefore cannot push more than
+		// that one plus a full channel before it parks. This ceiling is
+		// derived from those capacities, not from how the two race.
+		maxPushable = channelSlots + 1
+	)
 	addMNRecords(t, h.Node(t, "data-1"), "one", remoteRecords, nil)
 
 	// "| head 10 | stats count" runs the streaming aggregation over the merged
@@ -2154,10 +2166,10 @@ func TestMultiNode_EarlyTerminationReleasesTheFanOut(t *testing.T) {
 	cancel()
 	h.remoteSearcher.streamers.Wait()
 
-	// Parked, not drained: had the merge kept pulling, every batch would have
-	// gone through.
-	if sent := h.remoteSearcher.batchesSent.Load(); sent >= remoteRecords/batchSize {
-		t.Errorf("peer streamed %d of %d batches after the consumer stopped at 10 records", sent, remoteRecords/batchSize)
+	// Parked, not drained.
+	if sent := h.remoteSearcher.batchesSent.Load(); sent > maxPushable {
+		t.Errorf("peer pushed %d of %d batches after the consumer stopped at 10 records; it cannot exceed %d without someone draining the channel",
+			sent, totalBatches, maxPushable)
 	}
 }
 
