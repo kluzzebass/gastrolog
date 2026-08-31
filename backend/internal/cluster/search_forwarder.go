@@ -72,6 +72,42 @@ func (sf *SearchForwarder) Search(ctx context.Context, nodeID string, req *gastr
 	return merged, nil
 }
 
+// histogramGate carries a remote search's histogram from the stream's first
+// message to the coordinator that asked for it.
+//
+// The coordinator reads the histogram BEFORE it reads any records, so the gate
+// has to open as soon as the first message is parsed. Holding it until the
+// stream ends deadlocks the fan-out: the record channel fills, the drain
+// goroutine parks on a send nobody is reading, and the coordinator is still
+// blocked on the histogram — so the whole search hangs until the request
+// deadline for any vault whose match set outruns the channel.
+type histogramGate struct {
+	buckets []*gastrologv1.HistogramBucket
+	ready   chan struct{}
+	once    sync.Once
+}
+
+func newHistogramGate() *histogramGate {
+	return &histogramGate{ready: make(chan struct{})}
+}
+
+// open publishes buckets and releases every waiter. It is idempotent so the
+// drain goroutine can open the gate on the first message and again on its way
+// out, leaving a stream that failed before that message with an open gate
+// rather than a waiting coordinator.
+func (g *histogramGate) open(buckets []*gastrologv1.HistogramBucket) {
+	g.once.Do(func() {
+		g.buckets = buckets
+		close(g.ready)
+	})
+}
+
+// get blocks until the gate opens, then returns the published histogram.
+func (g *histogramGate) get() []*gastrologv1.HistogramBucket {
+	<-g.ready
+	return g.buckets
+}
+
 // SearchStream opens a server-streaming ForwardSearch RPC and returns the
 // results via channels. The call returns before the first remote batch arrives
 // so coordinators can start k-way merge while slow holders are still seeking.
@@ -85,13 +121,8 @@ func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req 
 	var resumeToken []byte
 	getResumeToken = func() []byte { return resumeToken }
 
-	var histogram []*gastrologv1.HistogramBucket
-	var histOnce sync.Once
-	histReady := make(chan struct{})
-	getHistogram = func() []*gastrologv1.HistogramBucket {
-		histOnce.Do(func() { <-histReady })
-		return histogram
-	}
+	gate := newHistogramGate()
+	getHistogram = gate.get
 
 	recCh := make(chan []*gastrologv1.ExportRecord, 16)
 	eCh := make(chan error, 1)
@@ -104,7 +135,7 @@ func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req 
 		eCh <- fmt.Errorf("open search stream to %s: %w", nodeID, err)
 		close(recCh)
 		close(eCh)
-		close(histReady)
+		gate.open(nil)
 		return recCh, nil, eCh, getResumeToken, getHistogram
 	}
 
@@ -114,7 +145,7 @@ func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req 
 		eCh <- fmt.Errorf("send search request to %s: %w", nodeID, err)
 		close(recCh)
 		close(eCh)
-		close(histReady)
+		gate.open(nil)
 		return recCh, nil, eCh, getResumeToken, getHistogram
 	}
 	if err := stream.CloseSend(); err != nil {
@@ -122,11 +153,11 @@ func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req 
 		eCh <- fmt.Errorf("close send to %s: %w", nodeID, err)
 		close(recCh)
 		close(eCh)
-		close(histReady)
+		gate.open(nil)
 		return recCh, nil, eCh, getResumeToken, getHistogram
 	}
 
-	go sf.drainSearchStream(ctx, nodeID, stream, h, recCh, eCh, histReady, &histogram, &resumeToken)
+	go sf.drainSearchStream(ctx, nodeID, stream, h, recCh, eCh, gate, &resumeToken)
 
 	return recCh, nil, eCh, getResumeToken, getHistogram
 }
@@ -138,14 +169,15 @@ func (sf *SearchForwarder) drainSearchStream(
 	h PeerConnHandle,
 	recCh chan<- []*gastrologv1.ExportRecord,
 	eCh chan<- error,
-	histReady chan struct{},
-	histogram *[]*gastrologv1.HistogramBucket,
+	gate *histogramGate,
 	resumeToken *[]byte,
 ) {
 	defer h.Release()
 	defer close(recCh)
 	defer close(eCh)
-	defer close(histReady)
+	// A stream that fails before its first message publishes no histogram;
+	// open the gate anyway rather than leave the coordinator waiting on it.
+	defer gate.open(nil)
 
 	first := &gastrologv1.ForwardSearchResponse{}
 	if err := stream.RecvMsg(first); err != nil {
@@ -155,7 +187,11 @@ func (sf *SearchForwarder) drainSearchStream(
 		}
 		return
 	}
-	*histogram = first.GetHistogram()
+	// The histogram arrives whole in the first message and is never added to,
+	// so publish it here. Every send below can park on a full record channel,
+	// and the coordinator does not start draining that channel until it has
+	// the histogram.
+	gate.open(first.GetHistogram())
 	if first.GetTableResult() != nil {
 		return
 	}

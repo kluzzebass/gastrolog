@@ -129,6 +129,18 @@ type mnConfig struct {
 	// tests that DO need it (waiting for a real tick) opt in per node via
 	// WithDiskGuard.
 	diskGuardNodes map[string]bool
+	// histogramAtStreamEnd is set by WithHistogramAtStreamEnd.
+	histogramAtStreamEnd bool
+}
+
+// WithHistogramAtStreamEnd makes the ForwardSearch stand-in withhold each
+// remote vault's histogram until its whole record stream has been produced,
+// reproducing the forwarder's older behaviour. Only a test asserting that the
+// coordinator cannot work that way should ask for it.
+func WithHistogramAtStreamEnd() mnOption {
+	return func(c *mnConfig) {
+		c.histogramAtStreamEnd = true
+	}
 }
 
 // WithoutVault creates a node that has an orchestrator but no vault.
@@ -278,7 +290,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		}
 		remoteOrchestrators[id] = nodes[id].orch
 	}
-	remoteSearcher := &directRemoteSearcher{nodes: remoteOrchestrators}
+	remoteSearcher := &directRemoteSearcher{nodes: remoteOrchestrators, histogramAtStreamEnd: cfg.histogramAtStreamEnd}
 	remoteIndexer := &directRemoteIndexer{nodes: remoteOrchestrators}
 
 	peerJobs := &mnPeerJobs{peers: map[string][]*gastrologv1.Job{}, changes: notify.NewSignal()}
@@ -659,6 +671,9 @@ type directRemoteSearcher struct {
 	// full channel, so a count short of the total says it never had to drain
 	// the whole match set.
 	batchesSent atomic.Int64
+	// histogramAtStreamEnd makes getHistogram wait for the whole stream, the
+	// way the forwarder used to. Only a test reproducing that stall sets it.
+	histogramAtStreamEnd bool
 }
 
 func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *gastrologv1.ForwardSearchRequest) (*gastrologv1.ForwardSearchResponse, error) {
@@ -806,9 +821,20 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 			})
 		}
 	}
+	// Mirrors the forwarder's contract: a remote search's histogram is known
+	// from the stream's first message, so the getter answers without the
+	// caller having read any records. histogramAtStreamEnd reproduces the
+	// older behaviour, where the getter waited for the producer to finish —
+	// which strands a coordinator that asks for the histogram before it starts
+	// draining records.
 	histReady := make(chan struct{})
-	close(histReady)
-	getHistogram := func() []*gastrologv1.HistogramBucket { return histProto }
+	getHistogram := func() []*gastrologv1.HistogramBucket {
+		<-histReady
+		return histProto
+	}
+	if !d.histogramAtStreamEnd {
+		close(histReady)
+	}
 
 	// Decode the resume token
 	// the same way the production ForwardSearch handler does. Without this,
@@ -840,6 +866,9 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		defer d.streamers.Done()
 		defer close(recCh)
 		defer close(errCh)
+		if d.histogramAtStreamEnd {
+			defer close(histReady)
+		}
 
 		const batchSize = 200
 		batch := make([]*gastrologv1.ExportRecord, 0, batchSize)
@@ -2171,6 +2200,91 @@ func TestMultiNode_EarlyTerminationReleasesTheFanOut(t *testing.T) {
 		t.Errorf("peer pushed %d of %d batches after the consumer stopped at 10 records; it cannot exceed %d without someone draining the channel",
 			sent, totalBatches, maxPushable)
 	}
+}
+
+// searchWithDeadline runs a Search RPC under a deadline and returns the
+// records it managed to stream plus the terminating error. The deadline is a
+// failure detector for a query that cannot finish, not a lever on timing.
+func searchWithDeadline(t *testing.T, client gastrologv1connect.QueryServiceClient, expr string, d time.Duration) ([]*gastrologv1.Record, []*gastrologv1.HistogramBucket, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+
+	stream, err := client.Search(ctx, connect.NewRequest(&gastrologv1.SearchRequest{
+		Query: &gastrologv1.Query{Expression: expr},
+	}))
+	if err != nil {
+		return nil, nil, err
+	}
+	var records []*gastrologv1.Record
+	var histogram []*gastrologv1.HistogramBucket
+	for stream.Receive() {
+		records = append(records, stream.Msg().Records...)
+		if len(stream.Msg().Histogram) > 0 {
+			histogram = stream.Msg().Histogram
+		}
+	}
+	if err := stream.Err(); err != nil && err != io.EOF {
+		return records, histogram, err
+	}
+	return records, histogram, nil
+}
+
+// The coordinator reads each remote vault's histogram before it starts
+// draining that vault's records, so a forwarder that only produces the
+// histogram once its whole stream has been sent strands the query: the record
+// channel fills, the peer's producer parks on a send nobody is reading, and
+// the coordinator is still waiting for the histogram. It only shows up past
+// the channel's depth, which is why paged queries never hit it and an
+// unlimited one does.
+func TestMultiNode_HistogramDoesNotSerializeTheRecordStream(t *testing.T) {
+	t.Parallel()
+	// Well past the stand-in's 16-batch channel (200 records per batch).
+	const remoteRecords = 4000
+
+	seed := func(h *multiNodeHarness) {
+		addMNRecords(t, h.Node(t, "data-1"), "one", remoteRecords, nil)
+	}
+
+	// Premise: with the histogram withheld until end of stream, the query
+	// cannot complete at all.
+	t.Run("premise: waiting for the whole stream strands the query", func(t *testing.T) {
+		t.Parallel()
+		h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"), WithHistogramAtStreamEnd())
+		seed(h)
+
+		records, _, err := searchWithDeadline(t, h.client, "", 3*time.Second)
+		if err == nil {
+			t.Fatalf("query returned %d records instead of stranding: the stall this test guards is not reachable, so the assertion below proves nothing", len(records))
+		}
+		if got := connect.CodeOf(err); got != connect.CodeDeadlineExceeded {
+			t.Fatalf("code: got %v, want %v (err: %v)", got, connect.CodeDeadlineExceeded, err)
+		}
+	})
+
+	t.Run("histogram from the first message streams every record", func(t *testing.T) {
+		t.Parallel()
+		h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+		seed(h)
+
+		records, histogram, err := searchWithDeadline(t, h.client, "", 30*time.Second)
+		if err != nil {
+			t.Fatalf("search: %v", err)
+		}
+		if len(records) != remoteRecords {
+			t.Errorf("streamed %d records, want %d", len(records), remoteRecords)
+		}
+
+		// The histogram has to be right as well as prompt: publishing it early
+		// must not drop or truncate the merged counts.
+		var total int64
+		for _, b := range histogram {
+			total += b.Count
+		}
+		if total != remoteRecords {
+			t.Errorf("histogram counts sum to %d over %d buckets, want %d", total, len(histogram), remoteRecords)
+		}
+	})
 }
 
 // An export moves data. When a node holding part of the match set cannot be

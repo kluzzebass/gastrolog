@@ -310,6 +310,15 @@ which node the client connected to and on how routing fanned copies across
 vaults. EventID's fields are intrinsic to the event and identical on every copy
 of it, so every node ranks any two records the same way.
 
+**Histograms travel ahead of records.** Each remote vault's histogram arrives
+whole in its stream's first message, and `SearchStream`'s `getHistogram` must
+answer from that message alone. The coordinator reads every vault's histogram
+*before* it starts draining any vault's records, so a getter that waited for
+its stream to finish would deadlock the fan-out: the record channel fills, the
+peer's producer parks on a send nobody is reading, and the coordinator is still
+waiting on the histogram. It only bites past the channel's depth, which is why
+paged queries never showed it and an unlimited one did.
+
 **Resume tokens** are split: local chunk positions stay on the coordinator,
 remote vault tokens are opaque blobs forwarded back to their originating nodes
 on the next page request.
