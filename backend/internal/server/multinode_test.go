@@ -134,9 +134,9 @@ type mnConfig struct {
 }
 
 // WithHistogramAtStreamEnd makes the ForwardSearch stand-in withhold each
-// remote vault's histogram until its whole record stream has been produced,
-// reproducing the forwarder's older behaviour. Only a test asserting that the
-// coordinator cannot work that way should ask for it.
+// remote vault's histogram until its whole record stream has been produced —
+// a contract the coordinator cannot work with, since it reads the histogram
+// before it drains any records. Only a test asserting that should ask for it.
 func WithHistogramAtStreamEnd() mnOption {
 	return func(c *mnConfig) {
 		c.histogramAtStreamEnd = true
@@ -659,6 +659,12 @@ func (p *mnPeerStorageStats) FindStorageState(storageID string) *gastrologv1.Sto
 
 // directRemoteSearcher calls directly into the target node's orchestrator,
 // simulating ForwardSearch/ForwardFollow/ForwardExplain RPCs without gRPC.
+// mnSearchStreamSlots is how many record batches the ForwardSearch stand-in
+// buffers ahead of the coordinator, mirroring the real forwarder. It bounds how
+// far a peer runs ahead before its producer parks, so tests reasoning about a
+// parked producer derive their bounds from this rather than restating it.
+const mnSearchStreamSlots = 16
+
 type directRemoteSearcher struct {
 	nodes map[string]*orchestrator.Orchestrator
 	// streamers tracks the per-vault SearchStream producer goroutines so a
@@ -671,8 +677,9 @@ type directRemoteSearcher struct {
 	// full channel, so a count short of the total says it never had to drain
 	// the whole match set.
 	batchesSent atomic.Int64
-	// histogramAtStreamEnd makes getHistogram wait for the whole stream, the
-	// way the forwarder used to. Only a test reproducing that stall sets it.
+	// histogramAtStreamEnd makes getHistogram wait for the whole record stream
+	// instead of answering from the first message. Only a test asserting that
+	// the coordinator deadlocks against such a peer sets it.
 	histogramAtStreamEnd bool
 }
 
@@ -750,7 +757,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 	func() []byte,
 	func() []*gastrologv1.HistogramBucket,
 ) {
-	recCh := make(chan []*gastrologv1.ExportRecord, 16)
+	recCh := make(chan []*gastrologv1.ExportRecord, mnSearchStreamSlots)
 	errCh := make(chan error, 1)
 	nilToken := func() []byte { return nil }
 	nilHist := func() []*gastrologv1.HistogramBucket { return nil }
@@ -823,10 +830,9 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 	}
 	// Mirrors the forwarder's contract: a remote search's histogram is known
 	// from the stream's first message, so the getter answers without the
-	// caller having read any records. histogramAtStreamEnd reproduces the
-	// older behaviour, where the getter waited for the producer to finish —
-	// which strands a coordinator that asks for the histogram before it starts
-	// draining records.
+	// caller having read any records. Under histogramAtStreamEnd the getter
+	// waits for the producer instead, which strands a coordinator that asks
+	// for the histogram before it starts draining records.
 	histReady := make(chan struct{})
 	getHistogram := func() []*gastrologv1.HistogramBucket {
 		<-histReady
@@ -2155,14 +2161,13 @@ func TestMultiNode_EarlyTerminationReleasesTheFanOut(t *testing.T) {
 	const (
 		remoteRecords = 4000
 		batchSize     = 200
-		channelSlots  = 16 // directRemoteSearcher's recCh capacity
 		totalBatches  = remoteRecords / batchSize
 		// The consumer takes ten records plus the merge's one-record
 		// pull-ahead, all inside the first batch, so exactly one batch ever
 		// leaves the channel. The producer therefore cannot push more than
 		// that one plus a full channel before it parks. This ceiling is
 		// derived from those capacities, not from how the two race.
-		maxPushable = channelSlots + 1
+		maxPushable = mnSearchStreamSlots + 1
 	)
 	addMNRecords(t, h.Node(t, "data-1"), "one", remoteRecords, nil)
 
@@ -2239,7 +2244,8 @@ func searchWithDeadline(t *testing.T, client gastrologv1connect.QueryServiceClie
 // unlimited one does.
 func TestMultiNode_HistogramDoesNotSerializeTheRecordStream(t *testing.T) {
 	t.Parallel()
-	// Well past the stand-in's 16-batch channel (200 records per batch).
+	// Well past the stand-in's channel depth (mnSearchStreamSlots batches of
+	// 200), so the peer's producer must park before its stream ends.
 	const remoteRecords = 4000
 
 	seed := func(h *multiNodeHarness) {

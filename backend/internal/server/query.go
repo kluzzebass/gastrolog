@@ -654,14 +654,11 @@ func mergeIterators(
 	dedup *dedupWindow,
 	limitHit *bool,
 ) error {
-	// Pull synchronously from each iterator using iter.Pull2. This is
-	// critical for resume-token correctness: the previous goroutine-pumped
-	// channel design ran the iterator one record AHEAD of merge consumption
-	// (the buffered channel holding a record that hadn't been emitted yet),
-	// which advanced the local iter's internal lastRefs past records the
-	// merge had not yet displayed. The next page then resumed from the
-	// over-advanced position, silently skipping records. Pull2 ensures
-	// each yield happens only when the merge actually pulls.
+	// Pull2 keeps each source in lockstep with consumption: a yield happens
+	// only when the merge actually pulls. Resume-token correctness depends on
+	// it — the local iter advances its lastRefs as it yields, so any buffering
+	// between iterator and merge would leave the token pointing past records
+	// the client has not been shown, and the next page would skip them.
 	localNext, localStop := iter.Pull2(localIter)
 	defer localStop()
 	remoteNext, remoteStop := iter.Pull2(remoteIter)

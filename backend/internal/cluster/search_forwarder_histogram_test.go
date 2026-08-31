@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,6 +27,9 @@ type scriptedStream struct {
 	holdAt   int
 	release  <-chan struct{}
 	received atomic.Int64
+	// failAfterScript, when set, is returned instead of io.EOF once the
+	// scripted messages run out.
+	failAfterScript error
 }
 
 func (s *scriptedStream) RecvMsg(m any) error {
@@ -37,6 +41,9 @@ func (s *scriptedStream) RecvMsg(m any) error {
 		}
 	}
 	if s.next >= len(s.msgs) {
+		if s.failAfterScript != nil {
+			return s.failAfterScript
+		}
 		return io.EOF
 	}
 	dst, ok := m.(*gastrologv1.ForwardSearchResponse)
@@ -103,7 +110,7 @@ func TestSearchStreamPublishesHistogramFromTheFirstMessage(t *testing.T) {
 
 	sf := &SearchForwarder{}
 	gate := newHistogramGate()
-	recCh := make(chan []*gastrologv1.ExportRecord, 16)
+	recCh := make(chan []*gastrologv1.ExportRecord, searchStreamBatchSlots)
 	eCh := make(chan error, 1)
 	var resumeToken []byte
 	go sf.drainSearchStream(streamCtx, "peer", stream, &noopHandle{}, recCh, eCh, gate, &resumeToken)
@@ -111,7 +118,7 @@ func TestSearchStreamPublishesHistogramFromTheFirstMessage(t *testing.T) {
 	// Nobody is reading recCh, exactly as the coordinator is not until it has
 	// the histogram. The deadline is only the failure detector.
 	got := make(chan []*gastrologv1.HistogramBucket, 1)
-	go func() { got <- gate.get() }()
+	go func() { got <- gate.waitFor(streamCtx) }()
 
 	waitCtx, cancelWait := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelWait()
@@ -160,13 +167,86 @@ func TestSearchStreamOpensHistogramGateOnEarlyFailure(t *testing.T) {
 	stream := &scriptedStream{ctx: ctx} // no messages: RecvMsg returns EOF
 	sf := &SearchForwarder{}
 	gate := newHistogramGate()
-	recCh := make(chan []*gastrologv1.ExportRecord, 16)
+	recCh := make(chan []*gastrologv1.ExportRecord, searchStreamBatchSlots)
 	eCh := make(chan error, 1)
 	var resumeToken []byte
 
 	sf.drainSearchStream(ctx, "peer", stream, &noopHandle{}, recCh, eCh, gate, &resumeToken)
 
-	if got := gate.get(); got != nil {
+	if got := gate.waitFor(ctx); got != nil {
 		t.Errorf("histogram = %v, want nil for a stream that produced nothing", got)
+	}
+}
+
+// A stream that fails mid-flight must open the gate AND report the failure:
+// the coordinator has to stop waiting and has to learn the search is
+// incomplete, or a partial result passes for a whole one.
+func TestSearchStreamDrainFailureOpensGateAndReportsError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	buckets := []*gastrologv1.HistogramBucket{{TimestampMs: 1000, Count: 3}}
+	stream := &scriptedStream{
+		ctx:  ctx,
+		msgs: []*gastrologv1.ForwardSearchResponse{{Histogram: buckets}},
+		// A non-EOF failure once the scripted messages run out.
+		failAfterScript: fmt.Errorf("peer went away"),
+	}
+	handle := &noopHandle{}
+	sf := &SearchForwarder{}
+	gate := newHistogramGate()
+	recCh := make(chan []*gastrologv1.ExportRecord, searchStreamBatchSlots)
+	eCh := make(chan error, 1)
+	var resumeToken []byte
+
+	sf.drainSearchStream(ctx, "peer", stream, handle, recCh, eCh, gate, &resumeToken)
+
+	if got := gate.waitFor(ctx); len(got) != 1 || got[0].Count != 3 {
+		t.Errorf("histogram = %v, want the first message's buckets even though the stream then failed", got)
+	}
+	err, ok := <-eCh
+	if !ok || err == nil {
+		t.Fatal("drain failure did not reach errCh: the coordinator would treat a truncated stream as complete")
+	}
+	if !strings.Contains(err.Error(), "peer went away") {
+		t.Errorf("error %q does not carry the stream failure", err)
+	}
+	if handle.invalidated.Load() != 1 {
+		t.Errorf("connection invalidated %d times, want 1", handle.invalidated.Load())
+	}
+}
+
+// A setup failure never starts the drain goroutine, so nothing downstream can
+// open the gate. SearchStream itself must, or every such failure hangs the
+// coordinator instead of failing it.
+func TestSearchStreamSetupFailureOpensHistogramGate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// A peer that cannot be resolved fails the very first setup step, before
+	// any drain goroutine exists to open the gate.
+	peers := NewPeerConnManager(PeerConnManagerConfig{
+		NodeID:        "self",
+		StaticResolve: func(string) (string, bool) { return "", false },
+	})
+	sf := NewSearchForwarder(peers)
+	recCh, table, eCh, getResumeToken, getHistogram := sf.SearchStream(ctx, "peer", &gastrologv1.ForwardSearchRequest{})
+
+	// Nothing may block: the caller reads the histogram before the records.
+	if got := getHistogram(); got != nil {
+		t.Errorf("histogram = %v, want nil for a stream that never opened", got)
+	}
+	if table != nil {
+		t.Errorf("tableResult = %v, want nil", table)
+	}
+	if got := getResumeToken(); got != nil {
+		t.Errorf("resume token = %v, want nil", got)
+	}
+	if _, ok := <-recCh; ok {
+		t.Error("record channel yielded a batch from a stream that never opened")
+	}
+	err, ok := <-eCh
+	if !ok || err == nil {
+		t.Fatal("setup failure did not reach errCh")
 	}
 }

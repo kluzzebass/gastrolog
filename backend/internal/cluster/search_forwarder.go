@@ -14,6 +14,12 @@ import (
 
 const searchForwarderPurpose = PurposeSearch
 
+// searchStreamBatchSlots is how many record batches a remote search stream
+// buffers ahead of the coordinator. It bounds how far a peer can run ahead
+// before its producer parks, so anything the coordinator must do before it
+// starts draining records has to complete without waiting on the stream.
+const searchStreamBatchSlots = 16
+
 // SearchForwarder sends search requests to remote cluster nodes.
 type SearchForwarder struct {
 	peers *PeerConnManager
@@ -102,10 +108,18 @@ func (g *histogramGate) open(buckets []*gastrologv1.HistogramBucket) {
 	})
 }
 
-// get blocks until the gate opens, then returns the published histogram.
-func (g *histogramGate) get() []*gastrologv1.HistogramBucket {
-	<-g.ready
-	return g.buckets
+// waitFor blocks until the gate opens or ctx ends, then returns the published
+// histogram. Binding the caller's own deadline into the wait means no path
+// through this file can strand a coordinator on a histogram nobody will
+// publish. A ctx that ends first yields no histogram — the request it belonged
+// to is already failing.
+func (g *histogramGate) waitFor(ctx context.Context) []*gastrologv1.HistogramBucket {
+	select {
+	case <-g.ready:
+		return g.buckets
+	case <-ctx.Done():
+		return nil
+	}
 }
 
 // SearchStream opens a server-streaming ForwardSearch RPC and returns the
@@ -122,39 +136,39 @@ func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req 
 	getResumeToken = func() []byte { return resumeToken }
 
 	gate := newHistogramGate()
-	getHistogram = gate.get
+	getHistogram = func() []*gastrologv1.HistogramBucket { return gate.waitFor(ctx) }
 
-	recCh := make(chan []*gastrologv1.ExportRecord, 16)
+	recCh := make(chan []*gastrologv1.ExportRecord, searchStreamBatchSlots)
 	eCh := make(chan error, 1)
+
+	// fail finishes a stream that will never produce anything: it reports err,
+	// closes both channels, and opens the histogram gate. Every return that
+	// does not start the drain goroutine goes through here, so no setup path
+	// can leave the coordinator waiting on a histogram nobody will publish.
+	fail := func(err error) (<-chan []*gastrologv1.ExportRecord, *gastrologv1.TableResult, <-chan error, func() []byte, func() []*gastrologv1.HistogramBucket) {
+		eCh <- err
+		close(recCh)
+		close(eCh)
+		gate.open(nil)
+		return recCh, nil, eCh, getResumeToken, getHistogram
+	}
 
 	h, stream, err := sf.peers.OpenServiceStream(ctx, nodeID, searchForwarderPurpose,
 		&grpc.StreamDesc{StreamName: "ForwardSearch", ServerStreams: true},
 		"/gastrolog.v1.ClusterService/ForwardSearch",
 	)
 	if err != nil {
-		eCh <- fmt.Errorf("open search stream to %s: %w", nodeID, err)
-		close(recCh)
-		close(eCh)
-		gate.open(nil)
-		return recCh, nil, eCh, getResumeToken, getHistogram
+		return fail(fmt.Errorf("open search stream to %s: %w", nodeID, err))
 	}
 
 	if err := stream.SendMsg(req); err != nil {
 		h.Invalidate(err)
 		h.Release()
-		eCh <- fmt.Errorf("send search request to %s: %w", nodeID, err)
-		close(recCh)
-		close(eCh)
-		gate.open(nil)
-		return recCh, nil, eCh, getResumeToken, getHistogram
+		return fail(fmt.Errorf("send search request to %s: %w", nodeID, err))
 	}
 	if err := stream.CloseSend(); err != nil {
 		h.Release()
-		eCh <- fmt.Errorf("close send to %s: %w", nodeID, err)
-		close(recCh)
-		close(eCh)
-		gate.open(nil)
-		return recCh, nil, eCh, getResumeToken, getHistogram
+		return fail(fmt.Errorf("close send to %s: %w", nodeID, err))
 	}
 
 	go sf.drainSearchStream(ctx, nodeID, stream, h, recCh, eCh, gate, &resumeToken)
