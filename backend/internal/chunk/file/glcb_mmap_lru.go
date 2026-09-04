@@ -10,24 +10,20 @@ import (
 // resident at once. Cold chunks are munmapped when over cap and unpinned.
 var glcbMappedCap = 64
 
-func (m *Manager) touchGLCBMapped(id chunk.ChunkID) {
-	m.glcbMapMu.Lock()
-	defer m.glcbMapMu.Unlock()
-
+// touchGLCBMappedLocked moves id to the most-recently-used position. Caller
+// holds glcbMapMu.
+func (m *Manager) touchGLCBMappedLocked(id chunk.ChunkID) {
 	m.glcbMapLRU = slices.DeleteFunc(m.glcbMapLRU, func(c chunk.ChunkID) bool {
 		return c == id
 	})
 	m.glcbMapLRU = append([]chunk.ChunkID{id}, m.glcbMapLRU...)
 }
 
-func (m *Manager) noteGLCBMapped(id chunk.ChunkID) {
-	m.glcbMapMu.Lock()
-	defer m.glcbMapMu.Unlock()
-
-	m.glcbMapLRU = slices.DeleteFunc(m.glcbMapLRU, func(c chunk.ChunkID) bool {
-		return c == id
-	})
-	m.glcbMapLRU = append([]chunk.ChunkID{id}, m.glcbMapLRU...)
+// noteGLCBMappedLocked records a fresh mapping and enforces the cap. The
+// caller has already pinned the new mapping, so enforcement can only close
+// mappings nobody holds. Caller holds glcbMapMu.
+func (m *Manager) noteGLCBMappedLocked(id chunk.ChunkID) {
+	m.touchGLCBMappedLocked(id)
 	m.enforceGLCBMapLRULocked()
 }
 
