@@ -580,23 +580,23 @@ func TestPipelineString(t *testing.T) {
 	}{
 		{
 			"error | stats count",
-			"token(error) | stats count",
+			"error | stats count",
 		},
 		{
 			"error | stats count by status",
-			"token(error) | stats count by status",
+			"error | stats count by status",
 		},
 		{
 			"error | stats count, avg(duration) by bin(5m), status",
-			"token(error) | stats count, avg(duration) by bin(5m), status",
+			"error | stats count, avg(duration) by bin(5m), status",
 		},
 		{
 			"error | stats count as n by status | where n>10",
-			"token(error) | stats count as n by status | where n>10",
+			"error | stats count as n by status | where n>10",
 		},
 		{
 			"error | stats avg(duration / 1000)",
-			"token(error) | stats avg((duration / 1000))",
+			"error | stats avg((duration / 1000))",
 		},
 	}
 
@@ -984,35 +984,35 @@ func TestParsePipelineNewOpsString(t *testing.T) {
 	}{
 		{
 			"error | eval ms = duration / 1000",
-			"token(error) | eval ms = (duration / 1000)",
+			"error | eval ms = (duration / 1000)",
 		},
 		{
 			"error | sort -count, status",
-			"token(error) | sort -count, status",
+			"error | sort -count, status",
 		},
 		{
 			"error | head 10",
-			"token(error) | head 10",
+			"error | head 10",
 		},
 		{
 			"error | rename src as source",
-			"token(error) | rename src as source",
+			"error | rename src as source",
 		},
 		{
 			"error | fields host, level",
-			"token(error) | fields host, level",
+			"error | fields host, level",
 		},
 		{
 			"error | fields - debug",
-			"token(error) | fields - debug",
+			"error | fields - debug",
 		},
 		{
 			"error | tail 5",
-			"token(error) | tail 5",
+			"error | tail 5",
 		},
 		{
 			"error | slice 12 54",
-			"token(error) | slice 12 54",
+			"error | slice 12 54",
 		},
 	}
 
@@ -1139,7 +1139,7 @@ func TestParsePipelineTimechartString(t *testing.T) {
 		t.Fatalf("ParsePipeline error: %v", err)
 	}
 	got := p.String()
-	want := "token(error) | timechart 50"
+	want := "error | timechart 50"
 	if got != want {
 		t.Errorf("String() = %q, want %q", got, want)
 	}
@@ -1166,7 +1166,7 @@ func TestParsePipelineTimechartBy(t *testing.T) {
 		t.Errorf("expected By=status, got %q", tc.By)
 	}
 	got := p.String()
-	want := "token(error) | timechart 50 by status"
+	want := "error | timechart 50 by status"
 	if got != want {
 		t.Errorf("String() = %q, want %q", got, want)
 	}
@@ -1192,8 +1192,8 @@ func TestParsePipelineDedupString(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParsePipeline error: %v", err)
 	}
-	if got := p.String(); got != "dedup" {
-		t.Errorf("String() = %q, want %q", got, "dedup")
+	if got := p.String(); got != "| dedup" {
+		t.Errorf("String() = %q, want %q", got, "| dedup")
 	}
 }
 
@@ -1301,7 +1301,7 @@ func TestParsePipelineLookupString(t *testing.T) {
 		t.Fatalf("ParsePipeline error: %v", err)
 	}
 	got := p.String()
-	want := "token(error) | lookup rdns src_ip"
+	want := "error | lookup rdns src_ip"
 	if got != want {
 		t.Errorf("String() = %q, want %q", got, want)
 	}
@@ -1727,7 +1727,7 @@ func TestParsePipelineBarchartString(t *testing.T) {
 		t.Fatalf("ParsePipeline error: %v", err)
 	}
 	got := p.String()
-	want := "token(error) | stats count by status | barchart"
+	want := "error | stats count by status | barchart"
 	if got != want {
 		t.Errorf("String() = %q, want %q", got, want)
 	}
@@ -1752,7 +1752,7 @@ func TestParsePipelineDonutString(t *testing.T) {
 		t.Fatalf("ParsePipeline error: %v", err)
 	}
 	got := p.String()
-	want := "token(error) | stats count by level | donut"
+	want := "error | stats count by level | donut"
 	if got != want {
 		t.Errorf("String() = %q, want %q", got, want)
 	}
@@ -1784,7 +1784,7 @@ func TestParsePipelineMapChoroplethString(t *testing.T) {
 		t.Fatalf("ParsePipeline error: %v", err)
 	}
 	got := p.String()
-	want := "token(error) | stats count by country | map choropleth country"
+	want := "error | stats count by country | map choropleth country"
 	if got != want {
 		t.Errorf("String() = %q, want %q", got, want)
 	}
@@ -1819,7 +1819,7 @@ func TestParsePipelineMapScatterString(t *testing.T) {
 		t.Fatalf("ParsePipeline error: %v", err)
 	}
 	got := p.String()
-	want := "token(error) | stats count by lat, lon | map scatter lat lon"
+	want := "error | stats count by lat, lon | map scatter lat lon"
 	if got != want {
 		t.Errorf("String() = %q, want %q", got, want)
 	}

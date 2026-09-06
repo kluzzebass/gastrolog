@@ -289,6 +289,14 @@ flowchart TD
     MergeAll --> Client
 ```
 
+The query travels to a peer as text: the coordinator prints the parsed filter
+and pipeline back into query syntax and the peer parses it again. That printer
+(`Expr.String()`, `Pipeline.String()`) is therefore a wire format, not a
+diagnostic: every predicate kind prints as syntax the parser reads back as the
+same predicate, values are quoted whenever the lexer could not take them as a
+bareword (the empty string included), and a pipeline without a filter prints
+with its leading `|`. A round-trip test and a fuzzer pin this.
+
 The coordinator determines which vaults live on peer nodes via
 `remoteVaultsByNode()`. For each remote vault, a streaming `ForwardSearch` RPC
 is opened. Results flow back without buffering — `kWayMerge()` performs
