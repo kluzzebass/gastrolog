@@ -41,7 +41,7 @@ flowchart LR
 |-----------|--------|
 | `last=<dur>` | Sets `Start = now-dur`, `End = now` |
 | `start=<t>` / `end=<t>` | Explicit IngestTS bounds (RFC3339 or relative) |
-| `source_start=` / `source_end=` | SourceTS bounds (runtime filter) |
+| `source_start=` / `source_end=` | SourceTS bounds: the seek key under `order=source_ts`, a runtime filter otherwise. `start=`/`end=` stay ingest bounds under every ordering |
 | `limit=<n>` | Max records to return |
 | `reverse=true` | Newest-first ordering |
 | `order=source_ts` | Switch ordering from default IngestTS |

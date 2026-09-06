@@ -21,9 +21,11 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
+	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/convert"
+	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
@@ -109,6 +111,10 @@ type mnOption func(*mnConfig)
 type mnConfig struct {
 	// noVault is a set of node IDs that should have no vault.
 	noVault map[string]bool
+	// fileVault is a set of node IDs whose vault is file-backed: the on-disk
+	// chunk manager that serves sealed GLCBs, so tests can drive the same
+	// read path a production data node uses.
+	fileVault map[string]bool
 	// environmentLabel / environmentColor are set on the coordinator's
 	// server.Config to exercise the env-banner field propagation through
 	// GetSystem.
@@ -150,6 +156,16 @@ func WithoutVault(nodeIDs ...string) mnOption {
 	return func(c *mnConfig) {
 		for _, id := range nodeIDs {
 			c.noVault[id] = true
+		}
+	}
+}
+
+// WithFileVault gives the named nodes a file-backed vault instead of the
+// default memory vault.
+func WithFileVault(nodeIDs ...string) mnOption {
+	return func(c *mnConfig) {
+		for _, id := range nodeIDs {
+			c.fileVault[id] = true
 		}
 	}
 }
@@ -233,7 +249,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		t.Fatal("setupMultiNode requires at least 2 node IDs")
 	}
 
-	cfg := &mnConfig{noVault: make(map[string]bool), diskGuardNodes: make(map[string]bool)}
+	cfg := &mnConfig{noVault: make(map[string]bool), fileVault: make(map[string]bool), diskGuardNodes: make(map[string]bool)}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -267,7 +283,14 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		if cfg.noVault[id] {
 			nodes[id] = setupMNNodeNoVault(t, id, cfgStore, alertsByNode[id], cfg.diskGuardNodes[id])
 		} else {
-			node := setupMNNode(t, id, cfgStore, alertsByNode[id], cfg.diskGuardNodes[id])
+			var node multinodeTestNode
+			vaultType := system.VaultTypeMemory
+			if cfg.fileVault[id] {
+				node = setupMNNodeFileVault(t, id, cfgStore, alertsByNode[id], cfg.diskGuardNodes[id])
+				vaultType = system.VaultTypeFile
+			} else {
+				node = setupMNNode(t, id, cfgStore, alertsByNode[id], cfg.diskGuardNodes[id])
+			}
 			// Write VaultConfig directly with all storage fields, plus a
 			// synthetic placement for this node.
 			placements := []system.VaultPlacement{
@@ -276,7 +299,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 			_ = cfgStore.PutVault(ctx, system.VaultConfig{
 				ID:   node.vaultID,
 				Name: "vault-" + id,
-				Type: system.VaultTypeMemory,
+				Type: vaultType,
 			})
 			_ = cfgStore.SetVaultPlacements(ctx, node.vaultID, placements)
 			nodes[id] = node
@@ -427,6 +450,36 @@ func setupMNNode(t *testing.T, nodeID string, loader system.Store, alerts *alert
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, v.CM, v.IM, v.QE))
 
 	return multinodeTestNode{nodeID: nodeID, orch: orch, vaultID: vaultID, vault: v}
+}
+
+// setupMNNodeFileVault builds a node whose vault is the on-disk chunk
+// manager, index manager and query engine — the components a production
+// data node serves sealed GLCB chunks through.
+func setupMNNodeFileVault(t *testing.T, nodeID string, loader system.Store, alerts *alert.Collector, diskGuard bool) multinodeTestNode {
+	t.Helper()
+
+	orch, err := orchestrator.New(mnOrchConfig(nodeID, loader, t.TempDir(), alerts, diskGuard))
+	if err != nil {
+		t.Fatalf("orchestrator.New: %v", err)
+	}
+
+	dir := t.TempDir()
+	cm, err := chunkfile.NewManager(chunkfile.Config{
+		Dir:            dir,
+		Now:            time.Now,
+		RotationPolicy: chunk.NewRecordCountPolicy(10000),
+	})
+	if err != nil {
+		t.Fatalf("file chunk manager: %v", err)
+	}
+	t.Cleanup(func() { _ = cm.Close() })
+	im := indexfile.NewManager(dir, nil, nil, cm)
+	qe := query.New(cm, im, nil)
+
+	vaultID := glid.New()
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, cm, im, qe))
+
+	return multinodeTestNode{nodeID: nodeID, orch: orch, vaultID: vaultID, vault: memtest.Vault{CM: cm, IM: im, QE: qe}}
 }
 
 func setupMNNodeNoVault(t *testing.T, nodeID string, loader system.Store, alerts *alert.Collector, diskGuard bool) multinodeTestNode {

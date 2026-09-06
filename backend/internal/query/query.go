@@ -249,6 +249,16 @@ func (q Query) Normalize() Query {
 	return result
 }
 
+// OrderBounds returns the lower and upper bounds on the query's ordering
+// axis: the source window under OrderBySourceTS, the ingest window otherwise.
+// These are the bounds a scan of the ordering index may seek by.
+func (q Query) OrderBounds() (lower, upper time.Time) {
+	if q.OrderBy == OrderBySourceTS {
+		return q.SourceStart, q.SourceEnd
+	}
+	return q.TimeBounds()
+}
+
 // TimeBounds returns the effective lower and upper IngestTS bounds, accounting for reverse order.
 // Always returns lower <= upper regardless of query direction.
 func (q Query) TimeBounds() (lower, upper time.Time) {
