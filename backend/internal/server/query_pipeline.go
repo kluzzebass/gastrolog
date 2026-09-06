@@ -31,31 +31,53 @@ func (s *QueryServer) searchPipeline(
 	if s.maxResultCount > 0 && (q.Limit == 0 || int64(q.Limit) > s.maxResultCount) {
 		q.Limit = int(s.maxResultCount)
 	}
+
+	dist, err := query.PlanDistributedTable(pipeline)
+	if err != nil {
+		return s.searchPipelineLocal(ctx, eng, q, pipeline, stream)
+	}
+
+	result, err := eng.RunPipeline(ctx, q, dist.PerNode)
+	if err != nil {
+		return errQueryExecution(err)
+	}
+	// A remote failure fails the whole pipeline query — a partial aggregate
+	// is silently wrong.
+	remoteResults, err := s.collectRemotePipeline(ctx, q, dist.PerNode)
+	if err != nil {
+		return err
+	}
+	table := dist.Merge(append([]*query.TableResult{result.Table}, remoteResults...))
+	table, err = eng.ApplyTableOps(ctx, table, dist.PostOps)
+	if err != nil {
+		return errQueryExecution(err)
+	}
+	return stream.Send(&apiv1.SearchResponse{
+		TableResult: tableResultToProto(table, pipeline),
+		Histogram:   HistogramToProto(eng.ComputeHistogram(ctx, q, 50)),
+	})
+}
+
+// searchPipelineLocal runs a materializing pipeline that produces no
+// aggregate table over this node's records and streams what it returns.
+func (s *QueryServer) searchPipelineLocal(
+	ctx context.Context,
+	eng *query.Engine,
+	q query.Query,
+	pipeline *querylang.Pipeline,
+	stream *connect.ServerStream[apiv1.SearchResponse],
+) error {
 	result, err := eng.RunPipeline(ctx, q, pipeline)
 	if err != nil {
 		return errQueryExecution(err)
 	}
-	// Compute local histogram to include alongside pipeline results.
 	histogram := HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
-
 	if result.Table != nil {
-		// Fan out to remote nodes and merge table results. A remote failure
-		// fails the whole pipeline query — a partial aggregate is silently
-		// wrong.
-		remoteResults, err := s.collectRemotePipeline(ctx, q, pipeline)
-		if err != nil {
-			return err
-		}
-		if len(remoteResults) > 0 {
-			result.Table = mergeTableResults(result.Table, remoteResults)
-		}
 		return stream.Send(&apiv1.SearchResponse{
 			TableResult: tableResultToProto(result.Table, pipeline),
 			Histogram:   histogram,
 		})
 	}
-	// Non-aggregating but needs full materialization (sort/tail/slice):
-	// stream all records.
 	batch := make([]*apiv1.Record, 0, 100)
 	for _, rec := range result.Records {
 		batch = append(batch, recordToProto(rec))
@@ -131,14 +153,25 @@ func (s *QueryServer) searchPipelineGlobal(
 // with execution metadata and human-readable notes.
 func buildPipelineStages(pipeline *querylang.Pipeline) []*apiv1.QueryPipelineStage {
 	stages := make([]*apiv1.QueryPipelineStage, 0, len(pipeline.Pipes))
+	aggregated := false
 	for _, op := range pipeline.Pipes {
+		execution := pipeOpExecution(op)
+		if aggregated && execution != "render-hint" {
+			// Operators after stats or timechart run once, on the
+			// coordinator, over the merged table.
+			execution = "coordinator-only"
+		}
 		stages = append(stages, &apiv1.QueryPipelineStage{
 			Operator:      pipeOpName(op),
 			Description:   op.String(),
 			Materializing: isMaterializing(op),
 			Note:          pipeOpNote(op),
-			Execution:     pipeOpExecution(op),
+			Execution:     execution,
 		})
+		switch op.(type) {
+		case *querylang.StatsOp, *querylang.TimechartOp:
+			aggregated = true
+		}
 	}
 	return stages
 }
