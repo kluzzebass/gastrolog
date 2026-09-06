@@ -270,6 +270,11 @@ func (o *Orchestrator) onPipelineChunkBuilt(vaultID glid.GLID, fsm *vaultctlfsm.
 		o.noteRegisterSkip(vaultID, id, "vault instance or reconciler not ready")
 		return
 	}
+	// The blob this node just built is final whether or not the seal has
+	// committed, so its secondary indexes are built now. Nothing else builds
+	// them for a pipeline-sealed chunk: the legacy post-seal path is not used
+	// and the missing-index sweep runs only at startup.
+	o.scheduleIndexRebuildIfNeeded(context.Background(), vaultID, ti, manifestEntryToChunkMeta(*e, true))
 	ti.Reconciler.ackOwnHolderReceipt(*e)
 	if e.State == chunk.ChunkStateSealed {
 		o.schedulePipelineCloudUpload(vaultID, id)
