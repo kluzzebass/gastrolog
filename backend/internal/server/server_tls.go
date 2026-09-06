@@ -134,14 +134,14 @@ func (s *Server) ListenUnix(path string) error {
 		return fmt.Errorf("chmod unix socket: %w", err)
 	}
 
-	// Build a separate mux with NoAuthInterceptor so the Connect layer
-	// skips JWT validation entirely. The OS file permissions on the socket
-	// provide the access control.
-	noAuthOpt := connect.WithInterceptors(
-		newRPCErrorLogInterceptor(s.logger),
-		&auth.NoAuthInterceptor{},
-	)
-	mux := s.buildMux(noAuthOpt)
+	// The socket skips JWT validation — the OS file permissions on the
+	// socket are the access control — but it is a first-hop client channel
+	// like TCP, so it routes owner-scoped requests to the node holding the
+	// resource exactly as TCP does. Only the internal handler, which serves
+	// requests that were already forwarded, stays unrouted.
+	interceptors := []connect.Interceptor{newRPCErrorLogInterceptor(s.logger), &auth.NoAuthInterceptor{}}
+	interceptors = append(interceptors, s.routingInterceptor()...)
+	mux := s.buildMux(connect.WithInterceptors(interceptors...))
 	handler := s.trackingMiddleware(s.corsMiddleware(securityHeadersMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(s.logger, mux)))))
 
 	s.mu.Lock()
