@@ -73,6 +73,7 @@ Filter by key=value in record attributes or message body. Both sources are check
 - `level=error` — exact key=value match
 - `key="value with spaces"` — quoted values for special characters
 - `host=*` — key exists with any value
+- `host=""` — key holds the empty string (an empty value is a value, not a presence check)
 - `*=error` — value exists under any key
 
 Key-value matching is case-insensitive.

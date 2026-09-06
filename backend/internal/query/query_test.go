@@ -2395,7 +2395,7 @@ func TestSearchKeyValueFilterKeyWildcard(t *testing.T) {
 
 	// Filter by env=* (key exists with any value)
 	results, err := collect(search(eng, context.Background(), query.Query{
-		KV: []query.KeyValueFilter{{Key: "env", Value: ""}}, // empty Value = any value
+		KV: []query.KeyValueFilter{{Key: "env", AnyValue: true}},
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2447,7 +2447,7 @@ func TestSearchKeyValueFilterKeyWildcardActiveChunk(t *testing.T) {
 	eng := setupWithActive(t, nil, active)
 
 	results, err := collect(search(eng, context.Background(), query.Query{
-		KV: []query.KeyValueFilter{{Key: "host", Value: ""}},
+		KV: []query.KeyValueFilter{{Key: "host", AnyValue: true}},
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2471,7 +2471,7 @@ func TestSearchKeyValueFilterCombinedWildcards(t *testing.T) {
 	// Filter by env=* AND level=error
 	results, err := collect(search(eng, context.Background(), query.Query{
 		KV: []query.KeyValueFilter{
-			{Key: "env", Value: ""},        // env exists
+			{Key: "env", AnyValue: true},   // env exists
 			{Key: "level", Value: "error"}, // level=error
 		},
 	}))
@@ -2494,7 +2494,7 @@ func TestSearchKeyValueFilterKeyWildcardNoMatch(t *testing.T) {
 
 	// Filter by env=* (key exists) - no matches
 	results, err := collect(search(eng, context.Background(), query.Query{
-		KV: []query.KeyValueFilter{{Key: "env", Value: ""}},
+		KV: []query.KeyValueFilter{{Key: "env", AnyValue: true}},
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

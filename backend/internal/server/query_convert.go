@@ -66,7 +66,9 @@ func protoToQuery(pq *apiv1.Query) (query.Query, *querylang.Pipeline, error) {
 	if len(pq.KvPredicates) > 0 {
 		q.KV = make([]query.KeyValueFilter, len(pq.KvPredicates))
 		for i, kv := range pq.KvPredicates {
-			q.KV[i] = query.KeyValueFilter{Key: kv.Key, Value: kv.Value}
+			// The proto predicate has no presence flag; an empty value is its
+			// way of asking for the key alone.
+			q.KV[i] = query.KeyValueFilter{Key: kv.Key, Value: kv.Value, AnyValue: kv.Value == ""}
 		}
 	}
 

@@ -90,7 +90,12 @@ func (o OrderBy) CompareRecords(a, b chunk.Record, reverse bool) int {
 //   - Key="", Value="bar"    - match any record with value "bar" (any key)
 type KeyValueFilter struct {
 	Key   string // empty string means "any key"
-	Value string // empty string means "any value"
+	Value string // exact value to compare against; not consulted when AnyValue is set
+
+	// AnyValue asks only that the key be present (key=*). An empty Value is a
+	// real value — key="" — and matches records whose key holds the empty
+	// string.
+	AnyValue bool
 
 	// Glob patterns for key/value positions. When non-nil, matching uses regex
 	// instead of exact string comparison.
@@ -210,11 +215,11 @@ func (q Query) Normalize() Query {
 	for _, f := range q.KV {
 		var pred *querylang.PredicateExpr
 		switch {
-		case f.Key == "" && f.Value != "":
+		case f.Key == "" && !f.AnyValue:
 			pred = &querylang.PredicateExpr{Kind: querylang.PredValueExists, Value: f.Value}
-		case f.Key != "" && f.Value == "":
+		case f.Key != "" && f.AnyValue:
 			pred = &querylang.PredicateExpr{Kind: querylang.PredKeyExists, Key: f.Key}
-		case f.Key != "" && f.Value != "":
+		case f.Key != "":
 			pred = &querylang.PredicateExpr{Kind: querylang.PredKV, Key: f.Key, Value: f.Value}
 		}
 		if pred != nil {
