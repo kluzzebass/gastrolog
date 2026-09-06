@@ -368,7 +368,10 @@ runs once on the coordinator over every node's records. Those records are
 first: the coordinator retains only what the pipeline's own operators hold, so
 memory tracks the answer rather than the match set. An uncapped `sort` is the
 one shape that genuinely has to hold every record, and the budget is what
-bounds it.
+bounds it. A `timechart` behind such an operator bins from that merged stream
+rather than from the coordinator's chunk metadata, so its buckets hold the
+survivors of the cap applied cluster-wide; without an explicit time range they
+span those survivors, whichever node coordinates.
 
 The ceiling is a fixed constant rather than a setting. A node runs queries for
 every vault it leads, so raising it to make one query fit would re-arm the same

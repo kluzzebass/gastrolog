@@ -80,9 +80,18 @@ func classifyPipes(pipeline *querylang.Pipeline) (*pipelinePhases, error) {
 	return p, nil
 }
 
-// runTimechartPipeline handles the timechart fast path.
-func (e *Engine) runTimechartPipeline(ctx context.Context, q Query, ph *pipelinePhases, budget *Budget) (*PipelineResult, error) {
-	table, err := e.runTimechart(ctx, q, ph.timechartOp, ph.preOps, budget)
+// runTimechartPipeline runs a timechart and its post-ops. Local-only queries
+// bin from chunk metadata and indexes where the shape allows; a query that
+// carries a remote stream bins from the merged records, since the pre-ops
+// ahead of the timechart must see the whole cluster.
+func (e *Engine) runTimechartPipeline(ctx context.Context, q Query, ph *pipelinePhases, remote iter.Seq2[chunk.Record, error], budget *Budget) (*PipelineResult, error) {
+	var table *TableResult
+	var err error
+	if remote != nil {
+		table, err = e.runTimechartOverStream(ctx, q, ph.timechartOp, ph.preOps, remote, budget)
+	} else {
+		table, err = e.runTimechart(ctx, q, ph.timechartOp, ph.preOps, budget)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -184,13 +193,7 @@ func (e *Engine) runPipeline(ctx context.Context, q Query, pipeline *querylang.P
 	}
 
 	if ph.timechartOp != nil {
-		// KNOWN GAP: a timechart bins from this node's chunk metadata and
-		// index positions, not from a record stream, so remote is dropped
-		// here. A capped timechart ("| head 6 | timechart 3") routes to this
-		// line on a coordinator and answers from local data alone, with no
-		// Truncated flag to say so. Merging remote buckets needs a bucket
-		// path that a record stream can feed.
-		return e.runTimechartPipeline(ctx, q, ph, budget)
+		return e.runTimechartPipeline(ctx, q, ph, remote, budget)
 	}
 
 	// Pipeline operators control their own result limits (head, tail, slice).
