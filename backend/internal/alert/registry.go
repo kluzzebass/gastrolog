@@ -238,6 +238,13 @@ var catalog = []AlarmType{
 		Response: "Read the alarm detail for which policies resolved with no trigger. Add a maxAge, maxSize, or maxChunks to at least one referenced policy -- maxSize alone is enough to both bound the vault and enable draining (it drains oldest chunks past the bound regardless of the refuse flag); add refuse=true to also refuse admission while over it, since refuse defaults off. Do NOT remove the vault's retention_rules to silence this -- detaching every policy leaves the vault with no drain at all, growing until the volume's free-space thresholds engage.",
 	},
 	{
+		IDPrefix: "vault-search-failing",
+		Priority: High,
+		Source:   "query",
+		Cause:    "Searches over this vault fail on this node because a chunk's bytes cannot be opened or read; every query that touches the vault fails with it.",
+		Response: "Run validate on the vault to name the chunk. If its data.glcb is present, the read path is at fault and the alarm detail names the error; if the file is missing or damaged, restore the chunk from another holder. The alarm clears on the next search that reads the vault successfully.",
+	},
+	{
 		IDPrefix: "chunk-suspect",
 		Priority: High,
 		Source:   "cloud-reconcile",

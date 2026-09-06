@@ -633,6 +633,7 @@ func (s *Server) forwardValidateVault(ctx context.Context, req *gastrologv1.Forw
 		Valid:           resp.GetValid(),
 		Chunks:          resp.GetChunks(),
 		CloudIndexAudit: audit,
+		Issues:          resp.GetIssues(),
 	}, nil
 }
 

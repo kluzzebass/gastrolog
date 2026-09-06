@@ -628,13 +628,13 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID glid.G
 			if errors.Is(err, errSkipMissingLocalChunk) {
 				return
 			}
-			yield(recordWithRef{}, err)
+			yield(recordWithRef{}, asReadError(vaultID, meta.ID, err))
 			return
 		}
 		defer func() { _ = cursor.Close() }()
 
 		if err := positionCursor(cursor, q, meta, startPos); err != nil {
-			yield(recordWithRef{}, err)
+			yield(recordWithRef{}, asReadError(vaultID, meta.ID, err))
 			return
 		}
 
@@ -647,7 +647,7 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID glid.G
 
 		for rr, err := range scanner {
 			if err != nil {
-				yield(rr, err)
+				yield(rr, asReadError(vaultID, meta.ID, err))
 				return
 			}
 			rr.Record.Ref = rr.Ref

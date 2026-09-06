@@ -303,7 +303,8 @@ func forwardSearchAfterParse(
 // the iterator directly — the streaming handler sends records as it iterates.
 func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 	return func(ctx context.Context, req *gastrologv1.ForwardSearchRequest) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
-		if glid.FromBytes(req.GetVaultId()).IsZero() {
+		vaultID := glid.FromBytes(req.GetVaultId())
+		if vaultID.IsZero() {
 			return nil, nil, nil, nil, errors.New("invalid vault_id")
 		}
 		q, pipeline, err := server.ParseExpression(req.GetQuery())
@@ -320,7 +321,14 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 		}
 
 		includeHist := server.ForwardSearchIncludesHistogram(req, q)
-		return forwardSearchAfterParse(ctx, eng, q, pipeline, req.GetResumeToken(), includeHist)
+		it, getToken, table, hist, err := forwardSearchAfterParse(ctx, eng, q, pipeline, req.GetResumeToken(), includeHist)
+		if err != nil {
+			server.NoteSearchOutcome(o.Alerts(), err, nil)
+			return nil, nil, nil, nil, err
+		}
+		// This node's copy of the vault is the one being read, so its alarm
+		// is raised or cleared here, where the read outcome is known.
+		return server.ObserveSearchIterator(o.Alerts(), vaultID, it), getToken, table, hist, nil
 	}
 }
 

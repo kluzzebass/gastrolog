@@ -2534,6 +2534,13 @@ export class ForwardValidateVaultResponse extends Message<ForwardValidateVaultRe
    */
   cloudIndexAudit?: CloudIndexAudit;
 
+  /**
+   * Vault-level findings from that node that no single chunk can be blamed for.
+   *
+   * @generated from field: repeated string issues = 4;
+   */
+  issues: string[] = [];
+
   constructor(data?: PartialMessage<ForwardValidateVaultResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2545,6 +2552,7 @@ export class ForwardValidateVaultResponse extends Message<ForwardValidateVaultRe
     { no: 1, name: "valid", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 2, name: "chunks", kind: "message", T: ChunkValidation, repeated: true },
     { no: 3, name: "cloud_index_audit", kind: "message", T: CloudIndexAudit },
+    { no: 4, name: "issues", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardValidateVaultResponse {

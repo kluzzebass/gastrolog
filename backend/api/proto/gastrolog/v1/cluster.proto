@@ -516,6 +516,9 @@ message ForwardValidateVaultResponse {
   // The responding node's own cloud-index audit. Absent when the vault has no
   // cloud store on that node.
   CloudIndexAudit cloud_index_audit = 3;
+
+  // Vault-level findings from that node that no single chunk can be blamed for.
+  repeated string issues = 4;
 }
 
 // ForwardReconcileCloudIndexRequest asks a remote node to rebuild its own

@@ -3027,8 +3027,10 @@ type ForwardValidateVaultResponse struct {
 	// The responding node's own cloud-index audit. Absent when the vault has no
 	// cloud store on that node.
 	CloudIndexAudit *CloudIndexAudit `protobuf:"bytes,3,opt,name=cloud_index_audit,json=cloudIndexAudit,proto3" json:"cloud_index_audit,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Vault-level findings from that node that no single chunk can be blamed for.
+	Issues        []string `protobuf:"bytes,4,rep,name=issues,proto3" json:"issues,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ForwardValidateVaultResponse) Reset() {
@@ -3078,6 +3080,13 @@ func (x *ForwardValidateVaultResponse) GetChunks() []*ChunkValidation {
 func (x *ForwardValidateVaultResponse) GetCloudIndexAudit() *CloudIndexAudit {
 	if x != nil {
 		return x.CloudIndexAudit
+	}
+	return nil
+}
+
+func (x *ForwardValidateVaultResponse) GetIssues() []string {
+	if x != nil {
+		return x.Issues
 	}
 	return nil
 }
@@ -5048,11 +5057,12 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x06sealed\x18\x01 \x01(\bR\x06sealed\x121\n" +
 	"\aindexes\x18\x02 \x03(\v2\x17.gastrolog.v1.IndexInfoR\aindexes\"8\n" +
 	"\x1bForwardValidateVaultRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\xb6\x01\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\xce\x01\n" +
 	"\x1cForwardValidateVaultResponse\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x125\n" +
 	"\x06chunks\x18\x02 \x03(\v2\x1d.gastrolog.v1.ChunkValidationR\x06chunks\x12I\n" +
-	"\x11cloud_index_audit\x18\x03 \x01(\v2\x1d.gastrolog.v1.CloudIndexAuditR\x0fcloudIndexAudit\">\n" +
+	"\x11cloud_index_audit\x18\x03 \x01(\v2\x1d.gastrolog.v1.CloudIndexAuditR\x0fcloudIndexAudit\x12\x16\n" +
+	"\x06issues\x18\x04 \x03(\tR\x06issues\">\n" +
 	"!ForwardReconcileCloudIndexRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\\\n" +
 	"\"ForwardReconcileCloudIndexResponse\x126\n" +

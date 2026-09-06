@@ -473,6 +473,10 @@ message ValidateVaultResponse {
   // hosts this vault, so `valid` describes a partial view. Absent on the
   // happy path.
   ContributionReport contribution_report = 4;
+
+  // Findings about the vault as a whole that no single chunk can be blamed
+  // for, such as a search across it failing.
+  repeated string issues = 5;
 }
 
 message ChunkValidation {

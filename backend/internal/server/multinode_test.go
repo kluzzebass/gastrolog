@@ -317,17 +317,18 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 
 	coordNode := nodes[coordinatorID]
 	srvCfg := server.Config{
-		NodeID:            coordinatorID,
-		RemoteSearcher:    remoteSearcher,
-		RemoteIndexer:     remoteIndexer,
-		RoutingForwarder:  routingFwd,
-		PeerJobs:          peerJobs,
-		PeerRouteStats:    peerRouteStats,
-		PeerIngesterStats: peerIngesterStats,
-		PeerVaultStats:    peerVaultStats,
-		PeerStorageStats:  peerStorageStats,
-		EnvironmentLabel:  cfg.environmentLabel,
-		EnvironmentColor:  cfg.environmentColor,
+		NodeID:               coordinatorID,
+		RemoteSearcher:       remoteSearcher,
+		RemoteIndexer:        remoteIndexer,
+		RemoteVaultValidator: &directRemoteVaultValidator{nodes: remoteOrchestrators},
+		RoutingForwarder:     routingFwd,
+		PeerJobs:             peerJobs,
+		PeerRouteStats:       peerRouteStats,
+		PeerIngesterStats:    peerIngesterStats,
+		PeerVaultStats:       peerVaultStats,
+		PeerStorageStats:     peerStorageStats,
+		EnvironmentLabel:     cfg.environmentLabel,
+		EnvironmentColor:     cfg.environmentColor,
 	}
 
 	if cfg.clusterStats {
@@ -1087,6 +1088,30 @@ func (d *directRemoteSearcher) ExportToVault(_ context.Context, _ string, _ *gas
 // directRemoteIndexer dispatches GetIndexes to a peer's orchestrator
 // in-process. Used by the multi-node harness to exercise the GetIndexes
 // fan-out path without a real cluster RPC stack.
+// directRemoteVaultValidator answers ForwardValidateVault in-process the way
+// newValidateVaultExecutor and forwardValidateVault do on a real peer.
+type directRemoteVaultValidator struct {
+	nodes map[string]*orchestrator.Orchestrator
+}
+
+func (d *directRemoteVaultValidator) ValidateVault(ctx context.Context, nodeID string, req *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error) {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return nil, fmt.Errorf("unknown node: %s", nodeID)
+	}
+	vaultID := glid.FromBytes(req.GetVaultId())
+	metas, err := orch.ListLocalChunkMetas(vaultID)
+	if err != nil {
+		return nil, err
+	}
+	resp := server.ValidateVaultLocal(ctx, orch, vaultID, metas, "")
+	var audit *gastrologv1.CloudIndexAudit
+	if audits := resp.GetCloudIndexAudits(); len(audits) > 0 {
+		audit = audits[0]
+	}
+	return &gastrologv1.ForwardValidateVaultResponse{Valid: resp.GetValid(), Chunks: resp.GetChunks(), CloudIndexAudit: audit, Issues: resp.GetIssues()}, nil
+}
+
 type directRemoteIndexer struct {
 	nodes map[string]*orchestrator.Orchestrator
 }

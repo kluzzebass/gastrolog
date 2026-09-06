@@ -1274,3 +1274,6 @@ func (o *Orchestrator) vaultCtlAppliedIndex(vaultID glid.GLID) uint64 {
 	}
 	return g.Raft.AppliedIndex()
 }
+
+// Alerts is the node's standing-alarm sink, nil when none is configured.
+func (o *Orchestrator) Alerts() alert.Sink { return o.alerts }

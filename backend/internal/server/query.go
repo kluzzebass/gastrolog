@@ -100,6 +100,20 @@ func (s *QueryServer) Search(
 	// this closes the gap for the unbounded case.
 	q = s.resolveUnboundedQuery(ctx, q)
 
+	err = s.dispatchSearch(ctx, eng, q, pipeline, req.Msg.ResumeToken, serverStart, stream)
+	NoteSearchOutcome(s.orch.Alerts(), err, func() []glid.GLID { return s.selectedOrAllVaults(ctx, q) })
+	return err
+}
+
+func (s *QueryServer) dispatchSearch(
+	ctx context.Context,
+	eng *query.Engine,
+	q query.Query,
+	pipeline *querylang.Pipeline,
+	resumeToken []byte,
+	serverStart time.Time,
+	stream *connect.ServerStream[apiv1.SearchResponse],
+) error {
 	if pipeline != nil && len(pipeline.Pipes) > 0 {
 		// Reject queries with export operator — must route through ExportToVault RPC.
 		if _, hasExport := querylang.HasExportOp(pipeline); hasExport {
@@ -111,14 +125,14 @@ func (s *QueryServer) Search(
 			// Streamable pipeline: apply ops per-record on top of the
 			// normal search iterator with full resume-token support.
 			transform := query.NewRecordTransform(pipeline.Pipes, s.lookupResolver)
-			return s.searchDirect(ctx, eng, q, req.Msg.ResumeToken, transform, serverStart, stream)
+			return s.searchDirect(ctx, eng, q, resumeToken, transform, serverStart, stream)
 		}
 		// Aggregating / full-materialization pipeline (stats, timechart,
 		// sort, tail, slice, raw).
 		return s.searchPipeline(ctx, eng, q, pipeline, stream)
 	}
 
-	return s.searchDirect(ctx, eng, q, req.Msg.ResumeToken, nil, serverStart, stream)
+	return s.searchDirect(ctx, eng, q, resumeToken, nil, serverStart, stream)
 }
 
 // searchDirect streams search results, merging local and remote vault results
