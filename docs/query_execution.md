@@ -369,7 +369,7 @@ per-node resource, and a shared counter would need a cluster round trip on the
 per-record path.
 
 A pipeline that ends in `stats` or `timechart` with combinable aggregates
-(`count`, `sum`, `min`, `max`) is split at the aggregating operator. Every node
+(`count`, `sum`, `min`, `max`, `avg`) is split at the aggregating operator. Every node
 runs the filter, the operators ahead of the aggregate, and the aggregate
 itself; the coordinator merges the per-node tables by the operator's structure
 — the leading columns are the group keys, the rest are the aggregates in
@@ -377,11 +377,13 @@ declaration order, each combined by its own rule — and then runs the operators
 after the aggregate (`where`, `eval`, `sort`, `head`, …) once over the merged
 table. Column names play no part in the merge, so an alias cannot hide an
 aggregate, and a filter after `stats` sees the cluster's count rather than each
-node's share of it.
+node's share of it. Every node is asked for *partial* aggregates: an `avg`
+arrives as its sum and its count, and the coordinator divides once, so the
+cluster average never needs the records.
 
 A pipeline the cluster cannot answer by merging per-node results — a `head`,
 `tail`, or `slice` that would otherwise apply once per node, a `dedup` whose
-window spans nodes, or an aggregate like `avg`/`dcount`/`median`/`values` that
+window spans nodes, or an aggregate like `dcount`/`median`/`values` that
 cannot be recombined from partials — runs once on the coordinator over every
 node's records. Those records are
 *streamed* through it, merged with the local scan in query order, not collected

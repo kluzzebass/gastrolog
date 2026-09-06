@@ -108,6 +108,10 @@ type Aggregator struct {
 	keyOrder  []string // insertion order for deterministic output
 	truncated bool
 
+	// partials emits each aggregate in the form another node's result can be
+	// combined with: an avg becomes two cells, its sum and its count.
+	partials bool
+
 	budget *Budget
 }
 
@@ -268,6 +272,9 @@ func (a *Aggregator) Result(start, end time.Time) *TableResult {
 	}
 	for _, agg := range a.aggs {
 		columns = append(columns, agg.DefaultAlias())
+		if a.partials && strings.EqualFold(agg.Func, "avg") {
+			columns = append(columns, agg.DefaultAlias()+" count")
+		}
 	}
 
 	// Build rows.
@@ -343,16 +350,28 @@ func (a *Aggregator) buildRows(columns []string) [][]string {
 // buildDefaultRow returns a single row with default accumulator values (no group-by, no records).
 func (a *Aggregator) buildDefaultRow() [][]string {
 	accs, _ := a.makeAccumulators()
-	row := make([]string, len(a.aggs))
-	for i, acc := range accs {
-		v := acc.Result()
-		if v.Missing {
-			row[i] = ""
-		} else {
-			row[i] = v.Str
-		}
+	row := make([]string, 0, len(a.aggs))
+	for _, acc := range accs {
+		row = a.appendResult(row, acc)
 	}
 	return [][]string{row}
+}
+
+// appendResult appends an accumulator's result cells to row: one cell, or the
+// sum and count of an avg when emitting partials.
+func (a *Aggregator) appendResult(row []string, acc accumulator) []string {
+	if av, ok := acc.(*avgAcc); ok && a.partials {
+		sum := ""
+		if av.count > 0 {
+			sum = querylang.NumValue(av.sum).Str
+		}
+		return append(row, sum, strconv.FormatInt(av.count, 10))
+	}
+	v := acc.Result()
+	if v.Missing {
+		return append(row, "")
+	}
+	return append(row, v.Str)
 }
 
 // buildGroupedRows returns one row per group key with group values and accumulator results.
@@ -363,12 +382,7 @@ func (a *Aggregator) buildGroupedRows(columns []string) [][]string {
 		row := make([]string, 0, len(columns))
 		row = append(row, gs.groupValues...)
 		for _, acc := range gs.accs {
-			v := acc.Result()
-			if v.Missing {
-				row = append(row, "")
-			} else {
-				row = append(row, v.Str)
-			}
+			row = a.appendResult(row, acc)
 		}
 		rows = append(rows, row)
 	}

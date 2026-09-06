@@ -71,6 +71,7 @@ type multiNodeHarness struct {
 	peerJobs          *mnPeerJobs
 	peerRouteStats    *mnPeerRouteStats
 	peerIngesterStats *mnPeerIngesterStats
+	remote            *directRemoteSearcher
 	peerVaultStats    *mnPeerVaultStats
 	peerStorageStats  *mnPeerStorageStats
 	// alerts is each node's alert.Collector; populated only with
@@ -367,6 +368,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	})
 
 	return &multiNodeHarness{
+		remote:            remoteSearcher,
 		coordinator:       coordinatorID,
 		nodes:             nodes,
 		cfgStore:          cfgStore,
@@ -668,6 +670,10 @@ const mnSearchStreamSlots = 16
 
 type directRemoteSearcher struct {
 	nodes map[string]*orchestrator.Orchestrator
+	// recordStreams counts SearchStream calls — the record gathers a
+	// coordinator opened — so a test can tell a merged-table answer from a
+	// gathered one.
+	recordStreams atomic.Int64
 	// streamers tracks the per-vault SearchStream producer goroutines so a
 	// test can wait for them to exit. Production's producer is released by
 	// request-context cancellation; without something to wait on, a leak is
@@ -708,6 +714,7 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
+	q.PartialAggregates = req.GetPartialAggregates()
 
 	// Pipeline query: run locally and return table.
 	if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
@@ -758,6 +765,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 	func() []byte,
 	func() []*gastrologv1.HistogramBucket,
 ) {
+	d.recordStreams.Add(1)
 	recCh := make(chan []*gastrologv1.ExportRecord, mnSearchStreamSlots)
 	errCh := make(chan error, 1)
 	nilToken := func() []byte { return nil }

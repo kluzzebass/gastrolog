@@ -311,6 +311,7 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("parse query: %w", err)
 		}
+		q.PartialAggregates = req.GetPartialAggregates()
 
 		eng, err := server.ForwardSearchEngine(o, req)
 		if err != nil {

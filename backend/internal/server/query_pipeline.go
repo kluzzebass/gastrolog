@@ -39,6 +39,9 @@ func (s *QueryServer) searchPipeline(
 		return connect.NewError(connect.CodeInternal, fmt.Errorf("pipeline routed to the per-node table path cannot be merged: %w", err))
 	}
 
+	// Every node, this one included, answers in the combinable form the
+	// merge expects.
+	q.PartialAggregates = true
 	result, err := eng.RunPipeline(ctx, q, dist.PerNode)
 	if err != nil {
 		return errQueryExecution(err)

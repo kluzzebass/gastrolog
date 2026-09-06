@@ -1790,6 +1790,15 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
    */
   searchPipelineChunks = false;
 
+  /**
+   * Emit aggregates in their combinable partial form (an avg as its sum and
+   * count) so the coordinator can merge per-node tables instead of gathering
+   * records.
+   *
+   * @generated from field: bool partial_aggregates = 6;
+   */
+  partialAggregates = false;
+
   constructor(data?: PartialMessage<ForwardSearchRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1803,6 +1812,7 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
     { no: 3, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 4, name: "sealed_chunk_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 5, name: "search_pipeline_chunks", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 6, name: "partial_aggregates", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSearchRequest {

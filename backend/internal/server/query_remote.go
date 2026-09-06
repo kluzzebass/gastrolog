@@ -407,8 +407,9 @@ func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, 
 			// search's latency policy, and wg.Wait() is bounded by the
 			// query timeout just as search's remote merge is.
 			responses[i], fetchErrors[i] = s.remoteSearcher.Search(ctx, f.nodeID, &apiv1.ForwardSearchRequest{
-				VaultId: f.vid.ToProto(),
-				Query:   remoteExpr,
+				VaultId:           f.vid.ToProto(),
+				Query:             remoteExpr,
+				PartialAggregates: q.PartialAggregates,
 			})
 		})
 	}

@@ -108,6 +108,7 @@ func (e *Engine) runAggregation(ctx context.Context, records []chunk.Record, ph 
 	if err != nil {
 		return nil, err
 	}
+	agg.partials = q.PartialAggregates
 	for _, rec := range records {
 		if err := agg.Add(rec); err != nil {
 			return nil, err
@@ -129,6 +130,7 @@ func (e *Engine) runStreamingAggregation(ctx context.Context, it iter.Seq2[chunk
 	if err != nil {
 		return nil, err
 	}
+	agg.partials = q.PartialAggregates
 	sf := newStreamFilter(ctx, ph.preOps, e.lookupResolver, budget)
 	for rec, recErr := range it {
 		if recErr != nil {
@@ -300,9 +302,10 @@ func headOnlyLimit(ops []querylang.PipeOp) int {
 //     per-record transform on the streaming search path (dedup, whose window
 //     spans nodes), OR
 //   - A cap operator (head, tail, slice) appears before an aggregation, OR
-//   - The pipeline contains a non-distributive aggregation function (avg,
-//     dcount, median, first, last, values) that cannot be correctly merged
-//     from per-node results.
+//   - The pipeline contains a non-distributive aggregation function (dcount,
+//     median, first, last, values) that cannot be correctly merged from
+//     per-node results. An avg is distributive: each node emits its sum and
+//     count and the coordinator divides.
 func PipelineNeedsGlobalRecords(pipeline *querylang.Pipeline) bool {
 	ph, err := classifyPipes(pipeline)
 	if err != nil {
@@ -345,7 +348,7 @@ func hasNonDistributiveAgg(op *querylang.StatsOp) bool {
 	}
 	for _, agg := range op.Aggs {
 		switch strings.ToLower(agg.Func) {
-		case "avg", "dcount", "median", "first", "last", "values":
+		case "dcount", "median", "first", "last", "values":
 			return true
 		}
 	}

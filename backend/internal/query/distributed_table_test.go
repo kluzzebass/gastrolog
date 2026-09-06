@@ -35,7 +35,7 @@ func TestPlanDistributedTableSplitsAtTheAggregate(t *testing.T) {
 // Aggregates that need the records are refused here so the caller routes them
 // through the record gather instead of merging something incorrect.
 func TestPlanDistributedTableRefusesHolisticAggregates(t *testing.T) {
-	for _, expr := range []string{"| stats avg(latency)", "| stats dcount(host)", "| stats median(latency) by host", "| stats values(host)", "| stats first(raw)"} {
+	for _, expr := range []string{"| stats dcount(host)", "| stats median(latency) by host", "| stats values(host)", "| stats first(raw)"} {
 		pipeline, err := querylang.ParsePipeline(expr)
 		if err != nil {
 			t.Fatalf("parse %q: %v", expr, err)
@@ -145,5 +145,29 @@ func TestDistributedTableMergeSkipsMalformedRows(t *testing.T) {
 	}
 	if len(d.Merge(nil).Rows) != 0 {
 		t.Error("merging nothing must yield an empty table")
+	}
+}
+
+// An avg travels as two cells per node, its sum and its count, and leaves the
+// merge as one quotient under the declared name. A node whose values were all
+// non-numeric contributes a count of zero and an empty sum.
+func TestDistributedTableMergeFinalizesAvgFromSumAndCount(t *testing.T) {
+	d := planFor(t, "| stats avg(latency) as mean, count by host")
+	partial := []string{"host", "mean", "mean count", "count"}
+	merged := d.Merge([]*TableResult{
+		{Columns: partial, Rows: [][]string{{"a", "60", "3", "3"}, {"b", "", "0", "1"}}},
+		{Columns: partial, Rows: [][]string{{"a", "100", "1", "1"}, {"b", "7", "1", "1"}}},
+	})
+	if want := []string{"host", "mean", "count"}; !slices.Equal(merged.Columns, want) {
+		t.Errorf("columns = %v, want %v", merged.Columns, want)
+	}
+	want := [][]string{{"a", "40", "4"}, {"b", "7", "2"}}
+	if !slices.EqualFunc(merged.Rows, want, slices.Equal) {
+		t.Errorf("rows = %v, want %v", merged.Rows, want)
+	}
+
+	merged = d.Merge([]*TableResult{{Columns: partial, Rows: [][]string{{"c", "", "0", "2"}}}})
+	if want := [][]string{{"c", "", "2"}}; !slices.EqualFunc(merged.Rows, want, slices.Equal) {
+		t.Errorf("no numeric values: rows = %v, want %v", merged.Rows, want)
 	}
 }

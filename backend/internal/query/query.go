@@ -154,6 +154,11 @@ type Query struct {
 	ResumeAfterTS    time.Time
 	ResumeAfterEvent chunk.EventID
 
+	// PartialAggregates makes a stats pipeline emit each aggregate in its
+	// combinable form — an avg as its sum and count — so the coordinator can
+	// merge this node's table with the others' instead of gathering records.
+	PartialAggregates bool
+
 	// SkipCloud skips cloud-backed chunks during search. Used by the
 	// histogram to compute filtered counts from local data only.
 	SkipCloud bool

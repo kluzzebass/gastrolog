@@ -353,13 +353,13 @@ func TestPipelineNeedsGlobalRecords(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "stats with avg is non-distributive",
+			name: "stats with avg combines from per-node sums and counts",
 			ops: []querylang.PipeOp{
 				&querylang.StatsOp{Aggs: []querylang.AggExpr{
 					{Func: "avg", Arg: &querylang.FieldRef{Name: "duration"}},
 				}},
 			},
-			want: true,
+			want: false,
 		},
 		{
 			name: "stats with dcount is non-distributive",
@@ -394,7 +394,7 @@ func TestPipelineNeedsGlobalRecords(t *testing.T) {
 			ops: []querylang.PipeOp{
 				&querylang.StatsOp{Aggs: []querylang.AggExpr{
 					{Func: "count"},
-					{Func: "avg", Arg: &querylang.FieldRef{Name: "duration"}},
+					{Func: "dcount", Arg: &querylang.FieldRef{Name: "duration"}},
 				}},
 			},
 			want: true,
