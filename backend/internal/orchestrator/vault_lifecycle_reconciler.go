@@ -815,21 +815,23 @@ func (r *VaultLifecycleReconciler) onSeal(e vaultctlfsm.ManifestEntry) {
 	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
 	}
-	ensurer, ok := r.vaultInst.Chunks.(chunk.SealEnsurer)
-	if !ok {
-		return
+	// EnsureSealed projects the seal onto a legacy chunk-manager active file.
+	// A pipeline vault never has one — its sealed chunks live at the vault
+	// ChunkRoot and the lazy GLCB resolver serves them on first lookup — and
+	// on a node that does not home the vault the manager is closed, so the
+	// projection is skipped there rather than reported as a failure.
+	if r.orch == nil || !r.orch.isPipelineIngestVault(r.vaultID) {
+		if ensurer, ok := r.vaultInst.Chunks.(chunk.SealEnsurer); ok {
+			if err := ensurer.EnsureSealed(e.ID); err != nil {
+				r.logger.Warn("onSeal: EnsureSealed failed",
+					"chunk", e.ID, "error", err)
+			}
+		}
 	}
-	if err := ensurer.EnsureSealed(e.ID); err != nil {
-		r.logger.Warn("onSeal: EnsureSealed failed",
-			"chunk", e.ID, "error", err)
-	}
-	// Pipeline-built sealed chunks live at the vault ChunkRoot, not the chunk
-	// manager dir, so EnsureSealed is a no-op for them. Queryability needs no
-	// action here: the lazy on-miss GLCB resolver serves the freshly-sealed
-	// chunk on first lookup. What remains event-driven is the holder
-	// receipt — propose it now that this home's copy is (usually)
-	// built and on disk; the gate inside skips it when the build lags the seal,
-	// and OnBuilt fires it once the file lands. No-op for non-home vaults.
+	// What remains event-driven is the holder receipt — propose it now that
+	// this home's copy is (usually) built and on disk; the gate inside skips
+	// it when the build lags the seal, and OnBuilt fires it once the file
+	// lands. No-op for non-home vaults.
 	r.ackOwnHolderReceipt(e)
 	if r.orch != nil && r.orch.isPipelineIngestVault(r.vaultID) {
 		r.orch.schedulePipelineCloudUpload(r.vaultID, e.ID)

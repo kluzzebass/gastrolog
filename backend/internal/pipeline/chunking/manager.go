@@ -562,6 +562,20 @@ func (m *Manager) PlanCatchUp(ctx context.Context, vaultID glid.GLID) error {
 // sealing a non-empty open manifest on schedule. It is the entry point for the
 // orchestrator's shared scheduler; the planner no-ops for non-leaders, so the
 // job can run on every home and self-select the leader.
+// SealOpenManifest seals the vault's open chunk manifest now, regardless of
+// its rotation policy, and reports whether it did. Only the chunking leader
+// acts; a follower, an empty or absent manifest, and an unknown vault all
+// leave the vault-ctl state untouched.
+func (m *Manager) SealOpenManifest(vaultID glid.GLID) (bool, error) {
+	m.mu.Lock()
+	v, ok := m.vaults[vaultID]
+	m.mu.Unlock()
+	if !ok {
+		return false, ErrUnknownVault
+	}
+	return v.sealOpenManifestNow()
+}
+
 func (m *Manager) RotateCron(ctx context.Context, vaultID glid.GLID) error {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
