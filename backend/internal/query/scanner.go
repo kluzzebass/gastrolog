@@ -450,6 +450,26 @@ func seekAndRead(cursor chunk.RecordCursor, chunkID chunk.ChunkID, pos uint64) (
 }
 
 // applyFilters returns true if the record passes all filters.
+// resumeAfterFilter keeps only records strictly after the query's resume
+// cursor in canonical order on the OrderBy axis. When either side carries no
+// ingester identity, ties cannot be ordered: records at the boundary
+// timestamp are kept rather than dropped.
+func resumeAfterFilter(q Query) recordFilter {
+	last := chunk.Record{EventID: q.ResumeAfterEvent, IngestTS: q.ResumeAfterTS, SourceTS: q.ResumeAfterTS}
+	reverse := q.Reverse()
+	cursorHasIdentity := !last.EventID.IngesterID.IsZero()
+	return func(rec chunk.Record) bool {
+		if !cursorHasIdentity || rec.EventID.IngesterID.IsZero() {
+			ts := q.OrderBy.RecordTS(rec)
+			if reverse {
+				return !ts.After(q.ResumeAfterTS)
+			}
+			return !ts.Before(q.ResumeAfterTS)
+		}
+		return q.OrderBy.CompareRecords(rec, last, reverse) > 0
+	}
+}
+
 func applyFilters(rec chunk.Record, filters []recordFilter) bool {
 	for _, f := range filters {
 		if !f(rec) {

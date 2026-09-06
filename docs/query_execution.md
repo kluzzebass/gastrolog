@@ -319,9 +319,13 @@ peer's producer parks on a send nobody is reading, and the coordinator is still
 waiting on the histogram. It only bites past the channel's depth, which is why
 paged queries never showed it and an unlimited one did.
 
-**Resume tokens** are split: local chunk positions stay on the coordinator,
-remote vault tokens are opaque blobs forwarded back to their originating nodes
-on the next page request.
+**Resume tokens** carry the coordinator's local chunk positions plus one
+canonical cursor for the merged stream: the last emitted record's timestamp on
+the ordering axis and its EventID. Remote vaults are not resumed by their own
+tokens; the next page bounds every source at the cursor's timestamp
+(inclusively) and the merge skips whatever sits at or before the cursor in
+canonical order, so a page boundary inside a group of records sharing a
+timestamp neither repeats nor drops any of them, from any node.
 
 ## Query Memory Budget
 

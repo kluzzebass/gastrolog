@@ -193,12 +193,24 @@ message ResumeToken {
   // shifting between pages.
   google.protobuf.Timestamp frozen_start = 2;
   google.protobuf.Timestamp frozen_end = 3;
-  // Highwater TS from the last emitted record. Acts as an exclusive
-  // boundary on the next page (reverse: upper bound; forward: lower
-  // bound) so pagination survives mid-scroll chunk lifecycle (seal,
-  // transition, retention) without re-emitting already-seen records,
-  // even when per-chunk positions become stale and unusable.
+  // Timestamp of the last record the previous page emitted, on the query's
+  // ordering axis. The next page bounds its scan at this instant inclusively
+  // and skips everything at or before highwater_event in canonical order, so
+  // records sharing the boundary timestamp are neither repeated nor lost.
+  // Survives mid-scroll chunk lifecycle (seal, transition, retention) even
+  // when per-chunk positions become stale and unusable.
   google.protobuf.Timestamp highwater_ts = 4;
+  // Identity of the record highwater_ts was taken from. With the timestamp
+  // it names one canonical position: (timestamp, then EventID order).
+  ResumeCursorEvent highwater_event = 5;
+}
+
+// ResumeCursorEvent is the EventID of the record a resume token points at.
+message ResumeCursorEvent {
+  bytes ingester_id = 1;
+  bytes node_id = 2;
+  google.protobuf.Timestamp ingest_ts = 3;
+  uint32 ingest_seq = 4;
 }
 
 // InnerVaultToken is the serialized per-vault resume state.

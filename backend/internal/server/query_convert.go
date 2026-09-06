@@ -328,6 +328,16 @@ func ProtoToResumeToken(data []byte) (*query.ResumeToken, error) {
 	if protoToken.HighwaterTs != nil {
 		token.HighwaterTS = protoToken.HighwaterTs.AsTime()
 	}
+	if ev := protoToken.HighwaterEvent; ev != nil {
+		token.HighwaterEvent = chunk.EventID{
+			IngesterID: glid.FromBytes(ev.IngesterId),
+			NodeID:     glid.FromBytes(ev.NodeId),
+			IngestSeq:  ev.IngestSeq,
+		}
+		if ev.IngestTs != nil {
+			token.HighwaterEvent.IngestTS = ev.IngestTs.AsTime()
+		}
+	}
 	return token, nil
 }
 
@@ -459,6 +469,14 @@ func ResumeTokenToProto(token *query.ResumeToken) []byte {
 	}
 	if !token.HighwaterTS.IsZero() {
 		protoToken.HighwaterTs = timestamppb.New(token.HighwaterTS)
+	}
+	if !token.HighwaterEvent.IngesterID.IsZero() {
+		protoToken.HighwaterEvent = &apiv1.ResumeCursorEvent{
+			IngesterId: token.HighwaterEvent.IngesterID.Bytes(),
+			NodeId:     token.HighwaterEvent.NodeID.Bytes(),
+			IngestTs:   timestamppb.New(token.HighwaterEvent.IngestTS),
+			IngestSeq:  token.HighwaterEvent.IngestSeq,
+		}
 	}
 
 	data, err := proto.Marshal(protoToken)

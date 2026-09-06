@@ -280,6 +280,10 @@ func forwardSearchAfterParse(
 			return nil, nil, nil, nil, fmt.Errorf("invalid resume token: %w", err)
 		}
 	}
+	// The coordinator's cursor names the last record it emitted; skipping up
+	// to it here, ahead of this node's page limit, is what lets the
+	// coordinator's next page arrive full of records it has not yet sent.
+	server.ApplyResumeCursor(&q, resume)
 
 	searchIter, getToken := eng.Search(ctx, q, resume)
 	getTokenBytes := func() []byte {

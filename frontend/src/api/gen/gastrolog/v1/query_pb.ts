@@ -914,15 +914,24 @@ export class ResumeToken extends Message<ResumeToken> {
   frozenEnd?: Timestamp;
 
   /**
-   * Highwater TS from the last emitted record. Acts as an exclusive
-   * boundary on the next page (reverse: upper bound; forward: lower
-   * bound) so pagination survives mid-scroll chunk lifecycle (seal,
-   * transition, retention) without re-emitting already-seen records,
-   * even when per-chunk positions become stale and unusable.
+   * Timestamp of the last record the previous page emitted, on the query's
+   * ordering axis. The next page bounds its scan at this instant inclusively
+   * and skips everything at or before highwater_event in canonical order, so
+   * records sharing the boundary timestamp are neither repeated nor lost.
+   * Survives mid-scroll chunk lifecycle (seal, transition, retention) even
+   * when per-chunk positions become stale and unusable.
    *
    * @generated from field: google.protobuf.Timestamp highwater_ts = 4;
    */
   highwaterTs?: Timestamp;
+
+  /**
+   * Identity of the record highwater_ts was taken from. With the timestamp
+   * it names one canonical position: (timestamp, then EventID order).
+   *
+   * @generated from field: gastrolog.v1.ResumeCursorEvent highwater_event = 5;
+   */
+  highwaterEvent?: ResumeCursorEvent;
 
   constructor(data?: PartialMessage<ResumeToken>) {
     super();
@@ -936,6 +945,7 @@ export class ResumeToken extends Message<ResumeToken> {
     { no: 2, name: "frozen_start", kind: "message", T: Timestamp },
     { no: 3, name: "frozen_end", kind: "message", T: Timestamp },
     { no: 4, name: "highwater_ts", kind: "message", T: Timestamp },
+    { no: 5, name: "highwater_event", kind: "message", T: ResumeCursorEvent },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ResumeToken {
@@ -952,6 +962,63 @@ export class ResumeToken extends Message<ResumeToken> {
 
   static equals(a: ResumeToken | PlainMessage<ResumeToken> | undefined, b: ResumeToken | PlainMessage<ResumeToken> | undefined): boolean {
     return proto3.util.equals(ResumeToken, a, b);
+  }
+}
+
+/**
+ * ResumeCursorEvent is the EventID of the record a resume token points at.
+ *
+ * @generated from message gastrolog.v1.ResumeCursorEvent
+ */
+export class ResumeCursorEvent extends Message<ResumeCursorEvent> {
+  /**
+   * @generated from field: bytes ingester_id = 1;
+   */
+  ingesterId = new Uint8Array(0);
+
+  /**
+   * @generated from field: bytes node_id = 2;
+   */
+  nodeId = new Uint8Array(0);
+
+  /**
+   * @generated from field: google.protobuf.Timestamp ingest_ts = 3;
+   */
+  ingestTs?: Timestamp;
+
+  /**
+   * @generated from field: uint32 ingest_seq = 4;
+   */
+  ingestSeq = 0;
+
+  constructor(data?: PartialMessage<ResumeCursorEvent>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ResumeCursorEvent";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "ingester_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 3, name: "ingest_ts", kind: "message", T: Timestamp },
+    { no: 4, name: "ingest_seq", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ResumeCursorEvent {
+    return new ResumeCursorEvent().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ResumeCursorEvent {
+    return new ResumeCursorEvent().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ResumeCursorEvent {
+    return new ResumeCursorEvent().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ResumeCursorEvent | PlainMessage<ResumeCursorEvent> | undefined, b: ResumeCursorEvent | PlainMessage<ResumeCursorEvent> | undefined): boolean {
+    return proto3.util.equals(ResumeCursorEvent, a, b);
   }
 }
 

@@ -60,13 +60,14 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 	for nodeID, vaultIDs := range byNode {
 		for _, vid := range vaultIDs {
 			wg.Go(func() {
-				// Remote opaque resume tokens are deliberately not propagated
-				// (the merge-level highwater drives pagination — see
-				// searchDirect), so the token getter is dropped here.
+				// Remote positions are never carried across pages; the remote
+				// resumes at the coordinator's cursor, which its own engine
+				// applies ahead of the page limit — so the token getter is
+				// dropped here.
 				recCh, _, eCh, _, getHist := s.remoteSearcher.SearchStream(ctx, nodeID, &apiv1.ForwardSearchRequest{
 					VaultId:     vid.ToProto(),
 					Query:       queryExpr,
-					ResumeToken: remoteTokens[vid],
+					ResumeToken: remoteTokenOrCursor(q, remoteTokens[vid]),
 				})
 				mu.Lock()
 				streams = append(streams, vaultStream{records: recCh, errCh: eCh, getHistogram: getHist, vaultID: vid})

@@ -141,6 +141,14 @@ type Query struct {
 	// The reorder scanner skips records already past this timestamp.
 	ResumeTS time.Time
 
+	// ResumeAfterTS and ResumeAfterEvent name the canonical position the
+	// previous page ended at, on the OrderBy axis. Every scanner drops
+	// records at or before it before the limit is counted, so a page
+	// boundary inside a group of records sharing a timestamp resumes
+	// exactly. A zero event skips only records strictly before the timestamp.
+	ResumeAfterTS    time.Time
+	ResumeAfterEvent chunk.EventID
+
 	// SkipCloud skips cloud-backed chunks during search. Used by the
 	// histogram to compute filtered counts from local data only.
 	SkipCloud bool
@@ -276,9 +284,10 @@ type MultiVaultPosition struct {
 // or remote — serializes its own resume state. The API node routes each
 // token to wherever the vault lives.
 type ResumeToken struct {
-	// VaultTokens maps vault IDs to their opaque resume tokens.
-	// For local vaults, these are deserialized into Positions by the search engine.
-	// For remote vaults, they are forwarded as-is to the owning node.
+	// VaultTokens maps vault IDs to their opaque resume tokens, deserialized
+	// into Positions for local vaults. Remote vaults are not resumed by
+	// token; the coordinator resumes them at the HighwaterTS/HighwaterEvent
+	// cursor.
 	VaultTokens map[glid.GLID][]byte
 
 	// FrozenStart and FrozenEnd preserve the original query time bounds from
@@ -287,12 +296,17 @@ type ResumeToken struct {
 	FrozenStart time.Time
 	FrozenEnd   time.Time
 
-	// HighwaterTS is the IngestTS of the last record emitted by the previous
-	// page. The server applies it as an exclusive bound on the next page —
-	// reverse=true narrows q.End to HighwaterTS, forward narrows q.Start —
-	// so pagination survives mid-scroll chunk lifecycle without re-emitting
-	// records, even when per-chunk Positions become stale and unusable.
+	// HighwaterTS is the timestamp, on the query's ordering axis, of the last
+	// record the previous page emitted. With HighwaterEvent it names one
+	// canonical position: the next page bounds its scan at HighwaterTS and
+	// skips everything at or before that position, so records sharing the
+	// boundary timestamp are neither repeated nor lost. Survives mid-scroll
+	// chunk lifecycle even when per-chunk Positions become stale.
 	HighwaterTS time.Time
+	// HighwaterEvent is the EventID of the record HighwaterTS was taken
+	// from. Zero for records that carry no ingester identity, in which case
+	// only the timestamp bounds the next page.
+	HighwaterEvent chunk.EventID
 
 	// Positions contains the last yielded position for each vault/chunk combination.
 	// This is the internal representation used by eng.Search() for local vaults.
@@ -758,6 +772,9 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 	// Add SourceTS filter if bounds are set.
 	if !q.SourceStart.IsZero() || !q.SourceEnd.IsZero() {
 		b.addFilter(sourceTimeFilter(q.SourceStart, q.SourceEnd))
+	}
+	if !q.ResumeAfterTS.IsZero() {
+		b.addFilter(resumeAfterFilter(q))
 	}
 
 	// Active/sealing FSM entries without a local GLCB fall back to manifest
