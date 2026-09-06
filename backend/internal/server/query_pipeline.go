@@ -32,9 +32,11 @@ func (s *QueryServer) searchPipeline(
 		q.Limit = int(s.maxResultCount)
 	}
 
+	// Every pipeline that reaches here produces a table from combinable
+	// aggregates; anything else went to searchPipelineGlobal.
 	dist, err := query.PlanDistributedTable(pipeline)
 	if err != nil {
-		return s.searchPipelineLocal(ctx, eng, q, pipeline, stream)
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("pipeline routed to the per-node table path cannot be merged: %w", err))
 	}
 
 	result, err := eng.RunPipeline(ctx, q, dist.PerNode)
@@ -56,39 +58,6 @@ func (s *QueryServer) searchPipeline(
 		TableResult: tableResultToProto(table, pipeline),
 		Histogram:   HistogramToProto(eng.ComputeHistogram(ctx, q, 50)),
 	})
-}
-
-// searchPipelineLocal runs a materializing pipeline that produces no
-// aggregate table over this node's records and streams what it returns.
-func (s *QueryServer) searchPipelineLocal(
-	ctx context.Context,
-	eng *query.Engine,
-	q query.Query,
-	pipeline *querylang.Pipeline,
-	stream *connect.ServerStream[apiv1.SearchResponse],
-) error {
-	result, err := eng.RunPipeline(ctx, q, pipeline)
-	if err != nil {
-		return errQueryExecution(err)
-	}
-	histogram := HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
-	if result.Table != nil {
-		return stream.Send(&apiv1.SearchResponse{
-			TableResult: tableResultToProto(result.Table, pipeline),
-			Histogram:   histogram,
-		})
-	}
-	batch := make([]*apiv1.Record, 0, 100)
-	for _, rec := range result.Records {
-		batch = append(batch, recordToProto(rec))
-		if len(batch) >= 100 {
-			if err := stream.Send(&apiv1.SearchResponse{Records: batch}); err != nil {
-				return err
-			}
-			batch = batch[:0]
-		}
-	}
-	return stream.Send(&apiv1.SearchResponse{Records: batch, Histogram: histogram})
 }
 
 // searchPipelineGlobal handles pipelines the cluster cannot answer by merging
@@ -235,7 +204,7 @@ func pipeOpExecution(op querylang.PipeOp) string {
 	switch op.(type) {
 	case *querylang.StatsOp, *querylang.TimechartOp:
 		return "materializing" // runs on each node, merged on coordinator
-	case *querylang.SortOp, *querylang.TailOp, *querylang.SliceOp:
+	case *querylang.SortOp, *querylang.TailOp, *querylang.SliceOp, *querylang.DedupOp:
 		return "coordinator-only" // runs once on the coordinating node, over every node's records
 	case *querylang.HeadOp:
 		return "short-circuit" // stops iteration early

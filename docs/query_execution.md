@@ -372,9 +372,10 @@ aggregate, and a filter after `stats` sees the cluster's count rather than each
 node's share of it.
 
 A pipeline the cluster cannot answer by merging per-node results — a `head`,
-`tail`, or `slice` that would otherwise apply once per node, or an aggregate
-like `avg`/`dcount`/`median`/`values` that cannot be recombined from partials —
-runs once on the coordinator over every node's records. Those records are
+`tail`, or `slice` that would otherwise apply once per node, a `dedup` whose
+window spans nodes, or an aggregate like `avg`/`dcount`/`median`/`values` that
+cannot be recombined from partials — runs once on the coordinator over every
+node's records. Those records are
 *streamed* through it, merged with the local scan in query order, not collected
 first: the coordinator retains only what the pipeline's own operators hold, so
 memory tracks the answer rather than the match set. An uncapped `sort` is the

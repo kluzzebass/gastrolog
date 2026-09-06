@@ -296,6 +296,9 @@ func headOnlyLimit(ops []querylang.PipeOp) int {
 // This is true when:
 //   - The pipeline contains a non-distributive ordering operator (tail, sort,
 //     slice) that requires all records to produce a correct result, OR
+//   - The pipeline produces records, not a table, and cannot run as a
+//     per-record transform on the streaming search path (dedup, whose window
+//     spans nodes), OR
 //   - A cap operator (head, tail, slice) appears before an aggregation, OR
 //   - The pipeline contains a non-distributive aggregation function (avg,
 //     dcount, median, first, last, values) that cannot be correctly merged
@@ -311,7 +314,7 @@ func PipelineNeedsGlobalRecords(pipeline *querylang.Pipeline) bool {
 		return true
 	}
 	if ph.statsOp == nil && ph.timechartOp == nil {
-		return false
+		return !CanStreamPipeline(pipeline)
 	}
 	if hasExplicitCap(ph.preOps) {
 		return true
