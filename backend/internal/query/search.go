@@ -51,7 +51,6 @@ type mergeState struct {
 	h              heap.Interface
 	scanners       []activeScanner
 	chunkPositions map[mergeKey]uint64
-	chunkResumeTS  map[mergeKey]time.Time // OrderBy-timestamp resume for reordered chunks
 	lastRefs       *[]MultiVaultPosition
 
 	// Lazy heap priming: chunks are opened on demand instead of all at once.
@@ -74,15 +73,11 @@ func (ms *mergeState) cleanup() {
 func (ms *mergeState) buildLastRefs() {
 	refs := make([]MultiVaultPosition, 0, len(ms.chunkPositions))
 	for key, pos := range ms.chunkPositions {
-		mvp := MultiVaultPosition{
+		refs = append(refs, MultiVaultPosition{
 			VaultID:  key.vaultID,
 			ChunkID:  key.chunkID,
 			Position: pos,
-		}
-		if ts, ok := ms.chunkResumeTS[key]; ok {
-			mvp.ResumeTS = ts
-		}
-		refs = append(refs, mvp)
+		})
 	}
 	*ms.lastRefs = refs
 }
@@ -277,7 +272,6 @@ func pruneStaleResumePositions(logger *slog.Logger, resume *ResumeToken, allChun
 // efficient lookup during heap initialization.
 type resumeInfo struct {
 	Position uint64
-	ResumeTS time.Time // non-zero for reordered chunks
 }
 
 func buildResumeMap(resume *ResumeToken) map[glid.GLID]map[chunk.ChunkID]resumeInfo {
@@ -289,10 +283,7 @@ func buildResumeMap(resume *ResumeToken) map[glid.GLID]map[chunk.ChunkID]resumeI
 		if m[pos.VaultID] == nil {
 			m[pos.VaultID] = make(map[chunk.ChunkID]resumeInfo)
 		}
-		m[pos.VaultID][pos.ChunkID] = resumeInfo{
-			Position: pos.Position,
-			ResumeTS: pos.ResumeTS,
-		}
+		m[pos.VaultID][pos.ChunkID] = resumeInfo{Position: pos.Position}
 	}
 	return m
 }
@@ -358,33 +349,28 @@ func (e *Engine) searchSingleChunk(
 		}
 	}
 
-	chunkQ := q
 	var startPos *uint64
 	if ri != nil {
-		if !ri.ResumeTS.IsZero() {
-			chunkQ.ResumeTS = ri.ResumeTS
-		} else {
-			startPos = &ri.Position
-		}
+		startPos = &ri.Position
 	}
 
+	// A rank-scanned chunk yields in index order, not physical order, so a
+	// physical position cannot resume it. It carries no position; the next
+	// page restarts it under the canonical cursor, which the narrowed time
+	// bound lets the rank scan seek to directly.
 	count := 0
-	for rr, err := range e.searchChunkWithRef(ctx, chunkQ, sc.vaultID, sc.meta, startPos) {
+	for rr, err := range e.searchChunkWithRef(ctx, q, sc.vaultID, sc.meta, startPos) {
 		if err != nil {
-			pos := MultiVaultPosition{VaultID: rr.VaultID, ChunkID: rr.Ref.ChunkID, Position: rr.Ref.Pos}
-			if rr.Reordered {
-				pos.ResumeTS = q.OrderBy.RecordTS(rr.Record)
+			if !rr.Reordered {
+				*lastRefs = []MultiVaultPosition{{VaultID: rr.VaultID, ChunkID: rr.Ref.ChunkID, Position: rr.Ref.Pos}}
 			}
-			*lastRefs = []MultiVaultPosition{pos}
 			yield(chunk.Record{}, err)
 			return false
 		}
 
-		pos := MultiVaultPosition{VaultID: rr.VaultID, ChunkID: rr.Ref.ChunkID, Position: rr.Ref.Pos}
-		if rr.Reordered {
-			pos.ResumeTS = q.OrderBy.RecordTS(rr.Record)
+		if !rr.Reordered {
+			*lastRefs = []MultiVaultPosition{{VaultID: rr.VaultID, ChunkID: rr.Ref.ChunkID, Position: rr.Ref.Pos}}
 		}
-		*lastRefs = []MultiVaultPosition{pos}
 
 		if !yield(rr.record(), nil) {
 			return false
@@ -412,14 +398,9 @@ func (e *Engine) primeHeapWithResume(
 	return e.lazyOpenCompeting(ctx, q, ms)
 }
 
-// primeChunkWithResume opens a scanner for a single chunk, handling resume
-// position or ResumeTS if present.
+// primeChunkWithResume opens a scanner for a single chunk, handling a resume
+// position if present.
 func (e *Engine) primeChunkWithResume(ctx context.Context, q Query, sc vaultChunk, ri *resumeInfo, ms *mergeState) error {
-	if ri != nil && !ri.ResumeTS.IsZero() {
-		resumeQ := q
-		resumeQ.ResumeTS = ri.ResumeTS
-		return e.openAndPrimeScanner(ctx, resumeQ, sc, nil, ms)
-	}
 	var startPos *uint64
 	if ri != nil {
 		startPos = &ri.Position
@@ -612,10 +593,11 @@ func runMergeLoop(
 
 		entry := heap.Pop(ms.h).(*cursorEntry)
 		key := mergeKey{vaultID: entry.vaultID, chunkID: entry.chunkID}
-		if entry.reordered {
-			ms.chunkResumeTS[key] = q.OrderBy.RecordTS(entry.rec)
+		// A rank-scanned chunk has no resumable physical position; the next
+		// page restarts it under the canonical cursor.
+		if !entry.reordered {
+			ms.chunkPositions[key] = entry.ref.Pos
 		}
-		ms.chunkPositions[key] = entry.ref.Pos
 
 		entry.rec.Ref = entry.ref
 		entry.rec.VaultID = entry.vaultID
@@ -673,6 +655,10 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 	if selectedVaults == nil {
 		selectedVaults = allVaults // no vault filter means all vaults
 	}
+	// Resume strictly after the record the token names. Per-chunk positions
+	// only speed up chunks scanned in physical order; the cursor is what
+	// makes the page boundary exact, on every chunk, whatever the ordering.
+	ApplyResumeCursor(&q, resume)
 
 	// Update query to use remaining expression (without vault/chunk predicates).
 	q.BoolExpr = remainingExpr
@@ -680,17 +666,18 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 	// Track state for resume token generation.
 	var lastRefs []MultiVaultPosition
 	var highwaterTS time.Time
+	var highwaterEvent chunk.EventID
 	completed := false
 
 	seq := func(yield func(chunk.Record, error) bool) {
-		// Wrap yield so every successful emission updates the highwater
-		// timestamp. Highwater is included in the resume token and used by
-		// the server as an exclusive time bound on the next page — this is
-		// what makes pagination survive mid-scroll chunk lifecycle when
+		// Wrap yield so every successful emission moves the token's canonical
+		// cursor: the record's ordering-axis timestamp and its EventID. This
+		// is what makes pagination survive mid-scroll chunk lifecycle when
 		// per-chunk Positions become stale and unusable.
 		wrappedYield := func(rec chunk.Record, err error) bool {
 			if err == nil {
 				highwaterTS = q.OrderBy.RecordTS(rec)
+				highwaterEvent = rec.EventID
 			}
 			return yield(rec, err)
 		}
@@ -729,7 +716,6 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 		ms := &mergeState{
 			h:              newMergeHeap(q, len(allChunks)),
 			chunkPositions: make(map[mergeKey]uint64),
-			chunkResumeTS:  make(map[mergeKey]time.Time),
 			lastRefs:       &lastRefs,
 		}
 		defer ms.cleanup()
@@ -749,7 +735,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 		if completed || (len(lastRefs) == 0 && highwaterTS.IsZero()) {
 			return nil
 		}
-		return &ResumeToken{Positions: lastRefs, HighwaterTS: highwaterTS}
+		return &ResumeToken{Positions: lastRefs, HighwaterTS: highwaterTS, HighwaterEvent: highwaterEvent}
 	}
 
 	return seq, nextToken
@@ -808,7 +794,6 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 		ms := &mergeState{
 			h:              newMergeHeap(q, len(allChunks)),
 			chunkPositions: make(map[mergeKey]uint64),
-			chunkResumeTS:  make(map[mergeKey]time.Time),
 			lastRefs:       &lastRefs,
 		}
 		defer ms.cleanup()

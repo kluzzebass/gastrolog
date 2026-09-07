@@ -27,22 +27,3 @@ func TestResumeTokenRoundTripsTheCursorEvent(t *testing.T) {
 		t.Fatalf("HighwaterEvent = %+v, want %+v", out.HighwaterEvent, ev)
 	}
 }
-
-// A token whose last record had no ingester identity carries no event, and
-// ApplyResumeCursor then keeps the identity-less bounds.
-func TestApplyResumeCursorWithoutIdentityKeepsExclusiveReverseBound(t *testing.T) {
-	hw := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
-	q := query.Query{IsReverse: true}
-	ApplyResumeCursor(&q, &query.ResumeToken{HighwaterTS: hw})
-	if !q.End.Equal(hw) {
-		t.Fatalf("identity-less reverse bound = %v, want exclusive at %v", q.End, hw)
-	}
-	q = query.Query{IsReverse: true}
-	ApplyResumeCursor(&q, &query.ResumeToken{HighwaterTS: hw, HighwaterEvent: chunk.EventID{IngesterID: glid.New(), IngestTS: hw, IngestSeq: 1}})
-	if !q.End.Equal(hw.Add(time.Nanosecond)) {
-		t.Fatalf("identified reverse bound = %v, want one tick past %v", q.End, hw)
-	}
-	if q.ResumeAfterTS.IsZero() || q.ResumeAfterEvent.IngesterID.IsZero() {
-		t.Fatal("cursor was not installed on the query")
-	}
-}

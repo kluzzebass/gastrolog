@@ -919,9 +919,6 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		}
 	}
 
-	// Mirrors forwardSearchAfterParse: the coordinator's cursor is applied
-	// on this node ahead of its page limit.
-	server.ApplyResumeCursor(&q, resume)
 	searchIter, getToken := eng.Search(ctx, q, resume)
 	getTokenBytes := func() []byte {
 		token := getToken()

@@ -12,7 +12,10 @@ import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/chunk/glcb/glcbtest"
 	"gastrolog/internal/glid"
+	"slices"
+	"strings"
 )
 
 // searchPaged drives Search the way a paginating client does: a fixed page
@@ -115,41 +118,142 @@ func TestMultiNode_PaginationLosesNothingAcrossTieGroups(t *testing.T) {
 	}
 }
 
-// Resuming under a non-default ordering is refused outright rather than
-// paged with a cursor the engine cannot yet honour on that axis; the client
-// gets Unimplemented, never a silently partial page.
-func TestMultiNode_ResumeUnderSourceTSOrderIsRefusedLoudly(t *testing.T) {
-	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
-	addMNRecordsAt(t, h.Node(t, "data-1"), "r", 30, time.Now().Add(-time.Minute))
-
-	stream, err := h.client.Search(context.Background(), connect.NewRequest(&gastrologv1.SearchRequest{
-		Query: &gastrologv1.Query{Expression: "", Limit: 10},
-	}))
-	if err != nil {
-		t.Fatalf("page 1: %v", err)
+// sourceOrderedBlobs plants sealed chunks on a file vault whose source
+// timestamps interleave across chunks and tie in groups of four, while each
+// chunk's ingest timestamps stay disjoint from the others' — the shape a
+// source-ordered scan meets when several chunks cover the same source window.
+// Every record carries a distinct EventID. Returns the raw payloads by source
+// order.
+func sourceOrderedBlobs(t *testing.T, node multinodeTestNode, chunks, perChunk int) []string {
+	t.Helper()
+	registrar, ok := node.vault.CM.(chunk.ExternalGLCBRegistrar)
+	if !ok {
+		t.Fatal("file vault chunk manager must register external GLCBs")
 	}
-	var token []byte
-	for stream.Receive() {
-		if rt := stream.Msg().ResumeToken; len(rt) > 0 {
-			token = rt
+	root := t.TempDir()
+	ingester := glid.New()
+	ingestBase := time.Now().Add(-10 * time.Minute).Truncate(time.Millisecond)
+	sourceBase := ingestBase.Add(-time.Hour)
+	seq := uint32(0)
+	type keyed struct {
+		k   int
+		raw string
+	}
+	var all []keyed
+	for c := range chunks {
+		recs := make([]chunk.Record, 0, perChunk)
+		for i := range perChunk {
+			seq++
+			k := i*chunks + c // global source order
+			raw := fmt.Sprintf("c%02d-%03d", c, i)
+			ingestTS := ingestBase.Add(time.Duration(c)*time.Second + time.Duration(i)*time.Millisecond)
+			recs = append(recs, chunk.Record{
+				SourceTS: sourceBase.Add(time.Duration(k/4) * 10 * time.Millisecond),
+				IngestTS: ingestTS,
+				WriteTS:  ingestTS,
+				EventID:  chunk.EventID{IngesterID: ingester, IngestTS: ingestTS, IngestSeq: seq},
+				Raw:      []byte(raw),
+			})
+			all = append(all, keyed{k, raw})
+		}
+		id := chunk.NewChunkID()
+		path, info := glcbtest.WriteSealedBlob(t, root, id, node.vaultID, recs)
+		if err := registrar.RegisterExternalGLCB(id, path, info); err != nil {
+			t.Fatalf("register chunk %d: %v", c, err)
 		}
 	}
-	if len(token) == 0 {
-		t.Fatal("page 1 produced no resume token")
+	slices.SortFunc(all, func(a, b keyed) int { return a.k - b.k })
+	out := make([]string, len(all))
+	for i, e := range all {
+		out[i] = e.raw
+	}
+	return out
+}
+
+// Paging under order=source_ts loses and repeats nothing, and every page
+// arrives in source order, on a vault whose chunks are scanned through their
+// source-timestamp index. Such a chunk has no resumable physical position; the
+// pages rely on the canonical cursor alone.
+func TestMultiNode_SourceTSPaginationLosesNothingAcrossTieGroups(t *testing.T) {
+	// The vault on a remote node exercises the forwarded cursor; on the
+	// coordinator itself, the engine's own per-chunk positions.
+	t.Run("vault on data node", func(t *testing.T) {
+		h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"), WithFileVault("data-1"))
+		sourceTSPagingLosesNothing(t, h, h.Node(t, "data-1"))
+	})
+	t.Run("vault on coordinator", func(t *testing.T) {
+		h := setupMultiNode(t, []string{"coord", "data-1"}, WithFileVault("coord"), WithoutVault("data-1"))
+		sourceTSPagingLosesNothing(t, h, h.Node(t, "coord"))
+	})
+}
+
+func sourceTSPagingLosesNothing(t *testing.T, h *multiNodeHarness, node multinodeTestNode) {
+	t.Helper()
+	const chunks, perChunk, pageSize = 6, 30, 7
+	want := sourceOrderedBlobs(t, node, chunks, perChunk)
+	total := chunks * perChunk
+
+	// Premise: unpaged, the coordinator sees every record in source order.
+	got := rawsOf(searchAll(t, h.client, "order=source_ts"))
+	if len(got) != total {
+		t.Fatalf("unpaged source-ordered search returned %d records, want %d", len(got), total)
+	}
+	if !sourceOrdered(got, want) {
+		t.Fatalf("unpaged source-ordered search is not in source order: %v…", head(got, 12))
 	}
 
-	stream, err = h.client.Search(context.Background(), connect.NewRequest(&gastrologv1.SearchRequest{
-		Query:       &gastrologv1.Query{Expression: "order=source_ts", Limit: 10},
-		ResumeToken: token,
-	}))
-	if err == nil {
-		for stream.Receive() {
+	for _, ord := range []string{"order=source_ts", "order=source_ts reverse=true"} {
+		t.Run(ord, func(t *testing.T) {
+			recs := searchPaged(t, h.client, ord, pageSize)
+			raws := rawsOf(recs)
+			if len(raws) != total {
+				t.Errorf("paged %d records, want %d", len(raws), total)
+			}
+			seen := make(map[string]int, len(raws))
+			for _, r := range raws {
+				seen[r]++
+			}
+			var lost, dup []string
+			for _, raw := range want {
+				if seen[raw] == 0 {
+					lost = append(lost, raw)
+				}
+			}
+			for raw, n := range seen {
+				if n > 1 {
+					dup = append(dup, raw)
+				}
+			}
+			if len(lost) > 0 || len(dup) > 0 {
+				t.Fatalf("lost %d %v…, duplicated %d %v…", len(lost), head(lost, 5), len(dup), head(dup, 5))
+			}
+			for i := 1; i < len(recs); i++ {
+				a, b := recs[i-1].GetSourceTs().AsTime(), recs[i].GetSourceTs().AsTime()
+				if (!strings.Contains(ord, "reverse") && b.Before(a)) || (strings.Contains(ord, "reverse") && b.After(a)) {
+					t.Fatalf("records %d and %d are out of source order across pages: %v then %v", i-1, i, a, b)
+				}
+			}
+		})
+	}
+}
+
+// sourceOrdered reports whether got lists want's records in an order
+// consistent with want's source order: records sharing a source timestamp
+// (groups of four in want) may appear in any order within their group.
+func sourceOrdered(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	rank := make(map[string]int, len(want))
+	for i, raw := range want {
+		rank[raw] = i / 4
+	}
+	for i := 1; i < len(got); i++ {
+		if rank[got[i]] < rank[got[i-1]] {
+			return false
 		}
-		err = stream.Err()
 	}
-	if connect.CodeOf(err) != connect.CodeUnimplemented {
-		t.Fatalf("resume under order=source_ts returned %v, want Unimplemented", err)
-	}
+	return true
 }
 
 func head(s []string, n int) []string {

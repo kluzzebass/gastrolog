@@ -24,20 +24,6 @@ func (m *emitMark) note(rec chunk.Record) {
 	m.event = rec.EventID
 }
 
-// ApplyResumeCursor bounds q at the token's highwater and installs the
-// canonical cursor the engine skips up to, so the next page resumes exactly
-// after the last record the previous page emitted — on the coordinator and,
-// through the forwarded token, on every remote node it fans out to.
-func ApplyResumeCursor(q *query.Query, resume *query.ResumeToken) {
-	if resume == nil || resume.HighwaterTS.IsZero() {
-		return
-	}
-	hasIdentity := !resume.HighwaterEvent.IngesterID.IsZero()
-	narrowQueryByHighwater(q, resume.HighwaterTS, hasIdentity)
-	q.ResumeAfterTS = resume.HighwaterTS
-	q.ResumeAfterEvent = resume.HighwaterEvent
-}
-
 // remoteTokenOrCursor is the resume token a remote vault receives. Remote
 // positions are never carried across pages, so absent a per-vault token the
 // remote gets the coordinator's cursor and nothing else.

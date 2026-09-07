@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
 	"gastrolog/internal/glid"
 	"iter"
 	"log/slog"
@@ -153,11 +152,6 @@ func (s *QueryServer) searchDirect(
 
 	var resume *query.ResumeToken
 	if len(resumeTokenData) > 0 {
-		// Resume tokens with non-default ordering are not yet supported.
-		if q.OrderBy != query.OrderByIngestTS {
-			return connect.NewError(connect.CodeUnimplemented,
-				fmt.Errorf("pagination with order=%s is not yet supported", q.OrderBy))
-		}
 		var err error
 		resume, err = ProtoToResumeToken(resumeTokenData)
 		if err != nil {
@@ -187,7 +181,7 @@ func (s *QueryServer) searchDirect(
 	// position references a chunk that vanished, the time bound plus the
 	// cursor keep the client from seeing a record twice or missing one.
 	histogramQ := q
-	ApplyResumeCursor(&q, resume)
+	query.ApplyResumeCursor(&q, resume)
 
 	selectedVaults := s.selectedOrAllVaults(ctx, q)
 
@@ -317,40 +311,6 @@ func (s *QueryServer) splitResumeToken(resume *query.ResumeToken, localVaults ma
 		localResume = &query.ResumeToken{Positions: localPositions}
 	}
 	return localResume, remoteTokens
-}
-
-// narrowQueryByHighwater bounds q at a resume-token highwater on the query's
-// ordering axis: forward it becomes the inclusive lower bound; with reverse
-// the exclusive upper bound, placed one tick past the highwater when the
-// cursor carries an identity so the boundary group stays reachable. No-op
-// when highwater is zero or already inside the existing bounds.
-func narrowQueryByHighwater(q *query.Query, highwater time.Time, includeBoundary bool) {
-	if highwater.IsZero() {
-		return
-	}
-	var lower, upper *time.Time
-	if q.OrderBy == query.OrderBySourceTS {
-		lower, upper = &q.SourceStart, &q.SourceEnd
-	} else {
-		lower, upper = &q.Start, &q.End
-	}
-	if q.Reverse() {
-		// The upper bound is exclusive: to keep records sharing the
-		// boundary timestamp in reach of the cursor it must sit one tick
-		// past the highwater. Without an identity to order ties there is
-		// nothing to resume within the group, so the bound excludes it.
-		bound := highwater
-		if includeBoundary {
-			bound = highwater.Add(time.Nanosecond)
-		}
-		if upper.IsZero() || bound.Before(*upper) {
-			*upper = bound
-		}
-		return
-	}
-	if lower.IsZero() || highwater.After(*lower) {
-		*lower = highwater
-	}
 }
 
 // buildResumeTokenBytes serializes the resume token for the response,

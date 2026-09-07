@@ -1083,15 +1083,6 @@ export class VaultPosition extends Message<VaultPosition> {
    */
   position = protoInt64.zero;
 
-  /**
-   * resume_ts is used instead of position for chunks without TS indexes
-   * (e.g., cloud-backed). On resume, the scanner re-reads the chunk and
-   * skips records already past this timestamp.
-   *
-   * @generated from field: google.protobuf.Timestamp resume_ts = 4;
-   */
-  resumeTs?: Timestamp;
-
   constructor(data?: PartialMessage<VaultPosition>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1103,7 +1094,6 @@ export class VaultPosition extends Message<VaultPosition> {
     { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "position", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 4, name: "resume_ts", kind: "message", T: Timestamp },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultPosition {

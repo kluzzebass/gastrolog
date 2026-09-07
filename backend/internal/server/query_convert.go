@@ -394,9 +394,6 @@ func VaultTokenToPositions(data []byte) ([]query.MultiVaultPosition, error) {
 			ChunkID:  chunkID,
 			Position: pos.Position,
 		}
-		if pos.ResumeTs != nil {
-			mvp.ResumeTS = pos.ResumeTs.AsTime()
-		}
 		positions[i] = mvp
 	}
 	return positions, nil
@@ -415,9 +412,6 @@ func PositionsToVaultToken(positions []query.MultiVaultPosition) []byte {
 			VaultId:  pos.VaultID.ToProto(),
 			ChunkId:  glid.GLID(pos.ChunkID).ToProto(),
 			Position: pos.Position,
-		}
-		if !pos.ResumeTS.IsZero() {
-			vp.ResumeTs = timestamppb.New(pos.ResumeTS)
 		}
 		inner.Positions[i] = vp
 	}

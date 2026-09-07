@@ -333,7 +333,15 @@ the ordering axis and its EventID. Remote vaults are not resumed by their own
 tokens; the next page bounds every source at the cursor's timestamp
 (inclusively) and the merge skips whatever sits at or before the cursor in
 canonical order, so a page boundary inside a group of records sharing a
-timestamp neither repeats nor drops any of them, from any node.
+timestamp neither repeats nor drops any of them, from any node. Positions are
+kept only for chunks scanned in physical order. A chunk scanned through its
+timestamp index (every sealed chunk, and any ordering other than the default)
+yields in index order, so no physical position can resume it; it carries none,
+and the next page restarts it under the cursor, which the narrowed time bound
+lets the rank scan seek to directly. The engine applies its own token's cursor,
+so pagination is exact at the engine boundary too, not only through the
+server. This is what makes `order=source_ts` pageable on the same terms as
+the default ordering.
 
 ## Query Memory Budget
 

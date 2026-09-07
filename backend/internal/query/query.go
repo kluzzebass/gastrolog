@@ -142,8 +142,9 @@ type Query struct {
 	ContextBefore int // number of records to include before each match
 	ContextAfter  int // number of records to include after each match
 
-	// ResumeTS is set internally when resuming a reordered chunk.
-	// The reorder scanner skips records already past this timestamp.
+	// ResumeTS is set internally by follow mode: the rank scanner skips
+	// records at or before it, so following resumes strictly after the first
+	// match.
 	ResumeTS time.Time
 
 	// ResumeAfterTS and ResumeAfterEvent name the canonical position the
@@ -296,7 +297,6 @@ type MultiVaultPosition struct {
 	VaultID  glid.GLID
 	ChunkID  chunk.ChunkID
 	Position uint64
-	ResumeTS time.Time // non-zero for chunks that resume by timestamp, not position
 }
 
 // ResumeToken allows resuming a query from where it left off.
