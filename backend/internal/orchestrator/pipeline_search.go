@@ -269,7 +269,9 @@ func (c *manifestRecordCursor) Seek(ref chunk.RecordRef) error {
 			c.fwdExhausted = true
 			return nil
 		}
-		c.revPos = ref.Pos
+		// The cursor contract: after Seek(p), Next reads p and Prev reads the
+		// record before it. Positions are 1-based and Next reads revPos+1.
+		c.revPos = ref.Pos - 1
 		c.fwdExhausted = true
 		return nil
 	}
