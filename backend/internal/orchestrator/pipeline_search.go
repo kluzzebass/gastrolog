@@ -175,10 +175,10 @@ func (c *manifestRecordCursor) ensureReader() (*chunking.OpenChunkReader, error)
 	return reader, nil
 }
 
-// readAt reads the record at 0-based merged-order index idx through the
-// positional reader, whose own positions are 1-based.
+// readAt reads the record at merged-order position idx through the
+// positional reader.
 func (c *manifestRecordCursor) readAt(reader *chunking.OpenChunkReader, idx uint64) (chunk.Record, error) {
-	rec, err := reader.ReadAt(idx + 1)
+	rec, err := reader.ReadAt(idx)
 	if err != nil {
 		return chunk.Record{}, err
 	}

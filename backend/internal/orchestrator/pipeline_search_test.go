@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -638,6 +639,118 @@ func TestPipelineActiveChunkSourceOrderIsSorted(t *testing.T) {
 			if seen[p] != 1 {
 				t.Errorf("reverse=%v: position %d seen %d times", reverse, p, seen[p])
 			}
+		}
+	}
+}
+
+// A position handed out while a chunk is open must name the same record once
+// the chunk is sealed: the open-chunk cursor and the sealed blob are two
+// readers of one chunk, and every resume token, context fetch and record
+// reference that spans a seal depends on them agreeing.
+func TestOpenChunkPositionsSurviveSealing(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const n = 40
+	fsm := vaultctlfsm.New()
+	vaultID := glid.New()
+	origin := newOriginFixture(t, ctx, vaultID, fsm)
+	origin.ingestScrambledSourceTimes(t, ctx, n)
+	home := t.TempDir()
+	var entries []vaultctlfsm.CompletedSegmentEntry
+	stable := time.Now()
+	for time.Now().Before(stable.Add(500 * time.Millisecond)) {
+		if cur := fsm.ListCompletedSegments(); len(cur) != len(entries) {
+			entries, stable = cur, time.Now()
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	var total uint64
+	for _, e := range entries {
+		copyCompletedToHead(t, origin.root, home, e.SegmentID)
+		total += uint64(e.RecordCount)
+	}
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunkingSpec(home, fsm, func() bool { return true })); err != nil {
+		t.Fatalf("RegisterVault: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	var open *vaultctlfsm.OpenChunkManifest
+	for {
+		if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+			t.Fatalf("PlanOnce: %v", err)
+		}
+		if open = fsm.OpenChunk(); open != nil && open.TotalRecords >= total {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("open manifest never covered the %d published records", total)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if open.TotalRecords < 8 {
+		t.Fatalf("open manifest holds %d records, need >= 8", open.TotalRecords)
+	}
+
+	// Positions while open, through the cursor a search uses.
+	reg := &pipelineSearchRegistry{vaultID: vaultID, home: home, fsm: fsm}
+	cursor, err := reg.OpenPipelineChunkCursor(vaultID, open.ChunkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	openByPos := make(map[uint64]string)
+	for {
+		rec, ref, err := cursor.Next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		openByPos[ref.Pos] = string(rec.EventID.IngestTS.Format(time.RFC3339Nano)) + " " + string(rec.Raw)
+	}
+	_ = cursor.Close()
+	if _, ok := openByPos[0]; !ok {
+		t.Fatalf("open chunk positions do not start at 0: %v", openByPos)
+	}
+
+	// Seal and build the same chunk.
+	if err := mgr.RotateCron(ctx, vaultID); err != nil {
+		t.Fatalf("RotateCron: %v", err)
+	}
+	sealedManifest := fsm.SealedManifest()
+	if sealedManifest == nil || sealedManifest.ChunkID != open.ChunkID {
+		t.Fatal("the open chunk was not the one sealed")
+	}
+	if err := mgr.BuildOnce(ctx, vaultID); err != nil {
+		t.Fatalf("BuildOnce: %v", err)
+	}
+	var sealed vaultctlfsm.ManifestEntry
+	for _, e := range fsm.List() {
+		if e.ID == open.ChunkID && e.IsSealed() {
+			sealed = e
+		}
+	}
+	if sealed.ID != open.ChunkID {
+		t.Fatal("sealed entry not found in FSM")
+	}
+	cm, im := newQueryCM(t)
+	glcbPath := chunking.ChunkGLCBPath(filepath.Join(home, "chunks"), open.ChunkID)
+	if err := cm.RegisterExternalGLCB(open.ChunkID, glcbPath, externalInfoFromEntry(sealed)); err != nil {
+		t.Fatalf("RegisterExternalGLCB: %v", err)
+	}
+	eng := query.New(cm, im, nil)
+	sealedByPos := make(map[uint64]string)
+	for _, rec := range drainSearch(t, eng, query.Query{}) {
+		sealedByPos[rec.Ref.Pos] = string(rec.EventID.IngestTS.Format(time.RFC3339Nano)) + " " + string(rec.Raw)
+	}
+
+	if len(sealedByPos) != len(openByPos) {
+		t.Fatalf("sealed chunk serves %d records, open served %d", len(sealedByPos), len(openByPos))
+	}
+	for pos, want := range openByPos {
+		if got := sealedByPos[pos]; got != want {
+			t.Errorf("position %d: open %q, sealed %q", pos, want, got)
 		}
 	}
 }
