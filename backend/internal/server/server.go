@@ -19,8 +19,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
@@ -59,15 +57,13 @@ const systemLoadTimeout = 5 * time.Second
 // fixed lifetime measured from when the response started, which is the
 // same failure mode a slowloris timeout guards against, just from the
 // opposite end of the connection. The main HTTP listener additionally
-// speaks HTTP/2 via h2c (see Serve, below); there golang.org/x/net/http2
-// arms WriteTimeout as one non-resetting per-stream timer set at stream
-// creation, which is the identical hazard enforced per RPC call instead of
-// per connection.
+// speaks unencrypted HTTP/2 (h2c, see Serve below), where WriteTimeout is
+// armed as one non-resetting per-stream timer set at stream creation — the
+// identical hazard enforced per RPC call instead of per connection.
 //
 // ReadHeaderTimeout and IdleTimeout close the slowloris/idle-hold vectors
-// without this hazard. See the h2c.NewHandler call in Serve for why
-// IdleTimeout needs to be set on the *http2.Server, not only the
-// *http.Server, for the main listener.
+// without this hazard, and Go's native HTTP/2 reads the http.Server's own
+// IdleTimeout for h2c connections, so one setting binds both protocols.
 const (
 	// readHeaderTimeout is the maximum time to read HTTP request headers.
 	readHeaderTimeout = 10 * time.Second
@@ -821,14 +817,17 @@ func (s *Server) Serve(listener net.Listener) error {
 	s.handler = handler
 	s.mu.Unlock()
 
-	// HTTP adds redirect-to-HTTPS + h2c (HTTP/2 without TLS). h2c.NewHandler
-	// never calls http2.ConfigureServer, so the *http.Server's IdleTimeout
-	// below is invisible to HTTP/2 connections unless it is also set on the
-	// *http2.Server directly — golang.org/x/net/http2 reads its own
-	// IdleTimeout field, not the outer http.Server's, for the idle-hold
-	// bound on this listener's h2c connections.
+	// HTTP adds redirect-to-HTTPS + unencrypted HTTP/2 (h2c) alongside HTTP/1.
 	redirectHandler := s.redirectMiddleware(handler)
-	srv := newTimedServer(h2c.NewHandler(redirectHandler, &http2.Server{IdleTimeout: idleTimeout}), readHeaderTimeout, readTimeout, idleTimeout)
+	var protocols http.Protocols
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
+	srv := newTimedServer(redirectHandler, readHeaderTimeout, readTimeout, idleTimeout)
+	// Protocols enables h2c without a separate http2.Server value: Go's
+	// native HTTP/2 support reads this http.Server's own IdleTimeout field
+	// (falling back to ReadTimeout) for the h2 idle timeout, so the timeouts
+	// set above bind h2c connections too.
+	srv.Protocols = &protocols
 	s.mu.Lock()
 	s.server = srv
 	s.mu.Unlock()
@@ -982,6 +981,5 @@ func (s *Server) initiateShutdown(drain bool) {
 // This is useful for testing or embedding in another server.
 func (s *Server) Handler() http.Handler {
 	mux := s.buildMux()
-	handler := h2c.NewHandler(mux, &http2.Server{})
-	return s.trackingMiddleware(handler)
+	return s.trackingMiddleware(mux)
 }
