@@ -156,6 +156,7 @@ func (m *Manager) activeChunkState() chunk.ActiveChunkState {
 		LastWriteTS: m.active.meta.WriteEnd,
 		CreatedAt:   m.active.createdAt,
 		Bytes:       uint64(m.active.size), //nolint:gosec // G115: size is always non-negative
+		RawBytes:    uint64(m.active.size), //nolint:gosec // G115: size is always non-negative
 		Records:     uint64(len(m.active.records)),
 	}
 }

@@ -764,6 +764,8 @@ func (m *Manager) activeChunkState() chunk.ActiveChunkState {
 		LastWriteTS: m.active.meta.writeEnd,
 		CreatedAt:   m.active.createdAt,
 		Bytes:       totalBytes,
+		RawBytes:    m.active.rawOffset,
+		AttrBytes:   m.active.attrOffset,
 		Records:     m.active.recordCount,
 	}
 }

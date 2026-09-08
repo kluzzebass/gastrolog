@@ -26,6 +26,13 @@ type ActiveChunkState struct {
 	// This reflects actual on-disk growth: raw payload + attribute blob + idx entry overhead.
 	Bytes uint64
 
+	// RawBytes and AttrBytes are the sizes of the raw payload file and the
+	// attribute file on their own. Each is addressed by a 32-bit offset, so
+	// each has its own hard limit; a chunk manager without separate files
+	// reports its whole size as RawBytes.
+	RawBytes  uint64
+	AttrBytes uint64
+
 	// Records is the number of records appended so far.
 	Records uint64
 }
@@ -168,18 +175,13 @@ func NewHardLimitPolicy(rawMaxBytes, attrMaxBytes uint64) *HardLimitPolicy {
 }
 
 func (p *HardLimitPolicy) ShouldRotate(state ActiveChunkState, next Record) *string {
-	rawSize := state.Bytes + uint64(len(next.Raw))
-
-	attrBytes, _ := next.Attrs.Encode()
-	// Note: we need to track raw and attr separately for hard limits
-	// For now, we use a conservative estimate based on total bytes
-	// The actual implementation in the manager tracks these separately
-	_ = attrBytes
-
-	if rawSize > p.rawMaxBytes {
+	if state.RawBytes+uint64(len(next.Raw)) > p.rawMaxBytes {
 		return new("hard-limit")
 	}
-
+	attrBytes, _ := next.Attrs.Encode()
+	if state.AttrBytes+uint64(len(attrBytes)) > p.attrMaxBytes {
+		return new("hard-limit")
+	}
 	return nil
 }
 
