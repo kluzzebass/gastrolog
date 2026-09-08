@@ -7,6 +7,7 @@ import (
 	"gastrolog/internal/glid"
 	"iter"
 	"slices"
+	"strings"
 	"sync"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
@@ -341,6 +342,26 @@ func runMerge(yield func(chunk.Record, error) bool, states []mergeState, entries
 	}
 }
 
+// forwardedPipelineExpression serializes a pipeline query for a remote node
+// as "<filter> <directives> | <pipe> | <pipe>…". The query already carries the
+// filter (protoToQuery copies the pipeline's filter into BoolExpr), so only
+// the pipe operators are appended: emitting Pipeline.String() would repeat the
+// filter behind a pipe, where the remote parser reads it as an operator. The
+// vault predicate is dropped because ForwardSearchRequest.VaultId names the
+// vault explicitly. Timestamps are absolute so every node bins identically.
+func forwardedPipelineExpression(q query.Query, pipeline *querylang.Pipeline) string {
+	if q.BoolExpr == nil {
+		q.BoolExpr = pipeline.Filter
+	}
+	_, q.BoolExpr = query.ExtractVaultFilter(q.BoolExpr, nil)
+	parts := make([]string, 0, len(pipeline.Pipes)+1)
+	parts = append(parts, q.String())
+	for _, op := range pipeline.Pipes {
+		parts = append(parts, op.String())
+	}
+	return strings.TrimSpace(strings.Join(parts, " | "))
+}
+
 // collectRemotePipeline fans out a pipeline query to all remote vaults and
 // collects their TableResults. Each remote node runs the full pipeline locally
 // (the executor detects the pipeline and calls RunPipeline). The coordinating
@@ -374,16 +395,7 @@ func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, 
 		return nil, nil
 	}
 
-	// Reconstruct expression with absolute timestamps so remote nodes
-	// produce identical timechart bucket boundaries.
-	// Pipeline.String() uses " | " between parts but omits a leading "|"
-	// when there is no filter. Prefix with "| " to ensure the remote parser
-	// sees the pipe operator.
-	pipelineStr := pipeline.String()
-	if len(pipelineStr) > 0 && pipelineStr[0] != '|' {
-		pipelineStr = "| " + pipelineStr
-	}
-	remoteExpr := q.String() + " " + pipelineStr
+	remoteExpr := forwardedPipelineExpression(q, pipeline)
 
 	// Fan out RPCs concurrently — one goroutine per remote vault.
 	type pipelineFetch struct {
