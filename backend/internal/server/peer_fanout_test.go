@@ -3,11 +3,15 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"gastrolog/internal/orchestrator"
 	"io"
 	"log/slog"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"connectrpc.com/connect"
 )
 
 // TestPeerFanOutHonorsPerPeerTimeout pins the invariant that one paused
@@ -210,9 +214,9 @@ func TestPeerFanOutPlacementChurnNotDegraded(t *testing.T) {
 	fn := func(_ context.Context, nodeID string) (string, error) {
 		switch nodeID {
 		case "churning":
-			// A cross-RPC placement-churn error shape (peer reconfigured
-			// out of the vault); IsPlacementChurnErr recognises this.
-			return "", errors.New("follower rejected command: seal failed: vault instance not registered on this node: vault V")
+			// A peer reconfigured out of the vault answers NotFound
+			// across the forwarding boundary.
+			return "", connect.NewError(connect.CodeNotFound, fmt.Errorf("%w: vault V", orchestrator.ErrInstanceNotLocal))
 		case "broken":
 			return "", realErr
 		default:

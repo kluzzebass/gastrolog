@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
-	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -350,7 +349,7 @@ func (s *LifecycleServer) SetNodeState(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("state is required (one of LIVE, UNREACHABLE, MAINTENANCE, DRAINING, DECOMMISSIONING)"))
 	}
 	if err := s.cfgStore.SetNodeState(ctx, id, state, time.Now()); err != nil {
-		if strings.Contains(err.Error(), "illegal node state transition") || strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, system.ErrIllegalNodeStateTransition) || errors.Is(err, system.ErrNodeNotFound) || errors.Is(err, system.ErrCommandRejected) {
 			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
 		}
 		return nil, errInternal(err)
@@ -450,8 +449,11 @@ func (s *LifecycleServer) RemoveNode(
 		// operator-correctable: drain the vault, add an eligible node, or
 		// re-run with --force. Surface as FailedPrecondition so the CLI
 		// can treat them differently from genuine internal errors.
-		if strings.Contains(err.Error(), "refusing to remove node") {
+		if errors.Is(err, cluster.ErrWouldDropBelowRF) || errors.Is(err, cluster.ErrWouldOrphanVaults) {
 			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		}
+		if errors.Is(err, cluster.ErrNodeNotInCluster) {
+			return nil, connect.NewError(connect.CodeNotFound, err)
 		}
 		return nil, errInternal(err)
 	}

@@ -9,6 +9,7 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging/comp"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -3398,7 +3399,7 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 	// 2. Build indexes. Now reads through OpenCursor → GLCB cursor.
 	for _, builder := range m.indexBuilders {
 		if err := builder.Build(ctx, id); err != nil {
-			if isMissingLocalChunkFileError(err) {
+			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
 			m.logger.Warn("index build failed", "chunk", id, "error", err)
@@ -3428,20 +3429,6 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 	}
 
 	return nil
-}
-
-func isMissingLocalChunkFileError(err error) bool {
-	if errors.Is(err, os.ErrNotExist) {
-		return true
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "no such file or directory") {
-		return false
-	}
-	return strings.Contains(msg, "open raw.log") ||
-		strings.Contains(msg, "open idx.log") ||
-		strings.Contains(msg, "open attr.log") ||
-		strings.Contains(msg, "open attr_dict")
 }
 
 // RefreshDiskSizes recomputes bytes and diskBytes for a sealed chunk from the

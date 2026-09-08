@@ -16,9 +16,12 @@ var (
 	ErrChunkNotSealed = errors.New("chunk is not sealed")
 	ErrChunkNotFound  = errors.New("chunk not found")
 	ErrVaultNotFound  = errors.New("vault not found")
-	ErrActiveChunk    = errors.New("cannot delete active chunk")
-	ErrChunkArchived  = errors.New("chunk is archived and not immediately readable")
-	ErrChunkSuspect   = errors.New("chunk blob not found in cloud storage — may be transient")
+	// ErrVaultNotLocal is returned when a vault exists in the cluster but has
+	// no instance registered on this node.
+	ErrVaultNotLocal = errors.New("vault instance not registered on this node")
+	ErrActiveChunk   = errors.New("cannot delete active chunk")
+	ErrChunkArchived = errors.New("chunk is archived and not immediately readable")
+	ErrChunkSuspect  = errors.New("chunk blob not found in cloud storage — may be transient")
 	// ErrCloudStoreNotConfigured distinguishes "this vault has no cloud store"
 	// from "the cloud store holds nothing", which are the same empty result
 	// otherwise.

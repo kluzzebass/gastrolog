@@ -3,8 +3,8 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"strings"
 
+	"gastrolog/internal/chunk"
 	"gastrolog/internal/system"
 )
 
@@ -12,13 +12,13 @@ var (
 	// ErrVaultNotEmpty is returned when attempting to remove a vault that has data.
 	ErrVaultNotEmpty = errors.New("vault is not empty")
 	// ErrVaultNotFound is returned when attempting to operate on a non-existent vault.
-	ErrVaultNotFound = errors.New("vault not found")
+	ErrVaultNotFound = chunk.ErrVaultNotFound
 	// ErrInstanceNotLocal is returned when a vault instance is not registered on
 	// this node (typically because placement reconfiguration evicted it),
 	// even though the vault still exists cluster-wide. Distinct from
 	// ErrVaultNotFound so log lines don't suggest the vault was deleted
 	// during legitimate placement churn.
-	ErrInstanceNotLocal = errors.New("vault instance not registered on this node")
+	ErrInstanceNotLocal = chunk.ErrVaultNotLocal
 	// ErrVaultDisabled is returned when attempting to append to a disabled vault.
 	ErrVaultDisabled = errors.New("vault disabled")
 	// ErrDuplicateID is returned when attempting to add a component with an existing ID.
@@ -39,15 +39,7 @@ var (
 // cluster boundary (handler concatenates "import failed: " etc.), so a
 // substring fallback catches the rendered wording too.
 func IsPlacementChurnErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, ErrVaultNotFound) || errors.Is(err, ErrInstanceNotLocal) {
-		return true
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "vault not found") ||
-		strings.Contains(msg, "vault instance not registered on this node")
+	return errors.Is(err, ErrVaultNotFound) || errors.Is(err, ErrInstanceNotLocal)
 }
 
 // loadSystem loads the full system state (config + runtime) via the SystemLoader.

@@ -3,10 +3,14 @@ package cluster
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/system"
 
 	hraft "github.com/hashicorp/raft"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Forwarder sends pre-marshaled ConfigCommand bytes to the current Raft leader's
@@ -41,6 +45,11 @@ func (f *Forwarder) Forward(ctx context.Context, data []byte) (uint64, error) {
 	client := NewForwardApplyClient(h.GRPC())
 	resp, err := client.ForwardApply(ctx, &gastrologv1.ForwardApplyRequest{Command: data})
 	if err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.FailedPrecondition {
+			// The leader applied the command and rejected it; the
+			// connection is fine.
+			return 0, fmt.Errorf("%w: %s", system.ErrCommandRejected, st.Message())
+		}
 		h.Invalidate(err)
 		return 0, err
 	}

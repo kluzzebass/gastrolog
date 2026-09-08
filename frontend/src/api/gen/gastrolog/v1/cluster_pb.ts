@@ -49,6 +49,33 @@ proto3.util.setEnumType(AlarmPriority, "gastrolog.v1.AlarmPriority", [
 ]);
 
 /**
+ * ImportRejection classifies a failed chunk replication command so the
+ * sender can act on the cause without reading the error text.
+ *
+ * @generated from enum gastrolog.v1.ImportRejection
+ */
+export enum ImportRejection {
+  /**
+   * a failure with no classification
+   *
+   * @generated from enum value: IMPORT_REJECTION_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * the vault has no instance on the receiver yet; retry later
+   *
+   * @generated from enum value: IMPORT_REJECTION_VAULT_NOT_READY = 1;
+   */
+  VAULT_NOT_READY = 1,
+}
+// Retrieve enum metadata with: proto3.getEnumType(ImportRejection)
+proto3.util.setEnumType(ImportRejection, "gastrolog.v1.ImportRejection", [
+  { no: 0, name: "IMPORT_REJECTION_UNSPECIFIED" },
+  { no: 1, name: "IMPORT_REJECTION_VAULT_NOT_READY" },
+]);
+
+/**
  * ForwardApplyRequest carries a pre-marshaled ConfigCommand for the leader
  * to apply via raft.Apply(). Used by followers to proxy config writes.
  *
@@ -1614,6 +1641,13 @@ export class ChunkReplicationAck extends Message<ChunkReplicationAck> {
    */
   chunkId = new Uint8Array(0);
 
+  /**
+   * set when ok is false and the cause is known
+   *
+   * @generated from field: gastrolog.v1.ImportRejection rejection = 4;
+   */
+  rejection = ImportRejection.UNSPECIFIED;
+
   constructor(data?: PartialMessage<ChunkReplicationAck>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1625,6 +1659,7 @@ export class ChunkReplicationAck extends Message<ChunkReplicationAck> {
     { no: 1, name: "ok", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 2, name: "error", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 4, name: "rejection", kind: "enum", T: proto3.getEnumType(ImportRejection) },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationAck {

@@ -2,14 +2,20 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"syscall"
 	"time"
+
+	hraft "github.com/hashicorp/raft"
 
 	pb "github.com/Jille/raftadmin/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -72,7 +78,7 @@ func JoinCluster(ctx context.Context, logger *slog.Logger, addr, nodeID, nodeAdd
 		// one we just tried, retry there immediately (no backoff —
 		// genuine leader change, not contention). If it returns the
 		// same address or fails, fall through to backoff retry.
-		if strings.Contains(err.Error(), "not the leader") {
+		if isNotLeaderErr(err) {
 			if leaderAddr, qErr := queryLeader(ctx, addr, creds); qErr == nil && leaderAddr != "" && leaderAddr != addr {
 				if logger != nil {
 					logger.Info("join cluster: following to new leader",
@@ -113,25 +119,35 @@ func isTransientJoinErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	switch {
-	case strings.Contains(msg, "not the leader"):
+	if isNotLeaderErr(err) {
 		// Leader transiently unknown — membership change mid-commit
 		// on the leader, or just-elected leader still propagating.
 		return true
-	case strings.Contains(msg, "leadership lost"),
-		strings.Contains(msg, "leadership transfer"):
+	}
+	if raftFutureFailedWith(err, hraft.ErrLeadershipLost) || raftFutureFailedWith(err, hraft.ErrLeadershipTransferInProgress) {
 		// Leader lost election mid-call. Cluster will re-elect; retry.
 		return true
-	case strings.Contains(msg, "code = Unavailable"):
-		// gRPC server transiently not accepting connections (still
-		// starting up, just restarted, transient connectivity blip).
-		return true
-	case strings.Contains(msg, "connection refused"):
-		// TCP-level: pod just starting, listener not bound yet.
-		return true
 	}
-	return false
+	// gRPC server transiently not accepting connections: still starting
+	// up, just restarted, or the listener not bound yet. A refused TCP
+	// connection surfaces as Unavailable through gRPC and as ECONNREFUSED
+	// from a direct dial.
+	return status.Code(err) == codes.Unavailable || errors.Is(err, syscall.ECONNREFUSED)
+}
+
+// isNotLeaderErr reports whether the membership change failed because the
+// node addressed is not the Raft leader.
+func isNotLeaderErr(err error) bool {
+	return raftFutureFailedWith(err, hraft.ErrNotLeader)
+}
+
+// raftFutureFailedWith reports whether err carries the given Raft future
+// error. The raftadmin service returns the leader's future error as text in
+// its Await response, so the text is the only form that crosses the wire;
+// comparing against the Raft library's own sentinel message keeps this tied
+// to the library rather than to a phrase typed here.
+func raftFutureFailedWith(err error, sentinel error) bool {
+	return errors.Is(err, sentinel) || strings.Contains(err.Error(), sentinel.Error())
 }
 
 func tryJoinCluster(ctx context.Context, addr, nodeID, nodeAddr string, creds credentials.TransportCredentials, voter bool) error {

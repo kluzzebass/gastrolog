@@ -364,11 +364,19 @@ message ChunkReplicationImportCommit {
   bytes chunk_id = 1;
 }
 
+// ImportRejection classifies a failed chunk replication command so the
+// sender can act on the cause without reading the error text.
+enum ImportRejection {
+  IMPORT_REJECTION_UNSPECIFIED = 0; // a failure with no classification
+  IMPORT_REJECTION_VAULT_NOT_READY = 1; // the vault has no instance on the receiver yet; retry later
+}
+
 // ChunkReplicationAck is sent follower → leader after each command.
 message ChunkReplicationAck {
   bool ok = 1;
   string error = 2;
   bytes chunk_id = 3; // echoes the chunk_id from the command
+  ImportRejection rejection = 4; // set when ok is false and the cause is known
 }
 
 // RequestReplicaCatchupRequest is sent follower → placement leader. The

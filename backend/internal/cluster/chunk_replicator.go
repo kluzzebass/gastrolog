@@ -157,6 +157,9 @@ func (tr *ChunkReplicator) send(ctx context.Context, vaultID glid.GLID, nodeID s
 		// preempted the wedged import and spammed WARN on every catchup
 		// frame.
 		tr.closeStream(vaultID, nodeID)
+		if ack.GetRejection() == gastrologv1.ImportRejection_IMPORT_REJECTION_VAULT_NOT_READY {
+			return fmt.Errorf("follower rejected command: %w: %s", chunk.ErrVaultNotLocal, ack.Error)
+		}
 		return fmt.Errorf("follower rejected command: %s", ack.Error)
 	}
 	return nil

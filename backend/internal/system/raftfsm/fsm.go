@@ -273,7 +273,7 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 			return nil, err
 		}
 		if node == nil {
-			return nil, fmt.Errorf("set node state: node %s not found", id)
+			return nil, fmt.Errorf("set node state: %w: %s", system.ErrNodeNotFound, id)
 		}
 		if err := system.ValidateNodeStateTransition(node.State, newState); err != nil {
 			return nil, err

@@ -388,6 +388,21 @@ func (s *Server) AddNonvoter(id, addr string, timeout time.Duration) error {
 	return s.raft.AddNonvoter(hraft.ServerID(id), hraft.ServerAddress(addr), 0, timeout).Error()
 }
 
+// Removal refusals and misses. Wrapped by the removal path so the RPC layer
+// can answer with FailedPrecondition or NotFound without reading message
+// text, and so the CLI can tell an already-gone node from a failure.
+var (
+	// ErrWouldDropBelowRF is the sentinel wrapped by every RF-preservation
+	// refusal: the removal would drop a vault below its replication factor.
+	ErrWouldDropBelowRF = errors.New("removal would drop a vault below its replication factor")
+	// ErrWouldOrphanVaults is the sentinel wrapped by every orphan refusal:
+	// the removal would leave a vault with no holder at all.
+	ErrWouldOrphanVaults = errors.New("removal would orphan a vault")
+	// ErrNodeNotInCluster is returned when the node named is not in the
+	// Raft configuration.
+	ErrNodeNotInCluster = errors.New("node not in cluster configuration")
+)
+
 // DemoteVoter demotes an existing voter to a nonvoter.
 // The node continues receiving log replication but no longer participates in elections.
 func (s *Server) DemoteVoter(id string, timeout time.Duration) error {

@@ -6,6 +6,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 )
 
@@ -20,7 +21,15 @@ func errRequired(field string) *connect.Error {
 // errInternal wraps an error as a CodeInternal connect error. Replaces:
 //
 //	connect.NewError(connect.CodeInternal, err)
+//
+// A vault that is not on this node is not an internal failure: the caller
+// (usually a coordinator fanning out) gets NotFound, which crosses the
+// forwarding boundary as a code and lets it treat the answer as placement
+// churn rather than degradation.
 func errInternal(err error) *connect.Error {
+	if orchestrator.IsPlacementChurnErr(err) {
+		return connect.NewError(connect.CodeNotFound, err)
+	}
 	return connect.NewError(connect.CodeInternal, err)
 }
 

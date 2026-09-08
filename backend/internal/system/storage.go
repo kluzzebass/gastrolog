@@ -88,7 +88,7 @@ func ValidateNodeStateTransition(from, to NodeState) error {
 	if slices.Contains(legal, to) {
 		return nil
 	}
-	return fmt.Errorf("illegal node state transition: %s → %s", from, to)
+	return fmt.Errorf("%w: %s → %s", ErrIllegalNodeStateTransition, from, to)
 }
 
 // NodeConfig represents a cluster node configuration with its

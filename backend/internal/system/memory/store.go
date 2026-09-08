@@ -512,7 +512,7 @@ func (s *Store) SetNodeState(_ context.Context, id glid.GLID, state system.NodeS
 
 	node, ok := s.nodes[id]
 	if !ok {
-		return fmt.Errorf("set node state: node %s not found", id)
+		return fmt.Errorf("set node state: %w: %s", system.ErrNodeNotFound, id)
 	}
 	if err := system.ValidateNodeStateTransition(node.State, state); err != nil {
 		return err

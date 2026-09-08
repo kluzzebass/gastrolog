@@ -545,18 +545,11 @@ func newClusterYieldLeadershipCmd() *cobra.Command {
 	}
 }
 
-// isAlreadyRemoved reports whether err from RemoveNode indicates the
-// target was already absent from the cluster. preStop hooks must
-// treat these as benign success.
+// isAlreadyRemoved reports whether err from RemoveNode says the target is
+// already absent from the cluster, which the server answers with NotFound.
+// preStop hooks must treat that as benign success.
 func isAlreadyRemoved(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "not in cluster") ||
-		strings.Contains(msg, "not a voter") ||
-		strings.Contains(msg, "already removed") ||
-		strings.Contains(msg, "not in configuration")
+	return err != nil && connect.CodeOf(err) == connect.CodeNotFound
 }
 
 func newClusterPromoteCmd() *cobra.Command {
