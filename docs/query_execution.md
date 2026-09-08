@@ -338,7 +338,10 @@ kept only for chunks scanned in physical order. A chunk scanned through its
 timestamp index (every sealed chunk, and any ordering other than the default)
 yields in index order, so no physical position can resume it; it carries none,
 and the next page restarts it under the cursor, which the narrowed time bound
-lets the rank scan seek to directly. The engine applies its own token's cursor,
+lets the rank scan seek to directly. An open pipeline chunk has no source
+index yet; under `order=source_ts` it is put in canonical order in memory —
+one pass collects each surviving record's ordering key and position, charged
+against the memory budget, and the records are read back sorted. The engine applies its own token's cursor,
 so pagination is exact at the engine boundary too, not only through the
 server. This is what makes `order=source_ts` pageable on the same terms as
 the default ordering.

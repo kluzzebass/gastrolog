@@ -12,7 +12,9 @@ import (
 	"gastrolog/internal/manifest"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/segment"
+	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/query"
+	"gastrolog/internal/record"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -59,10 +61,52 @@ func buildOpenPipelineManifest(t *testing.T, ctx context.Context) (glid.GLID, *v
 // manifest references all of them.
 func buildOpenPipelineManifestN(t *testing.T, ctx context.Context, n int) (glid.GLID, *vaultctlfsm.FSM, string, chunk.ChunkID, uint64) {
 	t.Helper()
+	return buildOpenPipelineManifestWith(t, ctx, func(origin *originFixture) {
+		origin.ingestAttributed(t, ctx, n, "rubicon-c-segment-payload-line-for-paging-tests", nil)
+	})
+}
+
+// ingestScrambledSourceTimes ingests n records one second apart in ingest
+// time whose source times are a permutation of those seconds, so source order
+// disagrees with write order throughout the chunk.
+func (o *originFixture) ingestScrambledSourceTimes(t *testing.T, ctx context.Context, n int) {
+	t.Helper()
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	ingester := glid.New()
+	for i := range n {
+		ingestTS := t0.Add(time.Duration(i) * time.Second)
+		rec := record.Record{
+			EventID:  record.EventID{IngesterID: ingester, IngestTS: ingestTS, IngestSeq: uint32(i + 1)}, //nolint:gosec // G115: small loop index
+			IngestTS: ingestTS,
+			SourceTS: t0.Add(time.Duration((i*7)%n) * time.Second),
+			Raw:      []byte("rubicon-c-segment-payload-line-with-scrambled-source-times"),
+		}
+		ack := make(chan error, 1)
+		select {
+		case o.in <- segmentation.Input{Record: &rec, Ack: ack}:
+		case <-ctx.Done():
+			t.Fatal("ingest cancelled")
+		}
+		select {
+		case err := <-ack:
+			if err != nil {
+				t.Fatalf("ingest ack: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("ingest ack timeout")
+		}
+	}
+}
+
+// buildOpenPipelineManifestWith runs ingest against a fresh origin, waits for
+// the origin to publish what it will, brings every completed segment to head,
+// and plans until the open manifest references all of them.
+func buildOpenPipelineManifestWith(t *testing.T, ctx context.Context, ingest func(*originFixture)) (glid.GLID, *vaultctlfsm.FSM, string, chunk.ChunkID, uint64) {
+	t.Helper()
 	fsm := vaultctlfsm.New()
 	vaultID := glid.New()
 	origin := newOriginFixture(t, ctx, vaultID, fsm)
-	origin.ingestAttributed(t, ctx, n, "rubicon-c-segment-payload-line-for-paging-tests", nil)
+	ingest(origin)
 
 	// Segments publish asynchronously; settle on the set that arrives.
 	var entries []vaultctlfsm.CompletedSegmentEntry
@@ -439,12 +483,12 @@ func TestManifestRecordCursorSeekMatchesTheFileCursorContract(t *testing.T) {
 	if err := end.Seek(chunk.RecordRef{ChunkID: chunkID, Pos: wantRecords}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ref, err := end.Prev(); err != nil || ref.Pos != wantRecords {
-		t.Errorf("Seek(end) then Prev returned position %d (err %v), want %d", ref.Pos, err, wantRecords)
+	if _, ref, err := end.Prev(); err != nil || ref.Pos != wantRecords-1 {
+		t.Errorf("Seek(end) then Prev returned position %d (err %v), want %d", ref.Pos, err, wantRecords-1)
 	}
 	_ = end.Close()
 
-	for _, p := range []uint64{1, 2, wantRecords / 2, wantRecords - 1} {
+	for _, p := range []uint64{0, 1, wantRecords / 2, wantRecords - 1} {
 		cursor, err := reg.OpenPipelineChunkCursor(vaultID, chunkID)
 		if err != nil {
 			t.Fatal(err)
@@ -460,17 +504,21 @@ func TestManifestRecordCursorSeekMatchesTheFileCursorContract(t *testing.T) {
 		if ref.Pos != p || string(rec.Raw) != byPos[p] {
 			t.Errorf("Seek(%d) then Next returned position %d", p, ref.Pos)
 		}
-		if _, ref, err := cursor.Next(); err != nil || ref.Pos != p+1 {
-			t.Errorf("Seek(%d), Next, Next returned position %d (err %v), want %d", p, ref.Pos, err, p+1)
+		if p+1 < wantRecords {
+			if _, ref, err := cursor.Next(); err != nil || ref.Pos != p+1 {
+				t.Errorf("Seek(%d), Next, Next returned position %d (err %v), want %d", p, ref.Pos, err, p+1)
+			}
+		} else if _, _, err := cursor.Next(); !errors.Is(err, chunk.ErrNoMoreRecords) {
+			t.Errorf("Seek(last), Next, Next: want exhaustion, got %v", err)
 		}
 		if err := cursor.Seek(chunk.RecordRef{ChunkID: chunkID, Pos: p}); err != nil {
 			t.Fatalf("Seek(%d): %v", p, err)
 		}
 		rec, ref, err = cursor.Prev()
 		switch {
-		case p == 1:
+		case p == 0:
 			if !errors.Is(err, chunk.ErrNoMoreRecords) {
-				t.Errorf("Seek(1) then Prev returned position %d, want exhaustion", ref.Pos)
+				t.Errorf("Seek(0) then Prev returned position %d, want exhaustion", ref.Pos)
 			}
 		case err != nil:
 			t.Fatalf("Seek(%d) then Prev: %v", p, err)
@@ -519,7 +567,7 @@ func TestPipelineActiveChunkPagesWithoutLoss(t *testing.T) {
 			}
 		}
 		var lost, dup []uint64
-		for p := uint64(1); p <= wantRecords; p++ {
+		for p := uint64(0); p < wantRecords; p++ {
 			switch seen[p] {
 			case 0:
 				lost = append(lost, p)
@@ -530,6 +578,66 @@ func TestPipelineActiveChunkPagesWithoutLoss(t *testing.T) {
 		}
 		if len(lost) > 0 || len(dup) > 0 {
 			t.Errorf("reverse=%v: paged %d of %d records; lost %v, duplicated %v", reverse, len(seen), wantRecords, lost, dup)
+		}
+	}
+}
+
+// An open pipeline chunk has no source index, so under order=source_ts the
+// engine must sort it: every record in canonical source order, forward and
+// reverse, and paging through it must lose and repeat nothing.
+func TestPipelineActiveChunkSourceOrderIsSorted(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const n = 60
+	vaultID, fsm, home, _, wantRecords := buildOpenPipelineManifestWith(t, ctx, func(origin *originFixture) {
+		origin.ingestScrambledSourceTimes(t, ctx, n)
+	})
+	if wantRecords < 8 {
+		t.Fatalf("need >= 8 records in the open manifest, got %d", wantRecords)
+	}
+	open := fsm.OpenChunk()
+	meta := openChunkManifestToChunkMeta(open, chunk.ChunkStateActive)
+	cm, im := newQueryCM(t)
+	reg := &pipelineSearchRegistry{vaultID: vaultID, cm: cm, im: im, metas: []chunk.ChunkMeta{meta}, home: home, fsm: fsm}
+	eng := query.NewWithRegistry(reg, nil)
+
+	for _, reverse := range []bool{false, true} {
+		got := drainSearch(t, eng, query.Query{OrderBy: query.OrderBySourceTS, IsReverse: reverse})
+		if uint64(len(got)) != wantRecords {
+			t.Fatalf("reverse=%v: %d records, want %d", reverse, len(got), wantRecords)
+		}
+		scrambled := 0
+		for i := 1; i < len(got); i++ {
+			if got[i].IngestTS.Before(got[i-1].IngestTS) != reverse {
+				scrambled++
+			}
+			if a, b := got[i-1].SourceTS, got[i].SourceTS; (!reverse && b.Before(a)) || (reverse && b.After(a)) {
+				t.Fatalf("reverse=%v: out of source order at %d: %v then %v", reverse, i, a, b)
+			}
+		}
+		if scrambled == 0 {
+			t.Fatalf("reverse=%v: source order coincides with write order; the fixture proves nothing", reverse)
+		}
+
+		seen := make(map[uint64]int, wantRecords)
+		var token *query.ResumeToken
+		for page := 0; page < int(wantRecords)+2; page++ {
+			it, next := eng.Search(ctx, query.Query{OrderBy: query.OrderBySourceTS, IsReverse: reverse, Limit: 7}, token)
+			for rec, err := range it {
+				if err != nil {
+					t.Fatalf("reverse=%v page %d: %v", reverse, page, err)
+				}
+				seen[rec.Ref.Pos]++
+			}
+			if token = next(); token == nil {
+				break
+			}
+		}
+		for p := uint64(0); p < wantRecords; p++ {
+			if seen[p] != 1 {
+				t.Errorf("reverse=%v: position %d seen %d times", reverse, p, seen[p])
+			}
 		}
 	}
 }

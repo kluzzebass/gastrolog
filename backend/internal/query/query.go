@@ -70,9 +70,15 @@ func (o OrderBy) RecordTS(rec chunk.Record) time.Time {
 // EventID's fields are intrinsic to the event and identical on every copy of
 // it, so every node ranks the same two records the same way.
 func (o OrderBy) CompareRecords(a, b chunk.Record, reverse bool) int {
-	c := o.RecordTS(a).Compare(o.RecordTS(b))
+	return compareOrderKeys(o.RecordTS(a), a.EventID, o.RecordTS(b), b.EventID, reverse)
+}
+
+// compareOrderKeys is CompareRecords on the two fields it reads, for callers
+// that hold an ordering timestamp and an EventID without the record.
+func compareOrderKeys(tsA time.Time, evA chunk.EventID, tsB time.Time, evB chunk.EventID, reverse bool) int {
+	c := tsA.Compare(tsB)
 	if c == 0 {
-		c = a.EventID.Compare(b.EventID)
+		c = evA.Compare(evB)
 	}
 	if reverse {
 		return -c
@@ -798,12 +804,17 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 	}
 
 	// Active/sealing FSM entries without a local GLCB fall back to manifest
-	// segment scans. Once data.glcb is on disk (registered with the chunk
-	// manager), use the embedded ITSI like a sealed chunk.
+	// segment scans, which serve ingest order. Once data.glcb is on disk
+	// (registered with the chunk manager), use the embedded ITSI like a sealed
+	// chunk. Any other ordering over such a chunk has no index to walk, so the
+	// chunk is sorted in memory.
 	if !chunkLocallyMaterialized(cm, meta) {
 		view := tsIndexViewForChunk(cm, im, q.OrderBy)
 		if !chunkHasTSIndex(view, meta.ID) {
-			return b.build(ctx, cursor, q), nil
+			if q.OrderBy == OrderByIngestTS {
+				return b.build(ctx, cursor, q), nil
+			}
+			return e.buildSortedScanner(ctx, cursor, q, b, meta), nil
 		}
 	}
 
