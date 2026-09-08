@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"net"
 	"net/http"
 	"strconv"
@@ -27,10 +26,22 @@ import (
 
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/ingester/bodyutil"
+	"gastrolog/internal/ingester/limits"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
+	"gastrolog/internal/panicguard"
 	"gastrolog/internal/pipeline/ingestion"
 )
+
+// maxExportBodyBytes bounds one OTLP/HTTP request after decompression.
+// Collectors batch well under this; the ceiling is what stops a small
+// compressed payload from expanding into the node's memory.
+const maxExportBodyBytes = 10 << 20
+
+// droppedAttrLogInterval spaces the "attributes dropped" warning. A
+// misconfigured producer emits the same oversized record continuously, and
+// one line per record would bury the condition it reports.
+const droppedAttrLogInterval = 10 * time.Second
 
 // Ingester accepts OpenTelemetry log records via HTTP and gRPC.
 type Ingester struct {
@@ -39,6 +50,11 @@ type Ingester struct {
 	grpcAddr string
 	out      chan<- ingestion.IngesterMessage
 	logger   *slog.Logger
+
+	// droppedAttrLog throttles the report of attributes the record ceiling
+	// refused. Dropping them silently would leave records that quietly
+	// disagree with what the producer sent.
+	droppedAttrLog logging.Throttle
 
 	// pressureGate is consulted non-blockingly by processExportRequest to
 	// decide whether to reject incoming exports with 429 / ResourceExhausted.
@@ -64,10 +80,11 @@ type Config struct {
 // New creates a new OTLP ingester.
 func New(cfg Config) *Ingester {
 	return &Ingester{
-		id:       cfg.ID,
-		httpAddr: cfg.HTTPAddr,
-		grpcAddr: cfg.GRPCAddr,
-		logger:   comp.Ingester.Sub("otlp").Desc("OpenTelemetry Logs ingester — accepts OTLP log records via HTTP (POST /v1/logs) and gRPC.").Apply(logging.Default(cfg.Logger)),
+		id:             cfg.ID,
+		httpAddr:       cfg.HTTPAddr,
+		grpcAddr:       cfg.GRPCAddr,
+		droppedAttrLog: logging.Throttle{Interval: droppedAttrLogInterval},
+		logger:         comp.Ingester.Sub("otlp").Desc("OpenTelemetry Logs ingester — accepts OTLP log records via HTTP (POST /v1/logs) and gRPC.").Apply(logging.Default(cfg.Logger)),
 	}
 }
 
@@ -110,7 +127,11 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 	}()
 	ing.logger.Info("otlp http listening", "addr", httpLn.Addr().String())
 
-	grpcSrv := grpc.NewServer()
+	// grpc-go does not recover panics raised inside a service handler, so
+	// without this interceptor a panic in Export ends the process. The
+	// service exposes only unary methods; a stream interceptor would guard
+	// nothing.
+	grpcSrv := grpc.NewServer(grpc.UnaryInterceptor(ing.recoverUnary))
 	collogspb.RegisterLogsServiceServer(grpcSrv, &logsServiceServer{ing: ing})
 
 	go func() {
@@ -139,8 +160,11 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 // handleHTTP handles POST /v1/logs requests.
 // Accepts protobuf (application/x-protobuf) and JSON (application/json).
 func (ing *Ingester) handleHTTP(w http.ResponseWriter, req *http.Request) {
-	data, err := bodyutil.ReadBody(req.Body, req.Header.Get("Content-Encoding"), 10<<20)
+	data, err := bodyutil.ReadBody(req.Body, req.Header.Get("Content-Encoding"), maxExportBodyBytes)
 	if err != nil {
+		// A rejected body means the sender's records did not land. Say so
+		// on both sides rather than only answering 400.
+		ing.logger.Warn("export body rejected", "error", err, "remote", req.RemoteAddr)
 		http.Error(w, "failed to read body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -180,6 +204,20 @@ func (ing *Ingester) handleHTTP(w http.ResponseWriter, req *http.Request) {
 	_, _ = w.Write(respData)
 }
 
+// recoverUnary turns a panic inside a gRPC handler into an Internal status
+// for that one call, so a hostile export costs the caller its request and
+// not the node its process.
+func (ing *Ingester) recoverUnary(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
+	defer func() {
+		if v := recover(); v != nil {
+			panicguard.Log(ing.logger, "OTLP gRPC handler", v, "method", info.FullMethod)
+			resp = nil
+			err = status.Error(codes.Internal, "internal error")
+		}
+	}()
+	return handler(ctx, req)
+}
+
 // errBackpressure signals the queue is near capacity.
 var errBackpressure = errors.New("backpressure: ingest queue near capacity")
 
@@ -201,13 +239,17 @@ func (ing *Ingester) processExportRequest(ctx context.Context, req *collogspb.Ex
 	now := time.Now()
 
 	for _, rl := range req.GetResourceLogs() {
-		resourceAttrs := flattenKVList(rl.GetResource().GetAttributes())
+		// The KeyValue lists are carried down as-is rather than flattened
+		// into maps first: flattening would materialize an
+		// attacker-sized map before anything checked its size, and the
+		// protobuf order is what makes the ceiling deterministic.
+		resourceKVs := rl.GetResource().GetAttributes()
 
 		for _, sl := range rl.GetScopeLogs() {
-			scopeAttrs := flattenKVList(sl.GetScope().GetAttributes())
+			scopeKVs := sl.GetScope().GetAttributes()
 
 			for _, lr := range sl.GetLogRecords() {
-				msg := ing.logRecordToMessage(lr, resourceAttrs, scopeAttrs, now)
+				msg := ing.logRecordToMessage(lr, resourceKVs, scopeKVs, now)
 				select {
 				case ing.out <- msg:
 				case <-ctx.Done():
@@ -219,27 +261,44 @@ func (ing *Ingester) processExportRequest(ctx context.Context, req *collogspb.Ex
 	return nil
 }
 
-func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceAttrs, scopeAttrs map[string]string, now time.Time) ingestion.IngesterMessage {
-	attrs := make(map[string]string, len(resourceAttrs)+len(scopeAttrs)+8)
+func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceKVs, scopeKVs []*commonpb.KeyValue, now time.Time) ingestion.IngesterMessage {
+	attrs := make(map[string]string, min(len(resourceKVs)+len(scopeKVs)+8, limits.Records.Count))
 
-	maps.Copy(attrs, resourceAttrs)
-	maps.Copy(attrs, scopeAttrs)
-	maps.Copy(attrs, flattenKVList(lr.GetAttributes()))
+	// A record's attributes are attacker-chosen in both count and length,
+	// and each one becomes an index term. Bound them, and drop the excess
+	// rather than the record: the log line itself is the payload that must
+	// not be lost.
+	//
+	// Most specific first, and an attribute already present is not
+	// replaced, so record attributes still win over scope and scope over
+	// resource — and a resource-level flood cannot starve the record's own
+	// attributes out of the budget. Within each level the protobuf order
+	// decides, so two identical records always keep the same attributes.
+	var loss limits.AttrLoss
+	loss.Dropped = ing.addBounded(attrs, lr.GetAttributes())
+	loss.Dropped += ing.addBounded(attrs, scopeKVs)
+	loss.Dropped += ing.addBounded(attrs, resourceKVs)
 
+	// The ingester's own attributes are written last and outside the
+	// budget: they describe the record rather than repeat what the
+	// producer said, so a flood must neither crowd them out nor forge
+	// them. Every one of these names is a plausible producer attribute —
+	// "severity" most of all — so a record can lose a real attribute this
+	// way, and SetOwn counts it.
 	if lr.GetSeverityText() != "" {
-		attrs["severity"] = lr.GetSeverityText()
+		loss.SetOwn(attrs, "severity", lr.GetSeverityText())
 	}
 	if lr.GetSeverityNumber() != logspb.SeverityNumber_SEVERITY_NUMBER_UNSPECIFIED {
-		attrs["severity_number"] = strconv.Itoa(int(lr.GetSeverityNumber()))
+		loss.SetOwn(attrs, "severity_number", strconv.Itoa(int(lr.GetSeverityNumber())))
 	}
 	if len(lr.GetTraceId()) > 0 {
-		attrs["trace_id"] = hex.EncodeToString(lr.GetTraceId())
+		loss.SetOwn(attrs, "trace_id", hex.EncodeToString(lr.GetTraceId()))
 	}
 	if len(lr.GetSpanId()) > 0 {
-		attrs["span_id"] = hex.EncodeToString(lr.GetSpanId())
+		loss.SetOwn(attrs, "span_id", hex.EncodeToString(lr.GetSpanId()))
 	}
 
-	attrs["ingester_type"] = "otlp"
+	loss.SetOwn(attrs, "ingester_type", "otlp")
 
 	// Both OTLP timestamps are preserved as attributes unconditionally.
 	// SourceTS prefers TimeUnixNano, falls back to ObservedTimeUnixNano.
@@ -247,14 +306,22 @@ func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceAttrs, sco
 	if lr.GetTimeUnixNano() != 0 {
 		t := time.Unix(0, int64(lr.GetTimeUnixNano())) //nolint:gosec // G115: OTLP nanosecond timestamps are well within int64 range
 		sourceTS = t
-		attrs["time_unix_nano"] = t.Format(time.RFC3339Nano)
+		loss.SetOwn(attrs, "time_unix_nano", t.Format(time.RFC3339Nano))
 	}
 	if lr.GetObservedTimeUnixNano() != 0 {
 		t := time.Unix(0, int64(lr.GetObservedTimeUnixNano())) //nolint:gosec // G115
 		if sourceTS.IsZero() {
 			sourceTS = t
 		}
-		attrs["observed_ts"] = t.Format(time.RFC3339Nano)
+		loss.SetOwn(attrs, "observed_ts", t.Format(time.RFC3339Nano))
+	}
+
+	if loss.Any() {
+		if n, ok := ing.droppedAttrLog.Allow("record-attrs"); ok {
+			ing.logger.Warn("OTLP record attributes dropped",
+				"dropped", loss.Dropped, "displaced", loss.Displaced,
+				"max_attrs", limits.Records.Count, "suppressed", n)
+		}
 	}
 
 	return ingestion.IngesterMessage{
@@ -265,6 +332,23 @@ func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceAttrs, sco
 		IngestTS:   now,
 		IngesterID: ing.id,
 	}
+}
+
+// addBounded adds kvs to attrs in protobuf order under the record ceiling,
+// returning how many it had to leave out. A key already present keeps the
+// value a more specific level gave it.
+func (ing *Ingester) addBounded(attrs map[string]string, kvs []*commonpb.KeyValue) int {
+	dropped := 0
+	for _, kv := range kvs {
+		key := kv.GetKey()
+		if _, taken := attrs[key]; taken {
+			continue
+		}
+		if err := limits.Records.Add(attrs, key, anyValueToString(kv.GetValue())); err != nil {
+			dropped++
+		}
+	}
+	return dropped
 }
 
 // logsServiceServer implements the gRPC LogsService.

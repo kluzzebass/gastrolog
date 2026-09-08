@@ -14,17 +14,16 @@ import (
 
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/ingester/bodyutil"
+	"gastrolog/internal/ingester/limits"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
 	"gastrolog/internal/pipeline/ingestion"
 )
 
-// Attribute limits to prevent abuse.
-const (
-	maxAttrs        = 32  // maximum number of attributes per message
-	maxAttrKeyLen   = 64  // maximum length of attribute key
-	maxAttrValueLen = 256 // maximum length of attribute value
-)
+// maxPushBodyBytes bounds one push request after decompression. Loki
+// senders batch to a few megabytes at most; the ceiling is what stops a
+// small compressed payload from expanding into the node's memory.
+const maxPushBodyBytes = 10 << 20
 
 // Ingester accepts log messages via the Loki Push API (POST /loki/api/v1/push).
 // It implements ingestion.Ingester.
@@ -186,8 +185,11 @@ func (r *Ingester) handlePush(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Ingester) decodePushBody(w http.ResponseWriter, req *http.Request) ([]ingestion.IngesterMessage, bool) {
-	data, err := bodyutil.ReadBody(req.Body, req.Header.Get("Content-Encoding"), 10<<20)
+	data, err := bodyutil.ReadBody(req.Body, req.Header.Get("Content-Encoding"), maxPushBodyBytes)
 	if err != nil {
+		// A rejected body means the sender's records did not land. Say so
+		// on both sides rather than only answering 400.
+		r.logger.Warn("push body rejected", "error", err, "remote", req.RemoteAddr)
 		http.Error(w, "failed to read body: "+err.Error(), http.StatusBadRequest)
 		return nil, false
 	}
@@ -290,9 +292,9 @@ func (r *Ingester) parseValue(val Value, streamLabels map[string]string) (ingest
 	}
 
 	// Build attrs from stream labels (with validation).
-	attrs := make(map[string]string, min(len(streamLabels), maxAttrs))
+	attrs := make(map[string]string, min(len(streamLabels), limits.Labels.Count))
 	for k, v := range streamLabels {
-		if err := addAttr(attrs, k, v); err != nil {
+		if err := limits.Labels.Add(attrs, k, v); err != nil {
 			return ingestion.IngesterMessage{}, fmt.Errorf("stream label: %w", err)
 		}
 	}
@@ -304,7 +306,7 @@ func (r *Ingester) parseValue(val Value, streamLabels map[string]string) (ingest
 			return ingestion.IngesterMessage{}, fmt.Errorf("metadata must be an object: %w", err)
 		}
 		for k, v := range metadata {
-			if err := addAttr(attrs, k, v); err != nil {
+			if err := limits.Labels.Add(attrs, k, v); err != nil {
 				return ingestion.IngesterMessage{}, fmt.Errorf("metadata: %w", err)
 			}
 		}
@@ -320,19 +322,4 @@ func (r *Ingester) parseValue(val Value, streamLabels map[string]string) (ingest
 		IngestTS:   time.Now(),
 		IngesterID: r.id,
 	}, nil
-}
-
-// addAttr adds an attribute with validation. Returns error if limits exceeded.
-func addAttr(attrs map[string]string, key, value string) error {
-	if len(attrs) >= maxAttrs {
-		return fmt.Errorf("too many attributes (max %d)", maxAttrs)
-	}
-	if len(key) > maxAttrKeyLen {
-		return fmt.Errorf("attribute key too long: %d > %d", len(key), maxAttrKeyLen)
-	}
-	if len(value) > maxAttrValueLen {
-		return fmt.Errorf("attribute value too long: %d > %d", len(value), maxAttrValueLen)
-	}
-	attrs[key] = value
-	return nil
 }

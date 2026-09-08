@@ -14,6 +14,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/panicguard"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
 	"gastrolog/internal/system"
@@ -224,7 +225,9 @@ func (s *QueryServer) searchDirect(
 	if resume == nil {
 		histCh = make(chan []*apiv1.HistogramBucket, 1)
 		go func() {
-			histCh <- s.computePageHistogram(ctx, eng, histogramQ, remoteHist, distributed, selectedVaults)
+			histCh <- s.guardedHistogram(func() []*apiv1.HistogramBucket {
+				return s.computePageHistogram(ctx, eng, histogramQ, remoteHist, distributed, selectedVaults)
+			})
 		}()
 	}
 
@@ -255,6 +258,23 @@ func (s *QueryServer) searchDirect(
 	}
 
 	return s.mergeAndStream(ctx, localIter, getToken, remoteIter, q.OrderBy, q.Reverse(), q.Limit, transform, nil, contributingVaults, serverStart, stream, histCh)
+}
+
+// guardedHistogram runs the page-1 histogram computation on its own
+// goroutine's behalf, yielding no buckets if it panics. The histogram is one
+// panel of a search response; bucket arithmetic that fails costs the client
+// its chart, not every vault and Raft group this node serves.
+//
+// It returns on the panic path rather than swallowing the goroutine, because
+// the caller blocks waiting for exactly one value on the histogram channel.
+func (s *QueryServer) guardedHistogram(compute func() []*apiv1.HistogramBucket) (buckets []*apiv1.HistogramBucket) {
+	defer func() {
+		if v := recover(); v != nil {
+			panicguard.Log(s.logger, "search histogram", v)
+			buckets = nil
+		}
+	}()
+	return compute()
 }
 
 // computePageHistogram builds the page-1 volume histogram for a search.

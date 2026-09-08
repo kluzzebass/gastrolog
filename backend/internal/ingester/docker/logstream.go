@@ -8,6 +8,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"gastrolog/internal/ingester/limits"
 )
 
 // streamType identifies the source of a Docker log line.
@@ -65,6 +67,12 @@ func readMultiplexed(r io.Reader, entries chan<- logEntry) error {
 
 		if size == 0 {
 			continue
+		}
+		// The frame header sizes the allocation below. Docker's own log
+		// driver splits at 16 KB, so anything near this ceiling is a
+		// driver that is not what it claims to be.
+		if int64(size) > limits.MaxFrameBytes {
+			return fmt.Errorf("docker: frame size %d exceeds %d", size, limits.MaxFrameBytes)
 		}
 
 		payload := make([]byte, size)

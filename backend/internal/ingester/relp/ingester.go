@@ -19,11 +19,18 @@ import (
 
 	"gastrolog/internal/cert"
 	"gastrolog/internal/chanwatch"
+	"gastrolog/internal/ingester/limits"
 	"gastrolog/internal/ingester/syslogparse"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
+	"gastrolog/internal/panicguard"
 	"gastrolog/internal/pipeline/ingestion"
 )
+
+// refusedLogInterval spaces the "listener at capacity" warning. A peer that
+// hammers a full listener would otherwise write one line per refused
+// connection, burying the condition it is reporting.
+const refusedLogInterval = 10 * time.Second
 
 // Ingester accepts syslog messages via the RELP protocol.
 // It implements ingestion.Ingester.
@@ -40,6 +47,15 @@ type Ingester struct {
 
 	mu       sync.Mutex
 	listener net.Listener
+
+	// conns caps concurrent connections; refusedLog keeps a peer that
+	// hammers the cap from filling the log with one line per refusal.
+	conns      *limits.ConnLimiter
+	refusedLog logging.Throttle
+
+	// frameTimeout bounds how long a sender may take to finish a frame it
+	// has started. Tests shorten it; nothing else sets it.
+	frameTimeout time.Duration
 
 	// pressureGate throttles socket reads when the ingest pipeline is backed up.
 	// The ack-gated message flow already provides indirect backpressure; this
@@ -73,10 +89,13 @@ type Config struct {
 // New creates a new RELP ingester.
 func New(cfg Config) *Ingester {
 	return &Ingester{
-		id:        cfg.ID,
-		addr:      cfg.Addr,
-		tlsConfig: cfg.TLSConfig,
-		logger:    comp.Ingester.Sub("relp").Desc("RELP ingester — TCP transport with transaction-based acknowledgments (rsyslog-compatible).").Apply(logging.Default(cfg.Logger)),
+		id:           cfg.ID,
+		addr:         cfg.Addr,
+		tlsConfig:    cfg.TLSConfig,
+		conns:        limits.NewConnLimiter(limits.MaxConnections),
+		frameTimeout: limits.FrameTimeout,
+		refusedLog:   logging.Throttle{Interval: refusedLogInterval},
+		logger:       comp.Ingester.Sub("relp").Desc("RELP ingester — TCP transport with transaction-based acknowledgments (rsyslog-compatible).").Apply(logging.Default(cfg.Logger)),
 	}
 }
 
@@ -127,7 +146,24 @@ func (r *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage
 			continue
 		}
 
+		remote := conn.RemoteAddr().String()
+		// Past the cap, refuse immediately: a peer opening connections
+		// faster than they close must not exhaust the node's file
+		// descriptors or goroutines.
+		if !r.conns.Acquire() {
+			_ = conn.Close()
+			if n, ok := r.refusedLog.Allow("conn-limit"); ok {
+				r.logger.Warn("RELP connection refused: listener at capacity",
+					"remote", remote, "max_connections", limits.MaxConnections, "suppressed", n)
+			}
+			continue
+		}
+
 		wg.Go(func() {
+			defer r.conns.Release()
+			// A panic on a hostile frame costs this connection, not the
+			// node and every other vault and ingester running on it.
+			defer panicguard.Recover(r.logger, "RELP connection", "remote", remote)
 			r.handleConn(ctx, conn, out)
 		})
 	}
@@ -152,18 +188,29 @@ func (r *Ingester) handleConn(ctx context.Context, conn net.Conn, out chan<- ing
 		remoteIP = tcpAddr.IP.String()
 	}
 
+	// A sender that starts a frame must finish it. Idle time between
+	// frames stays unbounded: a relay on a quiet host holds an open
+	// connection for hours and is not the thing being defended against.
+	framed := limits.NewFrameConn(conn, r.frameTimeout)
+
 	// Wrap with TLS if configured.
-	var fd io.ReadWriter = conn
+	var fd io.ReadWriter = framed
 	if r.tlsConfig != nil {
-		tlsConn := tls.Server(conn, r.tlsConfig)
+		tlsConn := tls.Server(framed, r.tlsConfig)
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
 			r.logger.Debug("RELP TLS handshake failed", "error", err, "remote", remoteIP)
 			return
 		}
+		framed.Done()
 		fd = tlsConn
 	}
 
 	session := NewSession(fd, fd)
+	// Clear the deadline as each frame completes rather than once per
+	// ReceiveLog: the first ReceiveLog reads the open handshake and then
+	// blocks on the next frame, so a per-call boundary would hold the
+	// handshake's deadline over a sender that is simply idle.
+	session.OnFrame(framed.Done)
 
 	r.logger.Debug("RELP session established", "remote", remoteIP)
 
@@ -197,7 +244,14 @@ func (r *Ingester) receiveAndForward(
 ) bool {
 	msg, err := session.ReceiveLog()
 	if err != nil {
-		if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+		switch {
+		case errors.Is(err, ErrOversizeFrame):
+			if n, ok := r.refusedLog.Allow("oversize-frame"); ok {
+				r.logger.Warn("RELP frame rejected", "error", err, "remote", remoteIP,
+					"max_frame_bytes", limits.MaxFrameBytes, "suppressed", n)
+			}
+		case errors.Is(err, io.EOF), errors.Is(err, net.ErrClosed):
+		default:
 			r.logger.Debug("RELP receive ended", "error", err, "remote", remoteIP)
 		}
 		return false
