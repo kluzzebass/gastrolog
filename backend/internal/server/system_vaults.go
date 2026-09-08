@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"gastrolog/internal/glid"
@@ -11,6 +12,7 @@ import (
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/blobstore"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
@@ -495,6 +497,70 @@ func protoToVaultConfig(p *apiv1.VaultConfig) (system.VaultConfig, error) {
 // CloudServiceTester validates connectivity for a cloud storage configuration.
 type CloudServiceTester func(ctx context.Context, params map[string]string) (string, error)
 
+// credentialParams are the store params that carry secret material.
+var credentialParams = []string{
+	blobstore.ParamAccessKey,
+	blobstore.ParamSecretKey,
+	blobstore.ParamConnectionString,
+	blobstore.ParamCredentialsJSON,
+}
+
+// carriesCredentials reports whether a test request supplies credential
+// material of its own.
+func carriesCredentials(params map[string]string) bool {
+	for _, k := range credentialParams {
+		if params[k] != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// cloudTestParams resolves the params a connection test runs with.
+//
+// A request carrying credentials of its own is tested exactly as given: the
+// caller is proving credentials they already hold, against whatever
+// destination they name. A request that names a saved service and supplies
+// none is testing that service, so it runs against the service's stored
+// configuration in full — credentials and destination together.
+//
+// Taking the destination from the caller while spending stored credentials
+// would hand any caller a probe that writes, reads and lists in a bucket of
+// their choosing under the operator's cloud identity, which is precisely
+// what redacting the credentials exists to prevent. For the same reason,
+// spending stored credentials at all is admin-only.
+//
+// The two cases never mix. A request that supplies half a key pair is run
+// as given, with the other half empty — completing it from the store would
+// report whether the missing half was guessed correctly.
+func (s *SystemServer) cloudTestParams(ctx context.Context, msg *apiv1.TestCloudServiceRequest) (map[string]string, *connect.Error) {
+	params := make(map[string]string, len(msg.Params))
+	maps.Copy(params, msg.Params)
+	if len(msg.CloudServiceId) == 0 || carriesCredentials(params) {
+		return params, nil
+	}
+
+	id, connErr := parseProtoID(msg.CloudServiceId)
+	if connErr != nil {
+		return nil, connErr
+	}
+	stored, err := s.sysStore.GetCloudService(ctx, id)
+	if err != nil {
+		return nil, errInternal(err)
+	}
+	if stored == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("cloud service not found"))
+	}
+	if carriesCredentials(stored.StoreParams()) && !isAdmin(ctx) {
+		return nil, connect.NewError(connect.CodePermissionDenied,
+			errors.New("testing a cloud service against its stored credentials requires the admin role"))
+	}
+
+	storedParams := stored.StoreParams()
+	storedParams[blobstore.ParamProvider] = stored.Provider
+	return storedParams, nil
+}
+
 // TestCloudService tests connectivity for a cloud storage configuration without saving it.
 func (s *SystemServer) TestCloudService(
 	ctx context.Context,
@@ -508,7 +574,12 @@ func (s *SystemServer) TestCloudService(
 		}), nil
 	}
 
-	msg, err := tester(ctx, req.Msg.Params)
+	params, connErr := s.cloudTestParams(ctx, req.Msg)
+	if connErr != nil {
+		return nil, connErr
+	}
+
+	msg, err := tester(ctx, params)
 	if err != nil {
 		return connect.NewResponse(&apiv1.TestCloudServiceResponse{ //nolint:nilerr // test failure is reported in the response body, not as an RPC error
 			Success: false,

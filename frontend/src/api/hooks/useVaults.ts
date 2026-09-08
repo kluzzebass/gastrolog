@@ -216,10 +216,13 @@ function stripEmptyParams(params: Record<string, string>): Record<string, string
 
 export function useTestCloudService() {
   return useMutation({
-    mutationFn: async (args: { type: string; params: Record<string, string> }) => {
+    mutationFn: async (args: { type: string; params: Record<string, string>; cloudServiceId?: string }) => {
       const response = await systemClient.testCloudService({
         type: args.type,
         params: stripEmptyParams(args.params),
+        // Set when testing a saved service: the server supplies the
+        // credentials it holds for the params left empty here.
+        cloudServiceId: args.cloudServiceId ? decode(args.cloudServiceId) : undefined,
       });
       return response;
     },

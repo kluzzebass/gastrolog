@@ -1,6 +1,7 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { endpointSchemeError } from "../../utils/endpointScheme";
 import { FormField, TextInput, TextArea, SelectInput, NumberInput } from "./FormField";
+import { Checkbox } from "./Checkbox";
 import { Button } from "./Buttons";
 
 interface CloudStorageTransitionEdit {
@@ -13,8 +14,16 @@ interface CloudServiceFieldValues {
   bucket: string;
   region: string;
   endpoint: string;
+  // Credentials are write-only: the server reports whether they exist via
+  // credentialsConfigured and never sends the values back, so these start
+  // empty on an existing service and an empty one means "keep the stored
+  // credential".
   accessKey: string;
   secretKey: string;
+  credentialsConfigured: boolean;
+  // Drops the stored credentials, which an empty field would otherwise
+  // keep. This is how a service moves to its provider's ambient chain.
+  clearCredentials: boolean;
   container: string;
   connectionString: string;
   credentialsJson: string;
@@ -102,10 +111,12 @@ export function CloudServiceFields({
       {/* S3 credentials */}
       {isS3 && (
         <>
+          <CredentialNotice values={values} onChange={onChange} dark={dark} />
           <FormField label="Access Key" dark={dark}>
             <TextInput
               value={values.accessKey}
               onChange={(v) => onChange({ accessKey: v })}
+              disabled={values.clearCredentials}
               dark={dark}
               mono
             />
@@ -114,6 +125,7 @@ export function CloudServiceFields({
             <TextInput
               value={values.secretKey}
               onChange={(v) => onChange({ secretKey: v })}
+              disabled={values.clearCredentials}
               dark={dark}
               mono
             />
@@ -123,31 +135,104 @@ export function CloudServiceFields({
 
       {/* Azure credentials */}
       {isAzure && (
-        <FormField label="Connection String" dark={dark}>
-          <TextInput
-            value={values.connectionString}
-            onChange={(v) => onChange({ connectionString: v })}
-            dark={dark}
-            mono
-          />
-        </FormField>
+        <>
+          <CredentialNotice values={values} onChange={onChange} dark={dark} />
+          <FormField label="Connection String" dark={dark}>
+            <TextInput
+              value={values.connectionString}
+              onChange={(v) => onChange({ connectionString: v })}
+              disabled={values.clearCredentials}
+              dark={dark}
+              mono
+            />
+          </FormField>
+        </>
       )}
 
       {/* GCS credentials */}
       {isGCS && (
-        <FormField label="Credentials JSON" dark={dark}>
-          <TextArea
-            value={values.credentialsJson}
-            onChange={(v) => onChange({ credentialsJson: v })}
-            dark={dark}
-            rows={4}
-          />
-        </FormField>
+        <>
+          <CredentialNotice values={values} onChange={onChange} dark={dark} />
+          <FormField label="Credentials JSON" dark={dark}>
+            <TextArea
+              value={values.credentialsJson}
+              onChange={(v) => onChange({ credentialsJson: v })}
+              disabled={values.clearCredentials}
+              dark={dark}
+              rows={4}
+            />
+          </FormField>
+        </>
       )}
 
       {/* Archival Lifecycle */}
       <ArchivalSection values={values} onChange={onChange} dark={dark} />
     </>
+  );
+}
+
+// --- Credentials ---
+
+function unconfiguredCredentialText(provider: string): string {
+  switch (provider) {
+    case "azure":
+      return "No credentials stored. Azure Blob Storage requires a connection string.";
+    case "gcs":
+      return "No credentials stored — Application Default Credentials are used: GOOGLE_APPLICATION_CREDENTIALS, an attached service account, or gcloud auth.";
+    default:
+      return "No credentials stored — the AWS default credential chain is used: environment variables, ~/.aws/credentials, or an IAM instance role.";
+  }
+}
+
+/**
+ * States what the empty credential fields below it mean. Stored credentials
+ * are never sent to the browser, so an empty field is ambiguous on its own:
+ * it either means the service has none, or means "keep the one on the server".
+ * When something is stored, this is also the only way to drop it — an empty
+ * field can no longer say "remove this".
+ */
+function CredentialNotice({
+  values,
+  onChange,
+  dark,
+}: Readonly<{
+  values: CloudServiceFieldValues;
+  onChange: (patch: Partial<CloudServiceFieldValues>) => void;
+  dark: boolean;
+}>) {
+  const c = useThemeClass(dark);
+  const muted = c("text-text-muted", "text-light-text-muted");
+
+  if (!values.credentialsConfigured) {
+    return (
+      <p className={`text-[0.75em] leading-snug ${muted}`}>
+        {unconfiguredCredentialText(values.provider)}
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <p className={`text-[0.75em] leading-snug ${muted}`}>
+        {values.clearCredentials
+          ? "The stored credentials will be removed on save."
+          : "Credentials are stored. They are never sent back to the browser — leave the fields below empty to keep them, or enter a value to replace it."}
+      </p>
+      <Checkbox
+        checked={values.clearCredentials}
+        onChange={(v) =>
+          // Discards anything typed: "remove" that leaves a credential in
+          // place would be a lie, and the fields are disabled while it is on.
+          onChange(
+            v
+              ? { clearCredentials: true, accessKey: "", secretKey: "", connectionString: "", credentialsJson: "" }
+              : { clearCredentials: false },
+          )
+        }
+        label="Remove the stored credentials"
+        dark={dark}
+      />
+    </div>
   );
 }
 

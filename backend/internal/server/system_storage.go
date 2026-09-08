@@ -49,6 +49,22 @@ func (s *SystemServer) PutCloudService(
 	cfg := convert.CloudServiceFromProto(req.Msg.Config)
 	cfg.ID = id
 
+	// Reads redact credentials, so a client editing an existing service has
+	// none to send back: an empty credential field keeps the stored value.
+	// Clearing instead would strip credentials on the first save after a
+	// config read and lock the cluster out of sealed chunks already in the
+	// object store. clear_credentials is the explicit way to drop them and
+	// fall back to the provider's ambient chain. Merged before validation so
+	// the checks below see the credentials the service will actually run with.
+	existing, err := s.sysStore.GetCloudService(ctx, id)
+	if err != nil {
+		return nil, errInternal(err)
+	}
+	if existing != nil && !req.Msg.ClearCredentials {
+		cfg = cfg.WithPreservedCredentials(*existing)
+	}
+	cfg = cfg.WithoutUnusedCredentials()
+
 	// Config-accept validation: reject configs that would fail blobstore store
 	// creation at vault init, so a bad provider config (bare endpoint, missing
 	// bucket, …) errors here — visible to the CLI/UI/API caller — instead of
@@ -63,6 +79,7 @@ func (s *SystemServer) PutCloudService(
 	if err := s.sysStore.PutCloudService(ctx, cfg); err != nil {
 		return nil, errInternal(err)
 	}
+	s.logCloudCredentialChange(existing, cfg)
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyCloudServicePut, ID: id})
 
 	fullCfg, err := s.buildFullSystem(ctx)
@@ -70,6 +87,26 @@ func (s *SystemServer) PutCloudService(
 		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.PutCloudServiceResponse{System: fullCfg}), nil
+}
+
+// logCloudCredentialChange records credential material leaving a cloud
+// service, after the write it describes has succeeded. Credentials are
+// write-only, so the log is the only place the change is visible at all —
+// and a service that quietly stops carrying credentials degrades to
+// whatever ambient chain the provider finds, which is a change an operator
+// must be able to find after the fact.
+//
+// Any credential material leaving counts, not just a complete set: an S3
+// service holding only an access key still has a secret to lose.
+func (s *SystemServer) logCloudCredentialChange(prev *system.CloudService, next system.CloudService) {
+	if s.logger == nil || prev == nil {
+		return
+	}
+	if !carriesCredentials(prev.StoreParams()) || carriesCredentials(next.StoreParams()) {
+		return
+	}
+	s.logger.Warn("cloud service credentials removed",
+		"cloud_service", next.ID, "name", next.Name, "provider", next.Provider)
 }
 
 // DeleteCloudService removes a cloud service.

@@ -233,6 +233,14 @@ proto3.util.setEnumType(LogComponentLevelSource, "gastrolog.v1.LogComponentLevel
  * @generated from message gastrolog.v1.GetSystemRequest
  */
 export class GetSystemRequest extends Message<GetSystemRequest> {
+  /**
+   * When true, return cloud service credentials (for export/backup).
+   * Admin only; any other caller gets the redacted response.
+   *
+   * @generated from field: bool include_secrets = 1;
+   */
+  includeSecrets = false;
+
   constructor(data?: PartialMessage<GetSystemRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -241,6 +249,7 @@ export class GetSystemRequest extends Message<GetSystemRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.GetSystemRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "include_secrets", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSystemRequest {
@@ -2174,6 +2183,7 @@ export class DeleteIngesterResponse extends Message<DeleteIngesterResponse> {
 export class GetSettingsRequest extends Message<GetSettingsRequest> {
   /**
    * When true, return actual secret values (for export/backup).
+   * Admin only; any other caller gets the redacted response.
    *
    * @generated from field: bool include_secrets = 1;
    */
@@ -5459,6 +5469,18 @@ export class TestCloudServiceRequest extends Message<TestCloudServiceRequest> {
    */
   params: { [key: string]: string } = {};
 
+  /**
+   * Optional: an existing cloud service whose stored credentials fill in
+   * the credential params left empty here, so an operator can test a saved
+   * service without retyping secrets the API never returned. The fallback
+   * only applies when params carry the same endpoint the service is stored
+   * with — otherwise the request would spend those credentials on a
+   * destination the caller chose.
+   *
+   * @generated from field: bytes cloud_service_id = 3;
+   */
+  cloudServiceId = new Uint8Array(0);
+
   constructor(data?: PartialMessage<TestCloudServiceRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -5469,6 +5491,7 @@ export class TestCloudServiceRequest extends Message<TestCloudServiceRequest> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+    { no: 3, name: "cloud_service_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TestCloudServiceRequest {
@@ -7068,6 +7091,16 @@ export class PutCloudServiceRequest extends Message<PutCloudServiceRequest> {
    */
   config?: CloudService;
 
+  /**
+   * Drop the stored credentials instead of keeping the ones config leaves
+   * empty. This is how a service moves to its provider's ambient
+   * credential chain — an IAM role, ADC — now that an empty credential
+   * field means "unchanged".
+   *
+   * @generated from field: bool clear_credentials = 2;
+   */
+  clearCredentials = false;
+
   constructor(data?: PartialMessage<PutCloudServiceRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -7077,6 +7110,7 @@ export class PutCloudServiceRequest extends Message<PutCloudServiceRequest> {
   static readonly typeName = "gastrolog.v1.PutCloudServiceRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "config", kind: "message", T: CloudService },
+    { no: 2, name: "clear_credentials", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutCloudServiceRequest {
