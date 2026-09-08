@@ -1394,7 +1394,7 @@ var File_gastrolog_v1_lifecycle_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\n" +
-	"\x1cgastrolog/v1/lifecycle.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1agastrolog/v1/cluster.proto\x1a\x1agastrolog/v1/storage.proto\x1a\x19gastrolog/v1/system.proto\x1a\x18gastrolog/v1/vault.proto\"\x0f\n" +
+	"\x1cgastrolog/v1/lifecycle.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18gastrolog/v1/authz.proto\x1a\x1agastrolog/v1/cluster.proto\x1a\x1agastrolog/v1/storage.proto\x1a\x19gastrolog/v1/system.proto\x1a\x18gastrolog/v1/vault.proto\"\x0f\n" +
 	"\rHealthRequest\"\xe1\x01\n" +
 	"\x0eHealthResponse\x12,\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x14.gastrolog.v1.StatusR\x06status\x12\x18\n" +
@@ -1494,18 +1494,18 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"!CLUSTER_NODE_SUFFRAGE_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bCLUSTER_NODE_SUFFRAGE_VOTER\x10\x01\x12\"\n" +
 	"\x1eCLUSTER_NODE_SUFFRAGE_NONVOTER\x10\x02\x12!\n" +
-	"\x1dCLUSTER_NODE_SUFFRAGE_STAGING\x10\x032\xa9\x06\n" +
-	"\x10LifecycleService\x12C\n" +
-	"\x06Health\x12\x1b.gastrolog.v1.HealthRequest\x1a\x1c.gastrolog.v1.HealthResponse\x12I\n" +
-	"\bShutdown\x12\x1d.gastrolog.v1.ShutdownRequest\x1a\x1e.gastrolog.v1.ShutdownResponse\x12a\n" +
-	"\x10GetClusterStatus\x12%.gastrolog.v1.GetClusterStatusRequest\x1a&.gastrolog.v1.GetClusterStatusResponse\x12^\n" +
-	"\x0fSetNodeSuffrage\x12$.gastrolog.v1.SetNodeSuffrageRequest\x1a%.gastrolog.v1.SetNodeSuffrageResponse\x12U\n" +
-	"\fSetNodeState\x12!.gastrolog.v1.SetNodeStateRequest\x1a\".gastrolog.v1.SetNodeStateResponse\x12R\n" +
-	"\vJoinCluster\x12 .gastrolog.v1.JoinClusterRequest\x1a!.gastrolog.v1.JoinClusterResponse\x12O\n" +
+	"\x1dCLUSTER_NODE_SUFFRAGE_STAGING\x10\x032\xdf\x06\n" +
+	"\x10LifecycleService\x12I\n" +
+	"\x06Health\x12\x1b.gastrolog.v1.HealthRequest\x1a\x1c.gastrolog.v1.HealthResponse\"\x04\x80\xb5\x18\x01\x12O\n" +
+	"\bShutdown\x12\x1d.gastrolog.v1.ShutdownRequest\x1a\x1e.gastrolog.v1.ShutdownResponse\"\x04\x80\xb5\x18\x03\x12g\n" +
+	"\x10GetClusterStatus\x12%.gastrolog.v1.GetClusterStatusRequest\x1a&.gastrolog.v1.GetClusterStatusResponse\"\x04\x80\xb5\x18\x03\x12d\n" +
+	"\x0fSetNodeSuffrage\x12$.gastrolog.v1.SetNodeSuffrageRequest\x1a%.gastrolog.v1.SetNodeSuffrageResponse\"\x04\x80\xb5\x18\x03\x12[\n" +
+	"\fSetNodeState\x12!.gastrolog.v1.SetNodeStateRequest\x1a\".gastrolog.v1.SetNodeStateResponse\"\x04\x80\xb5\x18\x03\x12X\n" +
+	"\vJoinCluster\x12 .gastrolog.v1.JoinClusterRequest\x1a!.gastrolog.v1.JoinClusterResponse\"\x04\x80\xb5\x18\x03\x12U\n" +
 	"\n" +
-	"RemoveNode\x12\x1f.gastrolog.v1.RemoveNodeRequest\x1a .gastrolog.v1.RemoveNodeResponse\x12^\n" +
-	"\x0fYieldLeadership\x12$.gastrolog.v1.YieldLeadershipRequest\x1a%.gastrolog.v1.YieldLeadershipResponse\x12f\n" +
-	"\x11WatchSystemStatus\x12&.gastrolog.v1.WatchSystemStatusRequest\x1a'.gastrolog.v1.WatchSystemStatusResponse0\x01B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"RemoveNode\x12\x1f.gastrolog.v1.RemoveNodeRequest\x1a .gastrolog.v1.RemoveNodeResponse\"\x04\x80\xb5\x18\x03\x12d\n" +
+	"\x0fYieldLeadership\x12$.gastrolog.v1.YieldLeadershipRequest\x1a%.gastrolog.v1.YieldLeadershipResponse\"\x04\x80\xb5\x18\x03\x12l\n" +
+	"\x11WatchSystemStatus\x12&.gastrolog.v1.WatchSystemStatusRequest\x1a'.gastrolog.v1.WatchSystemStatusResponse\"\x04\x80\xb5\x18\x030\x01B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_lifecycle_proto_rawDescOnce sync.Once
@@ -1604,6 +1604,7 @@ func file_gastrolog_v1_lifecycle_proto_init() {
 	if File_gastrolog_v1_lifecycle_proto != nil {
 		return
 	}
+	file_gastrolog_v1_authz_proto_init()
 	file_gastrolog_v1_cluster_proto_init()
 	file_gastrolog_v1_storage_proto_init()
 	file_gastrolog_v1_system_proto_init()

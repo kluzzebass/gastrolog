@@ -22,7 +22,7 @@ func TestIntegration_RegisterThenDeny(t *testing.T) {
 	t.Parallel()
 	cfgStore := sysmem.NewStore()
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
-	interceptor := auth.NewAuthInterceptor(tokens, cfgStore, nil)
+	interceptor := auth.NewAuthInterceptor(auth.NewVerifier(tokens, nil), cfgStore)
 	opts := connect.WithInterceptors(interceptor)
 
 	mux := http.NewServeMux()

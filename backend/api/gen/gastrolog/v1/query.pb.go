@@ -2442,7 +2442,7 @@ var File_gastrolog_v1_query_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\n" +
-	"\x18gastrolog/v1/query.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18gastrolog/v1/vault.proto\"]\n" +
+	"\x18gastrolog/v1/query.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18gastrolog/v1/authz.proto\x1a\x18gastrolog/v1/vault.proto\"]\n" +
 	"\rSearchRequest\x12)\n" +
 	"\x05query\x18\x01 \x01(\v2\x13.gastrolog.v1.QueryR\x05query\x12!\n" +
 	"\fresume_token\x18\x02 \x01(\fR\vresumeToken\"\x84\x03\n" +
@@ -2660,18 +2660,18 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"expression\x12\x16\n" +
 	"\x06target\x18\x02 \x01(\tR\x06target\".\n" +
 	"\x15ExportToVaultResponse\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\fR\x05jobId2\xeb\x05\n" +
-	"\fQueryService\x12E\n" +
-	"\x06Search\x12\x1b.gastrolog.v1.SearchRequest\x1a\x1c.gastrolog.v1.SearchResponse0\x01\x12E\n" +
-	"\x06Follow\x12\x1b.gastrolog.v1.FollowRequest\x1a\x1c.gastrolog.v1.FollowResponse0\x01\x12F\n" +
-	"\aExplain\x12\x1c.gastrolog.v1.ExplainRequest\x1a\x1d.gastrolog.v1.ExplainResponse\x12O\n" +
+	"\x06job_id\x18\x01 \x01(\fR\x05jobId2\xa1\x06\n" +
+	"\fQueryService\x12K\n" +
+	"\x06Search\x12\x1b.gastrolog.v1.SearchRequest\x1a\x1c.gastrolog.v1.SearchResponse\"\x04\x80\xb5\x18\x020\x01\x12K\n" +
+	"\x06Follow\x12\x1b.gastrolog.v1.FollowRequest\x1a\x1c.gastrolog.v1.FollowResponse\"\x04\x80\xb5\x18\x020\x01\x12L\n" +
+	"\aExplain\x12\x1c.gastrolog.v1.ExplainRequest\x1a\x1d.gastrolog.v1.ExplainResponse\"\x04\x80\xb5\x18\x02\x12U\n" +
 	"\n" +
-	"GetContext\x12\x1f.gastrolog.v1.GetContextRequest\x1a .gastrolog.v1.GetContextResponse\x12L\n" +
-	"\tGetSyntax\x12\x1e.gastrolog.v1.GetSyntaxRequest\x1a\x1f.gastrolog.v1.GetSyntaxResponse\x12X\n" +
-	"\rValidateQuery\x12\".gastrolog.v1.ValidateQueryRequest\x1a#.gastrolog.v1.ValidateQueryResponse\x12d\n" +
-	"\x11GetPipelineFields\x12&.gastrolog.v1.GetPipelineFieldsRequest\x1a'.gastrolog.v1.GetPipelineFieldsResponse\x12L\n" +
-	"\tGetFields\x12\x1e.gastrolog.v1.GetFieldsRequest\x1a\x1f.gastrolog.v1.GetFieldsResponse\x12X\n" +
-	"\rExportToVault\x12\".gastrolog.v1.ExportToVaultRequest\x1a#.gastrolog.v1.ExportToVaultResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"GetContext\x12\x1f.gastrolog.v1.GetContextRequest\x1a .gastrolog.v1.GetContextResponse\"\x04\x80\xb5\x18\x02\x12R\n" +
+	"\tGetSyntax\x12\x1e.gastrolog.v1.GetSyntaxRequest\x1a\x1f.gastrolog.v1.GetSyntaxResponse\"\x04\x80\xb5\x18\x02\x12^\n" +
+	"\rValidateQuery\x12\".gastrolog.v1.ValidateQueryRequest\x1a#.gastrolog.v1.ValidateQueryResponse\"\x04\x80\xb5\x18\x02\x12j\n" +
+	"\x11GetPipelineFields\x12&.gastrolog.v1.GetPipelineFieldsRequest\x1a'.gastrolog.v1.GetPipelineFieldsResponse\"\x04\x80\xb5\x18\x02\x12R\n" +
+	"\tGetFields\x12\x1e.gastrolog.v1.GetFieldsRequest\x1a\x1f.gastrolog.v1.GetFieldsResponse\"\x04\x80\xb5\x18\x02\x12^\n" +
+	"\rExportToVault\x12\".gastrolog.v1.ExportToVaultRequest\x1a#.gastrolog.v1.ExportToVaultResponse\"\x04\x80\xb5\x18\x03B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_query_proto_rawDescOnce sync.Once
@@ -2802,6 +2802,7 @@ func file_gastrolog_v1_query_proto_init() {
 	if File_gastrolog_v1_query_proto != nil {
 		return
 	}
+	file_gastrolog_v1_authz_proto_init()
 	file_gastrolog_v1_vault_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{

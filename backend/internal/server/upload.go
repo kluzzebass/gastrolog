@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/home"
 	"gastrolog/internal/system"
 )
@@ -38,15 +39,18 @@ func (s *Server) handleManagedFileUpload(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Auth check: verify JWT from Authorization header (unless noAuth mode).
-	if !s.noAuth && s.tokens != nil {
-		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if token == "" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+	// Admin only — a managed file's display name is what resolves a lookup
+	// source, so an upload can shadow an admin-configured source and steer
+	// enrichment. This route is a plain http.Handler that the Connect auth
+	// interceptor never sees, so it authorizes through the same verifier: JWT
+	// signature, expiry, server-side revocation, then role.
+	if !s.noAuth {
+		if s.tokens == nil {
+			http.Error(w, "authentication unavailable", http.StatusInternalServerError)
 			return
 		}
-		if _, err := s.tokens.Verify(token); err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		if _, err := s.apiVerifier().Authorize(r.Context(), apiv1.AuthLevel_AUTH_LEVEL_ADMIN, r.Header); err != nil {
+			writeAuthError(w, err)
 			return
 		}
 	}

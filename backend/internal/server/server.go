@@ -601,7 +601,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		interceptors = append(interceptors, s.routingInterceptor()...)
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(interceptors...))
 	case s.tokens != nil:
-		authInterceptor := auth.NewAuthInterceptor(s.tokens, s.cfgStore, &tokenValidator{cfgStore: s.cfgStore})
+		authInterceptor := auth.NewAuthInterceptor(s.apiVerifier(), s.cfgStore)
 		interceptors := []connect.Interceptor{newRPCErrorLogInterceptor(s.logger), authInterceptor}
 		interceptors = append(interceptors, s.routingInterceptor()...)
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(interceptors...))
