@@ -630,7 +630,7 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) startCombined() error {
-	opts := s.baseServerOpts(maxChunkTransferBytes, true)
+	opts := s.baseServerOpts(maxChunkTransferBytes)
 	s.grpcSrv = grpc.NewServer(opts...)
 	s.tm.Register(s.grpcSrv)
 	if s.raft != nil {
@@ -646,7 +646,7 @@ func (s *Server) startWithLaneIsolation() error {
 	s.tm.SetInboundLaneRegistry(registry)
 	s.sniDemux = newSNIDemuxListener(s.listener, registry)
 
-	serviceOpts := s.baseServerOpts(maxChunkTransferBytes, true)
+	serviceOpts := s.baseServerOpts(maxChunkTransferBytes)
 	s.grpcSrv = grpc.NewServer(serviceOpts...)
 	if s.raft != nil {
 		raftadmin.Register(s.grpcSrv, s.raft)
@@ -682,11 +682,7 @@ func (s *Server) EnsureRaftGroupLane(groupID string) error {
 	// Register transport group state before serving inbound RPCs so demuxed
 	// connections never hit dispatchRPC with an unregistered group.
 	s.tm.GroupTransport(groupID)
-	raftOpts := append(s.baseServerOpts(maxRaftLaneRecvBytes, false),
-		grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor),
-		grpc.ChainStreamInterceptor(s.pauseStreamInterceptor),
-	)
-	srv := grpc.NewServer(raftOpts...)
+	srv := grpc.NewServer(s.baseServerOpts(maxRaftLaneRecvBytes)...)
 	s.tm.RegisterGroup(srv, groupID)
 	s.raftGroupServers[groupID] = srv
 	return s.serveListener(ln, srv, "cluster-raft-"+groupID)
@@ -706,20 +702,23 @@ func (s *Server) RemoveRaftGroupLane(groupID string) {
 	}
 }
 
-func (s *Server) baseServerOpts(maxRecv int, fullInterceptors bool) []grpc.ServerOption {
+// baseServerOpts builds the options shared by every inbound gRPC stack on the
+// cluster port. Under TLS every stack — service lane and raft lanes alike —
+// gets the mTLS interceptors: hashicorp/raft authenticates no peer of its own,
+// so without them an uncredentialed dial to a lane commits entries to the
+// replicated FSM.
+func (s *Server) baseServerOpts(maxRecv int) []grpc.ServerOption {
 	var opts []grpc.ServerOption
 	opts = append(opts, grpc.MaxRecvMsgSize(maxRecv))
 
 	if s.cfg.TLS != nil {
 		tlsCfg := s.cfg.TLS.ServerTLSConfig()
-		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsCfg)))
-		if fullInterceptors {
-			opts = append(opts,
-				grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor, s.mTLSUnaryInterceptor),
-				grpc.ChainStreamInterceptor(s.pauseStreamInterceptor, s.mTLSStreamInterceptor),
-			)
-		}
-	} else if fullInterceptors {
+		opts = append(opts,
+			grpc.Creds(credentials.NewTLS(tlsCfg)),
+			grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor, s.mTLSUnaryInterceptor),
+			grpc.ChainStreamInterceptor(s.pauseStreamInterceptor, s.mTLSStreamInterceptor),
+		)
+	} else {
 		opts = append(opts,
 			grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor),
 			grpc.ChainStreamInterceptor(s.pauseStreamInterceptor),

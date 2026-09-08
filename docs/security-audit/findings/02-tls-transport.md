@@ -38,12 +38,24 @@ sends no client cert, and calls `MultiRaftTransportService`:
 - `TimeoutNow` → forces a target into candidate state on demand.
 - `InstallSnapshot` → replaces a follower's entire FSM state.
 
-**Remediation.** Add `s.mTLSUnaryInterceptor` / `s.mTLSStreamInterceptor` to the raft lane
-option set (i.e. pass `fullInterceptors=true` in `EnsureRaftGroupLane`, or chain the mTLS
-interceptors explicitly alongside the pause ones). Better, remove the footgun at the root:
-set `ClientAuth: tls.RequireAndVerifyClientCert` in `GetConfigForClient` and give the Enroll
-path its own listener/lane rather than relaxing client auth for the whole port. The mTLS
-interceptor should then be defence in depth, not the sole gate.
+**Remediation.** Two layers, and the interceptor one is *not* the one-liner it looks like.
+
+Adding `s.mTLSUnaryInterceptor` / `s.mTLSStreamInterceptor` to the raft lane option set
+changes nothing on its own: the `MultiRaftTransportService` handlers are hand-written
+`grpc.MethodDesc` entries, and the unary ones discarded the `grpc.UnaryServerInterceptor`
+argument gRPC hands them. gRPC applies stream interceptors itself but delegates unary ones
+to the handler, so *every* server-level unary interceptor on that service was inert —
+including the pause interceptor the lanes explicitly installed. The handlers must run
+dispatch through that chain, the way the `ClusterService` handlers in `forward.go` already
+did.
+
+The gate that actually rejects the anonymous dial is the TLS layer: choose `ClientAuth`
+per connection in `GetConfigForClient` from the ClientHello SNI. Raft lane SNIs get
+`tls.RequireAndVerifyClientCert`; everything else reaches the service lane and stays
+`VerifyClientCertIfGiven`, because Enroll is how a joining node obtains the certificate it
+does not yet have. The SNI is already the demux key, so this needs no separate listener —
+tightening the whole port instead would lock new nodes out. The mTLS interceptor is then
+defence in depth, not the sole gate.
 
 ---
 
@@ -393,8 +405,10 @@ that pushes operators toward unsafe workarounds rather than a flaw in itself.
 
 ## Suggested fix order
 
-1. **C-1** — one-line-scale change (`fullInterceptors=true` for raft lanes), removes an
-   unauthenticated remote-code-of-consensus path. Do this first.
+1. **C-1** — per-SNI `ClientAuth` plus interceptor plumbing in the hand-written
+   `MultiRaftTransportService` handlers; removes an unauthenticated
+   remote-code-of-consensus path. Do this first. (Scoped as one-line-scale when filed —
+   `fullInterceptors=true` alone turns out to change nothing; see the finding.)
 2. **H-1** — replace `verifyCAFingerprint` with a real chain verification against the pinned CA.
 3. **H-3** — stop logging the token; add expiry/single-use and a rotation path.
 4. **H-2** — per-node certificates and identity enforcement. The largest change, and the

@@ -38,7 +38,11 @@ So the service lane (ForwardRPC, ForwardApply, chunk transfer, managed-file stre
 
 **Exploitability:** requires network reach to the cluster port. In the local dev layout and in a flat Kubernetes pod network that is any workload in the cluster; it is *not* limited to already-root-on-a-node. This is the highest-impact finding in this lens.
 
-**Remediation:** pass `fullInterceptors = true` at `cluster.go:685` so the Raft lanes get `mTLSUnaryInterceptor` / `mTLSStreamInterceptor`, or better, move the peer-cert requirement into the TLS config itself for the Raft lanes (`ClientAuth: tls.RequireAndVerifyClientCert`) — the `VerifyClientCertIfGiven` relaxation exists only for `Enroll`, which lives on the service lane, so the Raft lanes never need it. Add a test that dials a Raft lane with no client cert and asserts the handshake or first RPC fails.
+**Remediation:** put the peer-cert requirement in the TLS config, chosen per connection from the ClientHello SNI in `GetConfigForClient`. Raft lane SNIs get `ClientAuth: tls.RequireAndVerifyClientCert`; every other SNI reaches the service lane and keeps `VerifyClientCertIfGiven`, because the relaxation exists for `Enroll` — how a joining node obtains the certificate it does not yet have. SNI is already the demux key, so the two policies coexist on one port; tightening the whole listener would lock new nodes out.
+
+Attaching `mTLSUnaryInterceptor` / `mTLSStreamInterceptor` to the Raft lanes is worth doing as defence in depth, but **it is not sufficient by itself** and is not the one-line change it appears to be: the `MultiRaftTransportService` handlers are hand-written `grpc.MethodDesc` entries whose unary handlers discarded the interceptor argument gRPC passes them, leaving every server-level unary interceptor on that service inert. Fix the handlers to dispatch through the chain (as `forward.go`'s `ClusterService` handlers do) or the interceptor never runs.
+
+Add a test that dials a Raft lane with no client cert and asserts the handshake or first RPC fails — and, because the TLS layer now rejects first, a separate test that pins the interceptor chain itself, or this exact defect regresses silently.
 
 ---
 

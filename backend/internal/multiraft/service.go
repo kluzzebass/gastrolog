@@ -33,15 +33,17 @@ func (t *Transport[K]) RegisterGroup(s grpc.ServiceRegistrar, groupID K) {
 	s.RegisterService(&serviceDesc, newGroupLaneAPI(t, groupID))
 }
 
+const serviceName = "gastrolog.v1.MultiRaftTransportService"
+
 var serviceDesc = grpc.ServiceDesc{
-	ServiceName: "gastrolog.v1.MultiRaftTransportService",
+	ServiceName: serviceName,
 	HandlerType: (*raftDispatcher)(nil),
 	Methods: []grpc.MethodDesc{
-		{MethodName: "AppendEntries", Handler: handleAppendEntries},
-		{MethodName: "RequestVote", Handler: handleRequestVote},
-		{MethodName: "RequestPreVote", Handler: handleRequestPreVote},
-		{MethodName: "TimeoutNow", Handler: handleTimeoutNow},
-		{MethodName: "BatchHeartbeat", Handler: handleBatchHeartbeat},
+		unaryMethod("AppendEntries", raftDispatcher.appendEntries),
+		unaryMethod("RequestVote", raftDispatcher.requestVote),
+		unaryMethod("RequestPreVote", raftDispatcher.requestPreVote),
+		unaryMethod("TimeoutNow", raftDispatcher.timeoutNow),
+		unaryMethod("BatchHeartbeat", raftDispatcher.batchHeartbeat),
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -58,44 +60,40 @@ var serviceDesc = grpc.ServiceDesc{
 	},
 }
 
-func handleAppendEntries(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
-	req := new(gastrologv1.MultiRaftAppendEntriesRequest)
-	if err := dec(req); err != nil {
-		return nil, err
+// unaryMethod builds the MethodDesc for one unary raft RPC. name is written
+// once and serves as both the registered method name and the FullMethod the
+// interceptor chain sees, so the two cannot drift — requireClientCert matches
+// its exemption against FullMethod.
+//
+// The handler runs dispatch through the interceptor chain gRPC passes in.
+// gRPC applies nothing itself for hand-written MethodDescs, so a handler that
+// drops that argument silently disables every server-level unary interceptor
+// on this service — mTLS enforcement included.
+func unaryMethod[Req, Resp any](name string, dispatch func(raftDispatcher, *Req) (*Resp, error)) grpc.MethodDesc {
+	return grpc.MethodDesc{
+		MethodName: name,
+		Handler: func(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+			req := new(Req)
+			if err := dec(req); err != nil {
+				return nil, err
+			}
+			// Dispatch takes no context: a raft RPC hands off to the group's
+			// rpcChan and the reply comes back on a channel, so there is no
+			// downstream call for a deadline or span to be threaded into.
+			handler := func(_ context.Context, r any) (any, error) {
+				resp, err := dispatch(srv.(raftDispatcher), r.(*Req))
+				if err != nil {
+					return nil, err
+				}
+				return resp, nil
+			}
+			if interceptor == nil {
+				return handler(ctx, req)
+			}
+			info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + serviceName + "/" + name}
+			return interceptor(ctx, req, info, handler)
+		},
 	}
-	return srv.(raftDispatcher).appendEntries(req)
-}
-
-func handleRequestVote(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
-	req := new(gastrologv1.MultiRaftRequestVoteRequest)
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-	return srv.(raftDispatcher).requestVote(req)
-}
-
-func handleRequestPreVote(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
-	req := new(gastrologv1.MultiRaftRequestPreVoteRequest)
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-	return srv.(raftDispatcher).requestPreVote(req)
-}
-
-func handleTimeoutNow(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
-	req := new(gastrologv1.MultiRaftTimeoutNowRequest)
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-	return srv.(raftDispatcher).timeoutNow(req)
-}
-
-func handleBatchHeartbeat(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
-	req := new(gastrologv1.MultiRaftBatchHeartbeatRequest)
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-	return srv.(raftDispatcher).batchHeartbeat(req)
 }
 
 func handleInstallSnapshot(srv any, stream grpc.ServerStream) error {

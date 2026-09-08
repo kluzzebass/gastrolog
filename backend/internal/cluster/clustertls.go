@@ -111,7 +111,7 @@ func SaveFile(path string, certPEM, keyPEM, caCertPEM []byte) error {
 // LoadFile reads persisted TLS material from a local JSON file and calls
 // Load to populate the atomic state. Returns false if the file doesn't exist.
 func (c *ClusterTLS) LoadFile(path string) (bool, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // G304: path from trusted home dir
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path from trusted home dir //ok:os-readfile a few KB of PEM in one JSON object, read once at startup
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
@@ -132,8 +132,8 @@ func (c *ClusterTLS) LoadFile(path string) (bool, error) {
 
 // ServerTLSConfig returns a tls.Config for the cluster gRPC server.
 // GetCertificate and GetConfigForClient read from the atomic pointer,
-// enabling hot-reload. ClientAuth is VerifyClientCertIfGiven to allow
-// the Enroll RPC from nodes without client certs.
+// enabling hot-reload. GetConfigForClient also picks the client-certificate
+// policy per connection from the ClientHello SNI — see clientAuthForSNI.
 func (c *ClusterTLS) ServerTLSConfig() *tls.Config {
 	return &tls.Config{
 		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -143,7 +143,7 @@ func (c *ClusterTLS) ServerTLSConfig() *tls.Config {
 			}
 			return &st.Cert, nil
 		},
-		GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
 			st := c.state.Load()
 			if st == nil {
 				return nil, errors.New("cluster TLS not loaded")
@@ -151,13 +151,26 @@ func (c *ClusterTLS) ServerTLSConfig() *tls.Config {
 			return &tls.Config{
 				Certificates: []tls.Certificate{st.Cert},
 				ClientCAs:    st.CAPool,
-				ClientAuth:   tls.VerifyClientCertIfGiven,
+				ClientAuth:   clientAuthForSNI(hello.ServerName),
 				MinVersion:   tls.VersionTLS13,
 			}, nil
 		},
 		ClientAuth: tls.VerifyClientCertIfGiven,
 		MinVersion: tls.VersionTLS13,
 	}
+}
+
+// clientAuthForSNI selects the client-certificate policy for one inbound
+// connection. Raft lane SNIs demand a cluster certificate at the handshake:
+// hashicorp/raft trusts its transport unconditionally, so an anonymous lane
+// connection would drive consensus. Every other SNI reaches the service lane,
+// which stays certificate-optional because Enroll is how a joining node gets
+// the certificate it does not yet have.
+func clientAuthForSNI(sni string) tls.ClientAuthType {
+	if multiraft.IsRaftLaneSNI(sni) {
+		return tls.RequireAndVerifyClientCert
+	}
+	return tls.VerifyClientCertIfGiven
 }
 
 // ClientTLSConfig returns a tls.Config for dialing other cluster nodes on the
