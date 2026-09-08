@@ -940,21 +940,39 @@ func (o *Orchestrator) SealActive(vaultID glid.GLID) (int, error) {
 		return 0, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 
-	var sealed int
-	vaultInst := vault.Instance
-	if vaultInst == nil {
+	if vaultInst := vault.Instance; vaultInst != nil {
+		active := vaultInst.Chunks.Active()
+		if active != nil && active.RecordCount > 0 {
+			chunkID := active.ID
+			if err := vaultInst.Chunks.Seal(); err != nil {
+				return 0, fmt.Errorf("seal vault %s: %w", vaultID, err)
+			}
+			o.schedulePostSeal(vaultID, vaultInst.Chunks, chunkID)
+			return 1, nil
+		}
+	}
+
+	// No chunk-manager active file to seal. A pipeline vault's active chunk
+	// is the open manifest on the vault-ctl FSM; sealing it is a leader-gated
+	// vault-ctl command that the routing layer has already delivered to the
+	// vault's home.
+	if !o.isPipelineIngestVault(vaultID) {
 		return 0, nil
 	}
-	active := vaultInst.Chunks.Active()
-	if active != nil && active.RecordCount > 0 {
-		chunkID := active.ID
-		if err := vaultInst.Chunks.Seal(); err != nil {
-			return sealed, fmt.Errorf("seal vault %s: %w", vaultID, err)
-		}
-		sealed++
-		o.schedulePostSeal(vaultID, vaultInst.Chunks, chunkID)
+	o.mu.RLock()
+	pl := o.pipeline
+	o.mu.RUnlock()
+	if pl == nil {
+		return 0, nil
 	}
-	return sealed, nil
+	sealedOpen, err := pl.SealOpenChunk(vaultID)
+	if err != nil {
+		return 0, fmt.Errorf("seal open chunk of vault %s: %w", vaultID, err)
+	}
+	if sealedOpen {
+		return 1, nil
+	}
+	return 0, nil
 }
 
 // --- Index ops ---

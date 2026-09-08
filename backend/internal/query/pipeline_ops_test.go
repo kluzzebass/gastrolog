@@ -518,7 +518,10 @@ func TestApplyRecordDedup(t *testing.T) {
 		{IngestTS: t2, WriteTS: t2.Add(50 * time.Millisecond), EventID: chunk.EventID{IngesterID: idA, IngestTS: t2, IngestSeq: 1}, Raw: []byte("dup2")},
 	}
 
-	result := applyRecordDedup(records, defaultDedupWindow)
+	result, dedupErr := applyRecordDedup(records, defaultDedupWindow, NewBudget())
+	if dedupErr != nil {
+		t.Fatalf("dedup: %v", dedupErr)
+	}
 	if len(result) != 3 {
 		t.Fatalf("expected 3 records after dedup, got %d", len(result))
 	}
@@ -541,14 +544,20 @@ func TestApplyRecordDedupNoDups(t *testing.T) {
 		{IngestTS: baseTime.Add(time.Second), WriteTS: baseTime.Add(time.Second), EventID: chunk.EventID{IngesterID: idB, IngestTS: baseTime.Add(time.Second), IngestSeq: 0}, Raw: []byte("two")},
 	}
 
-	result := applyRecordDedup(records, defaultDedupWindow)
+	result, dedupErr := applyRecordDedup(records, defaultDedupWindow, NewBudget())
+	if dedupErr != nil {
+		t.Fatalf("dedup: %v", dedupErr)
+	}
 	if len(result) != 2 {
 		t.Fatalf("expected 2 records (no dups), got %d", len(result))
 	}
 }
 
 func TestApplyRecordDedupEmpty(t *testing.T) {
-	result := applyRecordDedup(nil, defaultDedupWindow)
+	result, dedupErr := applyRecordDedup(nil, defaultDedupWindow, NewBudget())
+	if dedupErr != nil {
+		t.Fatalf("dedup: %v", dedupErr)
+	}
 	if len(result) != 0 {
 		t.Fatalf("expected 0 records for nil input, got %d", len(result))
 	}
@@ -562,7 +571,10 @@ func TestApplyRecordDedupSameTimeDiffIngester(t *testing.T) {
 		{IngestTS: baseTime, WriteTS: baseTime, EventID: chunk.EventID{IngesterID: idB, IngestTS: baseTime, IngestSeq: 0}, Raw: []byte("two")},
 	}
 
-	result := applyRecordDedup(records, defaultDedupWindow)
+	result, dedupErr := applyRecordDedup(records, defaultDedupWindow, NewBudget())
+	if dedupErr != nil {
+		t.Fatalf("dedup: %v", dedupErr)
+	}
 	if len(result) != 2 {
 		t.Fatalf("expected 2 records (different ingester_id), got %d", len(result))
 	}
@@ -577,7 +589,10 @@ func TestApplyRecordDedupWindowExpiry(t *testing.T) {
 		{IngestTS: t0, WriteTS: t0.Add(2 * time.Second), EventID: chunk.EventID{IngesterID: idA, IngestTS: t0, IngestSeq: 0}, Raw: []byte("late-dup")},
 	}
 
-	result := applyRecordDedup(records, defaultDedupWindow)
+	result, dedupErr := applyRecordDedup(records, defaultDedupWindow, NewBudget())
+	if dedupErr != nil {
+		t.Fatalf("dedup: %v", dedupErr)
+	}
 	if len(result) != 2 {
 		t.Fatalf("expected 2 records (window expired), got %d", len(result))
 	}
@@ -634,7 +649,7 @@ func TestStreamingTailBasic(t *testing.T) {
 	records := makeTestRecords(1000, nil)
 	ops := []querylang.PipeOp{&querylang.TailOp{N: 10}}
 
-	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOps: %v", err)
 	}
@@ -654,7 +669,7 @@ func TestStreamingTailFewerRecordsThanN(t *testing.T) {
 	records := makeTestRecords(5, nil)
 	ops := []querylang.PipeOp{&querylang.TailOp{N: 100}}
 
-	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOps: %v", err)
 	}
@@ -678,7 +693,7 @@ func TestStreamingTailWithWhere(t *testing.T) {
 		&querylang.TailOp{N: 3},
 	}
 
-	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOps: %v", err)
 	}
@@ -695,7 +710,7 @@ func TestStreamingSliceBasic(t *testing.T) {
 	records := makeTestRecords(100, nil)
 	ops := []querylang.PipeOp{&querylang.SliceOp{Start: 5, End: 10}}
 
-	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOps: %v", err)
 	}
@@ -722,7 +737,7 @@ func TestStreamingSliceWithWhere(t *testing.T) {
 		&querylang.SliceOp{Start: 2, End: 4},
 	}
 
-	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOps: %v", err)
 	}
@@ -750,7 +765,7 @@ func TestStreamingSliceEarlyExit(t *testing.T) {
 	}
 	ops := []querylang.PipeOp{&querylang.SliceOp{Start: 1, End: 3}}
 
-	result, err := applyRecordOps(context.Background(), countingIter, ops, nil)
+	result, err := applyRecordOps(context.Background(), countingIter, ops, nil, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOps: %v", err)
 	}
@@ -773,7 +788,7 @@ func TestSortBeforeTailFallsBackToMaterialization(t *testing.T) {
 	}
 
 	// Should not panic or error — falls back to batch path.
-	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil, NewBudget())
 	if err != nil {
 		t.Fatalf("applyRecordOps: %v", err)
 	}

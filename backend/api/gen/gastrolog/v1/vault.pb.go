@@ -2425,8 +2425,11 @@ type ValidateVaultResponse struct {
 	// hosts this vault, so `valid` describes a partial view. Absent on the
 	// happy path.
 	ContributionReport *ContributionReport `protobuf:"bytes,4,opt,name=contribution_report,json=contributionReport,proto3" json:"contribution_report,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Findings about the vault as a whole that no single chunk can be blamed
+	// for, such as a search across it failing.
+	Issues        []string `protobuf:"bytes,5,rep,name=issues,proto3" json:"issues,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ValidateVaultResponse) Reset() {
@@ -2483,6 +2486,13 @@ func (x *ValidateVaultResponse) GetCloudIndexAudits() []*CloudIndexAudit {
 func (x *ValidateVaultResponse) GetContributionReport() *ContributionReport {
 	if x != nil {
 		return x.ContributionReport
+	}
+	return nil
+}
+
+func (x *ValidateVaultResponse) GetIssues() []string {
+	if x != nil {
+		return x.Issues
 	}
 	return nil
 }
@@ -4473,12 +4483,13 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x14ReindexVaultResponse\x12\x15\n" +
 	"\x06job_id\x18\x04 \x01(\fR\x05jobId\",\n" +
 	"\x14ValidateVaultRequest\x12\x14\n" +
-	"\x05vault\x18\x01 \x01(\tR\x05vault\"\x84\x02\n" +
+	"\x05vault\x18\x01 \x01(\tR\x05vault\"\x9c\x02\n" +
 	"\x15ValidateVaultResponse\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x125\n" +
 	"\x06chunks\x18\x02 \x03(\v2\x1d.gastrolog.v1.ChunkValidationR\x06chunks\x12K\n" +
 	"\x12cloud_index_audits\x18\x03 \x03(\v2\x1d.gastrolog.v1.CloudIndexAuditR\x10cloudIndexAudits\x12Q\n" +
-	"\x13contribution_report\x18\x04 \x01(\v2 .gastrolog.v1.ContributionReportR\x12contributionReport\"s\n" +
+	"\x13contribution_report\x18\x04 \x01(\v2 .gastrolog.v1.ContributionReportR\x12contributionReport\x12\x16\n" +
+	"\x06issues\x18\x05 \x03(\tR\x06issues\"s\n" +
 	"\x0fChunkValidation\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12\x14\n" +
 	"\x05valid\x18\x02 \x01(\bR\x05valid\x12\x16\n" +

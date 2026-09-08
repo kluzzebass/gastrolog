@@ -27,8 +27,8 @@ import (
 //
 // Only pipelines that genuinely need the full record set (e.g. an uncapped
 // sort, or a filter after a sort) fall back to full materialization.
-func applyRecordOps(ctx context.Context, it iter.Seq2[chunk.Record, error], ops []querylang.PipeOp, resolve lookup.Resolver) ([]chunk.Record, error) {
-	return applyRecordOpsLimit(ctx, it, ops, resolve, 0)
+func applyRecordOps(ctx context.Context, it iter.Seq2[chunk.Record, error], ops []querylang.PipeOp, resolve lookup.Resolver, budget *Budget) ([]chunk.Record, error) {
+	return applyRecordOpsLimit(ctx, it, ops, resolve, 0, budget)
 }
 
 // applyRecordOpsLimit is applyRecordOps with an implicit output limit.
@@ -36,33 +36,47 @@ func applyRecordOps(ctx context.Context, it iter.Seq2[chunk.Record, error], ops 
 // caller keeps only the first implicitLimit records of the final result.
 // Knowing it up front lets sortless pipelines stop collecting early and
 // capless sorts bound their working set.
-func applyRecordOpsLimit(ctx context.Context, it iter.Seq2[chunk.Record, error], ops []querylang.PipeOp, resolve lookup.Resolver, implicitLimit int) ([]chunk.Record, error) {
+func applyRecordOpsLimit(ctx context.Context, it iter.Seq2[chunk.Record, error], ops []querylang.PipeOp, resolve lookup.Resolver, implicitLimit int, budget *Budget) ([]chunk.Record, error) {
+	if err := chargeDeclaredCaps(ops, budget); err != nil {
+		return nil, err
+	}
+
 	// Streaming tail/slice when no sort precedes the cap.
 	if capIdx, ok := findStreamableCap(ops); ok {
-		return applyStreamingCap(ctx, it, ops, capIdx, resolve)
+		return applyStreamingCap(ctx, it, ops, capIdx, resolve, budget)
 	}
 
 	// Bounded sort: a sort whose output is capped by a following
 	// head/tail/slice (or by the implicit limit) keeps a top-N working set.
 	if plan, ok := planBoundedSort(ops, implicitLimit); ok {
-		return applyBoundedSort(ctx, it, ops, plan, resolve)
+		return applyBoundedSort(ctx, it, ops, plan, resolve, budget)
 	}
 
 	// Sortless, capless pipeline with an implicit output limit: apply
 	// operators per-record and stop once the limit is reached.
 	if implicitLimit > 0 && opsStreamable(ops) {
-		return applyStreamingLimit(ctx, it, ops, implicitLimit, resolve)
+		return applyStreamingLimit(ctx, it, ops, implicitLimit, resolve, budget)
 	}
 
-	// Full materialization fallback.
+	// Full materialization fallback: an uncapped sort, or a filter after a
+	// sort, needs every matching record at once. This is the path with no
+	// structural bound, so the budget is what keeps it from taking the node.
 	var records []chunk.Record
 	for rec, err := range it {
 		if err != nil {
 			return nil, err
 		}
-		records = append(records, rec.Copy())
+		rec = rec.Copy()
+		// Charge AFTER materializing: extracted JSON/logfmt fields land in
+		// Attrs and are most of what a buffered record retains, so charging
+		// the unexpanded copy undercounts it several-fold.
+		materializeRecord(&rec)
+		if err := budget.ChargeRecord(consumerRecordBuffer, rec); err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
 	}
-	return applyBatchOps(ctx, records, ops, resolve)
+	return applyMaterializedBatchOps(ctx, records, ops, resolve, budget)
 }
 
 // findStreamableCap returns the index of the last TailOp or SliceOp in ops
@@ -81,6 +95,33 @@ func findStreamableCap(ops []querylang.PipeOp) (int, bool) {
 		}
 	}
 	return capIdx, capIdx >= 0
+}
+
+// chargeDeclaredCaps charges the record slots a tail or slice operator asks
+// the node to hold. N comes straight from the query text, so it is a claim on
+// memory made before any data is read — the streaming collector allocates the
+// whole slot array up front, and the batch path must hold at least that many
+// records to satisfy the cap. Charging it here refuses "| tail 200000000"
+// instead of letting the query reserve tens of gigabytes.
+func chargeDeclaredCaps(ops []querylang.PipeOp, budget *Budget) error {
+	for _, op := range ops {
+		var slots int
+		switch o := op.(type) {
+		case *querylang.TailOp:
+			slots = o.N
+		case *querylang.SliceOp:
+			slots = o.End - o.Start + 1
+		default:
+			continue
+		}
+		if slots <= 0 {
+			continue
+		}
+		if err := budget.Charge(consumerRecordBuffer, int64(slots)*recordStructBytes); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // opsStreamable reports whether every operator can run per-record via
@@ -102,8 +143,8 @@ func opsStreamable(ops []querylang.PipeOp) bool {
 // soon as implicitLimit records survive the pipeline. Because every operator
 // is order-preserving and per-record, the first implicitLimit survivors equal
 // the first implicitLimit records of the fully materialized result.
-func applyStreamingLimit(ctx context.Context, it iter.Seq2[chunk.Record, error], ops []querylang.PipeOp, limit int, resolve lookup.Resolver) ([]chunk.Record, error) {
-	sf := newStreamFilter(ctx, ops, resolve)
+func applyStreamingLimit(ctx context.Context, it iter.Seq2[chunk.Record, error], ops []querylang.PipeOp, limit int, resolve lookup.Resolver, budget *Budget) ([]chunk.Record, error) {
+	sf := newStreamFilter(ctx, ops, resolve, budget)
 	out := make([]chunk.Record, 0, min(limit, 1024))
 	for rec, err := range it {
 		if err != nil {
@@ -117,6 +158,9 @@ func applyStreamingLimit(ctx context.Context, it iter.Seq2[chunk.Record, error],
 			return nil, evalErr
 		}
 		if keep {
+			if err := budget.ChargeRecord(consumerRecordBuffer, rec); err != nil {
+				return nil, err
+			}
 			out = append(out, rec)
 			if len(out) >= limit {
 				break
@@ -198,10 +242,10 @@ var testBoundedSortObserver func(maxItems int)
 // applyBoundedSort streams pre-sort operators per-record into a bounded top-N
 // collector, then applies the post-sort operators batch-wise on the small
 // surviving set. Output is identical to full materialization + stable sort.
-func applyBoundedSort(ctx context.Context, it iter.Seq2[chunk.Record, error], ops []querylang.PipeOp, plan boundedSortPlan, resolve lookup.Resolver) ([]chunk.Record, error) {
+func applyBoundedSort(ctx context.Context, it iter.Seq2[chunk.Record, error], ops []querylang.PipeOp, plan boundedSortPlan, resolve lookup.Resolver, budget *Budget) ([]chunk.Record, error) {
 	sortOp := ops[plan.sortIdx].(*querylang.SortOp)
-	sf := newStreamFilter(ctx, ops[:plan.sortIdx], resolve)
-	col := newTopNCollector(sortOp.Fields, plan.keep, plan.largest)
+	sf := newStreamFilter(ctx, ops[:plan.sortIdx], resolve, budget)
+	col := newTopNCollector(sortOp.Fields, plan.keep, plan.largest, budget)
 
 	for rec, err := range it {
 		if err != nil {
@@ -215,7 +259,9 @@ func applyBoundedSort(ctx context.Context, it iter.Seq2[chunk.Record, error], op
 			return nil, evalErr
 		}
 		if keep {
-			col.add(rec)
+			if err := col.add(rec); err != nil {
+				return nil, err
+			}
 		}
 		if sf.exhausted {
 			break
@@ -229,7 +275,7 @@ func applyBoundedSort(ctx context.Context, it iter.Seq2[chunk.Record, error], op
 	// The collector's output equals the capped prefix/suffix of the full
 	// stable sort; the remaining operators (including the cap itself) run
 	// batch-wise on this bounded set with unchanged semantics.
-	return applyBatchOps(ctx, col.result(), ops[plan.sortIdx+1:], resolve)
+	return applyBatchOps(ctx, col.result(), ops[plan.sortIdx+1:], resolve, budget)
 }
 
 // topNCollector retains the keep smallest (or largest) records under a sort
@@ -242,6 +288,7 @@ type topNCollector struct {
 	items    []sortItem
 	seq      int
 	maxItems int // high-water mark, for test instrumentation
+	budget   *Budget
 }
 
 // sortItem carries a record with its precomputed sort keys and arrival order.
@@ -251,28 +298,46 @@ type sortItem struct {
 	seq  int
 }
 
-func newTopNCollector(fields []querylang.SortField, keep int, largest bool) *topNCollector {
+// footprint is the bytes this item retains: the record plus its sort keys.
+func (it sortItem) footprint() int64 {
+	n := RecordFootprint(it.rec)
+	for _, k := range it.keys {
+		n += int64(len(k)) + stringHeaderBytes
+	}
+	return n
+}
+
+func newTopNCollector(fields []querylang.SortField, keep int, largest bool, budget *Budget) *topNCollector {
 	return &topNCollector{
 		fields:  fields,
 		keep:    keep,
 		largest: largest,
 		items:   make([]sortItem, 0, min(2*keep, 1024)),
+		budget:  budget,
 	}
 }
 
 // add inserts a record, compacting the working set when it reaches 2×keep.
-func (c *topNCollector) add(rec chunk.Record) {
+// The working set is bounded by count, but keep comes from the query, so the
+// bytes it holds are charged as they arrive and released as compaction drops
+// them.
+func (c *topNCollector) add(rec chunk.Record) error {
 	row := RecordToRow(rec)
 	keys := make([]string, len(c.fields))
 	for i, f := range c.fields {
 		keys[i] = row[f.Name]
 	}
-	c.items = append(c.items, sortItem{rec: rec, keys: keys, seq: c.seq})
+	item := sortItem{rec: rec, keys: keys, seq: c.seq}
+	if err := c.budget.Charge(consumerSortBuffer, item.footprint()); err != nil {
+		return err
+	}
+	c.items = append(c.items, item)
 	c.seq++
 	c.maxItems = max(c.maxItems, len(c.items))
 	if len(c.items) >= 2*c.keep {
 		c.compact()
 	}
+	return nil
 }
 
 // cmp is a strict total order: sort fields first, arrival order as tiebreak.
@@ -298,6 +363,19 @@ func (c *topNCollector) compact() {
 	if len(c.items) <= c.keep {
 		return
 	}
+	// Identify the dropped items before anything moves. In largest mode the
+	// copy below overwrites the head of the slice, after which the tail is a
+	// duplicate of what was RETAINED, not what was dropped — releasing that
+	// tail credits back the wrong footprints and the ledger drifts upward on
+	// every compaction whenever record size correlates with the sort key.
+	dropped := c.items[c.keep:]
+	if c.largest {
+		dropped = c.items[:len(c.items)-c.keep]
+	}
+	for _, item := range dropped {
+		c.budget.Release(item.footprint())
+	}
+
 	if c.largest {
 		copy(c.items, c.items[len(c.items)-c.keep:])
 	}
@@ -320,31 +398,14 @@ func (c *topNCollector) result() []chunk.Record {
 // applyStreamingCap processes the iterator with bounded memory by applying
 // pre-cap operators inline per-record and using a ring buffer (tail) or
 // positional collector (slice) instead of materializing all records.
-func applyStreamingCap(ctx context.Context, it iter.Seq2[chunk.Record, error], ops []querylang.PipeOp, capIdx int, resolve lookup.Resolver) ([]chunk.Record, error) {
+func applyStreamingCap(ctx context.Context, it iter.Seq2[chunk.Record, error], ops []querylang.PipeOp, capIdx int, resolve lookup.Resolver, budget *Budget) ([]chunk.Record, error) {
 	preOps := ops[:capIdx]
 	capOp := ops[capIdx]
 	postOps := ops[capIdx+1:]
 
-	sf := newStreamFilter(ctx, preOps, resolve)
+	sf := newStreamFilter(ctx, preOps, resolve, budget)
+	col := newCapCollector(capOp, budget)
 
-	// Initialize collector based on cap type.
-	var ring []chunk.Record
-	var ringPos, ringN int
-	var sliceStart, sliceEnd int // 1-indexed inclusive
-	var sliceCount int           // 0-indexed count of survivors seen so far
-	var collected []chunk.Record
-
-	switch op := capOp.(type) {
-	case *querylang.TailOp:
-		ringN = op.N
-		ring = make([]chunk.Record, ringN)
-	case *querylang.SliceOp:
-		sliceStart = op.Start // 1-indexed
-		sliceEnd = op.End     // 1-indexed inclusive
-		collected = make([]chunk.Record, 0, sliceEnd-sliceStart+1)
-	}
-
-	done := false
 	for rec, err := range it {
 		if err != nil {
 			return nil, err
@@ -357,33 +418,95 @@ func applyStreamingCap(ctx context.Context, it iter.Seq2[chunk.Record, error], o
 			return nil, evalErr
 		}
 		if keep {
-			// Feed to collector.
-			switch capOp.(type) {
-			case *querylang.TailOp:
-				ring[ringPos%ringN] = rec
-				ringPos++
-			case *querylang.SliceOp:
-				sliceCount++
-				if sliceCount >= sliceStart && sliceCount <= sliceEnd {
-					collected = append(collected, rec)
-				}
-				if sliceCount >= sliceEnd {
-					done = true
-				}
+			if err := col.feed(rec); err != nil {
+				return nil, err
 			}
 		}
-		if done || sf.exhausted {
+		if col.done || sf.exhausted {
 			break
 		}
 	}
 
-	records := linearizeCollector(capOp, ring, ringPos, ringN, collected)
+	records := col.result()
 
 	// Apply post-cap ops on the small result set.
 	if len(postOps) > 0 {
-		return applyBatchOps(ctx, records, postOps, resolve)
+		return applyBatchOps(ctx, records, postOps, resolve, budget)
 	}
 	return records, nil
+}
+
+// capCollector retains the records a trailing tail or slice operator selects,
+// without materializing everything before it. The slot array was charged by
+// chargeDeclaredCaps before the scan, so feeding charges only what each slot
+// holds — and the ring releases whatever the slot it overwrites was holding.
+type capCollector struct {
+	capOp  querylang.PipeOp
+	budget *Budget
+
+	ring    []chunk.Record
+	ringPos int
+	ringN   int
+
+	sliceStart, sliceEnd int // 1-indexed, inclusive
+	sliceCount           int // survivors seen so far
+	collected            []chunk.Record
+
+	// done reports that no later record can change the result.
+	done bool
+}
+
+func newCapCollector(capOp querylang.PipeOp, budget *Budget) *capCollector {
+	c := &capCollector{capOp: capOp, budget: budget}
+	switch op := capOp.(type) {
+	case *querylang.TailOp:
+		c.ringN = op.N
+		c.ring = make([]chunk.Record, op.N)
+	case *querylang.SliceOp:
+		c.sliceStart = op.Start
+		c.sliceEnd = op.End
+		c.collected = make([]chunk.Record, 0, op.End-op.Start+1)
+	}
+	return c
+}
+
+func (c *capCollector) feed(rec chunk.Record) error {
+	switch c.capOp.(type) {
+	case *querylang.TailOp:
+		return c.feedRing(rec)
+	case *querylang.SliceOp:
+		return c.feedSlice(rec)
+	}
+	return nil
+}
+
+func (c *capCollector) feedRing(rec chunk.Record) error {
+	slot := c.ringPos % c.ringN
+	c.budget.Release(recordPayloadBytes(c.ring[slot]))
+	if err := c.budget.Charge(consumerRecordBuffer, recordPayloadBytes(rec)); err != nil {
+		return err
+	}
+	c.ring[slot] = rec
+	c.ringPos++
+	return nil
+}
+
+func (c *capCollector) feedSlice(rec chunk.Record) error {
+	c.sliceCount++
+	if c.sliceCount >= c.sliceStart && c.sliceCount <= c.sliceEnd {
+		if err := c.budget.Charge(consumerRecordBuffer, recordPayloadBytes(rec)); err != nil {
+			return err
+		}
+		c.collected = append(c.collected, rec)
+	}
+	if c.sliceCount >= c.sliceEnd {
+		c.done = true
+	}
+	return nil
+}
+
+func (c *capCollector) result() []chunk.Record {
+	return linearizeCollector(c.capOp, c.ring, c.ringPos, c.ringN, c.collected)
 }
 
 // streamFilter applies pre-cap pipeline operators inline per-record.
@@ -400,9 +523,27 @@ type streamFilter struct {
 	exhausted bool
 }
 
+// dedupTracker remembers every EventID it has seen. The window is a comparison
+// against the remembered timestamp, not an eviction deadline, so the set grows
+// one entry per distinct event for the whole scan and is charged per entry.
 type dedupTracker struct {
 	seen   map[chunk.EventID]time.Time
 	window time.Duration
+	budget *Budget
+}
+
+// note records an event, reporting whether it is a duplicate within the window.
+func (dt *dedupTracker) note(rec *chunk.Record) (duplicate bool, err error) {
+	firstTS, exists := dt.seen[rec.EventID]
+	if exists {
+		if rec.WriteTS.Sub(firstTS) <= dt.window {
+			return true, nil
+		}
+	} else if err := dt.budget.Charge(consumerDedupState, dedupEntryBytes); err != nil {
+		return false, err
+	}
+	dt.seen[rec.EventID] = rec.WriteTS
+	return false, nil
 }
 
 // headState tracks how many records have passed a head operator at its
@@ -413,7 +554,7 @@ type headState struct {
 	passed int
 }
 
-func newStreamFilter(ctx context.Context, ops []querylang.PipeOp, resolve lookup.Resolver) *streamFilter {
+func newStreamFilter(ctx context.Context, ops []querylang.PipeOp, resolve lookup.Resolver, budget *Budget) *streamFilter {
 	sf := &streamFilter{
 		ctx:     ctx,
 		ops:     ops,
@@ -428,7 +569,7 @@ func newStreamFilter(ctx context.Context, ops []querylang.PipeOp, resolve lookup
 		case *querylang.WhereOp:
 			sf.filters[i] = CompileFilter(o.Expr)
 		case *querylang.DedupOp:
-			sf.dedups[i] = &dedupTracker{seen: make(map[chunk.EventID]time.Time), window: parseDedupWindow(o.Window)}
+			sf.dedups[i] = &dedupTracker{seen: make(map[chunk.EventID]time.Time), window: parseDedupWindow(o.Window), budget: budget}
 		case *querylang.HeadOp:
 			sf.heads[i] = &headState{n: o.N}
 		}
@@ -446,11 +587,13 @@ func (sf *streamFilter) apply(rec *chunk.Record) (bool, error) {
 				return false, nil
 			}
 		case *querylang.DedupOp:
-			dt := sf.dedups[i]
-			if firstTS, exists := dt.seen[rec.EventID]; exists && rec.WriteTS.Sub(firstTS) <= dt.window {
+			duplicate, err := sf.dedups[i].note(rec)
+			if err != nil {
+				return false, err
+			}
+			if duplicate {
 				return false, nil
 			}
-			dt.seen[rec.EventID] = rec.WriteTS
 		case *querylang.EvalOp:
 			if err := applyInlineEval(rec, o, sf.eval); err != nil {
 				return false, err
@@ -547,8 +690,16 @@ func linearizeCollector(capOp querylang.PipeOp, ring []chunk.Record, ringPos, ri
 // applyBatchOps applies operators to an already-materialized record slice.
 // It is both the full-materialization fallback for applyRecordOps and the
 // post-cap/post-sort finisher for the bounded paths.
-func applyBatchOps(ctx context.Context, records []chunk.Record, ops []querylang.PipeOp, resolve lookup.Resolver) ([]chunk.Record, error) {
+func applyBatchOps(ctx context.Context, records []chunk.Record, ops []querylang.PipeOp, resolve lookup.Resolver, budget *Budget) ([]chunk.Record, error) {
 	materializeFields(records)
+	return applyMaterializedBatchOps(ctx, records, ops, resolve, budget)
+}
+
+// applyMaterializedBatchOps is applyBatchOps for records whose extracted
+// fields are already in Attrs. Callers that materialize per-record — so the
+// memory budget sees the expanded record — use this to avoid a second
+// extraction pass over the whole set.
+func applyMaterializedBatchOps(ctx context.Context, records []chunk.Record, ops []querylang.PipeOp, resolve lookup.Resolver, budget *Budget) ([]chunk.Record, error) {
 	eval := querylang.NewEvaluator()
 	for _, op := range ops {
 		var err error
@@ -556,7 +707,7 @@ func applyBatchOps(ctx context.Context, records []chunk.Record, ops []querylang.
 		case *querylang.WhereOp:
 			records = applyRecordWhere(records, o)
 		case *querylang.DedupOp:
-			records = applyRecordDedup(records, parseDedupWindow(o.Window))
+			records, err = applyRecordDedup(records, parseDedupWindow(o.Window), budget)
 		case *querylang.EvalOp:
 			records, err = applyRecordEval(records, o, eval)
 		case *querylang.SortOp:
@@ -617,9 +768,13 @@ func parseDedupWindow(raw string) time.Duration {
 // Records routed to multiple vaults share the same EventID but have different
 // WriteTS values. The window parameter controls how far apart WriteTSes can be
 // and still be considered duplicates.
-func applyRecordDedup(records []chunk.Record, window time.Duration) []chunk.Record {
+func applyRecordDedup(records []chunk.Record, window time.Duration, budget *Budget) ([]chunk.Record, error) {
 	if len(records) == 0 {
-		return records
+		return records, nil
+	}
+	// One entry per record, sized and allocated up front.
+	if err := budget.Charge(consumerDedupState, int64(len(records))*dedupEntryBytes); err != nil {
+		return nil, err
 	}
 	seen := make(map[chunk.EventID]time.Time, len(records))
 	return slices.DeleteFunc(records, func(r chunk.Record) bool {
@@ -631,7 +786,7 @@ func applyRecordDedup(records []chunk.Record, window time.Duration) []chunk.Reco
 		}
 		seen[eid] = r.WriteTS
 		return false
-	})
+	}), nil
 }
 
 // applyRecordWhere filters records using a compiled boolean expression.

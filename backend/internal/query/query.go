@@ -54,6 +54,38 @@ func (o OrderBy) RecordTS(rec chunk.Record) time.Time {
 	return rec.IngestTS
 }
 
+// CompareRecords returns -1, 0, or +1 placing a and b in the cluster's
+// canonical record order: the ordering timestamp first, then EventID's own
+// total order. reverse negates the whole comparison, so reverse iteration
+// yields the exact reverse sequence.
+//
+// This is the ONE order every merge must use — the engine's fan-in across a
+// node's vaults, the coordinator's fan-in across remote vaults, and the
+// local/remote merge on top of them. A timestamp tie is not an edge case:
+// under order=source_ts, syslog second-granularity puts thousands of records
+// on one timestamp, so a head/tail cutoff lands inside a tie group as a matter
+// of course. Any merge that broke ties by which side happened to be "local",
+// or by vault placement, would return a different window depending on which
+// node received the query and on how routing fanned copies across vaults.
+// EventID's fields are intrinsic to the event and identical on every copy of
+// it, so every node ranks the same two records the same way.
+func (o OrderBy) CompareRecords(a, b chunk.Record, reverse bool) int {
+	return compareOrderKeys(o.RecordTS(a), a.EventID, o.RecordTS(b), b.EventID, reverse)
+}
+
+// compareOrderKeys is CompareRecords on the two fields it reads, for callers
+// that hold an ordering timestamp and an EventID without the record.
+func compareOrderKeys(tsA time.Time, evA chunk.EventID, tsB time.Time, evB chunk.EventID, reverse bool) int {
+	c := tsA.Compare(tsB)
+	if c == 0 {
+		c = evA.Compare(evB)
+	}
+	if reverse {
+		return -c
+	}
+	return c
+}
+
 // KeyValueFilter represents a key=value filter that searches both
 // record attributes and key=value pairs extracted from the message body.
 // The filter matches if the key=value pair is found in either location.
@@ -64,7 +96,12 @@ func (o OrderBy) RecordTS(rec chunk.Record) time.Time {
 //   - Key="", Value="bar"    - match any record with value "bar" (any key)
 type KeyValueFilter struct {
 	Key   string // empty string means "any key"
-	Value string // empty string means "any value"
+	Value string // exact value to compare against; not consulted when AnyValue is set
+
+	// AnyValue asks only that the key be present (key=*). An empty Value is a
+	// real value — key="" — and matches records whose key holds the empty
+	// string.
+	AnyValue bool
 
 	// Glob patterns for key/value positions. When non-nil, matching uses regex
 	// instead of exact string comparison.
@@ -111,9 +148,23 @@ type Query struct {
 	ContextBefore int // number of records to include before each match
 	ContextAfter  int // number of records to include after each match
 
-	// ResumeTS is set internally when resuming a reordered chunk.
-	// The reorder scanner skips records already past this timestamp.
+	// ResumeTS is set internally by follow mode: the rank scanner skips
+	// records at or before it, so following resumes strictly after the first
+	// match.
 	ResumeTS time.Time
+
+	// ResumeAfterTS and ResumeAfterEvent name the canonical position the
+	// previous page ended at, on the OrderBy axis. Every scanner drops
+	// records at or before it before the limit is counted, so a page
+	// boundary inside a group of records sharing a timestamp resumes
+	// exactly. A zero event skips only records strictly before the timestamp.
+	ResumeAfterTS    time.Time
+	ResumeAfterEvent chunk.EventID
+
+	// PartialAggregates makes a stats pipeline emit each aggregate in its
+	// combinable form — an avg as its sum and count — so the coordinator can
+	// merge this node's table with the others' instead of gathering records.
+	PartialAggregates bool
 
 	// SkipCloud skips cloud-backed chunks during search. Used by the
 	// histogram to compute filtered counts from local data only.
@@ -176,11 +227,11 @@ func (q Query) Normalize() Query {
 	for _, f := range q.KV {
 		var pred *querylang.PredicateExpr
 		switch {
-		case f.Key == "" && f.Value != "":
+		case f.Key == "" && !f.AnyValue:
 			pred = &querylang.PredicateExpr{Kind: querylang.PredValueExists, Value: f.Value}
-		case f.Key != "" && f.Value == "":
+		case f.Key != "" && f.AnyValue:
 			pred = &querylang.PredicateExpr{Kind: querylang.PredKeyExists, Key: f.Key}
-		case f.Key != "" && f.Value != "":
+		case f.Key != "":
 			pred = &querylang.PredicateExpr{Kind: querylang.PredKV, Key: f.Key, Value: f.Value}
 		}
 		if pred != nil {
@@ -203,6 +254,16 @@ func (q Query) Normalize() Query {
 	result := q
 	result.BoolExpr = expr
 	return result
+}
+
+// OrderBounds returns the lower and upper bounds on the query's ordering
+// axis: the source window under OrderBySourceTS, the ingest window otherwise.
+// These are the bounds a scan of the ordering index may seek by.
+func (q Query) OrderBounds() (lower, upper time.Time) {
+	if q.OrderBy == OrderBySourceTS {
+		return q.SourceStart, q.SourceEnd
+	}
+	return q.TimeBounds()
 }
 
 // TimeBounds returns the effective lower and upper IngestTS bounds, accounting for reverse order.
@@ -242,7 +303,6 @@ type MultiVaultPosition struct {
 	VaultID  glid.GLID
 	ChunkID  chunk.ChunkID
 	Position uint64
-	ResumeTS time.Time // non-zero for reordered chunks (no TS index)
 }
 
 // ResumeToken allows resuming a query from where it left off.
@@ -250,9 +310,10 @@ type MultiVaultPosition struct {
 // or remote — serializes its own resume state. The API node routes each
 // token to wherever the vault lives.
 type ResumeToken struct {
-	// VaultTokens maps vault IDs to their opaque resume tokens.
-	// For local vaults, these are deserialized into Positions by the search engine.
-	// For remote vaults, they are forwarded as-is to the owning node.
+	// VaultTokens maps vault IDs to their opaque resume tokens, deserialized
+	// into Positions for local vaults. Remote vaults are not resumed by
+	// token; the coordinator resumes them at the HighwaterTS/HighwaterEvent
+	// cursor.
 	VaultTokens map[glid.GLID][]byte
 
 	// FrozenStart and FrozenEnd preserve the original query time bounds from
@@ -261,12 +322,17 @@ type ResumeToken struct {
 	FrozenStart time.Time
 	FrozenEnd   time.Time
 
-	// HighwaterTS is the IngestTS of the last record emitted by the previous
-	// page. The server applies it as an exclusive bound on the next page —
-	// reverse=true narrows q.End to HighwaterTS, forward narrows q.Start —
-	// so pagination survives mid-scroll chunk lifecycle without re-emitting
-	// records, even when per-chunk Positions become stale and unusable.
+	// HighwaterTS is the timestamp, on the query's ordering axis, of the last
+	// record the previous page emitted. With HighwaterEvent it names one
+	// canonical position: the next page bounds its scan at HighwaterTS and
+	// skips everything at or before that position, so records sharing the
+	// boundary timestamp are neither repeated nor lost. Survives mid-scroll
+	// chunk lifecycle even when per-chunk Positions become stale.
 	HighwaterTS time.Time
+	// HighwaterEvent is the EventID of the record HighwaterTS was taken
+	// from. Zero for records that carry no ingester identity, in which case
+	// only the timestamp bounds the next page.
+	HighwaterEvent chunk.EventID
 
 	// Positions contains the last yielded position for each vault/chunk combination.
 	// This is the internal representation used by eng.Search() for local vaults.
@@ -347,6 +413,10 @@ type Engine struct {
 
 	// Lookup enrichment resolver (optional). Set via SetLookupResolver.
 	lookupResolver lookup.Resolver
+
+	// memLimit is the per-query working-set ceiling this engine hands to
+	// every budget it creates. Zero means MaxQueryMemoryBytes.
+	memLimit int64
 
 	// Logger for this engine instance.
 	// Scoped with component="query-engine" at construction time.
@@ -584,13 +654,13 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID glid.G
 			if errors.Is(err, errSkipMissingLocalChunk) {
 				return
 			}
-			yield(recordWithRef{}, err)
+			yield(recordWithRef{}, asReadError(vaultID, meta.ID, err))
 			return
 		}
 		defer func() { _ = cursor.Close() }()
 
 		if err := positionCursor(cursor, q, meta, startPos); err != nil {
-			yield(recordWithRef{}, err)
+			yield(recordWithRef{}, asReadError(vaultID, meta.ID, err))
 			return
 		}
 
@@ -603,7 +673,7 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID glid.G
 
 		for rr, err := range scanner {
 			if err != nil {
-				yield(rr, err)
+				yield(rr, asReadError(vaultID, meta.ID, err))
 				return
 			}
 			rr.Record.Ref = rr.Ref
@@ -729,14 +799,22 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 	if !q.SourceStart.IsZero() || !q.SourceEnd.IsZero() {
 		b.addFilter(sourceTimeFilter(q.SourceStart, q.SourceEnd))
 	}
+	if !q.ResumeAfterTS.IsZero() {
+		b.addFilter(resumeAfterFilter(q))
+	}
 
 	// Active/sealing FSM entries without a local GLCB fall back to manifest
-	// segment scans. Once data.glcb is on disk (registered with the chunk
-	// manager), use the embedded ITSI like a sealed chunk.
+	// segment scans, which serve ingest order. Once data.glcb is on disk
+	// (registered with the chunk manager), use the embedded ITSI like a sealed
+	// chunk. Any other ordering over such a chunk has no index to walk, so the
+	// chunk is sorted in memory.
 	if !chunkLocallyMaterialized(cm, meta) {
 		view := tsIndexViewForChunk(cm, im, q.OrderBy)
 		if !chunkHasTSIndex(view, meta.ID) {
-			return b.build(ctx, cursor, q), nil
+			if q.OrderBy == OrderByIngestTS {
+				return b.build(ctx, cursor, q), nil
+			}
+			return e.buildSortedScanner(ctx, cursor, q, b, meta), nil
 		}
 	}
 

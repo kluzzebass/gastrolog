@@ -59,7 +59,7 @@ func (s *QueryServer) collectPartitionRemote(
 
 	for _, target := range targets {
 		wg.Go(func() {
-			req := forwardSearchRequestFromTarget(target, queryExpr, remoteTokens[target.vaultID])
+			req := forwardSearchRequestFromTarget(target, queryExpr, remoteTokenOrCursor(q, remoteTokens[target.vaultID]))
 			// Remote resume tokens are not propagated (see collectRemote).
 			recCh, _, eCh, _, _ := s.remoteSearcher.SearchStream(ctx, target.nodeID, req)
 			mu.Lock()

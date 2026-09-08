@@ -107,6 +107,11 @@ type QueryConfig struct {
 	MaxResultCount int `json:"max_result_count,omitempty"`
 }
 
+// DefaultMaxResultCount is the result cap a fresh install is bootstrapped with.
+// An operator is free to change it, including to 0 for no cap: Search is
+// cursor-paginated, so the client decides how much of a result set it pulls.
+const DefaultMaxResultCount = 10_000
+
 // SchedulerConfig holds configuration for the job scheduler.
 type SchedulerConfig struct {
 	MaxConcurrentJobs int `json:"max_concurrent_jobs,omitempty"` // default 4

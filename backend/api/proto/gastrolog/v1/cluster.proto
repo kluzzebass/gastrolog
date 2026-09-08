@@ -403,6 +403,10 @@ message ForwardSearchRequest {
   bytes resume_token = 3; // resume token for pagination across pages
   repeated bytes sealed_chunk_ids = 4; // sealed chunks this holder should scan
   bool search_pipeline_chunks = 5; // include active/sealing chunks (leader only)
+  // Emit aggregates in their combinable partial form (an avg as its sum and
+  // count) so the coordinator can merge per-node tables instead of gathering
+  // records.
+  bool partial_aggregates = 6;
 }
 
 message ForwardSearchResponse {
@@ -516,6 +520,9 @@ message ForwardValidateVaultResponse {
   // The responding node's own cloud-index audit. Absent when the vault has no
   // cloud store on that node.
   CloudIndexAudit cloud_index_audit = 3;
+
+  // Vault-level findings from that node that no single chunk can be blamed for.
+  repeated string issues = 4;
 }
 
 // ForwardReconcileCloudIndexRequest asks a remote node to rebuild its own

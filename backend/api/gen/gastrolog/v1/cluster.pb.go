@@ -2131,8 +2131,12 @@ type ForwardSearchRequest struct {
 	ResumeToken          []byte                 `protobuf:"bytes,3,opt,name=resume_token,json=resumeToken,proto3" json:"resume_token,omitempty"`                               // resume token for pagination across pages
 	SealedChunkIds       [][]byte               `protobuf:"bytes,4,rep,name=sealed_chunk_ids,json=sealedChunkIds,proto3" json:"sealed_chunk_ids,omitempty"`                    // sealed chunks this holder should scan
 	SearchPipelineChunks bool                   `protobuf:"varint,5,opt,name=search_pipeline_chunks,json=searchPipelineChunks,proto3" json:"search_pipeline_chunks,omitempty"` // include active/sealing chunks (leader only)
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Emit aggregates in their combinable partial form (an avg as its sum and
+	// count) so the coordinator can merge per-node tables instead of gathering
+	// records.
+	PartialAggregates bool `protobuf:"varint,6,opt,name=partial_aggregates,json=partialAggregates,proto3" json:"partial_aggregates,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ForwardSearchRequest) Reset() {
@@ -2196,6 +2200,13 @@ func (x *ForwardSearchRequest) GetSealedChunkIds() [][]byte {
 func (x *ForwardSearchRequest) GetSearchPipelineChunks() bool {
 	if x != nil {
 		return x.SearchPipelineChunks
+	}
+	return false
+}
+
+func (x *ForwardSearchRequest) GetPartialAggregates() bool {
+	if x != nil {
+		return x.PartialAggregates
 	}
 	return false
 }
@@ -3027,8 +3038,10 @@ type ForwardValidateVaultResponse struct {
 	// The responding node's own cloud-index audit. Absent when the vault has no
 	// cloud store on that node.
 	CloudIndexAudit *CloudIndexAudit `protobuf:"bytes,3,opt,name=cloud_index_audit,json=cloudIndexAudit,proto3" json:"cloud_index_audit,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Vault-level findings from that node that no single chunk can be blamed for.
+	Issues        []string `protobuf:"bytes,4,rep,name=issues,proto3" json:"issues,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ForwardValidateVaultResponse) Reset() {
@@ -3078,6 +3091,13 @@ func (x *ForwardValidateVaultResponse) GetChunks() []*ChunkValidation {
 func (x *ForwardValidateVaultResponse) GetCloudIndexAudit() *CloudIndexAudit {
 	if x != nil {
 		return x.CloudIndexAudit
+	}
+	return nil
+}
+
+func (x *ForwardValidateVaultResponse) GetIssues() []string {
+	if x != nil {
+		return x.Issues
 	}
 	return nil
 }
@@ -4991,13 +5011,14 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\tchunk_ids\x18\x02 \x03(\fR\bchunkIds\x12*\n" +
 	"\x11requester_node_id\x18\x03 \x01(\fR\x0frequesterNodeId\"=\n" +
 	"\x1dRequestReplicaCatchupResponse\x12\x1c\n" +
-	"\tscheduled\x18\x01 \x01(\rR\tscheduled\"\xca\x01\n" +
+	"\tscheduled\x18\x01 \x01(\rR\tscheduled\"\xf9\x01\n" +
 	"\x14ForwardSearchRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x12!\n" +
 	"\fresume_token\x18\x03 \x01(\fR\vresumeToken\x12(\n" +
 	"\x10sealed_chunk_ids\x18\x04 \x03(\fR\x0esealedChunkIds\x124\n" +
-	"\x16search_pipeline_chunks\x18\x05 \x01(\bR\x14searchPipelineChunks\"\x86\x02\n" +
+	"\x16search_pipeline_chunks\x18\x05 \x01(\bR\x14searchPipelineChunks\x12-\n" +
+	"\x12partial_aggregates\x18\x06 \x01(\bR\x11partialAggregates\"\x86\x02\n" +
 	"\x15ForwardSearchResponse\x124\n" +
 	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\x12!\n" +
 	"\fresume_token\x18\x02 \x01(\fR\vresumeToken\x12\x19\n" +
@@ -5048,11 +5069,12 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x06sealed\x18\x01 \x01(\bR\x06sealed\x121\n" +
 	"\aindexes\x18\x02 \x03(\v2\x17.gastrolog.v1.IndexInfoR\aindexes\"8\n" +
 	"\x1bForwardValidateVaultRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\xb6\x01\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\xce\x01\n" +
 	"\x1cForwardValidateVaultResponse\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x125\n" +
 	"\x06chunks\x18\x02 \x03(\v2\x1d.gastrolog.v1.ChunkValidationR\x06chunks\x12I\n" +
-	"\x11cloud_index_audit\x18\x03 \x01(\v2\x1d.gastrolog.v1.CloudIndexAuditR\x0fcloudIndexAudit\">\n" +
+	"\x11cloud_index_audit\x18\x03 \x01(\v2\x1d.gastrolog.v1.CloudIndexAuditR\x0fcloudIndexAudit\x12\x16\n" +
+	"\x06issues\x18\x04 \x03(\tR\x06issues\">\n" +
 	"!ForwardReconcileCloudIndexRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\\\n" +
 	"\"ForwardReconcileCloudIndexResponse\x126\n" +

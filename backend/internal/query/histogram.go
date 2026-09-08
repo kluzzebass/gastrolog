@@ -31,7 +31,7 @@ import (
 //     Capped at 1M records; sets Truncated when cap is hit.
 //
 // Returns a TableResult with columns ["_time", "count"] or ["_time", "<field>", "count"].
-func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.TimechartOp, preOps []querylang.PipeOp) (*TableResult, error) {
+func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.TimechartOp, preOps []querylang.PipeOp, budget *Budget) (*TableResult, error) {
 	numBuckets := clampBuckets(tc.N)
 
 	selectedVaults := e.timechartVaults(q)
@@ -77,7 +77,7 @@ func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.Timech
 	truncated, err := e.runTimechartStrategy(ctx, q, preOps, selectedVaults,
 		start, end, bucketWidth, numBuckets,
 		hasFilter, hasPreOps, hasGroupBy, groupField,
-		acc)
+		acc, budget)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +102,7 @@ func (e *Engine) runTimechartStrategy(
 	ctx context.Context, q Query, preOps []querylang.PipeOp, selectedVaults []glid.GLID,
 	start, end time.Time, bucketWidth time.Duration, numBuckets int,
 	hasFilter, hasPreOps, hasGroupBy bool, groupField string,
-	acc *histogramAccum,
+	acc *histogramAccum, budget *Budget,
 ) (bool, error) {
 	cloudFlags := acc.cloudFlags
 	cloudCounts := acc.cloudCounts
@@ -117,7 +117,7 @@ func (e *Engine) runTimechartStrategy(
 		localQ := q
 		localQ.SkipCloud = true
 		truncated, err := e.timechartScanPath(ctx, localQ, preOps, start, end, bucketWidth,
-			numBuckets, groupField, hasGroupBy, hasPreOps, counts, groupCounts)
+			numBuckets, groupField, hasGroupBy, hasPreOps, counts, groupCounts, budget)
 		if err != nil {
 			return truncated, err
 		}
@@ -761,32 +761,34 @@ func timechartChunkGroupsWideSpan(
 
 // timechartScanPath counts records per bucket via record scanning with optional grouping and pre-ops.
 // Returns (truncated, error) where truncated is true when the 1M scan cap was hit.
-func (e *Engine) timechartScanPath(ctx context.Context, q Query, preOps []querylang.PipeOp, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy, hasPreOps bool, counts []int64, groupCounts []map[string]int64) (bool, error) {
+func (e *Engine) timechartScanPath(ctx context.Context, q Query, preOps []querylang.PipeOp, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy, hasPreOps bool, counts []int64, groupCounts []map[string]int64, budget *Budget) (bool, error) {
 	orderBy := q.OrderBy
 	q.Limit = 0
 	iter, _ := e.Search(ctx, q, nil)
 
 	if hasPreOps {
-		return false, timechartScanPreOps(ctx, iter, preOps, e.lookupResolver, orderBy, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
+		return false, timechartScanPreOps(ctx, iter, preOps, e.lookupResolver, orderBy, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts, budget)
 	}
-	return timechartScanDirect(iter, orderBy, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
+	return timechartScanDirect(iter, orderBy, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts, budget)
 }
 
 // timechartScanPreOps applies pipeline pre-ops then bins the resulting records.
-func timechartScanPreOps(ctx context.Context, iter iter.Seq2[chunk.Record, error], preOps []querylang.PipeOp, resolve lookup.Resolver, orderBy OrderBy, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy bool, counts []int64, groupCounts []map[string]int64) error {
-	records, err := applyRecordOps(ctx, iter, preOps, resolve)
+func timechartScanPreOps(ctx context.Context, iter iter.Seq2[chunk.Record, error], preOps []querylang.PipeOp, resolve lookup.Resolver, orderBy OrderBy, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy bool, counts []int64, groupCounts []map[string]int64, budget *Budget) error {
+	records, err := applyRecordOps(ctx, iter, preOps, resolve, budget)
 	if err != nil {
 		return err
 	}
 	for _, rec := range records {
-		timechartBinRecord(orderBy.RecordTS(rec), rec.Attrs, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
+		if err := timechartBinRecord(orderBy.RecordTS(rec), rec.Attrs, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts, budget); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 // timechartScanDirect iterates records directly and bins them, capped at 1M records.
 // Returns (truncated, error) where truncated is true when the cap was hit.
-func timechartScanDirect(records iter.Seq2[chunk.Record, error], orderBy OrderBy, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy bool, counts []int64, groupCounts []map[string]int64) (bool, error) {
+func timechartScanDirect(records iter.Seq2[chunk.Record, error], orderBy OrderBy, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy bool, counts []int64, groupCounts []map[string]int64, budget *Budget) (bool, error) {
 	const maxScan = 1_000_000
 	scanned := 0
 	for rec, err := range records {
@@ -796,7 +798,9 @@ func timechartScanDirect(records iter.Seq2[chunk.Record, error], orderBy OrderBy
 			}
 			return false, err
 		}
-		timechartBinRecord(orderBy.RecordTS(rec), rec.Attrs, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
+		if err := timechartBinRecord(orderBy.RecordTS(rec), rec.Attrs, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts, budget); err != nil {
+			return false, err
+		}
 		scanned++
 		if scanned >= maxScan {
 			return true, nil
@@ -805,21 +809,32 @@ func timechartScanDirect(records iter.Seq2[chunk.Record, error], orderBy OrderBy
 	return false, nil
 }
 
-// timechartBinRecord places a single record into the appropriate bucket, updating counts and group counts.
-func timechartBinRecord(ts time.Time, attrs chunk.Attributes, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy bool, counts []int64, groupCounts []map[string]int64) {
+// timechartBinRecord places a single record into the appropriate bucket,
+// updating counts and group counts. The per-bucket group map grows with the
+// cardinality of the group field, so each new key is charged.
+func timechartBinRecord(ts time.Time, attrs chunk.Attributes, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy bool, counts []int64, groupCounts []map[string]int64, budget *Budget) error {
 	if ts.Before(start) || !ts.Before(end) {
-		return
+		return nil
 	}
 	idx := int(ts.Sub(start) / bucketWidth)
 	if idx >= numBuckets {
 		idx = numBuckets - 1
 	}
 	counts[idx]++
-	if hasGroupBy {
-		if v := attrs[groupField]; v != "" {
-			groupCounts[idx][v]++
+	if !hasGroupBy {
+		return nil
+	}
+	v := attrs[groupField]
+	if v == "" {
+		return nil
+	}
+	if _, seen := groupCounts[idx][v]; !seen {
+		if err := budget.Charge(consumerTimechartState, stringSetEntryBytes(v)); err != nil {
+			return err
 		}
 	}
+	groupCounts[idx][v]++
+	return nil
 }
 
 // TimechartCloudFlagColumn and TimechartCloudCountColumn are sentinel

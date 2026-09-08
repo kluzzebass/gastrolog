@@ -270,6 +270,11 @@ func (o *Orchestrator) onPipelineChunkBuilt(vaultID glid.GLID, fsm *vaultctlfsm.
 		o.noteRegisterSkip(vaultID, id, "vault instance or reconciler not ready")
 		return
 	}
+	// The blob this node just built is final whether or not the seal has
+	// committed, so its secondary indexes are built now. Nothing else builds
+	// them for a pipeline-sealed chunk: the legacy post-seal path is not used
+	// and the missing-index sweep runs only at startup.
+	o.scheduleIndexRebuildIfNeeded(context.Background(), vaultID, ti, manifestEntryToChunkMeta(*e, true))
 	ti.Reconciler.ackOwnHolderReceipt(*e)
 	if e.State == chunk.ChunkStateSealed {
 		o.schedulePipelineCloudUpload(vaultID, id)
@@ -706,11 +711,13 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 	// changed, so unchanged vaults never flap their pipeline state. The cron
 	// rotation job is reconciled every pass regardless (its schedule may change
 	// independent of the registration key, and it is idempotent).
+	chunkHomes := make(map[glid.GLID]bool, len(desired))
 	for vid := range desired {
 		home := o.isVaultHome(sys, vid)
 		fsm, applier, isLeader, hasHandle := o.vaultCtlHandle(vid)
 		policy, cronExpr := o.resolveChunkPolicy(sys, vid)
 		chunkEnabled := home && hasHandle
+		chunkHomes[vid] = chunkEnabled
 		want := pipelineVaultReg{home: home, hasHandle: hasHandle, policy: policy}
 		if prev, ok := o.lookupPipelineVault(vid); ok {
 			if prev == want {
@@ -734,14 +741,23 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 		o.finishPendingPipelineCtlRestore(vid)
 	}
 
-	for vid := range desired {
+	o.rewireChunkHomesAfterReload(chunkHomes)
+	return nil
+}
+
+// rewireChunkHomesAfterReload re-wires chunking for the vaults this node
+// chunks for. Only those have a chunking registration to rewire; on every
+// other node the vault is unknown to chunking by design, not by failure.
+func (o *Orchestrator) rewireChunkHomesAfterReload(chunkHomes map[glid.GLID]bool) {
+	for vid, enabled := range chunkHomes {
+		if !enabled {
+			continue
+		}
 		if err := o.rewirePipelineAfterCtlRestore(vid); err != nil {
 			o.logger.Warn("pipeline rewire after config reload failed",
 				"vault", vid, "error", err)
 		}
 	}
-
-	return nil
 }
 
 // overlayPipelineChunkMetaBounds fills missing timestamp bounds on active/sealing

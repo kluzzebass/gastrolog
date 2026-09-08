@@ -60,13 +60,14 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 	for nodeID, vaultIDs := range byNode {
 		for _, vid := range vaultIDs {
 			wg.Go(func() {
-				// Remote opaque resume tokens are deliberately not propagated
-				// (the merge-level highwater drives pagination — see
-				// searchDirect), so the token getter is dropped here.
+				// Remote positions are never carried across pages; the remote
+				// resumes at the coordinator's cursor, which its own engine
+				// applies ahead of the page limit — so the token getter is
+				// dropped here.
 				recCh, _, eCh, _, getHist := s.remoteSearcher.SearchStream(ctx, nodeID, &apiv1.ForwardSearchRequest{
 					VaultId:     vid.ToProto(),
 					Query:       queryExpr,
-					ResumeToken: remoteTokens[vid],
+					ResumeToken: remoteTokenOrCursor(q, remoteTokens[vid]),
 				})
 				mu.Lock()
 				streams = append(streams, vaultStream{records: recCh, errCh: eCh, getHistogram: getHist, vaultID: vid})
@@ -301,15 +302,11 @@ func stopAll(states []mergeState) {
 	}
 }
 
-// buildMergeLess returns a comparison function for merge entries.
+// buildMergeLess orders merge entries by query.OrderBy.CompareRecords — ties
+// included, since this slice's own order is goroutine-completion order.
 func buildMergeLess(orderBy query.OrderBy, reverse bool) func(a, b mergeEntry) bool {
 	return func(a, b mergeEntry) bool {
-		ta := orderBy.RecordTS(a.rec)
-		tb := orderBy.RecordTS(b.rec)
-		if reverse {
-			return ta.After(tb)
-		}
-		return ta.Before(tb)
+		return orderBy.CompareRecords(a.rec, b.rec, reverse) < 0
 	}
 }
 
@@ -410,8 +407,9 @@ func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, 
 			// search's latency policy, and wg.Wait() is bounded by the
 			// query timeout just as search's remote merge is.
 			responses[i], fetchErrors[i] = s.remoteSearcher.Search(ctx, f.nodeID, &apiv1.ForwardSearchRequest{
-				VaultId: f.vid.ToProto(),
-				Query:   remoteExpr,
+				VaultId:           f.vid.ToProto(),
+				Query:             remoteExpr,
+				PartialAggregates: q.PartialAggregates,
 			})
 		})
 	}

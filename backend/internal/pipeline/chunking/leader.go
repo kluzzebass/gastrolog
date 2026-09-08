@@ -372,6 +372,25 @@ func (v *vaultChunking) collectRefBatch(
 
 // applySealOpenManifest proposes SealOpenChunkManifest. Sealed manifests queue
 // FIFO on the FSM so rotation is not blocked while earlier chunks build.
+// sealOpenManifestNow is the operator's seal: it commits the seal of the open
+// manifest ahead of the policy, under the same planner lock and leader gate
+// the policy-driven seal uses, so it cannot race a planner step.
+func (v *vaultChunking) sealOpenManifestNow() (bool, error) {
+	v.planMu.Lock()
+	defer v.planMu.Unlock()
+	if !v.cfg.IsLeader() || v.applier() == nil {
+		return false, nil
+	}
+	open := v.fsm().OpenChunk()
+	if open == nil || open.TotalRecords == 0 {
+		return false, nil
+	}
+	if err := v.applySealOpenManifest(open.ChunkID, v.now()); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (v *vaultChunking) applySealOpenManifest(chunkID chunk.ChunkID, sealedAt time.Time) error {
 	if err := v.applier().Apply(vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt)); err != nil {
 		return err

@@ -2063,6 +2063,14 @@ export class ValidateVaultResponse extends Message<ValidateVaultResponse> {
    */
   contributionReport?: ContributionReport;
 
+  /**
+   * Findings about the vault as a whole that no single chunk can be blamed
+   * for, such as a search across it failing.
+   *
+   * @generated from field: repeated string issues = 5;
+   */
+  issues: string[] = [];
+
   constructor(data?: PartialMessage<ValidateVaultResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2075,6 +2083,7 @@ export class ValidateVaultResponse extends Message<ValidateVaultResponse> {
     { no: 2, name: "chunks", kind: "message", T: ChunkValidation, repeated: true },
     { no: 3, name: "cloud_index_audits", kind: "message", T: CloudIndexAudit, repeated: true },
     { no: 4, name: "contribution_report", kind: "message", T: ContributionReport },
+    { no: 5, name: "issues", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ValidateVaultResponse {

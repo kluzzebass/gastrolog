@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
 	"gastrolog/internal/glid"
 	"iter"
 	"log/slog"
@@ -100,6 +99,20 @@ func (s *QueryServer) Search(
 	// this closes the gap for the unbounded case.
 	q = s.resolveUnboundedQuery(ctx, q)
 
+	err = s.dispatchSearch(ctx, eng, q, pipeline, req.Msg.ResumeToken, serverStart, stream)
+	NoteSearchOutcome(s.orch.Alerts(), err, func() []glid.GLID { return s.selectedOrAllVaults(ctx, q) })
+	return err
+}
+
+func (s *QueryServer) dispatchSearch(
+	ctx context.Context,
+	eng *query.Engine,
+	q query.Query,
+	pipeline *querylang.Pipeline,
+	resumeToken []byte,
+	serverStart time.Time,
+	stream *connect.ServerStream[apiv1.SearchResponse],
+) error {
 	if pipeline != nil && len(pipeline.Pipes) > 0 {
 		// Reject queries with export operator — must route through ExportToVault RPC.
 		if _, hasExport := querylang.HasExportOp(pipeline); hasExport {
@@ -111,14 +124,14 @@ func (s *QueryServer) Search(
 			// Streamable pipeline: apply ops per-record on top of the
 			// normal search iterator with full resume-token support.
 			transform := query.NewRecordTransform(pipeline.Pipes, s.lookupResolver)
-			return s.searchDirect(ctx, eng, q, req.Msg.ResumeToken, transform, serverStart, stream)
+			return s.searchDirect(ctx, eng, q, resumeToken, transform, serverStart, stream)
 		}
 		// Aggregating / full-materialization pipeline (stats, timechart,
 		// sort, tail, slice, raw).
 		return s.searchPipeline(ctx, eng, q, pipeline, stream)
 	}
 
-	return s.searchDirect(ctx, eng, q, req.Msg.ResumeToken, nil, serverStart, stream)
+	return s.searchDirect(ctx, eng, q, resumeToken, nil, serverStart, stream)
 }
 
 // searchDirect streams search results, merging local and remote vault results
@@ -139,11 +152,6 @@ func (s *QueryServer) searchDirect(
 
 	var resume *query.ResumeToken
 	if len(resumeTokenData) > 0 {
-		// Resume tokens with non-default ordering are not yet supported.
-		if q.OrderBy != query.OrderByIngestTS {
-			return connect.NewError(connect.CodeUnimplemented,
-				fmt.Errorf("pagination with order=%s is not yet supported", q.OrderBy))
-		}
 		var err error
 		resume, err = ProtoToResumeToken(resumeTokenData)
 		if err != nil {
@@ -166,17 +174,14 @@ func (s *QueryServer) searchDirect(
 	// records as the user scrolls.
 	frozenStart, frozenEnd := q.Start, q.End
 
-	// Apply the highwater TS as an exclusive boundary for this page's
-	// search ONLY (not the histogram). With reverse=true narrow q.End to
-	// the highwater (records strictly older); with forward narrow q.Start
-	// (records strictly newer). This is what makes pagination survive
+	// Bound this page's search (not the histogram) at the previous page's
+	// highwater, and let the cursor skip what that page already emitted at
+	// the boundary timestamp. This is what makes pagination survive
 	// chunk-lifecycle transitions during a scroll: even if every per-chunk
-	// position references a chunk that vanished, the time bound prevents
-	// re-emitting records the client already saw.
+	// position references a chunk that vanished, the time bound plus the
+	// cursor keep the client from seeing a record twice or missing one.
 	histogramQ := q
-	if resume != nil {
-		narrowQueryByHighwater(&q, resume.HighwaterTS)
-	}
+	query.ApplyResumeCursor(&q, resume)
 
 	selectedVaults := s.selectedOrAllVaults(ctx, q)
 
@@ -308,39 +313,6 @@ func (s *QueryServer) splitResumeToken(resume *query.ResumeToken, localVaults ma
 	return localResume, remoteTokens
 }
 
-// narrowQueryByHighwater applies a resume-token highwater as an exclusive
-// time bound on q. With reverse=true the highwater becomes the upper bound
-// (records strictly older); with forward it becomes the lower bound
-// (records strictly newer). No-op when highwater is zero or already
-// outside the existing bound.
-//
-// The narrowed bound matches the active sort key: by default we narrow
-// IngestTS (q.Start/q.End), but when sorting by SourceTS we narrow
-// SourceStart/SourceEnd instead. The chunkMatchesQuery filter consults
-// both axes, so narrowing the wrong axis would either fail to exclude
-// already-emitted records (causing duplicates across pages) or exclude
-// records that should still be reachable.
-func narrowQueryByHighwater(q *query.Query, highwater time.Time) {
-	if highwater.IsZero() {
-		return
-	}
-	var lower, upper *time.Time
-	if q.OrderBy == query.OrderBySourceTS {
-		lower, upper = &q.SourceStart, &q.SourceEnd
-	} else {
-		lower, upper = &q.Start, &q.End
-	}
-	if q.Reverse() {
-		if upper.IsZero() || highwater.Before(*upper) {
-			*upper = highwater
-		}
-		return
-	}
-	if lower.IsZero() || highwater.After(*lower) {
-		*lower = highwater
-	}
-}
-
 // buildResumeTokenBytes serializes the resume token for the response,
 // overriding the engine-derived highwater with the merge-level one when
 // the merge advanced strictly further. The merge-level highwater is the
@@ -353,7 +325,7 @@ func narrowQueryByHighwater(q *query.Query, highwater time.Time) {
 // engine's lastRefs tracks the most recent value yielded by the iter,
 // but a sorted merge always has one record pulled ahead per source for
 // comparison, so the engine's positions overshoot what the client saw.
-func buildResumeTokenBytes(transform *query.RecordTransform, getToken func() *query.ResumeToken, mergeHighwater time.Time, reverse bool, lastLocalSet bool, lastLocalRec chunk.Record, mergeInvolved bool) []byte {
+func buildResumeTokenBytes(transform *query.RecordTransform, getToken func() *query.ResumeToken, mark *emitMark, reverse bool, lastLocalSet bool, lastLocalRec chunk.Record, mergeInvolved bool) []byte {
 	if transform != nil && transform.Done() {
 		return nil
 	}
@@ -368,7 +340,7 @@ func buildResumeTokenBytes(transform *query.RecordTransform, getToken func() *qu
 	// from highwater alone, or the client will auto-paginate against a
 	// query that has nothing left to give and re-fetch already-displayed
 	// records.
-	if token == nil && mergeInvolved && (lastLocalSet || !mergeHighwater.IsZero()) {
+	if token == nil && mergeInvolved && (lastLocalSet || !mark.ts.IsZero()) {
 		token = &query.ResumeToken{}
 	}
 	if token == nil {
@@ -387,8 +359,9 @@ func buildResumeTokenBytes(transform *query.RecordTransform, getToken func() *qu
 	// iter yielded, but the sorted merge pulls one record ahead per source
 	// for comparison, so the engine's value is one record past what the
 	// client saw. Always override with mergeHighwater when set.
-	if !mergeHighwater.IsZero() {
-		token.HighwaterTS = mergeHighwater
+	if !mark.ts.IsZero() {
+		token.HighwaterTS = mark.ts
+		token.HighwaterEvent = mark.event
 	}
 	return ResumeTokenToProto(token)
 }
@@ -434,12 +407,12 @@ func (s *QueryServer) mergeAndStream(
 	histCh chan []*apiv1.HistogramBucket,
 ) error {
 	sb := newStreamBatcher(stream, 100)
-	// Track the IngestTS of the last record actually emitted by this server
-	// (across both local and remote sources). Used to override the engine's
-	// own highwater on the resume token — the engine only sees its local
-	// emissions, so when records come from a remote iterator the engine's
-	// highwater stays zero and the bound on the next page would be lost.
-	var mergeHighwater time.Time
+	// Track the canonical position of the last record actually emitted by
+	// this server (across both local and remote sources). It overrides the
+	// engine's own highwater on the resume token — the engine only sees its
+	// local emissions, so when records come from a remote iterator its
+	// highwater stays zero and the next page would lose its bound.
+	mark := &emitMark{orderBy: orderBy}
 	// Track the last local record actually emitted by the merge. The
 	// engine's own lastRefs is updated BEFORE the iter yields, but a sorted
 	// merge pulls one record ahead from each source to compare timestamps
@@ -473,7 +446,7 @@ func (s *QueryServer) mergeAndStream(
 		mergeInvolved = true
 		// Two-way sorted merge of local and remote iterators.
 		captured := chunk.Record{}
-		if err := mergeIterators(ctx, sb, localIter, remoteIter, orderBy, reverse, limit, transform, &mergeHighwater, &captured, dedup, &limitHit); err != nil {
+		if err := mergeIterators(ctx, sb, localIter, remoteIter, orderBy, reverse, limit, transform, mark, &captured, dedup, &limitHit); err != nil {
 			return err
 		}
 		if !captured.IngestTS.IsZero() {
@@ -482,7 +455,7 @@ func (s *QueryServer) mergeAndStream(
 		}
 	} else {
 		// Fast path: no remote results, just stream local.
-		if err := streamLocal(ctx, sb, localIter, transform, &mergeHighwater, dedup); err != nil {
+		if err := streamLocal(ctx, sb, localIter, transform, mark, dedup); err != nil {
 			return err
 		}
 	}
@@ -493,7 +466,7 @@ func (s *QueryServer) mergeAndStream(
 	// synthesized token would make the CLI auto-paginate against an
 	// empty stream and yield phantom duplicates.
 	synthOK := mergeInvolved && limitHit
-	tokenBytes := buildResumeTokenBytes(transform, getToken, mergeHighwater, reverse, lastLocalSet, lastLocalRec, synthOK)
+	tokenBytes := buildResumeTokenBytes(transform, getToken, mark, reverse, lastLocalSet, lastLocalRec, synthOK)
 
 	// Attach histogram from the page-1 goroutine. Records are already
 	// streamed — waiting here only delays the trailing empty batch, not
@@ -578,12 +551,12 @@ func (d *dedupWindow) shouldSkip(rec chunk.Record) bool {
 }
 
 // streamLocal streams local iterator results through the batcher.
-func streamLocal(ctx context.Context, sb *streamBatcher, localIter iter.Seq2[chunk.Record, error], transform *query.RecordTransform, highwater *time.Time, dedup *dedupWindow) error {
+func streamLocal(ctx context.Context, sb *streamBatcher, localIter iter.Seq2[chunk.Record, error], transform *query.RecordTransform, mark *emitMark, dedup *dedupWindow) error {
 	for rec, err := range localIter {
 		if err != nil {
 			return mapSearchError(err)
 		}
-		_, done, emitErr := emitRecord(ctx, sb, rec, transform, highwater, dedup)
+		_, done, emitErr := emitRecord(ctx, sb, rec, transform, mark, dedup)
 		if emitErr != nil {
 			return emitErr
 		}
@@ -625,8 +598,9 @@ func pullPending(next func() (chunk.Record, error, bool)) *mergePending {
 	return &mergePending{rec: rec, err: err}
 }
 
-// pickWinner selects the next record between local and remote
-// pendings, advancing the corresponding iter.
+// pickWinner selects the next record between local and remote pendings,
+// advancing the corresponding iter, in query.OrderBy.CompareRecords order —
+// ties included, so which side a record arrived on carries no weight.
 func pickWinner(local, remote *mergePending, orderBy query.OrderBy, reverse bool, localNext, remoteNext func() (chunk.Record, error, bool)) (rec chunk.Record, fromLocal bool, newLocal, newRemote *mergePending) {
 	switch {
 	case local == nil:
@@ -634,13 +608,7 @@ func pickWinner(local, remote *mergePending, orderBy query.OrderBy, reverse bool
 	case remote == nil:
 		return local.rec, true, pullPending(localNext), remote
 	}
-	la := orderBy.RecordTS(local.rec)
-	rb := orderBy.RecordTS(remote.rec)
-	localFirst := la.Before(rb)
-	if reverse {
-		localFirst = la.After(rb)
-	}
-	if localFirst {
+	if orderBy.CompareRecords(local.rec, remote.rec, reverse) <= 0 {
 		return local.rec, true, pullPending(localNext), remote
 	}
 	return remote.rec, false, local, pullPending(remoteNext)
@@ -654,19 +622,16 @@ func mergeIterators(
 	reverse bool,
 	limit int,
 	transform *query.RecordTransform,
-	highwater *time.Time,
+	mark *emitMark,
 	lastLocalRec *chunk.Record,
 	dedup *dedupWindow,
 	limitHit *bool,
 ) error {
-	// Pull synchronously from each iterator using iter.Pull2. This is
-	// critical for resume-token correctness: the previous goroutine-pumped
-	// channel design ran the iterator one record AHEAD of merge consumption
-	// (the buffered channel holding a record that hadn't been emitted yet),
-	// which advanced the local iter's internal lastRefs past records the
-	// merge had not yet displayed. The next page then resumed from the
-	// over-advanced position, silently skipping records. Pull2 ensures
-	// each yield happens only when the merge actually pulls.
+	// Pull2 keeps each source in lockstep with consumption: a yield happens
+	// only when the merge actually pulls. Resume-token correctness depends on
+	// it — the local iter advances its lastRefs as it yields, so any buffering
+	// between iterator and merge would leave the token pointing past records
+	// the client has not been shown, and the next page would skip them.
 	localNext, localStop := iter.Pull2(localIter)
 	defer localStop()
 	remoteNext, remoteStop := iter.Pull2(remoteIter)
@@ -688,7 +653,7 @@ func mergeIterators(
 		var fromLocal bool
 		rec, fromLocal, localPending, remotePending = pickWinner(localPending, remotePending, orderBy, reverse, localNext, remoteNext)
 
-		emittedNow, done, err := emitRecord(ctx, sb, rec, transform, highwater, dedup)
+		emittedNow, done, err := emitRecord(ctx, sb, rec, transform, mark, dedup)
 		if err != nil {
 			return err
 		}
@@ -736,7 +701,7 @@ func mergeIterators(
 // window BEFORE any transform/highwater work — duplicates short-circuit
 // without affecting state, so the highwater advances only on records
 // the client actually receives.
-func emitRecord(ctx context.Context, sb *streamBatcher, rec chunk.Record, transform *query.RecordTransform, highwater *time.Time, dedup *dedupWindow) (bool, bool, error) {
+func emitRecord(ctx context.Context, sb *streamBatcher, rec chunk.Record, transform *query.RecordTransform, mark *emitMark, dedup *dedupWindow) (bool, bool, error) {
 	if dedup != nil && dedup.shouldSkip(rec) {
 		return false, false, nil
 	}
@@ -748,17 +713,13 @@ func emitRecord(ctx context.Context, sb *streamBatcher, rec chunk.Record, transf
 		if err := sb.add(recordToProto(rec)); err != nil {
 			return false, false, err
 		}
-		if highwater != nil {
-			*highwater = rec.IngestTS
-		}
+		mark.note(rec)
 		return true, transform.Done(), nil
 	}
 	if err := sb.add(recordToProto(rec)); err != nil {
 		return false, false, err
 	}
-	if highwater != nil {
-		*highwater = rec.IngestTS
-	}
+	mark.note(rec)
 	return true, false, nil
 }
 

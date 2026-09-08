@@ -8,6 +8,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
@@ -77,9 +78,10 @@ func setup(t *testing.T, batches ...[]chunk.Record) *query.Engine {
 		Now:            fakeClockForBatches(batches),
 	})
 
+	stamp := identityStamper()
 	for _, records := range batches {
 		for _, rec := range records {
-			if _, _, err := s.CM.Append(rec); err != nil {
+			if _, _, err := s.CM.Append(stamp(rec)); err != nil {
 				t.Fatalf("append: %v", err)
 			}
 		}
@@ -93,6 +95,21 @@ func setup(t *testing.T, batches ...[]chunk.Record) *query.Engine {
 	return s.QE
 }
 
+// identityStamper gives fixture records the event identity every ingested
+// record carries in production, leaving records that already have one alone.
+func identityStamper() func(chunk.Record) chunk.Record {
+	ingester := glid.New()
+	seq := uint32(0)
+	return func(rec chunk.Record) chunk.Record {
+		if !rec.EventID.IngesterID.IsZero() {
+			return rec
+		}
+		seq++
+		rec.EventID = chunk.EventID{IngesterID: ingester, IngestTS: rec.IngestTS, IngestSeq: seq}
+		return rec
+	}
+}
+
 // setupWithActive is like setup but leaves the last batch unsealed (active chunk).
 func setupWithActive(t *testing.T, sealed [][]chunk.Record, active []chunk.Record) *query.Engine {
 	t.Helper()
@@ -104,9 +121,10 @@ func setupWithActive(t *testing.T, sealed [][]chunk.Record, active []chunk.Recor
 		Now:            fakeClockForBatches(allBatches),
 	})
 
+	stamp := identityStamper()
 	for _, records := range sealed {
 		for _, rec := range records {
-			if _, _, err := s.CM.Append(rec); err != nil {
+			if _, _, err := s.CM.Append(stamp(rec)); err != nil {
 				t.Fatalf("append: %v", err)
 			}
 		}
@@ -117,7 +135,7 @@ func setupWithActive(t *testing.T, sealed [][]chunk.Record, active []chunk.Recor
 
 	// Append active chunk records without sealing.
 	for _, rec := range active {
-		if _, _, err := s.CM.Append(rec); err != nil {
+		if _, _, err := s.CM.Append(stamp(rec)); err != nil {
 			t.Fatalf("append: %v", err)
 		}
 	}
@@ -1107,21 +1125,19 @@ func TestSearchPartiallyStaleResumeTokenContinues(t *testing.T) {
 
 	eng := setup(t, records)
 
-	// First page: pull one record so the engine emits a real resume position
-	// against the actual chunk.
+	// First page: pull one record so the engine emits a real resume token.
 	seq, nextToken := eng.Search(context.Background(), query.Query{Limit: 1}, nil)
 	_, err := collect(seq)
 	if err != nil {
 		t.Fatalf("page 1 search: %v", err)
 	}
 	tok := nextToken()
-	if tok == nil || len(tok.Positions) == 0 {
-		t.Fatalf("expected non-empty resume token after page 1, got %+v", tok)
+	if tok == nil || tok.HighwaterTS.IsZero() {
+		t.Fatalf("expected a resume token after page 1, got %+v", tok)
 	}
 
-	// Inject a stale position alongside the valid one.
+	// Inject a position for a chunk that no longer exists.
 	tok.Positions = append(tok.Positions, query.MultiVaultPosition{
-		VaultID:  tok.Positions[0].VaultID,
 		ChunkID:  chunk.NewChunkID(), // doesn't exist
 		Position: 0,
 	})
@@ -2395,7 +2411,7 @@ func TestSearchKeyValueFilterKeyWildcard(t *testing.T) {
 
 	// Filter by env=* (key exists with any value)
 	results, err := collect(search(eng, context.Background(), query.Query{
-		KV: []query.KeyValueFilter{{Key: "env", Value: ""}}, // empty Value = any value
+		KV: []query.KeyValueFilter{{Key: "env", AnyValue: true}},
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2447,7 +2463,7 @@ func TestSearchKeyValueFilterKeyWildcardActiveChunk(t *testing.T) {
 	eng := setupWithActive(t, nil, active)
 
 	results, err := collect(search(eng, context.Background(), query.Query{
-		KV: []query.KeyValueFilter{{Key: "host", Value: ""}},
+		KV: []query.KeyValueFilter{{Key: "host", AnyValue: true}},
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2471,7 +2487,7 @@ func TestSearchKeyValueFilterCombinedWildcards(t *testing.T) {
 	// Filter by env=* AND level=error
 	results, err := collect(search(eng, context.Background(), query.Query{
 		KV: []query.KeyValueFilter{
-			{Key: "env", Value: ""},        // env exists
+			{Key: "env", AnyValue: true},   // env exists
 			{Key: "level", Value: "error"}, // level=error
 		},
 	}))
@@ -2494,7 +2510,7 @@ func TestSearchKeyValueFilterKeyWildcardNoMatch(t *testing.T) {
 
 	// Filter by env=* (key exists) - no matches
 	results, err := collect(search(eng, context.Background(), query.Query{
-		KV: []query.KeyValueFilter{{Key: "env", Value: ""}},
+		KV: []query.KeyValueFilter{{Key: "env", AnyValue: true}},
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

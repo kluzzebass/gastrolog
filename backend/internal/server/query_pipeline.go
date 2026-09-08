@@ -8,7 +8,6 @@ import (
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
-	"gastrolog/internal/chunk"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
 	"gastrolog/internal/safeutf8"
@@ -32,49 +31,49 @@ func (s *QueryServer) searchPipeline(
 	if s.maxResultCount > 0 && (q.Limit == 0 || int64(q.Limit) > s.maxResultCount) {
 		q.Limit = int(s.maxResultCount)
 	}
-	result, err := eng.RunPipeline(ctx, q, pipeline)
-	if err != nil {
-		return errInternal(err)
-	}
-	// Compute local histogram to include alongside pipeline results.
-	histogram := HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
 
-	if result.Table != nil {
-		// Fan out to remote nodes and merge table results. A remote failure
-		// fails the whole pipeline query — a partial aggregate is silently
-		// wrong.
-		remoteResults, err := s.collectRemotePipeline(ctx, q, pipeline)
-		if err != nil {
-			return err
-		}
-		if len(remoteResults) > 0 {
-			result.Table = mergeTableResults(result.Table, remoteResults)
-		}
-		return stream.Send(&apiv1.SearchResponse{
-			TableResult: tableResultToProto(result.Table, pipeline),
-			Histogram:   histogram,
-		})
+	// Every pipeline that reaches here produces a table from combinable
+	// aggregates; anything else went to searchPipelineGlobal.
+	dist, err := query.PlanDistributedTable(pipeline)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("pipeline routed to the per-node table path cannot be merged: %w", err))
 	}
-	// Non-aggregating but needs full materialization (sort/tail/slice):
-	// stream all records.
-	batch := make([]*apiv1.Record, 0, 100)
-	for _, rec := range result.Records {
-		batch = append(batch, recordToProto(rec))
-		if len(batch) >= 100 {
-			if err := stream.Send(&apiv1.SearchResponse{Records: batch}); err != nil {
-				return err
-			}
-			batch = batch[:0]
-		}
+
+	// Every node, this one included, answers in the combinable form the
+	// merge expects.
+	q.PartialAggregates = true
+	result, err := eng.RunPipeline(ctx, q, dist.PerNode)
+	if err != nil {
+		return errQueryExecution(err)
 	}
-	return stream.Send(&apiv1.SearchResponse{Records: batch, Histogram: histogram})
+	// A remote failure fails the whole pipeline query — a partial aggregate
+	// is silently wrong.
+	remoteResults, err := s.collectRemotePipeline(ctx, q, dist.PerNode)
+	if err != nil {
+		return err
+	}
+	table := dist.Merge(append([]*query.TableResult{result.Table}, remoteResults...))
+	table, err = eng.ApplyTableOps(ctx, table, dist.PostOps)
+	if err != nil {
+		return errQueryExecution(err)
+	}
+	return stream.Send(&apiv1.SearchResponse{
+		TableResult: tableResultToProto(table, pipeline),
+		Histogram:   HistogramToProto(eng.ComputeHistogram(ctx, q, 50)),
+	})
 }
 
-// searchPipelineGlobal handles pipelines where non-distributive cap operators
-// (head, tail, slice) precede an aggregation (stats/timechart). Instead of
-// fanning out the full pipeline to each remote node (which would apply the cap
-// independently per-node), it gathers raw records from all remote nodes, then
-// runs the entire pipeline on the coordinator.
+// searchPipelineGlobal handles pipelines the cluster cannot answer by merging
+// per-node pipeline results: a cap (head, tail, slice) that would otherwise
+// apply independently on each node, or an aggregate that cannot be recombined
+// from partials. Every node's raw records are merged into one ordered stream
+// on the coordinator and run through the pipeline once.
+//
+// The stream is consumed, never collected: the pipeline retains only what its
+// operators hold — a head/tail window, a bounded top-N sort, or accumulator
+// state — so the coordinator's memory tracks the answer rather than the match
+// set. An uncapped sort is the one shape that must still hold every record,
+// and the memory budget is what bounds it.
 func (s *QueryServer) searchPipelineGlobal(
 	ctx context.Context,
 	eng *query.Engine,
@@ -86,21 +85,16 @@ func (s *QueryServer) searchPipelineGlobal(
 		q.Limit = int(s.maxResultCount)
 	}
 
-	// Collect raw records from remote nodes (no pipeline — just the base query).
-	remoteIter, remoteHist, _ := s.collectRemote(ctx, q, nil)
-	var extraRecords []chunk.Record
-	if remoteIter != nil {
-		for rec, iterErr := range remoteIter {
-			if iterErr != nil {
-				return connect.NewError(connect.CodeInternal, iterErr)
-			}
-			extraRecords = append(extraRecords, rec)
-		}
-	}
+	// One account for this node's whole share of the query.
+	budget := query.NewBudget()
 
-	result, err := eng.RunPipelineOnRecords(ctx, q, pipeline, extraRecords)
+	// Stream raw records from remote nodes (no pipeline — just the base
+	// query); the pipeline runs once, over local and remote records merged.
+	remoteIter, remoteHist, _ := s.collectRemote(ctx, q, nil)
+
+	result, err := eng.RunPipelineWithRemote(ctx, q, pipeline, remoteIter, budget)
 	if err != nil {
-		return errInternal(err)
+		return errQueryExecution(err)
 	}
 
 	// Compute and merge histogram.
@@ -131,14 +125,25 @@ func (s *QueryServer) searchPipelineGlobal(
 // with execution metadata and human-readable notes.
 func buildPipelineStages(pipeline *querylang.Pipeline) []*apiv1.QueryPipelineStage {
 	stages := make([]*apiv1.QueryPipelineStage, 0, len(pipeline.Pipes))
+	aggregated := false
 	for _, op := range pipeline.Pipes {
+		execution := pipeOpExecution(op)
+		if aggregated && execution != "render-hint" {
+			// Operators after stats or timechart run once, on the
+			// coordinator, over the merged table.
+			execution = "coordinator-only"
+		}
 		stages = append(stages, &apiv1.QueryPipelineStage{
 			Operator:      pipeOpName(op),
 			Description:   op.String(),
 			Materializing: isMaterializing(op),
 			Note:          pipeOpNote(op),
-			Execution:     pipeOpExecution(op),
+			Execution:     execution,
 		})
+		switch op.(type) {
+		case *querylang.StatsOp, *querylang.TimechartOp:
+			aggregated = true
+		}
 	}
 	return stages
 }
@@ -202,8 +207,8 @@ func pipeOpExecution(op querylang.PipeOp) string {
 	switch op.(type) {
 	case *querylang.StatsOp, *querylang.TimechartOp:
 		return "materializing" // runs on each node, merged on coordinator
-	case *querylang.SortOp, *querylang.TailOp, *querylang.SliceOp:
-		return "coordinator-only" // buffers all records on the coordinating node
+	case *querylang.SortOp, *querylang.TailOp, *querylang.SliceOp, *querylang.DedupOp:
+		return "coordinator-only" // runs once on the coordinating node, over every node's records
 	case *querylang.HeadOp:
 		return "short-circuit" // stops iteration early
 	case *querylang.BarchartOp, *querylang.DonutOp, *querylang.MapOp, *querylang.RawOp:
@@ -248,13 +253,13 @@ func pipeOpNote(op querylang.PipeOp) string {
 				fields[i] = f.Name + " (asc)"
 			}
 		}
-		return fmt.Sprintf("Sorts all results by %s. Buffers all records in memory on the coordinator.", strings.Join(fields, ", "))
+		return fmt.Sprintf("Sorts all results by %s. Buffers records in memory on the coordinator, up to the per-query memory budget.", strings.Join(fields, ", "))
 	case *querylang.HeadOp:
 		return fmt.Sprintf("Returns only the first %d records. Stops scanning early once the limit is reached.", o.N)
 	case *querylang.TailOp:
 		return fmt.Sprintf("Returns only the last %d records. All records must be scanned to find the tail.", o.N)
 	case *querylang.SliceOp:
-		return fmt.Sprintf("Returns records %d through %d. All records must be buffered to extract the slice.", o.Start, o.End)
+		return fmt.Sprintf("Returns records %d through %d. Only that window is held, and scanning stops once it is filled.", o.Start, o.End)
 	case *querylang.RenameOp:
 		pairs := make([]string, len(o.Renames))
 		for i, r := range o.Renames {

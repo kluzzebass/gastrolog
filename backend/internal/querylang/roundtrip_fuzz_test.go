@@ -1,54 +1,6 @@
 package querylang
 
-import (
-	"strings"
-	"testing"
-)
-
-// exprToQuery converts an AST back to parseable query syntax.
-// Unlike String() which is diagnostic (e.g. "token(error)"), this produces
-// a string the parser can consume for round-trip testing.
-func exprToQuery(e Expr) string {
-	switch v := e.(type) {
-	case *PredicateExpr:
-		switch v.Kind {
-		case PredToken:
-			return quoteIfNeeded(v.Value)
-		case PredKV:
-			k := quoteIfNeeded(v.Key)
-			val := quoteIfNeeded(v.Value)
-			return k + v.Op.String() + val
-		case PredKeyExists:
-			return quoteIfNeeded(v.Key) + "=*"
-		case PredValueExists:
-			return "*=" + quoteIfNeeded(v.Value)
-		case PredRegex:
-			return "/" + v.Value + "/"
-		case PredGlob:
-			return v.Value
-		case PredExpr:
-			return v.ExprLHS.String() + v.Op.String() + v.Value
-		default:
-			return quoteIfNeeded(v.Value)
-		}
-	case *NotExpr:
-		return "NOT " + exprToQuery(v.Term)
-	case *AndExpr:
-		parts := make([]string, len(v.Terms))
-		for i, t := range v.Terms {
-			parts[i] = exprToQuery(t)
-		}
-		return "(" + strings.Join(parts, " AND ") + ")"
-	case *OrExpr:
-		parts := make([]string, len(v.Terms))
-		for i, t := range v.Terms {
-			parts[i] = exprToQuery(t)
-		}
-		return "(" + strings.Join(parts, " OR ") + ")"
-	default:
-		return ""
-	}
-}
+import "testing"
 
 func FuzzParseStringRoundTrip(f *testing.F) {
 	// Seed corpus: queries that exercise various AST node types.
@@ -85,8 +37,9 @@ func FuzzParseStringRoundTrip(f *testing.F) {
 			return // unparseable, skip
 		}
 
-		// Serialize back to parseable query syntax.
-		s := exprToQuery(expr1)
+		// String() is the wire format the coordinator forwards, so it must
+		// parse back to the same expression.
+		s := expr1.String()
 		if s == "" {
 			return
 		}
@@ -98,10 +51,14 @@ func FuzzParseStringRoundTrip(f *testing.F) {
 				input, s, err2)
 		}
 
-		// Second serialization must equal first (stable round-trip).
-		s2 := exprToQuery(expr2)
-		if s != s2 {
+		// Second serialization must equal first (stable round-trip), and the
+		// two expressions must mean the same thing.
+		if s2 := expr2.String(); s != s2 {
 			t.Fatalf("unstable round-trip: first=%q, second=%q (original input=%q)", s, s2, input)
+		}
+		dnf1, dnf2 := ToDNF(expr1), ToDNF(expr2)
+		if d1, d2 := dnf1.String(), dnf2.String(); d1 != d2 {
+			t.Fatalf("round-trip changed meaning: %q → %q parses as %q, not %q", input, s, d2, d1)
 		}
 	})
 }

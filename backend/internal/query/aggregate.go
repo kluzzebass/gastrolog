@@ -107,6 +107,12 @@ type Aggregator struct {
 	state     map[string]*groupState
 	keyOrder  []string // insertion order for deterministic output
 	truncated bool
+
+	// partials emits each aggregate in the form another node's result can be
+	// combined with: an avg becomes two cells, its sum and its count.
+	partials bool
+
+	budget *Budget
 }
 
 type groupState struct {
@@ -114,14 +120,17 @@ type groupState struct {
 	accs        []accumulator // one per aggregate expression
 }
 
-// NewAggregator creates an Aggregator from a parsed StatsOp.
-func NewAggregator(stats *querylang.StatsOp) (*Aggregator, error) {
+// NewAggregator creates an Aggregator from a parsed StatsOp. The budget bounds
+// group state and per-accumulator state; it is required rather than optional so
+// no execution path can construct an unbounded aggregator.
+func NewAggregator(stats *querylang.StatsOp, budget *Budget) (*Aggregator, error) {
 	a := &Aggregator{
 		aggs:   stats.Aggs,
 		groups: stats.Groups,
 		eval:   querylang.NewEvaluator(),
 		binIdx: -1,
 		state:  make(map[string]*groupState),
+		budget: budget,
 	}
 
 	// Find and parse bin() group if present.
@@ -191,6 +200,9 @@ func (a *Aggregator) Add(rec chunk.Record) error {
 			a.truncated = true
 			return nil
 		}
+		if err := a.budget.Charge(consumerGroupState, groupStateFootprint(key, groupValues, len(a.aggs))); err != nil {
+			return err
+		}
 		accs, err := a.makeAccumulators()
 		if err != nil {
 			return err
@@ -218,11 +230,27 @@ func (a *Aggregator) Add(rec chunk.Record) error {
 				val = v
 			}
 		}
-		gs.accs[i].Add(val)
+		if err := gs.accs[i].Add(val); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
+
+// groupStateFootprint estimates the bytes one group retains: its map entry,
+// the key and the display value for each group column (held twice — once in
+// the key, once in groupValues), and the accumulator slice.
+func groupStateFootprint(key string, groupValues []string, numAggs int) int64 {
+	n := stringSetEntryBytes(key) + int64(len(key))
+	n += int64(len(groupValues)) * stringHeaderBytes
+	n += int64(numAggs) * accumulatorSlotBytes
+	return n
+}
+
+// accumulatorSlotBytes is the interface word pair plus the smallest
+// accumulator struct behind it, held once per aggregate per group.
+const accumulatorSlotBytes = 48
 
 // Result produces the final TableResult.
 // start and end are used for gap-filling when bin() is present.
@@ -244,6 +272,9 @@ func (a *Aggregator) Result(start, end time.Time) *TableResult {
 	}
 	for _, agg := range a.aggs {
 		columns = append(columns, agg.DefaultAlias())
+		if a.partials && strings.EqualFold(agg.Func, "avg") {
+			columns = append(columns, agg.DefaultAlias()+" count")
+		}
 	}
 
 	// Build rows.
@@ -267,7 +298,7 @@ func makeGroupKey(values []string) string {
 func (a *Aggregator) makeAccumulators() ([]accumulator, error) {
 	accs := make([]accumulator, len(a.aggs))
 	for i, agg := range a.aggs {
-		acc, err := newAccumulator(agg.Func)
+		acc, err := newAccumulator(agg.Func, a.budget)
 		if err != nil {
 			return nil, err
 		}
@@ -319,16 +350,28 @@ func (a *Aggregator) buildRows(columns []string) [][]string {
 // buildDefaultRow returns a single row with default accumulator values (no group-by, no records).
 func (a *Aggregator) buildDefaultRow() [][]string {
 	accs, _ := a.makeAccumulators()
-	row := make([]string, len(a.aggs))
-	for i, acc := range accs {
-		v := acc.Result()
-		if v.Missing {
-			row[i] = ""
-		} else {
-			row[i] = v.Str
-		}
+	row := make([]string, 0, len(a.aggs))
+	for _, acc := range accs {
+		row = a.appendResult(row, acc)
 	}
 	return [][]string{row}
+}
+
+// appendResult appends an accumulator's result cells to row: one cell, or the
+// sum and count of an avg when emitting partials.
+func (a *Aggregator) appendResult(row []string, acc accumulator) []string {
+	if av, ok := acc.(*avgAcc); ok && a.partials {
+		sum := ""
+		if av.count > 0 {
+			sum = querylang.NumValue(av.sum).Str
+		}
+		return append(row, sum, strconv.FormatInt(av.count, 10))
+	}
+	v := acc.Result()
+	if v.Missing {
+		return append(row, "")
+	}
+	return append(row, v.Str)
 }
 
 // buildGroupedRows returns one row per group key with group values and accumulator results.
@@ -339,12 +382,7 @@ func (a *Aggregator) buildGroupedRows(columns []string) [][]string {
 		row := make([]string, 0, len(columns))
 		row = append(row, gs.groupValues...)
 		for _, acc := range gs.accs {
-			v := acc.Result()
-			if v.Missing {
-				row = append(row, "")
-			} else {
-				row = append(row, v.Str)
-			}
+			row = a.appendResult(row, acc)
 		}
 		rows = append(rows, row)
 	}
@@ -402,7 +440,13 @@ func (a *Aggregator) collectNonBinGroups() map[string][]string {
 	return nonBinGroups
 }
 
-// fillBinsForGroup fills all bins from minTS to maxTS for a specific non-bin group combination.
+// fillBinsForGroup fills all bins from minTS to maxTS for a specific non-bin
+// group combination.
+//
+// A narrow bin over a wide range spans an unbounded number of bins, so filling
+// stops at the cardinality cap or the memory budget and marks the result
+// truncated. Gap-fill only adds empty rows, so stopping drops padding, never a
+// computed value.
 func (a *Aggregator) fillBinsForGroup(nbValues []string, minTS, maxTS time.Time) {
 	for t := minTS; !t.After(maxTS); t = t.Add(a.binWidth) {
 		binStr := t.UTC().Format(time.RFC3339)
@@ -411,6 +455,14 @@ func (a *Aggregator) fillBinsForGroup(nbValues []string, minTS, maxTS time.Time)
 		key := makeGroupKey(fullValues)
 		if _, exists := a.state[key]; exists {
 			continue
+		}
+		if len(a.state) >= MaxGroupCardinality {
+			a.truncated = true
+			return
+		}
+		if err := a.budget.Charge(consumerGroupState, groupStateFootprint(key, fullValues, len(a.aggs))); err != nil {
+			a.truncated = true
+			return
 		}
 		accs, err := a.makeAccumulators()
 		if err != nil {
@@ -489,9 +541,11 @@ func (a *Aggregator) sortRows(rows [][]string) {
 	})
 }
 
-// accumulator is the interface for aggregate function state.
+// accumulator is the interface for aggregate function state. Add returns an
+// error when the value would grow state past the query's memory budget; the
+// accumulators whose state is bounded by construction never return one.
 type accumulator interface {
-	Add(v querylang.Value)
+	Add(v querylang.Value) error
 	Result() querylang.Value
 }
 
@@ -499,10 +553,11 @@ type accumulator interface {
 // the caller passes a non-missing value for every record.
 type countAcc struct{ n int64 }
 
-func (a *countAcc) Add(v querylang.Value) {
+func (a *countAcc) Add(v querylang.Value) error {
 	if !v.Missing {
 		a.n++
 	}
+	return nil
 }
 
 func (a *countAcc) Result() querylang.Value {
@@ -514,11 +569,12 @@ type sumAcc struct {
 	any bool
 }
 
-func (a *sumAcc) Add(v querylang.Value) {
+func (a *sumAcc) Add(v querylang.Value) error {
 	if n, ok := v.ToNum(); ok {
 		a.sum += n
 		a.any = true
 	}
+	return nil
 }
 
 func (a *sumAcc) Result() querylang.Value {
@@ -533,11 +589,12 @@ type avgAcc struct {
 	count int64
 }
 
-func (a *avgAcc) Add(v querylang.Value) {
+func (a *avgAcc) Add(v querylang.Value) error {
 	if n, ok := v.ToNum(); ok {
 		a.sum += n
 		a.count++
 	}
+	return nil
 }
 
 func (a *avgAcc) Result() querylang.Value {
@@ -552,13 +609,14 @@ type minAcc struct {
 	any bool
 }
 
-func (a *minAcc) Add(v querylang.Value) {
+func (a *minAcc) Add(v querylang.Value) error {
 	if n, ok := v.ToNum(); ok {
 		if !a.any || n < a.min {
 			a.min = n
 			a.any = true
 		}
 	}
+	return nil
 }
 
 func (a *minAcc) Result() querylang.Value {
@@ -573,13 +631,14 @@ type maxAcc struct {
 	any bool
 }
 
-func (a *maxAcc) Add(v querylang.Value) {
+func (a *maxAcc) Add(v querylang.Value) error {
 	if n, ok := v.ToNum(); ok {
 		if !a.any || n > a.max {
 			a.max = n
 			a.any = true
 		}
 	}
+	return nil
 }
 
 func (a *maxAcc) Result() querylang.Value {
@@ -589,34 +648,52 @@ func (a *maxAcc) Result() querylang.Value {
 	return querylang.NumValue(a.max)
 }
 
-// dcountAcc counts distinct non-missing string values.
+// dcountAcc counts distinct non-missing string values. The set grows with the
+// cardinality of the data, not the size of the result, so every new member is
+// charged against the query's budget.
 type dcountAcc struct {
-	seen map[string]bool
+	seen   map[string]bool
+	budget *Budget
 }
 
-func (a *dcountAcc) Add(v querylang.Value) {
+func (a *dcountAcc) Add(v querylang.Value) error {
 	if v.Missing {
-		return
+		return nil
 	}
 	if a.seen == nil {
 		a.seen = make(map[string]bool)
 	}
+	if a.seen[v.Str] {
+		return nil
+	}
+	if err := a.budget.Charge(consumerDistinctSet, stringSetEntryBytes(v.Str)); err != nil {
+		return err
+	}
 	a.seen[v.Str] = true
+	return nil
 }
 
 func (a *dcountAcc) Result() querylang.Value {
 	return querylang.NumValue(float64(len(a.seen)))
 }
 
-// medianAcc collects numeric values and returns the median.
+// medianAcc collects numeric values and returns the median. It keeps one
+// sample per matching record, so the buffer is charged per sample.
 type medianAcc struct {
-	vals []float64
+	vals   []float64
+	budget *Budget
 }
 
-func (a *medianAcc) Add(v querylang.Value) {
-	if n, ok := v.ToNum(); ok {
-		a.vals = append(a.vals, n)
+func (a *medianAcc) Add(v querylang.Value) error {
+	n, ok := v.ToNum()
+	if !ok {
+		return nil
 	}
+	if err := a.budget.Charge(consumerMedianSamples, float64Bytes); err != nil {
+		return err
+	}
+	a.vals = append(a.vals, n)
+	return nil
 }
 
 func (a *medianAcc) Result() querylang.Value {
@@ -633,15 +710,21 @@ func (a *medianAcc) Result() querylang.Value {
 
 // firstAcc tracks the first non-missing value seen.
 type firstAcc struct {
-	val querylang.Value
-	set bool
+	val    querylang.Value
+	set    bool
+	budget *Budget
 }
 
-func (a *firstAcc) Add(v querylang.Value) {
-	if !a.set && !v.Missing {
-		a.val = v
-		a.set = true
+func (a *firstAcc) Add(v querylang.Value) error {
+	if a.set || v.Missing {
+		return nil
 	}
+	if err := a.budget.Charge(consumerLatchedValue, int64(len(v.Str))+stringHeaderBytes); err != nil {
+		return err
+	}
+	a.val = v
+	a.set = true
+	return nil
 }
 
 func (a *firstAcc) Result() querylang.Value {
@@ -651,17 +734,27 @@ func (a *firstAcc) Result() querylang.Value {
 	return a.val
 }
 
-// lastAcc tracks the last non-missing value seen.
+// lastAcc tracks the last non-missing value seen. Each replacement releases
+// the value it drops, so the charge tracks what is actually retained.
 type lastAcc struct {
-	val querylang.Value
-	set bool
+	val    querylang.Value
+	set    bool
+	budget *Budget
 }
 
-func (a *lastAcc) Add(v querylang.Value) {
-	if !v.Missing {
-		a.val = v
-		a.set = true
+func (a *lastAcc) Add(v querylang.Value) error {
+	if v.Missing {
+		return nil
 	}
+	if err := a.budget.Charge(consumerLatchedValue, int64(len(v.Str))+stringHeaderBytes); err != nil {
+		return err
+	}
+	if a.set {
+		a.budget.Release(int64(len(a.val.Str)) + stringHeaderBytes)
+	}
+	a.val = v
+	a.set = true
+	return nil
 }
 
 func (a *lastAcc) Result() querylang.Value {
@@ -671,23 +764,31 @@ func (a *lastAcc) Result() querylang.Value {
 	return a.val
 }
 
-// valuesAcc collects distinct values and returns them comma-separated.
+// valuesAcc collects distinct values and returns them comma-separated. It
+// holds every distinct value twice — once as a set member, once in order — so
+// both copies are charged.
 type valuesAcc struct {
-	seen  map[string]bool
-	order []string
+	seen   map[string]bool
+	order  []string
+	budget *Budget
 }
 
-func (a *valuesAcc) Add(v querylang.Value) {
+func (a *valuesAcc) Add(v querylang.Value) error {
 	if v.Missing {
-		return
+		return nil
 	}
 	if a.seen == nil {
 		a.seen = make(map[string]bool)
 	}
-	if !a.seen[v.Str] {
-		a.seen[v.Str] = true
-		a.order = append(a.order, v.Str)
+	if a.seen[v.Str] {
+		return nil
 	}
+	if err := a.budget.Charge(consumerValuesList, stringSetEntryBytes(v.Str)+stringHeaderBytes); err != nil {
+		return err
+	}
+	a.seen[v.Str] = true
+	a.order = append(a.order, v.Str)
+	return nil
 }
 
 func (a *valuesAcc) Result() querylang.Value {
@@ -697,7 +798,7 @@ func (a *valuesAcc) Result() querylang.Value {
 	return querylang.StrValue(strings.Join(a.order, ", "))
 }
 
-func newAccumulator(funcName string) (accumulator, error) {
+func newAccumulator(funcName string, budget *Budget) (accumulator, error) {
 	switch strings.ToLower(funcName) {
 	case "count":
 		return &countAcc{}, nil
@@ -710,15 +811,15 @@ func newAccumulator(funcName string) (accumulator, error) {
 	case "max":
 		return &maxAcc{}, nil
 	case "dcount":
-		return &dcountAcc{}, nil
+		return &dcountAcc{budget: budget}, nil
 	case "median":
-		return &medianAcc{}, nil
+		return &medianAcc{budget: budget}, nil
 	case "first":
-		return &firstAcc{}, nil
+		return &firstAcc{budget: budget}, nil
 	case "last":
-		return &lastAcc{}, nil
+		return &lastAcc{budget: budget}, nil
 	case "values":
-		return &valuesAcc{}, nil
+		return &valuesAcc{budget: budget}, nil
 	default:
 		return nil, fmt.Errorf("unknown aggregate function: %s", funcName)
 	}

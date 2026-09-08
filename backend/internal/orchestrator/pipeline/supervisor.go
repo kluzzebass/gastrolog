@@ -909,6 +909,17 @@ func (s *Supervisor) RotateChunkCron(ctx context.Context, vaultID glid.GLID) err
 	return nil
 }
 
+// SealOpenChunk seals a vault's open chunk manifest on demand and reports
+// whether a manifest was sealed. Leader-gated inside chunking; an unknown
+// vault is not an error, it simply has nothing to seal here.
+func (s *Supervisor) SealOpenChunk(vaultID glid.GLID) (bool, error) {
+	sealed, err := s.chunk.SealOpenManifest(vaultID)
+	if errors.Is(err, chunking.ErrUnknownVault) {
+		return false, nil
+	}
+	return sealed, err
+}
+
 // UnregisterVault stops the managers for a vault that has left this node. It is a
 // no-op for an unknown vault. Home managers are stopped before origin managers,
 // and routing is detached before segmentation closes the input queue.

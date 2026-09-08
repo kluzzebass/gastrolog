@@ -163,3 +163,30 @@ func TestSaveServerSettingsOverwritePreservesLatest(t *testing.T) {
 		t.Errorf("got %q, want %q", ss.Auth.JWTSecret, "second")
 	}
 }
+
+// Bootstrap writes the default cap so a fresh install starts with one. A
+// stored 0 stays 0 — Search is cursor-paginated, so an operator who clears the
+// cap means it.
+func TestBootstrapWritesMaxResultCount(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		boot func(context.Context, system.Store) error
+	}{
+		{"full", system.Bootstrap},
+		{"minimal", system.BootstrapMinimal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := memory.NewStore()
+			if err := tc.boot(context.Background(), store); err != nil {
+				t.Fatalf("bootstrap: %v", err)
+			}
+			ss, err := store.LoadServerSettings(context.Background())
+			if err != nil {
+				t.Fatalf("load settings: %v", err)
+			}
+			if ss.Query.MaxResultCount != system.DefaultMaxResultCount {
+				t.Errorf("MaxResultCount = %d, want %d", ss.Query.MaxResultCount, system.DefaultMaxResultCount)
+			}
+		})
+	}
+}
