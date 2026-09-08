@@ -11,11 +11,20 @@ import { LifecycleService } from "./gen/gastrolog/v1/lifecycle_connect";
 import { SystemService } from "./gen/gastrolog/v1/system_connect";
 import { AuthService } from "./gen/gastrolog/v1/auth_connect";
 import { JobService } from "./gen/gastrolog/v1/job_connect";
+import {
+  refreshSharedSession,
+  readStoredToken,
+  writeStoredToken,
+  readStoredRefreshToken,
+  writeStoredRefreshToken,
+  type Exchange,
+  type Install,
+} from "./session";
 
-// Token management — stored in localStorage, read by the auth interceptor.
-const TOKEN_KEY = "gastrolog_token";
-const REFRESH_TOKEN_KEY = "gastrolog_refresh_token";
-let currentToken: string | null = localStorage.getItem(TOKEN_KEY);
+// Token management — stored in localStorage by ./session, which owns the
+// shared-across-tabs half; this module holds the in-memory copy the auth
+// interceptor reads and the timer that refreshes ahead of expiry.
+let currentToken: string | null = readStoredToken();
 
 export function getToken(): string | null {
   return currentToken;
@@ -48,28 +57,21 @@ function scheduleProactiveRefresh(token: string) {
 
 export function setToken(token: string | null) {
   currentToken = token;
+  writeStoredToken(token);
   if (token) {
-    localStorage.setItem(TOKEN_KEY, token);
     scheduleProactiveRefresh(token);
-  } else {
-    localStorage.removeItem(TOKEN_KEY);
-    if (refreshTimer) {
-      clearTimeout(refreshTimer);
-      refreshTimer = null;
-    }
+  } else if (refreshTimer) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
   }
 }
 
 export function getRefreshToken(): string | null {
-  return localStorage.getItem(REFRESH_TOKEN_KEY);
+  return readStoredRefreshToken();
 }
 
 export function setRefreshToken(token: string | null) {
-  if (token) {
-    localStorage.setItem(REFRESH_TOKEN_KEY, token);
-  } else {
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
-  }
+  writeStoredRefreshToken(token);
 }
 
 // Attaches the stored JWT to every outgoing RPC request.
@@ -81,21 +83,27 @@ const authInterceptor: Interceptor = (next) => async (req) => {
 };
 
 // Track whether a refresh is already in-flight to avoid concurrent refreshes.
+// This covers one tab; ./session covers the rest.
 let refreshPromise: Promise<boolean> | null = null;
 
-async function tryRefresh(): Promise<boolean> {
-  const rt = getRefreshToken();
-  if (!rt) return false;
+const exchangeRefreshToken: Exchange = async (rt) => {
   try {
     const res = await authClient.refreshToken({ refreshToken: rt });
-    if (res.token) {
-      setToken(res.token.token);
-    }
-    setRefreshToken(res.refreshToken);
-    return true;
+    return { token: res.token?.token ?? null, refreshToken: res.refreshToken };
   } catch {
-    return false;
+    return null;
   }
+};
+
+const installSession: Install = (token, refreshToken) => {
+  if (token) {
+    setToken(token);
+  }
+  setRefreshToken(refreshToken);
+};
+
+function tryRefresh(): Promise<boolean> {
+  return refreshSharedSession(exchangeRefreshToken, installSession);
 }
 
 /**

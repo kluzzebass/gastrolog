@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"net/http"
-	"time"
 
 	"connectrpc.com/connect"
 
@@ -27,10 +26,14 @@ func (s *Server) apiVerifier() *auth.Verifier {
 	return auth.NewVerifier(s.tokens, &tokenValidator{cfgStore: s.cfgStore})
 }
 
-func (tv *tokenValidator) IsTokenValid(ctx context.Context, userID string, issuedAt time.Time) (bool, error) {
-	uid, err := glid.ParseUUID(userID)
+func (tv *tokenValidator) IsTokenValid(ctx context.Context, claims *auth.Claims) (bool, error) {
+	uid, err := glid.ParseUUID(claims.UserID)
 	if err != nil {
-		return false, fmt.Errorf("parse user ID %q: %w", userID, err)
+		return false, fmt.Errorf("parse user ID %q: %w", claims.UserID, err)
+	}
+	issuedAt, ok := claims.IssuedAtPrecise()
+	if !ok {
+		return false, nil // no issue time to rank against an invalidation
 	}
 	user, err := tv.cfgStore.GetUser(ctx, uid)
 	if err != nil {
@@ -39,8 +42,46 @@ func (tv *tokenValidator) IsTokenValid(ctx context.Context, userID string, issue
 	if user == nil {
 		return false, nil // deleted user
 	}
+	// An invalidation covers every token already in existence at that instant,
+	// so an issue time equal to it counts as invalidated.
 	if !user.TokenInvalidatedAt.IsZero() && !issuedAt.After(user.TokenInvalidatedAt) {
-		return false, nil // token issued before invalidation
+		return false, nil
+	}
+	return tv.sessionLive(ctx, claims.SessionID, uid)
+}
+
+// sessionLive reports whether the session a token names still exists. Logout
+// deletes the session's refresh-token row, and that is what stops the access
+// token issued from it.
+func (tv *tokenValidator) sessionLive(ctx context.Context, sessionID string, userID glid.GLID) (bool, error) {
+	if sessionID == "" {
+		return false, nil // a token naming no session cannot be logged out
+	}
+	sid, err := glid.ParseUUID(sessionID)
+	if err != nil {
+		// A claim that is not an ID names no session, so the token is
+		// rejected — this is a bad token, not a failure to check one.
+		return false, nil //nolint:nilerr // rejection, not an error to report
+	}
+	rt, err := tv.cfgStore.GetRefreshToken(ctx, sid)
+	if err != nil {
+		return false, err
+	}
+	if rt == nil {
+		// A miss on local state is not proof the session is gone: any node
+		// serves any request, and this one may not have applied the login
+		// that opened the session. Catch up before rejecting, or a freshly
+		// logged-in user is bounced back to the login page.
+		if err := tv.cfgStore.Barrier(ctx); err != nil {
+			return false, fmt.Errorf("confirm session %s: %w", sid, err)
+		}
+		rt, err = tv.cfgStore.GetRefreshToken(ctx, sid)
+		if err != nil {
+			return false, err
+		}
+	}
+	if rt == nil || rt.UserID != userID {
+		return false, nil
 	}
 	return true, nil
 }

@@ -175,10 +175,8 @@ message DeleteUserRequest {
 
 message DeleteUserResponse {}
 
-message LogoutRequest {
-  // The refresh token to revoke. Only this token is deleted — other
-  // sessions for the same user are unaffected.
-  string refresh_token = 1;
-}
+// LogoutRequest carries no fields: the session to end is the one the caller's
+// access token names, so a client cannot ask to end somebody else's.
+message LogoutRequest {}
 
 message LogoutResponse {}

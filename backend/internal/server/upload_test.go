@@ -80,9 +80,23 @@ func (f *uploadFixture) createUser(t *testing.T, id glid.GLID, username, role st
 	}
 }
 
+// issue mints an access token bound to a live session, the way login does:
+// a token that names no session is rejected as one that could never be
+// logged out.
 func (f *uploadFixture) issue(t *testing.T, id glid.GLID, username, role string) string {
 	t.Helper()
-	token, _, err := f.tokens.Issue(id.String(), username, role)
+	session := glid.New()
+	err := f.store.CreateRefreshToken(context.Background(), system.RefreshToken{
+		ID:        session,
+		UserID:    id,
+		TokenHash: "test-" + session.String(),
+		ExpiresAt: time.Now().Add(time.Hour),
+		CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("CreateRefreshToken: %v", err)
+	}
+	token, _, err := f.tokens.Issue(id.String(), username, role, session.String())
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}

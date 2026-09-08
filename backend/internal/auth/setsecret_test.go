@@ -10,7 +10,7 @@ func TestSetSecret_InvalidatesOldTokens(t *testing.T) {
 	secret2 := []byte("rotated--secret-key-32bytes!!!!!")
 
 	ts := NewTokenService(secret1, time.Hour)
-	token, _, err := ts.Issue("uid", "admin", "admin")
+	token, _, err := ts.Issue("uid", "admin", "admin", "")
 	if err != nil {
 		t.Fatal(err)
 	}

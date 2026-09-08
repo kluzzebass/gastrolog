@@ -11,7 +11,7 @@ func FuzzJWTVerify(f *testing.F) {
 	ts := NewTokenService([]byte("fuzz-secret-key"), 1*time.Hour)
 
 	// Seed with a legitimately issued token.
-	validToken, _, _ := ts.Issue("user-id-1", "admin", "admin")
+	validToken, _, _ := ts.Issue("user-id-1", "admin", "admin", "")
 	f.Add(validToken)
 	f.Add("")
 	f.Add("not.a.jwt")

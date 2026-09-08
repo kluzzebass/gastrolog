@@ -39,6 +39,7 @@ type Store struct {
 	raft         *raft.Raft
 	applyTimeout time.Duration
 	forwarder    Forwarder // nil for single-node
+	barriers     barrierGate
 }
 
 // New creates a new Store.
@@ -192,9 +193,16 @@ func (s *Store) ApplyRaw(data []byte) (uint64, error) {
 // this blocks on the tracker until the local FSM applies up to the barrier's
 // committed index — no polling. The barrier is an ordinary LogCommand (not a
 // raft LogBarrier) so it flows through FSM.Apply, which the FSM-fed tracker
-// requires to advance. Used by startup FSM catch-up; bound the wait by
-// passing a ctx with a deadline.
+// requires to advance. Used by startup FSM catch-up and by readers that must
+// not mistake replication lag for absence; bound the wait by passing a ctx
+// with a deadline.
+//
+// Callers arriving together share one commit — see barrierGate.
 func (s *Store) Barrier(ctx context.Context) error {
+	return s.barriers.Do(ctx, s.commitBarrier)
+}
+
+func (s *Store) commitBarrier(ctx context.Context) error {
 	data, err := command.Marshal(command.NewCatchupBarrier())
 	if err != nil {
 		return fmt.Errorf("marshal catchup barrier: %w", err)
@@ -297,6 +305,10 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 
 func (s *Store) GetUserPreferences(ctx context.Context, id glid.GLID) (*string, error) {
 	return s.fsm.Store().GetUserPreferences(ctx, id)
+}
+
+func (s *Store) GetRefreshToken(ctx context.Context, id glid.GLID) (*system.RefreshToken, error) {
+	return s.fsm.Store().GetRefreshToken(ctx, id)
 }
 
 func (s *Store) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (*system.RefreshToken, error) {
@@ -449,6 +461,23 @@ func (s *Store) CreateRefreshToken(ctx context.Context, token system.RefreshToke
 
 func (s *Store) DeleteRefreshToken(ctx context.Context, id glid.GLID) error {
 	return s.apply(ctx, command.NewDeleteRefreshToken(id))
+}
+
+// RotateRefreshToken commits the exchange as a single Raft entry, so the whole
+// cluster orders competing rotations of one token the same way. The winner is
+// the caller whose replacement is the one present afterwards: next.TokenHash is
+// freshly generated, so no other caller could have put it there. The read is
+// safe on a follower too — apply has already waited for the local FSM to reach
+// the entry's index.
+func (s *Store) RotateRefreshToken(ctx context.Context, oldTokenHash string, next system.RefreshToken) (bool, error) {
+	if err := s.apply(ctx, command.NewRotateRefreshToken(oldTokenHash, next)); err != nil {
+		return false, err
+	}
+	got, err := s.fsm.Store().GetRefreshTokenByHash(ctx, next.TokenHash)
+	if err != nil {
+		return false, err
+	}
+	return got != nil, nil
 }
 
 func (s *Store) DeleteUserRefreshTokens(ctx context.Context, userID glid.GLID) error {

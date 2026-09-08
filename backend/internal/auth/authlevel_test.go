@@ -105,7 +105,7 @@ func TestOperatorProceduresRequireAdmin(t *testing.T) {
 func TestUndeclaredProcedureIsDenied(t *testing.T) {
 	t.Parallel()
 	tokens := NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
-	adminToken, _, err := tokens.Issue("uid-admin", "admin", "admin")
+	adminToken, _, err := tokens.Issue("uid-admin", "admin", "admin", "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestUndeclaredProcedureIsDenied(t *testing.T) {
 func TestUnrecognizedLevelIsDenied(t *testing.T) {
 	t.Parallel()
 	tokens := NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
-	adminToken, _, err := tokens.Issue("uid-admin", "admin", "admin")
+	adminToken, _, err := tokens.Issue("uid-admin", "admin", "admin", "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}

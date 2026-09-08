@@ -97,6 +97,10 @@ func (s *Store) isEmpty() bool {
 		s.logLevels == nil
 }
 
+// Barrier is a no-op: this store is the state, so there is nothing it could
+// be lagging behind.
+func (s *Store) Barrier(ctx context.Context) error { return nil }
+
 // Load returns the full configuration.
 // Returns nil if no entities exist.
 func (s *Store) Load(ctx context.Context) (*system.System, error) {
@@ -895,6 +899,17 @@ func (s *Store) CreateRefreshToken(ctx context.Context, token system.RefreshToke
 	return nil
 }
 
+func (s *Store) GetRefreshToken(ctx context.Context, id glid.GLID) (*system.RefreshToken, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rt, ok := s.refreshTokens[id]
+	if !ok {
+		return nil, nil
+	}
+	return &rt, nil
+}
+
 func (s *Store) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (*system.RefreshToken, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -917,6 +932,28 @@ func (s *Store) ListRefreshTokens(ctx context.Context) ([]system.RefreshToken, e
 	}
 	slices.SortFunc(tokens, func(a, b system.RefreshToken) int { return glid.Compare(a.ID, b.ID) })
 	return tokens, nil
+}
+
+// RotateRefreshToken finds the token by hash, replaces it with next, and
+// reports whether it was there to consume — all under one lock hold, so a
+// second caller presenting the same token finds nothing left and gets false.
+// next must name the session being rotated; writing it anywhere else would
+// overwrite an unrelated session.
+func (s *Store) RotateRefreshToken(ctx context.Context, oldTokenHash string, next system.RefreshToken) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for id, rt := range s.refreshTokens {
+		if rt.TokenHash != oldTokenHash {
+			continue
+		}
+		if next.ID != id {
+			return false, fmt.Errorf("rotate refresh token: session %q cannot be replaced by %q", id, next.ID)
+		}
+		s.refreshTokens[id] = next
+		return true, nil
+	}
+	return false, nil
 }
 
 func (s *Store) DeleteRefreshToken(ctx context.Context, id glid.GLID) error {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"connectrpc.com/connect"
 
@@ -13,10 +12,11 @@ import (
 )
 
 // TokenValidator checks whether a token is still valid after JWT verification.
-// This is used for server-side token revocation (e.g. after logout, password
-// change, or role change) and to reject a deleted user.
+// This is used for server-side token revocation: logout ends the token's
+// session, and password change, rename, or role change invalidates every token
+// the user holds; a deleted user is rejected the same way.
 type TokenValidator interface {
-	IsTokenValid(ctx context.Context, userID string, issuedAt time.Time) (bool, error)
+	IsTokenValid(ctx context.Context, claims *Claims) (bool, error)
 }
 
 // HeaderGetter reads a request header by name. Connect request headers and
@@ -85,8 +85,8 @@ func (v *Verifier) verifiedClaims(ctx context.Context, headers HeaderGetter) (*C
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid token: %w", err))
 	}
-	if v.validator != nil && claims.IssuedAt != nil {
-		valid, err := v.validator.IsTokenValid(ctx, claims.UserID, claims.IssuedAt.Time)
+	if v.validator != nil {
+		valid, err := v.validator.IsTokenValid(ctx, claims)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("validate token: %w", err))
 		}
