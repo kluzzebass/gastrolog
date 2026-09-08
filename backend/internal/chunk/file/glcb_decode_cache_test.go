@@ -42,7 +42,6 @@ func TestGLCBDecodeLRUEvictsUnpinned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mappedGLCB A: %v", err)
 	}
-	blobA.Retain()
 	if _, err := blobA.Reader(); err != nil {
 		t.Fatalf("Reader A: %v", err)
 	}
@@ -56,7 +55,6 @@ func TestGLCBDecodeLRUEvictsUnpinned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mappedGLCB B: %v", err)
 	}
-	blobB.Retain()
 	if _, err := blobB.Reader(); err != nil {
 		t.Fatalf("Reader B: %v", err)
 	}

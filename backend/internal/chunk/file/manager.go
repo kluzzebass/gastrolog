@@ -1052,10 +1052,9 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	// the same per-chunk read lock as multi-file mmap cursors
 	// (release-on-Close). Multi-file is the fallback.
 	if sealed && m.hasLocalGLCB(id) {
-		if cursor, err := m.openLocalGLCBCursor(id); err == nil {
-			return cursor, nil
+		if cursor, err := m.sealedGLCBCursorOrFallback(id); cursor != nil || err != nil {
+			return cursor, err
 		}
-		// Corrupt or partial data.glcb — fall through to multi-file.
 	}
 
 	// Acquire the per-chunk read lock BEFORE opening files. CompressChunk
@@ -1102,11 +1101,9 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	// waited, route to it; it is the canonical sealed artifact.
 	if sealedNow && m.hasLocalGLCB(id) {
 		chunkLock.RUnlock()
-		if cursor, err := m.openLocalGLCBCursor(id); err == nil {
-			return cursor, nil
+		if cursor, err := m.sealedGLCBCursorOrFallback(id); cursor != nil || err != nil {
+			return cursor, err
 		}
-		// Corrupt or partial data.glcb — fall back to multi-file, which
-		// still exists in that case (removal only follows a good GLCB).
 		chunkLock.RLock()
 	}
 	sealed = sealedNow
@@ -3480,7 +3477,6 @@ func (m *Manager) openLocalGLCBCursor(id chunk.ChunkID) (chunk.RecordCursor, err
 		chunkLock.RUnlock()
 		return nil, err
 	}
-	blob.Retain()
 	rd, err := blob.Reader()
 	if err != nil {
 		blob.Release()
@@ -3498,6 +3494,21 @@ func (m *Manager) openLocalGLCBCursor(id chunk.ChunkID) (chunk.RecordCursor, err
 // hasLocalGLCB reports whether the chunk's data.glcb is present on disk.
 // Used by read-path dispatch to prefer the GLCB cursor when available.
 // Resolves the externally-registered path for pipeline-built chunks.
+// sealedGLCBCursorOrFallback opens a sealed chunk through its data.glcb. On
+// failure it returns (nil, nil) to let the caller fall back to the multi-file
+// layout only when that layout exists; otherwise the GLCB error is the real
+// one and is returned rather than laundered into a missing-legacy-file error.
+func (m *Manager) sealedGLCBCursorOrFallback(id chunk.ChunkID) (chunk.RecordCursor, error) {
+	cursor, err := m.openLocalGLCBCursor(id)
+	if err == nil {
+		return cursor, nil
+	}
+	if _, statErr := os.Stat(m.rawLogPath(id)); statErr == nil {
+		return nil, nil
+	}
+	return nil, fmt.Errorf("chunk %s: open %s: %w", id, m.glcbPath(id), err)
+}
+
 func (m *Manager) hasLocalGLCB(id chunk.ChunkID) bool {
 	if v, ok := m.glcbMapped.Load(id); ok {
 		e := v.(*mappedGLCBEntry)
