@@ -188,41 +188,9 @@ func (s *QueryServer) searchDirect(
 	histogramQ := q
 	query.ApplyResumeCursor(&q, resume)
 
-	selectedVaults := s.selectedOrAllVaults(ctx, q)
-
-	var partitionTargets []searchPartitionTarget
-	distributed := false
-	if s.hasMultiHolderVaultsInScope(ctx, selectedVaults) {
-		partitionTargets = s.buildSearchPartitionTargets(ctx, selectedVaults)
-		distributed = usesDistributedSearchTargets(partitionTargets) && shouldUseDistributedSealedSearch(q)
-	}
-
-	localResume, remoteTokens := s.splitResumeToken(resume, localVaultIDsFromPartitionTargets(partitionTargets, s.localNodeID))
-
-	var localTargets, remoteTargets []searchPartitionTarget
-	for _, t := range partitionTargets {
-		if t.nodeID == s.localNodeID {
-			localTargets = append(localTargets, t)
-		} else {
-			remoteTargets = append(remoteTargets, t)
-		}
-	}
-
-	var localIter iter.Seq2[chunk.Record, error]
-	var getLocalToken func() *query.ResumeToken
-	if distributed {
-		localIter, getLocalToken = s.searchPartitionTargets(ctx, q, localResume, localTargets)
-	} else {
-		localIter, getLocalToken = eng.Search(ctx, q, localResume)
-	}
-	var remoteIter iter.Seq2[chunk.Record, error]
-	var remoteHist []*apiv1.HistogramBucket
-	var contributingVaults []glid.GLID
-	if distributed {
-		remoteIter, remoteHist, contributingVaults = s.collectPartitionRemote(ctx, q, remoteTargets, remoteTokens)
-	} else {
-		remoteIter, remoteHist, contributingVaults = s.collectRemote(ctx, q, remoteTokens)
-	}
+	localResume, remoteTokens := s.splitResumeToken(resume)
+	localIter, getLocalToken := eng.Search(ctx, q, localResume)
+	remoteIter, remoteHist, contributingVaults := s.collectRemote(ctx, q, remoteTokens)
 
 	// Histogram is computed only on the FIRST page of a paginated search.
 	var histCh chan []*apiv1.HistogramBucket
@@ -230,7 +198,7 @@ func (s *QueryServer) searchDirect(
 		histCh = make(chan []*apiv1.HistogramBucket, 1)
 		go func() {
 			histCh <- s.guardedHistogram(func() []*apiv1.HistogramBucket {
-				return s.computePageHistogram(ctx, eng, histogramQ, remoteHist, distributed, selectedVaults)
+				return s.computePageHistogram(ctx, eng, histogramQ, remoteHist)
 			})
 		}()
 	}
@@ -284,7 +252,7 @@ func (s *QueryServer) guardedHistogram(compute func() []*apiv1.HistogramBucket) 
 // computePageHistogram builds the page-1 volume histogram for a search.
 // Counts only — level breakdown is omitted so histogram work stays on the
 // ITSI fast path and cannot block search completion.
-func (s *QueryServer) computePageHistogram(ctx context.Context, eng *query.Engine, histogramQ query.Query, remoteHist []*apiv1.HistogramBucket, distributed bool, selectedVaults []glid.GLID) []*apiv1.HistogramBucket {
+func (s *QueryServer) computePageHistogram(ctx context.Context, eng *query.Engine, histogramQ query.Query, remoteHist []*apiv1.HistogramBucket) []*apiv1.HistogramBucket {
 	if s.histogramFullyLocal(ctx, histogramQ) {
 		localEng := s.orch.LocalVaultQueryEngine()
 		if s.lookupResolver != nil {
@@ -292,29 +260,17 @@ func (s *QueryServer) computePageHistogram(ctx context.Context, eng *query.Engin
 		}
 		return HistogramToProto(localEng.ComputeSearchPageHistogram(ctx, histogramQ, 50))
 	}
-	if distributed {
-		// Partitioned holder forwards skip per-slice histograms. Use the leader
-		// engine only — LocalVaultQueryEngine scanned every local replica chunk
-		// in parallel with holder partition search and dominated CPU (pprof).
-		if s.lookupResolver != nil {
-			eng.SetLookupResolver(s.lookupResolver)
-		}
-		return HistogramToProto(eng.ComputeSearchPageHistogram(ctx, histogramQ, 50))
-	}
 	localHist := HistogramToProto(eng.ComputeSearchPageHistogram(ctx, histogramQ, 50))
 	return mergeHistogramBuckets(localHist, remoteHist)
 }
 
 // splitResumeToken separates a unified resume token into local positions
 // (for eng.Search) and remote opaque blobs (for collectRemote).
-func (s *QueryServer) splitResumeToken(resume *query.ResumeToken, localVaults map[glid.GLID]bool) (*query.ResumeToken, map[glid.GLID][]byte) {
+func (s *QueryServer) splitResumeToken(resume *query.ResumeToken) (*query.ResumeToken, map[glid.GLID][]byte) {
 	if resume == nil || len(resume.VaultTokens) == 0 {
 		return nil, nil
 	}
-
-	if len(localVaults) == 0 {
-		localVaults = s.orch.LocalLeaderVaultIDs()
-	}
+	localVaults := s.orch.LocalLeaderVaultIDs()
 
 	remoteTokens := make(map[glid.GLID][]byte)
 	var localPositions []query.MultiVaultPosition

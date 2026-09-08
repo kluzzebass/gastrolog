@@ -316,7 +316,7 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 			return nil, nil, nil, nil, nil
 		}
 
-		includeHist := server.ForwardSearchIncludesHistogram(req, q)
+		includeHist := server.ForwardSearchIncludesHistogram(q)
 		it, getToken, table, hist, err := forwardSearchAfterParse(ctx, eng, q, pipeline, req.GetResumeToken(), includeHist)
 		if err != nil {
 			server.NoteSearchOutcome(o.Alerts(), err, nil)

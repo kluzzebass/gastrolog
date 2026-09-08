@@ -784,7 +784,7 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 
 	// Compute histogram for legacy full-vault forwards only.
 	var histProto []*gastrologv1.HistogramBucket
-	if server.ForwardSearchIncludesHistogram(req, q) {
+	if server.ForwardSearchIncludesHistogram(q) {
 		histogram := eng.ComputeHistogram(ctx, q, 50)
 		for _, b := range histogram {
 			histProto = append(histProto, &gastrologv1.HistogramBucket{
@@ -880,7 +880,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 
 	// Compute histogram for legacy full-vault forwards only.
 	var histProto []*gastrologv1.HistogramBucket
-	if server.ForwardSearchIncludesHistogram(req, q) {
+	if server.ForwardSearchIncludesHistogram(q) {
 		histogram := eng.ComputeHistogram(ctx, q, 50)
 		for _, b := range histogram {
 			histProto = append(histProto, &gastrologv1.HistogramBucket{

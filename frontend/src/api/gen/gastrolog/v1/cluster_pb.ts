@@ -1812,25 +1812,11 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
   resumeToken = new Uint8Array(0);
 
   /**
-   * sealed chunks this holder should scan
-   *
-   * @generated from field: repeated bytes sealed_chunk_ids = 4;
-   */
-  sealedChunkIds: Uint8Array[] = [];
-
-  /**
-   * include active/sealing chunks (leader only)
-   *
-   * @generated from field: bool search_pipeline_chunks = 5;
-   */
-  searchPipelineChunks = false;
-
-  /**
    * Emit aggregates in their combinable partial form (an avg as its sum and
    * count) so the coordinator can merge per-node tables instead of gathering
    * records.
    *
-   * @generated from field: bool partial_aggregates = 6;
+   * @generated from field: bool partial_aggregates = 4;
    */
   partialAggregates = false;
 
@@ -1845,9 +1831,7 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
     { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 4, name: "sealed_chunk_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
-    { no: 5, name: "search_pipeline_chunks", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 6, name: "partial_aggregates", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 4, name: "partial_aggregates", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSearchRequest {

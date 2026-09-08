@@ -409,12 +409,10 @@ message ForwardSearchRequest {
   bytes vault_id = 1;
   string query = 2;
   bytes resume_token = 3; // resume token for pagination across pages
-  repeated bytes sealed_chunk_ids = 4; // sealed chunks this holder should scan
-  bool search_pipeline_chunks = 5; // include active/sealing chunks (leader only)
   // Emit aggregates in their combinable partial form (an avg as its sum and
   // count) so the coordinator can merge per-node tables instead of gathering
   // records.
-  bool partial_aggregates = 6;
+  bool partial_aggregates = 4;
 }
 
 message ForwardSearchResponse {

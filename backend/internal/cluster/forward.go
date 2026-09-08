@@ -27,7 +27,6 @@ import (
 // it returns a TableResult with a nil iterator. The histogram slice (if
 // non-nil) provides an approximate volume histogram for the searched vault.
 // Used by the ForwardSearch handler to serve remote search requests.
-// The request may carry sealed-chunk subset fields for distributed search.
 // The returned getToken function returns a resume token for the next page
 // (nil if exhausted).
 type SearchExecutor func(ctx context.Context, req *gastrologv1.ForwardSearchRequest) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error)
