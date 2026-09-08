@@ -15,6 +15,7 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/lookup"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
@@ -159,6 +160,7 @@ func (s *QueryServer) runExportJob(
 	}
 
 	if hasStreamingPipeline {
+		ctx := lookup.EnsureOutboundBudget(ctx)
 		transform := query.NewRecordTransform(pipeline.Pipes, s.lookupResolver)
 		var filtered []chunk.Record
 		for _, rec := range records {

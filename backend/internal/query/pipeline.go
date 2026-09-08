@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/lookup"
 	"gastrolog/internal/querylang"
 )
 
@@ -193,6 +194,7 @@ func (e *Engine) runPipeline(ctx context.Context, q Query, pipeline *querylang.P
 	if err != nil {
 		return nil, err
 	}
+	ctx = lookup.EnsureOutboundBudget(ctx)
 
 	if ph.timechartOp != nil {
 		return e.runTimechartPipeline(ctx, q, ph, remote, budget)

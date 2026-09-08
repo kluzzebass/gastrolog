@@ -164,6 +164,12 @@ type HTTPLookupConfig struct {
 	Timeout       string            `json:"timeout,omitempty"`        // Go duration string, optional
 	CacheTTL      string            `json:"cache_ttl,omitempty"`      // Go duration string, optional
 	CacheSize     int               `json:"cache_size,omitempty"`     // optional, default 10000
+
+	// AllowPrivateDestinations lets this lookup reach loopback, private and
+	// unique-local addresses, which outbound requests are denied by default.
+	// Set it for a lookup service the operator hosts on the cluster's own
+	// network; link-local space stays out of reach either way.
+	AllowPrivateDestinations bool `json:"allow_private_destinations,omitempty"`
 }
 
 // JSONFileLookupConfig defines a JSON file-backed lookup table.

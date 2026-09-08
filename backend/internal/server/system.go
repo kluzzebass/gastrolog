@@ -1090,6 +1090,8 @@ func httpLookupsToProto(lookups []system.HTTPLookupConfig) []*apiv1.HTTPLookupEn
 			Timeout:       l.Timeout,
 			CacheTtl:      l.CacheTTL,
 			CacheSize:     int32(l.CacheSize), //nolint:gosec // reasonable config value
+
+			AllowPrivateDestinations: l.AllowPrivateDestinations,
 		}
 	}
 	return out
@@ -1114,6 +1116,8 @@ func httpLookupsFromProto(entries []*apiv1.HTTPLookupEntry) []system.HTTPLookupC
 			Timeout:       e.Timeout,
 			CacheTTL:      e.CacheTtl,
 			CacheSize:     int(e.CacheSize),
+
+			AllowPrivateDestinations: e.AllowPrivateDestinations,
 		})
 	}
 	return out
@@ -1413,6 +1417,10 @@ func validateSubmittedLookups(l *apiv1.PutLookupSettings) *connect.Error {
 			return connect.NewError(connect.CodeInvalidArgument,
 				fmt.Errorf("http lookup %q: url_template is required", e.GetName()))
 		}
+		if err := lookup.ValidateURLTemplate(e.GetUrlTemplate()); err != nil {
+			return connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("http lookup %q: %w", e.GetName(), err))
+		}
 	}
 	for _, e := range l.GetJsonFileLookups() {
 		if connErr := validateFileLookup("json file", e.GetName(), e.GetFileId()); connErr != nil {
@@ -1515,6 +1523,13 @@ func (s *SystemServer) TestHTTPLookup(
 		Headers:       cfg.Headers,
 		ResponsePaths: cfg.ResponsePaths,
 		CacheSize:     int(cfg.CacheSize),
+		Name:          cfg.GetName(),
+		Logger:        s.logger,
+
+		// Never from the request: the flag says an operator vouched for a
+		// destination on their own network, which only a stored lookup can
+		// claim. An ad-hoc config in a test call vouches for nothing.
+		AllowPrivateDestinations: s.storedLookupAllowsPrivate(ctx, cfg.GetName(), cfg.GetUrlTemplate()),
 	}
 	if cfg.Timeout != "" {
 		d, err := time.ParseDuration(cfg.Timeout)
@@ -1526,8 +1541,21 @@ func (s *SystemServer) TestHTTPLookup(
 		lcfg.Timeout = d
 	}
 
-	h := lookup.NewHTTP(lcfg)
-	result := h.TestFetch(ctx, req.Msg.Values)
+	h, err := lookup.NewHTTP(lcfg)
+	if err != nil {
+		return connect.NewResponse(&apiv1.TestHTTPLookupResponse{
+			Error: fmt.Sprintf("invalid url template %q: %v", cfg.UrlTemplate, err),
+		}), nil
+	}
+	result, fetchErr := h.TestFetch(ctx, req.Msg.Values)
+	if fetchErr != nil {
+		// The failure belongs in the response, not in the RPC status: the
+		// caller is diagnosing a lookup configuration, and the reason is the
+		// answer they asked for.
+		return connect.NewResponse(&apiv1.TestHTTPLookupResponse{
+			Error: fmt.Sprintf("lookup request failed: %v", fetchErr),
+		}), nil
+	}
 
 	return connect.NewResponse(&apiv1.TestHTTPLookupResponse{
 		Success: true,
@@ -1535,6 +1563,28 @@ func (s *SystemServer) TestHTTPLookup(
 			Fields: result,
 		}},
 	}), nil
+}
+
+// storedLookupAllowsPrivate reports whether a saved lookup with this name and
+// URL template carries the operator's opt-in for private destinations. Matching
+// the template too means editing the URL in the form drops the exemption until
+// the edit is saved, so the test cannot probe an address the stored entry never
+// pointed at.
+func (s *SystemServer) storedLookupAllowsPrivate(ctx context.Context, name, urlTemplate string) bool {
+	if name == "" {
+		return false
+	}
+	ss, err := s.sysStore.LoadServerSettings(ctx)
+	if err != nil {
+		s.logger.Warn("lookup test: load settings failed, denying private destinations", "error", err)
+		return false
+	}
+	for _, l := range ss.Lookup.HTTPLookups {
+		if l.Name == name && l.URLTemplate == urlTemplate {
+			return l.AllowPrivateDestinations
+		}
+	}
+	return false
 }
 
 // PreviewCSVLookup reads a managed CSV file and returns column headers,

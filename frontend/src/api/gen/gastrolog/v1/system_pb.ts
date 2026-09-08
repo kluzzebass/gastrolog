@@ -2787,6 +2787,13 @@ export class HTTPLookupEntry extends Message<HTTPLookupEntry> {
    */
   parameters: HTTPLookupParam[] = [];
 
+  /**
+   * reach loopback / private / unique-local targets, denied by default (never link-local)
+   *
+   * @generated from field: bool allow_private_destinations = 9;
+   */
+  allowPrivateDestinations = false;
+
   constructor(data?: PartialMessage<HTTPLookupEntry>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2803,6 +2810,7 @@ export class HTTPLookupEntry extends Message<HTTPLookupEntry> {
     { no: 6, name: "cache_size", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
     { no: 7, name: "response_paths", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
     { no: 8, name: "parameters", kind: "message", T: HTTPLookupParam, repeated: true },
+    { no: 9, name: "allow_private_destinations", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): HTTPLookupEntry {

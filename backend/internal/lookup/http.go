@@ -3,24 +3,49 @@ package lookup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"maps"
 	"mime"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/itchyny/gojq"
+
+	"gastrolog/internal/logging"
+	"gastrolog/internal/logging/comp"
+	"gastrolog/internal/safefetch"
 )
 
 const (
 	defaultHTTPTimeout  = 5 * time.Second
 	defaultHTTPCacheTTL = 5 * time.Minute
 	defaultHTTPCacheMax = 10_000
+
+	// maxConcurrentFetches bounds the requests one lookup table has in flight
+	// at once, so concurrent queries cannot multiply into a burst at the
+	// configured endpoint.
+	maxConcurrentFetches = 8
+
+	// maxHTTPTimeout caps how long one lookup may hold a request open. A
+	// per-record fetch that waits longer than this pins a goroutine and the
+	// query behind it for no useful enrichment.
+	maxHTTPTimeout = 30 * time.Second
+
+	// maxResponseBytes caps what one lookup response may cost in memory. A
+	// lookup answer is a small JSON object; anything larger is a misconfigured
+	// or hostile endpoint.
+	maxResponseBytes = 4 << 20
 )
+
+// errResponseTooLarge reports an endpoint answering with more than a lookup
+// result could reasonably be.
+var errResponseTooLarge = errors.New("lookup response exceeds the size limit")
 
 // HTTPConfig configures an HTTP API lookup table.
 type HTTPConfig struct {
@@ -31,6 +56,14 @@ type HTTPConfig struct {
 	Timeout       time.Duration     // 0 = default 5s
 	CacheTTL      time.Duration     // 0 = default 5min
 	CacheSize     int               // 0 = default 10000
+
+	// AllowPrivateDestinations lets this table reach loopback, private and
+	// unique-local addresses, which the destination policy denies by default.
+	// Link-local space stays out of reach either way.
+	AllowPrivateDestinations bool
+
+	Name   string       // registry name, for log lines
+	Logger *slog.Logger // nil discards
 }
 
 // httpEntry is a cached HTTP lookup result.
@@ -144,24 +177,37 @@ func jqSelectN(code *gojq.Code, input any, maxResults int) []any {
 // optionally navigates into the response via a JSONPath expression, and flattens
 // top-level scalar fields into the result map.
 type HTTP struct {
-	urlTemplate   string
+	urlTemplate   *urlTemplate
 	responsePaths []httpPath // parsed JSONPath expressions; nil/empty = use root object
 	parameters    []string   // ordered parameter names; empty = legacy {value} mode
 	client        *http.Client
 	headers       map[string]string
 	cacheTTL      time.Duration
 	cacheSize     int
+	inFlight      chan struct{} // capacity bounds concurrent outbound requests
+	name          string
+	logger        *slog.Logger
 
 	mu       sync.Mutex
 	cache    map[string]httpEntry
 	suffixes []string // discovered from first successful response
 }
 
-// NewHTTP creates an HTTP API lookup table.
-func NewHTTP(cfg HTTPConfig) *HTTP {
+// NewHTTP creates an HTTP API lookup table. It fails when the URL template
+// cannot be fetched safely — an unsupported scheme, or a placeholder in the
+// host, which would let a record value pick the destination.
+func NewHTTP(cfg HTTPConfig) (*HTTP, error) {
+	tmpl, err := parseURLTemplate(cfg.URLTemplate)
+	if err != nil {
+		return nil, err
+	}
+
 	timeout := cfg.Timeout
 	if timeout <= 0 {
 		timeout = defaultHTTPTimeout
+	}
+	if timeout > maxHTTPTimeout {
+		timeout = maxHTTPTimeout
 	}
 	cacheTTL := cfg.CacheTTL
 	if cacheTTL <= 0 {
@@ -186,16 +232,22 @@ func NewHTTP(cfg HTTPConfig) *HTTP {
 		params = []string{"value"}
 	}
 
+	policy := safefetch.Policy{AllowPrivate: cfg.AllowPrivateDestinations}
 	return &HTTP{
-		urlTemplate:   cfg.URLTemplate,
+		urlTemplate:   tmpl,
 		responsePaths: paths,
 		parameters:    params,
-		client:        &http.Client{Timeout: timeout},
+		client:        safefetch.Client(policy, timeout),
 		headers:       cfg.Headers,
 		cacheTTL:      cacheTTL,
 		cacheSize:     cacheSize,
-		cache:         make(map[string]httpEntry),
-	}
+		inFlight:      make(chan struct{}, maxConcurrentFetches),
+		name:          cfg.Name,
+		logger: comp.Root("lookup").Desc(
+			"Lookup tables that enrich records at query time — HTTP, file-backed, MMDB and static.",
+		).Apply(logging.Default(cfg.Logger)),
+		cache: make(map[string]httpEntry),
+	}, nil
 }
 
 // Suffixes returns the output suffixes discovered from the first successful response.
@@ -238,12 +290,28 @@ func (h *HTTP) LookupValues(ctx context.Context, values map[string]string) map[s
 	}
 	h.mu.Unlock()
 
-	// Build URL with all parameter substitutions.
-	reqURL := h.urlTemplate
-	for k, v := range values {
-		reqURL = strings.ReplaceAll(reqURL, "{"+k+"}", url.PathEscape(v))
+	reqURL, err := h.urlTemplate.expand(values)
+	if err != nil {
+		h.logger.Debug("lookup url could not be built", "table", h.name, "error", err)
+		return nil
 	}
-	result := h.doFetch(ctx, reqURL)
+
+	// A cache miss is what costs an outbound request, so it is what the
+	// per-query budget pays for.
+	allowed, firstRefusal := spendOutbound(ctx)
+	if !allowed {
+		if firstRefusal {
+			limit, _ := outboundLimit(ctx)
+			h.logger.Warn("outbound lookup budget exhausted; remaining records go unenriched",
+				"table", h.name, "limit", limit)
+		}
+		return nil
+	}
+
+	result, err := h.fetch(ctx, reqURL)
+	if err != nil {
+		h.logger.Debug("lookup fetch failed", "table", h.name, "error", err)
+	}
 
 	// Cache the result.
 	h.mu.Lock()
@@ -265,20 +333,27 @@ func (h *HTTP) LookupValues(ctx context.Context, values map[string]string) map[s
 
 // TestFetch makes a single HTTP request, bypassing the empty-value guard and cache.
 // Values are substituted as {key} placeholders in the URL template.
-func (h *HTTP) TestFetch(ctx context.Context, values map[string]string) map[string]string {
-	reqURL := h.urlTemplate
-	for k, v := range values {
-		reqURL = strings.ReplaceAll(reqURL, "{"+k+"}", url.PathEscape(v))
+func (h *HTTP) TestFetch(ctx context.Context, values map[string]string) (map[string]string, error) {
+	reqURL, err := h.urlTemplate.expand(values)
+	if err != nil {
+		return nil, err
 	}
-	return h.doFetch(ctx, reqURL)
+	return h.fetch(ctx, reqURL)
 }
 
-// doFetch makes the HTTP GET request and parses the JSON response.
-func (h *HTTP) doFetch(ctx context.Context, reqURL string) map[string]string {
+// fetch makes the HTTP GET request and parses the JSON response. An empty
+// result and a nil error means the endpoint answered with nothing usable.
+func (h *HTTP) fetch(ctx context.Context, reqURL string) (map[string]string, error) {
+	select {
+	case h.inFlight <- struct{}{}:
+		defer func() { <-h.inFlight }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	for k, v := range h.headers {
 		req.Header.Set(k, v)
@@ -286,36 +361,43 @@ func (h *HTTP) doFetch(ctx context.Context, reqURL string) map[string]string {
 
 	resp, err := h.client.Do(req)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil
+		return nil, fmt.Errorf("lookup endpoint returned HTTP %d", resp.StatusCode)
 	}
 
 	// Enforce JSON content type.
 	ct := resp.Header.Get("Content-Type")
-	if ct == "" {
-		return nil
-	}
 	mediaType, _, _ := mime.ParseMediaType(ct)
 	if mediaType != "application/json" {
-		return nil
+		return nil, fmt.Errorf("lookup endpoint returned content type %q, want application/json", ct)
+	}
+
+	// Read through a limit rather than streaming into the decoder: the reply is
+	// a small object, and a caller-chosen URL must not be able to pin memory.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxResponseBytes {
+		return nil, errResponseTooLarge
 	}
 
 	var raw any
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, err
 	}
 
 	// No paths configured — flatten the root object directly.
 	if len(h.responsePaths) == 0 {
 		obj, ok := raw.(map[string]any)
 		if !ok || len(obj) == 0 {
-			return nil
+			return nil, nil
 		}
-		return flattenScalars(obj)
+		return flattenScalars(obj), nil
 	}
 
 	// Evaluate each jq expression and merge results.
@@ -327,9 +409,9 @@ func (h *HTTP) doFetch(ctx context.Context, reqURL string) map[string]string {
 		}
 	}
 	if len(merged) == 0 {
-		return nil
+		return nil, nil
 	}
-	return merged
+	return merged, nil
 }
 
 // mergeNode adds a JSONPath result node into the merged map.

@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gastrolog/internal/safefetch"
 )
 
 const maxmindBaseURL = "https://download.maxmind.com"
@@ -19,11 +21,17 @@ const maxmindBaseURL = "https://download.maxmind.com"
 // It authenticates with HTTP Basic Auth (account ID + license key), downloads the
 // tar.gz archive, extracts the .mmdb file, and atomically renames it into place.
 func DownloadDB(ctx context.Context, accountID, licenseKey, edition, destDir string) error {
-	return downloadDBWithURL(ctx, accountID, licenseKey, edition, destDir, maxmindBaseURL)
+	// The vendor endpoint is on the public internet, so the default policy
+	// applies: a redirect or DNS answer pointing at the node's own network is
+	// refused rather than followed. No client timeout — a database archive is
+	// large and the caller owns the deadline through ctx.
+	client := safefetch.Client(safefetch.Policy{}, 0)
+	return downloadDBWithClient(ctx, accountID, licenseKey, edition, destDir, maxmindBaseURL, client)
 }
 
-// downloadDBWithURL is the testable implementation that accepts a custom base URL.
-func downloadDBWithURL(ctx context.Context, accountID, licenseKey, edition, destDir, baseURL string) error {
+// downloadDBWithClient is the testable implementation that accepts a custom
+// base URL and client.
+func downloadDBWithClient(ctx context.Context, accountID, licenseKey, edition, destDir, baseURL string, client *http.Client) error {
 	dlURL := baseURL + "/geoip/databases/" + edition + "/download?suffix=tar.gz"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dlURL, nil)
@@ -32,7 +40,7 @@ func downloadDBWithURL(ctx context.Context, accountID, licenseKey, edition, dest
 	}
 	req.SetBasicAuth(accountID, licenseKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("download %s: %w", edition, err)
 	}

@@ -5,6 +5,7 @@ import { useExpandedCards } from "../../../hooks/useExpandedCards";
 import { useLookupCrud } from "./useLookupCrud";
 import { FormField, TextInput, ParamsEditor } from "../FormField";
 import { Button } from "../Buttons";
+import { Checkbox } from "../Checkbox";
 import { SettingsCard } from "../SettingsCard";
 import { AddFormCard } from "../AddFormCard";
 import { StringListEditor, ParameterListEditor } from "./FormHelpers";
@@ -23,6 +24,7 @@ function serializeHttpLookups(lookups: HTTPLookupDraft[]) {
       timeout: h.timeout || undefined,
       cacheTtl: h.cacheTtl || undefined,
       cacheSize: h.cacheSize || undefined,
+      allowPrivateDestinations: h.allowPrivateDestinations,
     }));
 }
 
@@ -78,6 +80,14 @@ export function HttpAddForm({
       </FormField>
       <FormField label="Headers" description="Custom HTTP headers (e.g. Authorization)." dark={dark}>
         <ParamsEditor params={draft.headers} onChange={(v) => setDraft((d) => ({ ...d, headers: v }))} dark={dark} />
+      </FormField>
+      <FormField label="Destinations" description="Outbound lookups reach public addresses only. Enable this for a lookup service on your own network — loopback, 10.x, 172.16–31.x, 192.168.x, 100.64–127.x or an IPv6 unique-local address — then save: Test uses the saved setting, not this form. Link-local (169.254.x, fe80::) and address-translation ranges stay blocked either way." dark={dark}>
+        <Checkbox
+          checked={draft.allowPrivateDestinations}
+          onChange={(v) => setDraft((d) => ({ ...d, allowPrivateDestinations: v }))}
+          label="Allow private network destinations"
+          dark={dark}
+        />
       </FormField>
       <HttpCachingFields dark={dark} draft={draft} setDraft={setDraft} />
     </AddFormCard>
@@ -154,6 +164,14 @@ export function HttpCards({
             <FormField label="Headers" description="Custom HTTP headers (e.g. Authorization)." dark={dark}>
               <ParamsEditor params={h.headers} onChange={(v) => onUpdate(i, { headers: v })} dark={dark} />
             </FormField>
+            <FormField label="Destinations" description="Outbound lookups reach public addresses only. Enable this for a lookup service on your own network — loopback, 10.x, 172.16–31.x, 192.168.x, 100.64–127.x or an IPv6 unique-local address — then save: Test uses the saved setting, not this form. Link-local (169.254.x, fe80::) and address-translation ranges stay blocked either way." dark={dark}>
+              <Checkbox
+                checked={h.allowPrivateDestinations}
+                onChange={(v) => onUpdate(i, { allowPrivateDestinations: v })}
+                label="Allow private network destinations"
+                dark={dark}
+              />
+            </FormField>
             <HttpCachingFields dark={dark} draft={h} setDraft={(fn) => {
               const updated = typeof fn === "function" ? fn(h) : fn;
               onUpdate(i, updated);
@@ -201,6 +219,9 @@ export function HttpCards({
                           timeout: h.timeout || undefined,
                           cacheTtl: h.cacheTtl || undefined,
                           cacheSize: h.cacheSize || undefined,
+                          // Private destinations come from the saved lookup, not
+                          // from this form: the server ignores the flag on a test
+                          // request.
                         },
                         values: testValues[i] ?? {},
                       },

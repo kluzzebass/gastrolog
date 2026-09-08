@@ -90,6 +90,10 @@ func (s *QueryServer) Search(
 		return errInvalidArg(err)
 	}
 
+	// One allowance for the whole search, whichever branch runs it: the
+	// streaming transform path never enters the engine's pipeline entry points.
+	ctx = lookup.EnsureOutboundBudget(ctx)
+
 	// Resolve unbounded queries (last=all, no time directive) to concrete
 	// bounds on the coordinator before fan-out. Without this, every node
 	// independently calls deriveTimeRange against its own local chunk view

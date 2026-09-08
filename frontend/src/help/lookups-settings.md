@@ -32,6 +32,13 @@ HTTP lookups fetch data from an external HTTP endpoint at query time. Each looku
 - **Timeout** — maximum time to wait for a response. Default: `5s`.
 - **Cache TTL** — how long to cache successful responses. Default: `5m`. Set to `0` to disable caching.
 - **Cache Size** — maximum number of cached responses. Default: `10000`.
+- **Allow private network destinations** — off by default: a lookup may only reach public addresses. Turn it on for a lookup service you host yourself on loopback, `10.x`, `172.16-31.x`, `192.168.x`, `100.64-127.x` or an IPv6 unique-local address. Link-local (`169.254.x`, `fe80::`) and the ranges that translate to another address (NAT64, 6to4, Teredo) stay blocked either way — that is where the cloud instance metadata endpoints live. **Test** reads this setting from the saved lookup, so save the entry before testing a private destination.
+
+### Destinations and limits
+
+The destination is checked against the address it resolves to, at the moment the connection is made, so a hostname pointing at an internal address is refused however it is spelled, and a redirect cannot lead the request anywhere the policy denies. Placeholders are only allowed after the host — a URL template such as `http://{tenant}.example.com/x` is rejected when you save it, because a field value from a log record would then choose the destination.
+
+One query issues at most 512 outbound requests per node across all its HTTP lookups — a query that fans out to several nodes spends that budget on each — and one lookup table keeps at most 8 requests in flight at a time. A response larger than 4 MiB is discarded, and a lookup timeout longer than 30s is capped. A query that exceeds the budget still returns its records, just without enrichment for the values past the limit, and logs `outbound lookup budget exhausted` naming the table — which is another reason to look up after aggregating.
 
 ### Tips
 
