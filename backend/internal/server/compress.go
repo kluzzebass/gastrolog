@@ -107,6 +107,15 @@ type compressWriter struct {
 	logger      *slog.Logger
 }
 
+// Unwrap exposes the underlying ResponseWriter so http.ResponseController
+// can reach optional interfaces (SetReadDeadline, SetWriteDeadline, ...)
+// that compressWriter itself doesn't implement. Embedding ResponseWriter
+// as an interface doesn't promote those methods, and ResponseController
+// only follows this stdlib-documented Unwrap idiom to look past a wrapper.
+func (cw *compressWriter) Unwrap() http.ResponseWriter {
+	return cw.ResponseWriter
+}
+
 func (cw *compressWriter) WriteHeader(code int) {
 	if cw.started {
 		return

@@ -25,6 +25,25 @@ import (
 // small compressed payload from expanding into the node's memory.
 const maxPushBodyBytes = 10 << 20
 
+// Transport-level timeouts, bounding a client that opens a connection and
+// never finishes it (headers, body, or response read) before the pipeline
+// ever sees a message. Unlike the main API server, this ingester has no
+// long-lived streaming responses — every push is a single request/response
+// — so WriteTimeout is safe to set here. WriteTimeout is reset when the
+// request header finishes reading, so its clock also runs across the
+// X-Wait-Ack path's wait for persistence (sendAcked blocking on ackCh).
+// That wait is not itself interrupted by the deadline — the handler stays
+// parked on ackCh regardless. What the deadline changes is the connection:
+// once it elapses the server drops it, so a shipper waiting past this
+// bound sees a failed request and retries, which can double-ingest the
+// message if it had already reached the pipeline before the ack was lost.
+const (
+	readHeaderTimeout = 10 * time.Second
+	readTimeout       = 30 * time.Second // bodies capped at 10MiB (bodyutil.ReadBody)
+	writeTimeout      = 30 * time.Second
+	idleTimeout       = 120 * time.Second
+)
+
 // Ingester accepts log messages via the Loki Push API (POST /loki/api/v1/push).
 // It implements ingestion.Ingester.
 //
@@ -94,7 +113,10 @@ func (r *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage
 
 	r.server = &http.Server{
 		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 
 	// Create listener.

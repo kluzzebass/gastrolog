@@ -41,9 +41,65 @@ import (
 // Prevents indefinite hangs if the Raft FSM or underlying store is slow.
 const systemLoadTimeout = 5 * time.Second
 
-// readHeaderTimeout is the maximum time to read HTTP request headers.
-// Shared by HTTP, HTTPS, and Unix socket servers.
-const readHeaderTimeout = 10 * time.Second
+// Transport-level timeouts for the HTTP, HTTPS, and Unix socket servers.
+// These bound resource holding (goroutines, file descriptors) by a client
+// that opens a connection and never finishes it — the slowloris family of
+// attacks — before any application-level auth or handler code runs.
+//
+// WriteTimeout is deliberately left unset (zero, meaning unbounded) on all
+// three servers. The primary reason is plain HTTP/1.1, which every one of
+// these listeners speaks by default (the HTTPS listener never negotiates
+// h2 — CertManager.TLSConfig() sets no ALPN NextProtos — and the Unix
+// socket listener isn't wrapped in h2c at all): WriteTimeout there is a
+// single absolute deadline covering the whole response, headers through
+// last byte, not a per-write or per-inactivity bound. This API serves
+// long-lived Connect server-streaming RPCs (Follow, Search, ExportVault,
+// WatchSystem, WatchChunks, WatchIngesterStatus, WatchJobs,
+// WatchSystemStatus); a nonzero WriteTimeout caps every one of them to a
+// fixed lifetime measured from when the response started, which is the
+// same failure mode a slowloris timeout guards against, just from the
+// opposite end of the connection. The main HTTP listener additionally
+// speaks HTTP/2 via h2c (see Serve, below); there golang.org/x/net/http2
+// arms WriteTimeout as one non-resetting per-stream timer set at stream
+// creation, which is the identical hazard enforced per RPC call instead of
+// per connection.
+//
+// ReadHeaderTimeout and IdleTimeout close the slowloris/idle-hold vectors
+// without this hazard. See the h2c.NewHandler call in Serve for why
+// IdleTimeout needs to be set on the *http2.Server, not only the
+// *http.Server, for the main listener.
+const (
+	// readHeaderTimeout is the maximum time to read HTTP request headers.
+	readHeaderTimeout = 10 * time.Second
+
+	// readTimeout is the maximum time to read an entire request, including
+	// the body. Kept tight because it has to work for every handler on
+	// these listeners except one: the managed-file upload endpoint (up to
+	// 256 MiB, upload.go maxUploadSize) explicitly clears its own read
+	// deadline via http.ResponseController, since no single duration both
+	// bounds a slowloris body trickle for a 4 MiB Connect RPC and
+	// tolerates a legitimate 256 MiB transfer on a slow link.
+	readTimeout = 30 * time.Second
+
+	// idleTimeout is the maximum time a keep-alive connection may sit idle
+	// between requests, i.e. with no request being read or served. This
+	// never fires against an in-progress request or stream on any of the
+	// three listeners — see the package comment above.
+	idleTimeout = 120 * time.Second
+)
+
+// newTimedServer builds an http.Server with the standard transport
+// timeouts applied, shared by the HTTP, HTTPS, and Unix socket listeners.
+// Tests use this directly with short-lived values to exercise timeout
+// behavior without waiting out the production durations.
+func newTimedServer(handler http.Handler, hdrTimeout, reqTimeout, connIdleTimeout time.Duration) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: hdrTimeout,
+		ReadTimeout:       reqTimeout,
+		IdleTimeout:       connIdleTimeout,
+	}
+}
 
 // Config holds server configuration.
 type Config struct {
@@ -753,19 +809,29 @@ func (s *Server) Serve(listener net.Listener) error {
 
 	// Start rate-limiter cleanup goroutine.
 	rlCtx, rlCancel := context.WithCancel(context.Background())
+	s.mu.Lock()
 	s.rlCancel = rlCancel
+	s.mu.Unlock()
 	s.rl.startCleanup(rlCtx, &s.rlWG, 3*time.Minute, 5*time.Minute)
 
 	// Build the core handler once — reused by both HTTP and HTTPS.
 	mux := s.buildMux()
-	s.handler = s.wrapMiddleware(mux)
+	handler := s.wrapMiddleware(mux)
+	s.mu.Lock()
+	s.handler = handler
+	s.mu.Unlock()
 
-	// HTTP adds redirect-to-HTTPS + h2c (HTTP/2 without TLS).
-	redirectHandler := s.redirectMiddleware(s.handler)
-	s.server = &http.Server{
-		Handler:           h2c.NewHandler(redirectHandler, &http2.Server{}),
-		ReadHeaderTimeout: readHeaderTimeout,
-	}
+	// HTTP adds redirect-to-HTTPS + h2c (HTTP/2 without TLS). h2c.NewHandler
+	// never calls http2.ConfigureServer, so the *http.Server's IdleTimeout
+	// below is invisible to HTTP/2 connections unless it is also set on the
+	// *http2.Server directly — golang.org/x/net/http2 reads its own
+	// IdleTimeout field, not the outer http.Server's, for the idle-hold
+	// bound on this listener's h2c connections.
+	redirectHandler := s.redirectMiddleware(handler)
+	srv := newTimedServer(h2c.NewHandler(redirectHandler, &http2.Server{IdleTimeout: idleTimeout}), readHeaderTimeout, readTimeout, idleTimeout)
+	s.mu.Lock()
+	s.server = srv
+	s.mu.Unlock()
 
 	// Initial TLS config: start HTTPS if enabled
 	s.reconfigureTLS()
@@ -779,7 +845,10 @@ func (s *Server) Serve(listener net.Listener) error {
 
 	s.logger.Info("server starting", "addr", listener.Addr().String())
 
-	err := s.server.Serve(listener)
+	// Block on the local srv rather than s.server: it's the same value we
+	// just assigned under s.mu, and reading it back here would mean
+	// re-acquiring the lock for no reason.
+	err := srv.Serve(listener)
 	if err == http.ErrServerClosed {
 		return nil
 	}
@@ -840,13 +909,8 @@ func (s *Server) ServeTCP(addr string) error {
 
 // Stop gracefully stops the server.
 func (s *Server) Stop(ctx context.Context) error {
-	// Stop rate-limiter cleanup goroutine.
-	if s.rlCancel != nil {
-		s.rlCancel()
-		s.rlWG.Wait()
-	}
-
 	s.mu.Lock()
+	rlCancel := s.rlCancel
 	server := s.server
 	httpsServer := s.httpsServer
 	s.httpsServer = nil
@@ -857,6 +921,12 @@ func (s *Server) Stop(ctx context.Context) error {
 	s.unixListener = nil
 	s.unixPath = ""
 	s.mu.Unlock()
+
+	// Stop rate-limiter cleanup goroutine.
+	if rlCancel != nil {
+		rlCancel()
+		s.rlWG.Wait()
+	}
 
 	if unixServer != nil {
 		_ = unixServer.Shutdown(ctx)
