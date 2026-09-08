@@ -245,8 +245,12 @@ func (e *Engine) timechartVaults(q Query) []glid.GLID {
 	return allVaults
 }
 
-// deriveTimeRange fills in missing Start/End from chunk metadata across the selected vaults.
+// deriveTimeRange fills in missing Start/End from chunk metadata across the
+// selected vaults. Chunk metadata records the newest timestamp inclusively
+// while the query's End is an exclusive bound, so the derived end sits one
+// tick past the newest record to keep that record inside the range.
 func (e *Engine) deriveTimeRange(q *Query, selectedVaults []glid.GLID) {
+	derivedEnd := q.End.IsZero()
 	for _, vaultID := range selectedVaults {
 		cm, _ := e.getVaultManagers(vaultID)
 		if cm == nil {
@@ -260,8 +264,8 @@ func (e *Engine) deriveTimeRange(q *Query, selectedVaults []glid.GLID) {
 			if !meta.IngestStart.IsZero() && (q.Start.IsZero() || meta.IngestStart.Before(q.Start)) {
 				q.Start = meta.IngestStart
 			}
-			if !meta.IngestEnd.IsZero() && (q.End.IsZero() || meta.IngestEnd.After(q.End)) {
-				q.End = meta.IngestEnd
+			if derivedEnd && !meta.IngestEnd.IsZero() && !meta.IngestEnd.Before(q.End) {
+				q.End = meta.IngestEnd.Add(time.Nanosecond)
 			}
 		}
 	}
