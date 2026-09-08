@@ -2,6 +2,7 @@ import ReactEChartsCore from "echarts-for-react/esm/core";
 import { echarts } from "./echartsSetup";
 import { buildThemeOption } from "./echartsTheme";
 import { getColorForCategory, resolveColor, formatChartValue } from "./chartColors";
+import { barTooltipHtml } from "./chartTooltips";
 import type { EChartsOption } from "echarts";
 
 interface BarChartProps {
@@ -59,12 +60,7 @@ export function BarChart({ columns, rows, dark }: Readonly<BarChartProps>) {
       ...theme.tooltip as object,
       trigger: "axis",
       axisPointer: { type: "shadow" },
-      formatter: (params: any) => {
-        const p = Array.isArray(params) ? params[0] : params;
-        const color = p.color as string;
-        const dot = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color};margin-right:6px;"></span>`;
-        return `<div style="opacity:0.7">${p.name}</div>${dot}${columns[valueColIdx]} <b>${formatChartValue(p.value as number)}</b>`;
-      },
+      formatter: (params: any) => barTooltipHtml(params, columns),
     },
     series: [
       {

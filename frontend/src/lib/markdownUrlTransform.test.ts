@@ -1,0 +1,42 @@
+import { describe, test, expect } from "bun:test";
+import { markdownUrlTransform } from "./markdownUrlTransform";
+
+describe("markdownUrlTransform", () => {
+  test("strips script-bearing schemes", () => {
+    expect(markdownUrlTransform("javascript:alert(1)")).toBe("");
+    expect(markdownUrlTransform("JaVaScRiPt:alert(1)")).toBe("");
+    expect(markdownUrlTransform("vbscript:msgbox(1)")).toBe("");
+    expect(markdownUrlTransform("data:text/html,<script>alert(1)</script>")).toBe("");
+    expect(markdownUrlTransform("file:///etc/passwd")).toBe("");
+  });
+
+  test("whitespace and control characters cannot hide a scheme", () => {
+    expect(markdownUrlTransform("java\nscript:alert(1)")).toBe("");
+    expect(markdownUrlTransform("  javascript:alert(1)")).toBe("");
+    expect(markdownUrlTransform("java\0script:alert(1)")).toBe("");
+    expect(markdownUrlTransform("java\tscript:alert(1)")).toBe("");
+    expect(markdownUrlTransform("java script:alert(1)")).toBe("");
+  });
+
+  test("keeps the schemes help content actually links with", () => {
+    expect(markdownUrlTransform("https://gastrolog.dev/docs")).toBe("https://gastrolog.dev/docs");
+    expect(markdownUrlTransform("http://localhost:4564")).toBe("http://localhost:4564");
+    expect(markdownUrlTransform("mailto:ops@example.com")).toBe("mailto:ops@example.com");
+  });
+
+  test("keeps the in-app pseudo-schemes the help components route on", () => {
+    expect(markdownUrlTransform("help:pipeline-basics")).toBe("help:pipeline-basics");
+    expect(markdownUrlTransform("settings:ingesters")).toBe("settings:ingesters");
+    expect(markdownUrlTransform("inspector:scheduler")).toBe("inspector:scheduler");
+  });
+
+  test("keeps relative URLs and fragments", () => {
+    expect(markdownUrlTransform("")).toBe("");
+    expect(markdownUrlTransform("#section")).toBe("#section");
+    expect(markdownUrlTransform("/favicon.svg")).toBe("/favicon.svg");
+    expect(markdownUrlTransform("./guide.md")).toBe("./guide.md");
+    // A colon after the first path separator is part of the path, not a scheme.
+    expect(markdownUrlTransform("/a/b:c")).toBe("/a/b:c");
+    expect(markdownUrlTransform("?q=a:b")).toBe("?q=a:b");
+  });
+});

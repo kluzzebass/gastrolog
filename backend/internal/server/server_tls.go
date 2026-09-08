@@ -142,7 +142,7 @@ func (s *Server) ListenUnix(path string) error {
 	interceptors := []connect.Interceptor{newRPCErrorLogInterceptor(s.logger), &auth.NoAuthInterceptor{}}
 	interceptors = append(interceptors, s.routingInterceptor()...)
 	mux := s.buildMux(connect.WithInterceptors(interceptors...))
-	handler := s.trackingMiddleware(s.corsMiddleware(securityHeadersMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(s.logger, mux)))))
+	handler := s.wrapMiddleware(mux)
 
 	s.mu.Lock()
 	s.unixListener = ln

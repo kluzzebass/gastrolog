@@ -6,6 +6,7 @@ import worldTopo from "world-atlas/countries-110m.json";
 import { echarts } from "./echartsSetup";
 import { buildThemeOption } from "./echartsTheme";
 import { resolveColor, formatChartValue, cssVar } from "./chartColors";
+import { choroplethTooltipHtml, geoBubbleTooltipHtml } from "./chartTooltips";
 import { isoToMapName } from "./countryMapping";
 import type { EChartsOption } from "echarts";
 
@@ -184,14 +185,7 @@ function buildChoroplethOption(
     tooltip: {
       ...theme.tooltip as object,
       trigger: "item",
-      formatter: (params: any) => {
-        if (params.data?.value == null) {
-          return `<div style="opacity:0.7">${params.name}</div><span style="opacity:0.5">No data</span>`;
-        }
-        const d = params.data as ChoroplethDatum;
-        const code = d.isoCode ? ` (${d.isoCode})` : "";
-        return `<div style="opacity:0.7">${params.name}${code}</div><b>${formatChartValue(d.value)}</b> ${columns[valueColIdx]}`;
-      },
+      formatter: (params: any) => choroplethTooltipHtml(params, columns[valueColIdx] ?? ""),
     },
     visualMap: [
       {
@@ -301,12 +295,7 @@ function buildScatterOption(
     tooltip: {
       ...theme.tooltip as object,
       trigger: "item",
-      formatter: (params: any) => {
-        if (!params.data) return "";
-        const d = params.data as { value: number[]; name: string };
-        const [lon, lat, val] = d.value;
-        return `<div style="opacity:0.7">${d.name}</div><div style="opacity:0.5">${lat!.toFixed(4)}, ${lon!.toFixed(4)}</div><b>${formatChartValue(val!)}</b> ${valueCol}`;
-      },
+      formatter: (params: any) => geoBubbleTooltipHtml(params, valueCol),
     },
     visualMap: [
       {

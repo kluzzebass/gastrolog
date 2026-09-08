@@ -2,6 +2,7 @@ import ReactEChartsCore from "echarts-for-react/esm/core";
 import { echarts } from "./charts/echartsSetup";
 import { buildThemeOption } from "./charts/echartsTheme";
 import { SERIES_COLORS, resolveColor, formatChartValue, cssVar } from "./charts/chartColors";
+import { timeSeriesTooltipHtml } from "./charts/chartTooltips";
 import { formatTimeOnly } from "../utils/temporal";
 import type { EChartsOption } from "echarts";
 
@@ -123,17 +124,7 @@ export function TimeSeriesChart({ columns, rows, dark }: Readonly<TimeSeriesChar
         type: "cross",
         crossStyle: { color: dark ? cssVar("--color-text-muted") : cssVar("--color-light-text-muted") },
       },
-      formatter: (params: any) => {
-        const items = Array.isArray(params) ? params : [params];
-        if (items.length === 0) return "";
-        const ts = new Date(items[0].value[0]);
-        const timeStr = formatTimeOnly(ts);
-        const lines = items.map((p: any) => {
-          const dot = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${p.color};margin-right:6px;"></span>`;
-          return `${dot}${p.seriesName} <b>${formatChartValue(p.value[1] as number)}</b>`;
-        });
-        return `<div style="opacity:0.7">${timeStr}</div>${lines.join("<br/>")}`;
-      },
+      formatter: (params: any) => timeSeriesTooltipHtml(params, formatTimeOnly),
     },
     legend: series.length > 1 ? {
       bottom: 0,
