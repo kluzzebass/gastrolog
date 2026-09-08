@@ -1,4 +1,4 @@
-package cluster
+package raftutil
 
 import (
 	"errors"
@@ -15,7 +15,7 @@ func TestLeadershipTransferIsRetriedUntilItSettles(t *testing.T) {
 	t.Parallel()
 	calls := 0
 	var slept time.Duration
-	err := applyRetryingLeadershipTransfer(func() error {
+	err := ApplyRetryingLeadershipTransfer(func() error {
 		calls++
 		if calls < 3 {
 			return hraft.ErrLeadershipTransferInProgress
@@ -39,7 +39,7 @@ func TestLeadershipTransferIsRetriedUntilItSettles(t *testing.T) {
 func TestLeadershipTransferRetryIsBounded(t *testing.T) {
 	t.Parallel()
 	calls := 0
-	err := applyRetryingLeadershipTransfer(func() error {
+	err := ApplyRetryingLeadershipTransfer(func() error {
 		calls++
 		return hraft.ErrLeadershipTransferInProgress
 	}, func(time.Duration) {})
@@ -57,7 +57,7 @@ func TestLeadershipTransferRetryIsBounded(t *testing.T) {
 func TestNotLeaderIsReturnedImmediatelyForForwarding(t *testing.T) {
 	t.Parallel()
 	calls := 0
-	err := applyRetryingLeadershipTransfer(func() error {
+	err := ApplyRetryingLeadershipTransfer(func() error {
 		calls++
 		return hraft.ErrNotLeader
 	}, func(time.Duration) { t.Error("must not sleep for ErrNotLeader") })
@@ -76,7 +76,7 @@ func TestNotLeaderIsReturnedImmediatelyForForwarding(t *testing.T) {
 func TestLeadershipLostIsNotRetried(t *testing.T) {
 	t.Parallel()
 	calls := 0
-	err := applyRetryingLeadershipTransfer(func() error {
+	err := ApplyRetryingLeadershipTransfer(func() error {
 		calls++
 		return hraft.ErrLeadershipLost
 	}, func(time.Duration) { t.Error("must not sleep for ErrLeadershipLost") })
@@ -93,7 +93,7 @@ func TestLeadershipLostIsNotRetried(t *testing.T) {
 func TestSuccessAppliesOnce(t *testing.T) {
 	t.Parallel()
 	calls := 0
-	if err := applyRetryingLeadershipTransfer(func() error {
+	if err := ApplyRetryingLeadershipTransfer(func() error {
 		calls++
 		return nil
 	}, func(time.Duration) { t.Error("must not sleep on success") }); err != nil {

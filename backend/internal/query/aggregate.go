@@ -120,6 +120,10 @@ type groupState struct {
 	accs        []accumulator // one per aggregate expression
 }
 
+// AggFuncNames is every aggregate function a stats operator accepts, in the
+// order the syntax service advertises them. newAccumulator implements each.
+var AggFuncNames = []string{"count", "sum", "avg", "min", "max", "dcount", "median", "first", "last", "values"}
+
 // NewAggregator creates an Aggregator from a parsed StatsOp. The budget bounds
 // group state and per-accumulator state; it is required rather than optional so
 // no execution path can construct an unbounded aggregator.
@@ -151,13 +155,8 @@ func NewAggregator(stats *querylang.StatsOp, budget *Budget) (*Aggregator, error
 		}
 	}
 
-	// Validate aggregate functions.
 	for _, agg := range stats.Aggs {
-		switch strings.ToLower(agg.Func) {
-		case "count", "sum", "avg", "min", "max",
-			"dcount", "median", "first", "last", "values":
-			// OK
-		default:
+		if !slices.Contains(AggFuncNames, strings.ToLower(agg.Func)) {
 			return nil, fmt.Errorf("unknown aggregate function: %s", agg.Func)
 		}
 	}

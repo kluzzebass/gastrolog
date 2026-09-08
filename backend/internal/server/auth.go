@@ -20,7 +20,7 @@ import (
 	"gastrolog/internal/system"
 )
 
-var usernameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,64}$`)
+var usernameRe = auth.UsernamePattern
 
 // AuthServer implements the AuthService.
 type AuthServer struct {

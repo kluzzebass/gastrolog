@@ -1029,16 +1029,8 @@ func chunkChangeEventToProto(ev orchestrator.ChunkChangeEvent) *apiv1.WatchChunk
 	msg := &apiv1.WatchChunksResponse{
 		VaultId: ev.VaultID.ToProto(),
 		ChunkId: ev.ChunkID[:],
-		Op:      chunkOpToProto(ev.Op),
-	}
-	if ev.Meta != nil {
-		// Mirror VaultChunkMetaToProto: the inner ChunkMeta needs
-		// vault_id populated so the frontend's per-vault grouping
-		// matches against the same vaultId the ListChunks path uses.
-		// Bare ChunkMetaToProto leaves that field zero, which sends
-		// the chunk into the renderer's "unknown" group and hides it.
-		msg.Meta = ChunkMetaToProto(*ev.Meta)
-		msg.Meta.VaultId = ev.VaultID.ToProto()
+		Op:      ChunkOpToProto(ev.Op),
+		Meta:    ChunkChangeMetaToProto(ev),
 	}
 	if ev.Op == orchestrator.ChunkChangeOpProgress {
 		msg.RecordCount = ev.RecordCount
@@ -1046,7 +1038,23 @@ func chunkChangeEventToProto(ev orchestrator.ChunkChangeEvent) *apiv1.WatchChunk
 	return msg
 }
 
-func chunkOpToProto(op orchestrator.ChunkChangeOp) apiv1.ChunkChangeOp {
+// ChunkChangeMetaToProto converts a change event's chunk metadata, or nil when
+// the event carries none. The inner ChunkMeta needs vault_id populated so the
+// frontend's per-vault grouping matches the vaultId the ListChunks path uses;
+// bare ChunkMetaToProto leaves it zero, which sends the chunk into the
+// renderer's "unknown" group and hides it. The cluster-internal watch
+// forwarder converts through here too, so the two watch paths cannot drift.
+func ChunkChangeMetaToProto(ev orchestrator.ChunkChangeEvent) *apiv1.ChunkMeta {
+	if ev.Meta == nil {
+		return nil
+	}
+	meta := ChunkMetaToProto(*ev.Meta)
+	meta.VaultId = ev.VaultID.ToProto()
+	return meta
+}
+
+// ChunkOpToProto converts a chunk change operation to its proto value.
+func ChunkOpToProto(op orchestrator.ChunkChangeOp) apiv1.ChunkChangeOp {
 	switch op {
 	case orchestrator.ChunkChangeOpUnspecified:
 		return apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_UNSPECIFIED

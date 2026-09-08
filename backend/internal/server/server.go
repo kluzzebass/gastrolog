@@ -641,7 +641,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 
 	// Cap inbound message size to 4 MB to prevent memory exhaustion.
 	handlerOpts := []connect.HandlerOption{
-		connect.WithReadMaxBytes(4 << 20),
+		connect.WithReadMaxBytes(cluster.ForwardRPCMaxResponseBytes),
 	}
 	switch {
 	case len(overrideOpts) > 0:

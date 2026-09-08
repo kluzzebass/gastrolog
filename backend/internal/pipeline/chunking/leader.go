@@ -535,10 +535,14 @@ func segmentExhaustedForPlanning(fsm *vaultctlfsm.FSM, entry vaultctlfsm.Complet
 		return false
 	}
 	n, ok := fsm.ResumeRecordNumber(entry.SegmentID)
-	if !ok {
-		return false
-	}
-	return n >= entry.RecordCount
+	return segmentExhausted(n, ok, entry)
+}
+
+// segmentExhausted reports whether a segment's resume record number, when
+// known, has reached its record count: every record is referenced by a
+// manifest and nothing remains to plan.
+func segmentExhausted(resume uint32, known bool, entry vaultctlfsm.CompletedSegmentEntry) bool {
+	return known && resume >= entry.RecordCount
 }
 
 func (v *vaultChunking) openOrderedIndex(path string) (*OrderedIndex, error) {

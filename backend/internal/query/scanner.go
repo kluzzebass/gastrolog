@@ -19,8 +19,9 @@ import (
 	"gastrolog/internal/tokenizer"
 )
 
-// kvExtractors is the default set of KV extractors used by runtime filters.
-// Must match the extractors registered in the KV indexer factories.
+// kvExtractors is the set of KV extractors runtime filters apply. The KV
+// indexer factories take theirs from the same tokenizer.DefaultExtractors, so
+// the index and the filter agree by construction.
 var kvExtractors = tokenizer.DefaultExtractors()
 
 // pipeEval is a shared, stateless evaluator for expression predicates.

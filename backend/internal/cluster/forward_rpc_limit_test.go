@@ -86,7 +86,7 @@ func dispatchForward(t *testing.T, respBytes int) *gastrologv1.ForwardRPCFrame {
 // over the limit and asserts the handler returns an explicit ResourceExhausted
 // error frame naming the limit, rather than a silently truncated payload.
 func TestForwardRPCOverLimitErrorsExplicitly(t *testing.T) {
-	frame := dispatchForward(t, forwardRPCMaxResponseBytes+1)
+	frame := dispatchForward(t, ForwardRPCMaxResponseBytes+1)
 
 	if frame.GetErrorCode() != uint32(codes.ResourceExhausted) {
 		t.Fatalf("expected error_code %d (ResourceExhausted), got %d (msg=%q, payload=%d bytes)",
@@ -95,7 +95,7 @@ func TestForwardRPCOverLimitErrorsExplicitly(t *testing.T) {
 	if len(frame.GetPayload()) != 0 {
 		t.Errorf("over-limit error frame must carry no payload, got %d bytes (silent truncation)", len(frame.GetPayload()))
 	}
-	if !bytes.Contains([]byte(frame.GetErrorMessage()), []byte("forwardRPCMaxResponseBytes")) {
+	if !bytes.Contains([]byte(frame.GetErrorMessage()), []byte("ForwardRPCMaxResponseBytes")) {
 		t.Errorf("error message should name the limit constant, got %q", frame.GetErrorMessage())
 	}
 }
@@ -103,13 +103,13 @@ func TestForwardRPCOverLimitErrorsExplicitly(t *testing.T) {
 // TestForwardRPCAtLimitSucceeds pins the inclusive boundary: a response of
 // exactly the limit is passed through intact.
 func TestForwardRPCAtLimitSucceeds(t *testing.T) {
-	frame := dispatchForward(t, forwardRPCMaxResponseBytes)
+	frame := dispatchForward(t, ForwardRPCMaxResponseBytes)
 
 	if frame.GetErrorCode() != 0 {
 		t.Fatalf("at-limit response must not error, got code %d msg=%q", frame.GetErrorCode(), frame.GetErrorMessage())
 	}
-	if len(frame.GetPayload()) != forwardRPCMaxResponseBytes {
-		t.Errorf("expected %d payload bytes, got %d", forwardRPCMaxResponseBytes, len(frame.GetPayload()))
+	if len(frame.GetPayload()) != ForwardRPCMaxResponseBytes {
+		t.Errorf("expected %d payload bytes, got %d", ForwardRPCMaxResponseBytes, len(frame.GetPayload()))
 	}
 }
 

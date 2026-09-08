@@ -9,6 +9,7 @@ import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/applywait"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/raftutil"
 	"gastrolog/internal/vaultraft"
 
 	hraft "github.com/hashicorp/raft"
@@ -64,7 +65,7 @@ func NewVaultCtlChunkApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, vault
 func (f *VaultCtlChunkApplyForwarder) Apply(data []byte) error {
 	payload := vaultraft.MarshalVaultChunkCommand(f.vaultID, data)
 	var future hraft.ApplyFuture
-	err := applyRetryingLeadershipTransfer(func() error {
+	err := raftutil.ApplyRetryingLeadershipTransfer(func() error {
 		future = f.raft.Apply(payload, f.timeout)
 		return future.Error()
 	}, nil)

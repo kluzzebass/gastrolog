@@ -664,44 +664,23 @@ func newChunkEventSubscriber(o *orchestrator.Orchestrator) cluster.ChunkEventSub
 	}
 }
 
-// chunkChangeEventToForwardProto mirrors server.chunkChangeEventToProto
-// but produces the cluster-internal ForwardWatchChunksResponse rather
-// than the public WatchChunksResponse. Vault type lookup happens here
-// (same orchestrator registry) so peer messages already carry the
-// inspector-required field; the API node's per-message wrap then just
-// copies fields.
+// chunkChangeEventToForwardProto produces the cluster-internal
+// ForwardWatchChunksResponse through the same converters the public watch
+// uses, adding the vault type so peer messages already carry the
+// inspector-required field and the API node's per-message wrap just copies
+// fields.
 func chunkChangeEventToForwardProto(o *orchestrator.Orchestrator, ev orchestrator.ChunkChangeEvent) *gastrologv1.ForwardWatchChunksResponse {
 	msg := &gastrologv1.ForwardWatchChunksResponse{
 		VaultId: ev.VaultID.ToProto(),
 		ChunkId: ev.ChunkID[:],
-		Op:      chunkOpToForwardProto(ev.Op),
+		Op:      server.ChunkOpToProto(ev.Op),
+		Meta:    server.ChunkChangeMetaToProto(ev),
 	}
-	if ev.Meta != nil {
-		msg.Meta = server.ChunkMetaToProto(*ev.Meta)
-		msg.Meta.VaultId = ev.VaultID.ToProto()
+	if msg.Meta != nil {
 		msg.Meta.VaultType = o.VaultType(ev.VaultID)
 	}
 	if ev.Op == orchestrator.ChunkChangeOpProgress {
 		msg.RecordCount = ev.RecordCount
 	}
 	return msg
-}
-
-func chunkOpToForwardProto(op orchestrator.ChunkChangeOp) gastrologv1.ChunkChangeOp {
-	switch op {
-	case orchestrator.ChunkChangeOpUnspecified:
-		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_UNSPECIFIED
-	case orchestrator.ChunkChangeOpCreated:
-		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_CREATED
-	case orchestrator.ChunkChangeOpProgress:
-		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_PROGRESS
-	case orchestrator.ChunkChangeOpSealed:
-		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_SEALED
-	case orchestrator.ChunkChangeOpDeleted:
-		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_DELETED
-	case orchestrator.ChunkChangeOpUploaded:
-		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_UPLOADED
-	default:
-		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_UNSPECIFIED
-	}
 }

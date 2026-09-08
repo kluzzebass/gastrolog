@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
@@ -44,11 +43,10 @@ const (
 	initialAdminCredsMaxBytes = 4096
 )
 
-// adminUsernameRe matches the same pattern enforced by AuthServer.Register
-// — kept in sync so the file/env path produces creds that would also
-// pass through the interactive UI flow. Duplicated here rather than
-// imported to avoid a server→app dependency.
-var adminUsernameRe = regexp.MustCompile(`^[A-Za-z0-9_-]{3,64}$`)
+// adminUsernameRe is the account-name shape every creation path enforces, so
+// credentials from a file or the environment would also pass the interactive
+// registration.
+var adminUsernameRe = auth.UsernamePattern
 
 // initialAdminCreds is the file format for InitialAdminFile.
 //

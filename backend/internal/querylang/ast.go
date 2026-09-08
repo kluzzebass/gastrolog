@@ -137,26 +137,11 @@ func quoteIfNeeded(s string) string {
 		return `""`
 	}
 	for i := range len(s) {
-		if !isBarewordSafe(s[i]) {
+		if !isBarewordChar(s[i]) {
 			return `"` + escapeQuoted(s) + `"`
 		}
 	}
 	return s
-}
-
-// isBarewordSafe returns true if ch can appear unquoted in a bareword.
-// Mirrors isBarewordChar in lexer.go.
-func isBarewordSafe(ch byte) bool {
-	switch ch {
-	case ' ', '\t', '\n', '\r':
-		return false
-	case '(', ')', '=', '*', '?', '[', '"', '\'', '/', '>', '<', '!':
-		return false
-	case '|', ',', '+', '%', '#':
-		return false
-	default:
-		return true
-	}
 }
 
 // escapeQuoted escapes backslashes and double quotes inside a quoted string.

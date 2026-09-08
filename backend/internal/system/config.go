@@ -2,6 +2,7 @@ package system
 
 import (
 	"gastrolog/internal/glid"
+	"slices"
 	"time"
 )
 
@@ -268,6 +269,14 @@ type User struct {
 }
 
 // RefreshToken represents a stored refresh token (hash only, not the opaque token itself).
+// EligibleOn reports whether the ingester may run on nodeID. AllNodes makes
+// every node eligible regardless of the (legacy) NodeIDs list; otherwise a
+// non-empty NodeIDs restricts placement to the nodes listed, and an empty
+// list means every node.
+func (c IngesterConfig) EligibleOn(nodeID string) bool {
+	return c.AllNodes || len(c.NodeIDs) == 0 || slices.Contains(c.NodeIDs, nodeID)
+}
+
 type RefreshToken struct {
 	ID        glid.GLID `json:"id"`
 	UserID    glid.GLID `json:"user_id"`

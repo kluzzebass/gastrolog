@@ -206,7 +206,7 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 			return fsm
 		}
 		spec.Locate = chunking.VaultSegmentLocator{Root: root}
-		spec.ChunkRoot = filepath.Join(root, "chunks")
+		spec.ChunkRoot = pipelineChunkRoot(root)
 		spec.Applier = applier
 		spec.IsLeader = isLeader
 		spec.ChunkPolicy = policy
@@ -474,7 +474,17 @@ func (o *Orchestrator) originRoot(vaultID glid.GLID) (string, error) {
 	if o.segmentsDir == "" {
 		return "", errors.New("segments directory unset: configure orchestrator.Config.SegmentsDir from node home")
 	}
-	return filepath.Join(o.segmentsDir, vaultID.String()), nil
+	return pipelineVaultRoot(o.segmentsDir, vaultID), nil
+}
+
+// pipelineVaultRoot is a vault's segmentation root under the node's segments
+// directory; pipelineChunkRoot is where its built chunks live beneath that.
+func pipelineVaultRoot(segmentsDir string, vaultID glid.GLID) string {
+	return filepath.Join(segmentsDir, vaultID.String())
+}
+
+func pipelineChunkRoot(vaultRoot string) string {
+	return filepath.Join(vaultRoot, "chunks")
 }
 
 // isPipelineIngestVault reports whether this vault receives records through the
@@ -546,7 +556,6 @@ func (o *Orchestrator) deletePipelineVaultLocked(vaultID glid.GLID) {
 // snapshot, and segmentsDir is write-once at construction. The caller does the
 // stat/registration I/O afterwards. Both properties are required, not
 // incidental — the Raft apply pump calls this.
-// Mirrors the path math in originRoot + buildPipelineVaultSpec (spec.ChunkRoot).
 func (o *Orchestrator) pipelineVaultChunkRoot(vaultID glid.GLID) (string, bool) {
 	if o.segmentsDir == "" {
 		return "", false
@@ -555,7 +564,7 @@ func (o *Orchestrator) pipelineVaultChunkRoot(vaultID glid.GLID) (string, bool) 
 	if !registered || !reg.home {
 		return "", false
 	}
-	return filepath.Join(o.segmentsDir, vaultID.String(), "chunks"), true
+	return pipelineChunkRoot(pipelineVaultRoot(o.segmentsDir, vaultID)), true
 }
 
 // pipelineVaultStagingRoot returns the segment staging root for a vault

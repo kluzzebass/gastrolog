@@ -1,4 +1,7 @@
-package cluster
+// Package raftutil holds Raft helpers shared by every Raft user in the node —
+// the cluster group and the config store's own group — so their handling of
+// leadership errors cannot drift apart.
+package raftutil
 
 import (
 	"errors"
@@ -35,12 +38,12 @@ const (
 	leadershipTransferBackoff = 20 * time.Millisecond
 )
 
-// applyRetryingLeadershipTransfer calls apply, retrying only while Raft reports
+// ApplyRetryingLeadershipTransfer calls apply, retrying only while Raft reports
 // a leadership transfer in progress. Returns the final error, which callers
 // then handle as usual (notably: forwarding on ErrNotLeader).
 //
 // Takes a sleep function so tests can drive the retry without wall-clock waits.
-func applyRetryingLeadershipTransfer(apply func() error, sleep func(time.Duration)) error {
+func ApplyRetryingLeadershipTransfer(apply func() error, sleep func(time.Duration)) error {
 	if sleep == nil {
 		sleep = time.Sleep
 	}

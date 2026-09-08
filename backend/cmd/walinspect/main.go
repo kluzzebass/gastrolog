@@ -23,6 +23,9 @@ import (
 	"gastrolog/internal/glid"
 
 	hraft "github.com/hashicorp/raft"
+
+	"gastrolog/internal/raftwal"
+
 	"google.golang.org/protobuf/proto"
 )
 
@@ -231,57 +234,20 @@ func walkSegment(path string, visit func(gid uint32, typ byte, payload []byte) e
 	}
 }
 
-// walkLogBatch mirrors internal/raftwal.forEachBatchEntry: it visits each
-// sub-entry of an entryLogBatch payload as an entryLog. Bounds violations end
-// the walk silently — the record CRC already vouched for the bytes.
+// walkLogBatch visits each sub-entry of an entryLogBatch payload as an
+// entryLog, through the WAL package's own batch walker.
 func walkLogBatch(payload []byte, gid uint32, visit func(gid uint32, typ byte, payload []byte) error) error {
-	if len(payload) < logBatchCountSize {
-		return nil
-	}
-	count := int(binary.LittleEndian.Uint32(payload[0:logBatchCountSize]))
-	off := logBatchCountSize
-	for range count {
-		if off+logBatchEntryLenSize > len(payload) {
-			return nil
+	var err error
+	raftwal.ForEachBatchEntry(payload, func(enc []byte) {
+		if err == nil {
+			err = visit(gid, entryLog, enc)
 		}
-		n := int(binary.LittleEndian.Uint32(payload[off : off+logBatchEntryLenSize]))
-		off += logBatchEntryLenSize
-		if off+n > len(payload) {
-			return nil
-		}
-		if err := visit(gid, entryLog, payload[off:off+n]); err != nil {
-			return err
-		}
-		off += n
-	}
-	return nil
-}
-
-// decodeLog matches internal/raftwal.decodelog.
-func decodeLog(data []byte, lg *hraft.Log) error {
-	if len(data) < 21 {
-		return errors.New("short log entry")
-	}
-	lg.Index = binary.LittleEndian.Uint64(data[0:8])
-	lg.Term = binary.LittleEndian.Uint64(data[8:16])
-	lg.Type = hraft.LogType(data[16])
-	dataLen := int(binary.LittleEndian.Uint32(data[17:21]))
-	if len(data) < 21+dataLen+4 {
-		return errors.New("truncated log data")
-	}
-	lg.Data = make([]byte, dataLen)
-	copy(lg.Data, data[21:21+dataLen])
-	off := 21 + dataLen
-	extLen := int(binary.LittleEndian.Uint32(data[off : off+4]))
-	if extLen > 0 && off+4+extLen <= len(data) {
-		lg.Extensions = make([]byte, extLen)
-		copy(lg.Extensions, data[off+4:off+4+extLen])
-	}
-	return nil
+	})
+	return err
 }
 
 func tryDecodeLog(data []byte, lg *hraft.Log) bool {
-	return decodeLog(data, lg) == nil
+	return raftwal.DecodeLog(data, lg) == nil
 }
 
 // decodeFSMCmd decodes a Raft log payload as a protobuf VaultRaftCommand and

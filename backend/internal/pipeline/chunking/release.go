@@ -80,10 +80,11 @@ func scanSegmentReady(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.Complete
 	return holdersCover(entry.Holders, requiredHolders)
 }
 
-// scanSegmentExhausted mirrors segmentExhaustedForPlanning over the scan.
+// scanSegmentExhausted is segmentExhausted read from a release scan's resume
+// table rather than from the FSM.
 func scanSegmentExhausted(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.CompletedSegmentEntry) bool {
 	n, ok := scan.Resume[entry.SegmentID]
-	return ok && n >= entry.RecordCount
+	return segmentExhausted(n, ok, *entry)
 }
 
 // mayPurgeHeadAfterBuild reports whether this home may drop its head/ copy of a

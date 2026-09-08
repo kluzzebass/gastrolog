@@ -24,7 +24,7 @@ import (
 // Server-streaming forwards are NOT supported on this path and never were: the
 // routing interceptor only ever calls ForwardUnary, and large streamed
 // responses (search) travel over the dedicated ForwardSearch RPC, not here.
-// A forwarded response larger than forwardRPCMaxResponseBytes cannot round-trip
+// A forwarded response larger than ForwardRPCMaxResponseBytes cannot round-trip
 // and is rejected with a ResourceExhausted error frame rather than silently
 // truncated.
 func forwardRPCStreamHandler(srv any, stream grpc.ServerStream) error {
@@ -76,32 +76,32 @@ func forwardRPCStreamHandler(srv any, stream grpc.ServerStream) error {
 	return unaryResponseFrame(stream, resp.Body)
 }
 
-// forwardRPCMaxResponseBytes bounds a single forwarded unary response. It
-// mirrors the internal Connect mux's WithReadMaxBytes: a response larger than
-// this cannot be read back by the forwarding client, so the frame protocol
-// refuses it explicitly instead of silently truncating. The size check below
-// runs on the uncompressed body, where planned zstd transport compression will
-// hook in — revisit this limit when that lands.
-const forwardRPCMaxResponseBytes = 4 << 20
+// ForwardRPCMaxResponseBytes bounds a single forwarded unary response, and is
+// the read limit the Connect mux applies to every request body: a response
+// larger than this could not be read back by the forwarding client, so the
+// frame protocol refuses it explicitly instead of silently truncating. The
+// size check below runs on the uncompressed body, where planned zstd
+// transport compression will hook in — revisit this limit when that lands.
+const ForwardRPCMaxResponseBytes = 4 << 20
 
 // unaryResponseFrame reads a raw proto response body and sends it as a single
 // ForwardRPCFrame. Connect unary responses are NOT envelope-framed — the body
-// is raw proto bytes. Responses exceeding forwardRPCMaxResponseBytes are
+// is raw proto bytes. Responses exceeding ForwardRPCMaxResponseBytes are
 // rejected with a ResourceExhausted error frame naming the limit, rather than
 // truncated to a corrupt payload.
 func unaryResponseFrame(stream grpc.ServerStream, body io.Reader) error {
 	// Read one byte past the limit so we can distinguish "exactly at the
 	// limit" (allowed) from "over the limit" (rejected).
 	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(io.LimitReader(body, forwardRPCMaxResponseBytes+1)); err != nil {
+	if _, err := buf.ReadFrom(io.LimitReader(body, ForwardRPCMaxResponseBytes+1)); err != nil {
 		return status.Errorf(codes.Internal, "read response body: %v", err)
 	}
-	if buf.Len() > forwardRPCMaxResponseBytes {
+	if buf.Len() > ForwardRPCMaxResponseBytes {
 		return stream.SendMsg(&gastrologv1.ForwardRPCFrame{
 			ErrorCode: uint32(codes.ResourceExhausted),
 			ErrorMessage: fmt.Sprintf(
-				"forwarded response exceeds forwardRPCMaxResponseBytes limit of %d bytes",
-				forwardRPCMaxResponseBytes),
+				"forwarded response exceeds ForwardRPCMaxResponseBytes limit of %d bytes",
+				ForwardRPCMaxResponseBytes),
 		})
 	}
 
