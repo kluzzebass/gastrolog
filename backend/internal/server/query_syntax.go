@@ -15,11 +15,11 @@ func (s *QueryServer) GetSyntax(
 	_ context.Context,
 	_ *connect.Request[apiv1.GetSyntaxRequest],
 ) (*connect.Response[apiv1.GetSyntaxResponse], error) {
-	// Aggregation functions valid inside stats bodies.
-	aggs := []string{"count", "avg", "sum", "min", "max", "bin"}
-	// Combine aggs + scalar functions for the full pipeFunctions set.
-	funcs := make([]string, 0, len(aggs)+len(querylang.ScalarFuncNames))
-	funcs = append(funcs, aggs...)
+	// Aggregation functions valid inside stats bodies, plus the bin() group
+	// key, then the scalar functions.
+	funcs := make([]string, 0, len(query.AggFuncNames)+1+len(querylang.ScalarFuncNames))
+	funcs = append(funcs, query.AggFuncNames...)
+	funcs = append(funcs, "bin")
 	funcs = append(funcs, querylang.ScalarFuncNames...)
 
 	return connect.NewResponse(&apiv1.GetSyntaxResponse{

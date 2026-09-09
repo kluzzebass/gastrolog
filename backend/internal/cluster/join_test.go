@@ -3,7 +3,12 @@ package cluster
 import (
 	"errors"
 	"fmt"
+	"syscall"
 	"testing"
+
+	hraft "github.com/hashicorp/raft"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // JoinCluster classifies certain gRPC + raftadmin errors as transient
@@ -29,10 +34,10 @@ func TestIsTransientJoinErr_NotTheLeader(t *testing.T) {
 
 func TestIsTransientJoinErr_LeadershipLost(t *testing.T) {
 	t.Parallel()
-	for _, msg := range []string{
-		"membership change: leadership lost while committing log",
-		"membership change: leadership transfer in progress",
-	} {
+	// raftadmin returns the leader's future error as text, so the wire form
+	// is the Raft library's own message inside the client's wrapping.
+	for _, sentinel := range []error{hraft.ErrLeadershipLost, hraft.ErrLeadershipTransferInProgress} {
+		msg := "membership change: " + sentinel.Error()
 		if !isTransientJoinErr(errors.New(msg)) {
 			t.Errorf("expected transient for %q", msg)
 		}
@@ -41,21 +46,21 @@ func TestIsTransientJoinErr_LeadershipLost(t *testing.T) {
 
 func TestIsTransientJoinErr_Unavailable(t *testing.T) {
 	t.Parallel()
-	for _, msg := range []string{
-		"dial node-1: rpc error: code = Unavailable desc = connection error: desc = transport: Error while dialing",
-		"add voter RPC: rpc error: code = Unavailable desc = no healthy upstream",
+	for _, err := range []error{
+		fmt.Errorf("dial node-1: %w", status.Error(codes.Unavailable, "connection error: desc = transport: Error while dialing")),
+		fmt.Errorf("add voter RPC: %w", status.Error(codes.Unavailable, "no healthy upstream")),
 	} {
-		if !isTransientJoinErr(errors.New(msg)) {
-			t.Errorf("expected transient for %q", msg)
+		if !isTransientJoinErr(err) {
+			t.Errorf("expected transient for %v", err)
 		}
 	}
 }
 
 func TestIsTransientJoinErr_ConnectionRefused(t *testing.T) {
 	t.Parallel()
-	msg := "dial node-1: connection refused"
-	if !isTransientJoinErr(errors.New(msg)) {
-		t.Errorf("expected transient for %q", msg)
+	err := fmt.Errorf("dial node-1: %w", syscall.ECONNREFUSED)
+	if !isTransientJoinErr(err) {
+		t.Errorf("expected transient for %v", err)
 	}
 }
 

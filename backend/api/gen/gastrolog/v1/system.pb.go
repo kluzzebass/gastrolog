@@ -317,9 +317,12 @@ func (LogComponentLevelSource) EnumDescriptor() ([]byte, []int) {
 }
 
 type GetSystemRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// When true, return cloud service credentials (for export/backup).
+	// Admin only; any other caller gets the redacted response.
+	IncludeSecrets bool `protobuf:"varint,1,opt,name=include_secrets,json=includeSecrets,proto3" json:"include_secrets,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *GetSystemRequest) Reset() {
@@ -350,6 +353,13 @@ func (x *GetSystemRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GetSystemRequest.ProtoReflect.Descriptor instead.
 func (*GetSystemRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *GetSystemRequest) GetIncludeSecrets() bool {
+	if x != nil {
+		return x.IncludeSecrets
+	}
+	return false
 }
 
 type GetSystemResponse struct {
@@ -2617,8 +2627,10 @@ func (x *DeleteIngesterResponse) GetSystem() *GetSystemResponse {
 }
 
 type GetSettingsRequest struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	IncludeSecrets bool                   `protobuf:"varint,1,opt,name=include_secrets,json=includeSecrets,proto3" json:"include_secrets,omitempty"` // When true, return actual secret values (for export/backup).
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// When true, return actual secret values (for export/backup).
+	// Admin only; any other caller gets the redacted response.
+	IncludeSecrets bool `protobuf:"varint,1,opt,name=include_secrets,json=includeSecrets,proto3" json:"include_secrets,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -3261,17 +3273,18 @@ func (x *HTTPLookupParam) GetDescription() string {
 
 // HTTPLookupEntry defines an HTTP API lookup table for field enrichment.
 type HTTPLookupEntry struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                                                                 // registry name (e.g. "users")
-	UrlTemplate   string                 `protobuf:"bytes,2,opt,name=url_template,json=urlTemplate,proto3" json:"url_template,omitempty"`                                                // e.g. "http://api/users/{value}"
-	Headers       map[string]string      `protobuf:"bytes,3,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // optional auth/custom headers
-	Timeout       string                 `protobuf:"bytes,4,opt,name=timeout,proto3" json:"timeout,omitempty"`                                                                           // Go duration string, optional
-	CacheTtl      string                 `protobuf:"bytes,5,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`                                                         // Go duration string, optional
-	CacheSize     int32                  `protobuf:"varint,6,opt,name=cache_size,json=cacheSize,proto3" json:"cache_size,omitempty"`                                                     // optional, default 10000
-	ResponsePaths []string               `protobuf:"bytes,7,rep,name=response_paths,json=responsePaths,proto3" json:"response_paths,omitempty"`                                          // jq expressions, e.g. "$.data.user"
-	Parameters    []*HTTPLookupParam     `protobuf:"bytes,8,rep,name=parameters,proto3" json:"parameters,omitempty"`                                                                     // ordered param definitions for URL template
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                    protoimpl.MessageState `protogen:"open.v1"`
+	Name                     string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                                                                 // registry name (e.g. "users")
+	UrlTemplate              string                 `protobuf:"bytes,2,opt,name=url_template,json=urlTemplate,proto3" json:"url_template,omitempty"`                                                // e.g. "http://api/users/{value}"
+	Headers                  map[string]string      `protobuf:"bytes,3,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // optional auth/custom headers
+	Timeout                  string                 `protobuf:"bytes,4,opt,name=timeout,proto3" json:"timeout,omitempty"`                                                                           // Go duration string, optional
+	CacheTtl                 string                 `protobuf:"bytes,5,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`                                                         // Go duration string, optional
+	CacheSize                int32                  `protobuf:"varint,6,opt,name=cache_size,json=cacheSize,proto3" json:"cache_size,omitempty"`                                                     // optional, default 10000
+	ResponsePaths            []string               `protobuf:"bytes,7,rep,name=response_paths,json=responsePaths,proto3" json:"response_paths,omitempty"`                                          // jq expressions, e.g. "$.data.user"
+	Parameters               []*HTTPLookupParam     `protobuf:"bytes,8,rep,name=parameters,proto3" json:"parameters,omitempty"`                                                                     // ordered param definitions for URL template
+	AllowPrivateDestinations bool                   `protobuf:"varint,9,opt,name=allow_private_destinations,json=allowPrivateDestinations,proto3" json:"allow_private_destinations,omitempty"`      // reach loopback / private / unique-local targets, denied by default (never link-local)
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *HTTPLookupEntry) Reset() {
@@ -3358,6 +3371,13 @@ func (x *HTTPLookupEntry) GetParameters() []*HTTPLookupParam {
 		return x.Parameters
 	}
 	return nil
+}
+
+func (x *HTTPLookupEntry) GetAllowPrivateDestinations() bool {
+	if x != nil {
+		return x.AllowPrivateDestinations
+	}
+	return false
 }
 
 // JSONFileLookupEntry defines a JSON file-backed lookup table for field enrichment.
@@ -6458,11 +6478,18 @@ func (*TriggerIngesterResponse) Descriptor() ([]byte, []int) {
 }
 
 type TestCloudServiceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
-	Params        map[string]string      `protobuf:"bytes,2,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Type   string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	Params map[string]string      `protobuf:"bytes,2,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Optional: an existing cloud service whose stored credentials fill in
+	// the credential params left empty here, so an operator can test a saved
+	// service without retyping secrets the API never returned. The fallback
+	// only applies when params carry the same endpoint the service is stored
+	// with — otherwise the request would spend those credentials on a
+	// destination the caller chose.
+	CloudServiceId []byte `protobuf:"bytes,3,opt,name=cloud_service_id,json=cloudServiceId,proto3" json:"cloud_service_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *TestCloudServiceRequest) Reset() {
@@ -6505,6 +6532,13 @@ func (x *TestCloudServiceRequest) GetType() string {
 func (x *TestCloudServiceRequest) GetParams() map[string]string {
 	if x != nil {
 		return x.Params
+	}
+	return nil
+}
+
+func (x *TestCloudServiceRequest) GetCloudServiceId() []byte {
+	if x != nil {
+		return x.CloudServiceId
 	}
 	return nil
 }
@@ -8281,10 +8315,15 @@ func (x *PreviewYAMLLookupResponse) GetQueryError() string {
 }
 
 type PutCloudServiceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Config        *CloudService          `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Config *CloudService          `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
+	// Drop the stored credentials instead of keeping the ones config leaves
+	// empty. This is how a service moves to its provider's ambient
+	// credential chain — an IAM role, ADC — now that an empty credential
+	// field means "unchanged".
+	ClearCredentials bool `protobuf:"varint,2,opt,name=clear_credentials,json=clearCredentials,proto3" json:"clear_credentials,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *PutCloudServiceRequest) Reset() {
@@ -8322,6 +8361,13 @@ func (x *PutCloudServiceRequest) GetConfig() *CloudService {
 		return x.Config
 	}
 	return nil
+}
+
+func (x *PutCloudServiceRequest) GetClearCredentials() bool {
+	if x != nil {
+		return x.ClearCredentials
+	}
+	return false
 }
 
 type PutCloudServiceResponse struct {
@@ -9094,8 +9140,9 @@ var File_gastrolog_v1_system_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\n" +
-	"\x19gastrolog/v1/system.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1agastrolog/v1/storage.proto\x1a\x18gastrolog/v1/vault.proto\"\x12\n" +
-	"\x10GetSystemRequest\"\xbd\x06\n" +
+	"\x19gastrolog/v1/system.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18gastrolog/v1/authz.proto\x1a\x1agastrolog/v1/storage.proto\x1a\x18gastrolog/v1/vault.proto\";\n" +
+	"\x10GetSystemRequest\x12'\n" +
+	"\x0finclude_secrets\x18\x01 \x01(\bR\x0eincludeSecrets\"\xbd\x06\n" +
 	"\x11GetSystemResponse\x121\n" +
 	"\x06vaults\x18\x01 \x03(\v2\x19.gastrolog.v1.VaultConfigR\x06vaults\x12:\n" +
 	"\tingesters\x18\x02 \x03(\v2\x1c.gastrolog.v1.IngesterConfigR\tingesters\x12O\n" +
@@ -9306,7 +9353,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\afile_id\x18\x03 \x01(\fR\x06fileId\"G\n" +
 	"\x0fHTTPLookupParam\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
-	"\vdescription\x18\x02 \x01(\tR\vdescription\"\x86\x03\n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\"\xc4\x03\n" +
 	"\x0fHTTPLookupEntry\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
 	"\furl_template\x18\x02 \x01(\tR\vurlTemplate\x12D\n" +
@@ -9318,7 +9365,8 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0eresponse_paths\x18\a \x03(\tR\rresponsePaths\x12=\n" +
 	"\n" +
 	"parameters\x18\b \x03(\v2\x1d.gastrolog.v1.HTTPLookupParamR\n" +
-	"parameters\x1a:\n" +
+	"parameters\x12<\n" +
+	"\x1aallow_private_destinations\x18\t \x01(\bR\x18allowPrivateDestinations\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9c\x01\n" +
@@ -9551,10 +9599,11 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\vunreachable\x18\x04 \x01(\bR\vunreachable\"(\n" +
 	"\x16TriggerIngesterRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\"\x19\n" +
-	"\x17TriggerIngesterResponse\"\xb3\x01\n" +
+	"\x17TriggerIngesterResponse\"\xdd\x01\n" +
 	"\x17TestCloudServiceRequest\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12I\n" +
-	"\x06params\x18\x02 \x03(\v21.gastrolog.v1.TestCloudServiceRequest.ParamsEntryR\x06params\x1a9\n" +
+	"\x06params\x18\x02 \x03(\v21.gastrolog.v1.TestCloudServiceRequest.ParamsEntryR\x06params\x12(\n" +
+	"\x10cloud_service_id\x18\x03 \x01(\fR\x0ecloudServiceId\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"N\n" +
@@ -9701,9 +9750,10 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x05error\x18\x04 \x01(\tR\x05error\x12!\n" +
 	"\fquery_result\x18\x05 \x01(\tR\vqueryResult\x12\x1f\n" +
 	"\vquery_error\x18\x06 \x01(\tR\n" +
-	"queryError\"L\n" +
+	"queryError\"y\n" +
 	"\x16PutCloudServiceRequest\x122\n" +
-	"\x06config\x18\x01 \x01(\v2\x1a.gastrolog.v1.CloudServiceR\x06config\"R\n" +
+	"\x06config\x18\x01 \x01(\v2\x1a.gastrolog.v1.CloudServiceR\x06config\x12+\n" +
+	"\x11clear_credentials\x18\x02 \x01(\bR\x10clearCredentials\"R\n" +
 	"\x17PutCloudServiceResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"+\n" +
 	"\x19DeleteCloudServiceRequest\x12\x0e\n" +
@@ -9768,61 +9818,61 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x1cLOG_LEVEL_SOURCE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18LOG_LEVEL_SOURCE_DEFAULT\x10\x01\x12\x1f\n" +
 	"\x1bLOG_LEVEL_SOURCE_EXACT_RULE\x10\x02\x12\x1e\n" +
-	"\x1aLOG_LEVEL_SOURCE_GLOB_RULE\x10\x032\xf2&\n" +
-	"\rSystemService\x12L\n" +
-	"\tGetSystem\x12\x1e.gastrolog.v1.GetSystemRequest\x1a\x1f.gastrolog.v1.GetSystemResponse\x12d\n" +
-	"\x11GetIngesterStatus\x12&.gastrolog.v1.GetIngesterStatusRequest\x1a'.gastrolog.v1.GetIngesterStatusResponse\x12d\n" +
-	"\x11PutRotationPolicy\x12&.gastrolog.v1.PutRotationPolicyRequest\x1a'.gastrolog.v1.PutRotationPolicyResponse\x12m\n" +
-	"\x14DeleteRotationPolicy\x12).gastrolog.v1.DeleteRotationPolicyRequest\x1a*.gastrolog.v1.DeleteRotationPolicyResponse\x12g\n" +
-	"\x12PutRetentionPolicy\x12'.gastrolog.v1.PutRetentionPolicyRequest\x1a(.gastrolog.v1.PutRetentionPolicyResponse\x12p\n" +
-	"\x15DeleteRetentionPolicy\x12*.gastrolog.v1.DeleteRetentionPolicyRequest\x1a+.gastrolog.v1.DeleteRetentionPolicyResponse\x12I\n" +
-	"\bPutVault\x12\x1d.gastrolog.v1.PutVaultRequest\x1a\x1e.gastrolog.v1.PutVaultResponse\x12R\n" +
-	"\vDeleteVault\x12 .gastrolog.v1.DeleteVaultRequest\x1a!.gastrolog.v1.DeleteVaultResponse\x12R\n" +
-	"\vPutIngester\x12 .gastrolog.v1.PutIngesterRequest\x1a!.gastrolog.v1.PutIngesterResponse\x12[\n" +
-	"\x0eDeleteIngester\x12#.gastrolog.v1.DeleteIngesterRequest\x1a$.gastrolog.v1.DeleteIngesterResponse\x12R\n" +
-	"\vGetSettings\x12 .gastrolog.v1.GetSettingsRequest\x1a!.gastrolog.v1.GetSettingsResponse\x12g\n" +
-	"\x12PutServiceSettings\x12'.gastrolog.v1.PutServiceSettingsRequest\x1a(.gastrolog.v1.PutServiceSettingsResponse\x12d\n" +
-	"\x11PutLookupSettings\x12&.gastrolog.v1.PutLookupSettingsRequest\x1a'.gastrolog.v1.PutLookupSettingsResponse\x12g\n" +
-	"\x12PutMaxMindSettings\x12'.gastrolog.v1.PutMaxMindSettingsRequest\x1a(.gastrolog.v1.PutMaxMindSettingsResponse\x12a\n" +
-	"\x10PutSetupSettings\x12%.gastrolog.v1.PutSetupSettingsRequest\x1a&.gastrolog.v1.PutSetupSettingsResponse\x12j\n" +
-	"\x13RegenerateJwtSecret\x12(.gastrolog.v1.RegenerateJwtSecretRequest\x1a).gastrolog.v1.RegenerateJwtSecretResponse\x12[\n" +
-	"\x0eGetPreferences\x12#.gastrolog.v1.GetPreferencesRequest\x1a$.gastrolog.v1.GetPreferencesResponse\x12[\n" +
-	"\x0ePutPreferences\x12#.gastrolog.v1.PutPreferencesRequest\x1a$.gastrolog.v1.PutPreferencesResponse\x12^\n" +
-	"\x0fGetSavedQueries\x12$.gastrolog.v1.GetSavedQueriesRequest\x1a%.gastrolog.v1.GetSavedQueriesResponse\x12X\n" +
-	"\rPutSavedQuery\x12\".gastrolog.v1.PutSavedQueryRequest\x1a#.gastrolog.v1.PutSavedQueryResponse\x12a\n" +
-	"\x10DeleteSavedQuery\x12%.gastrolog.v1.DeleteSavedQueryRequest\x1a&.gastrolog.v1.DeleteSavedQueryResponse\x12a\n" +
-	"\x10ListCertificates\x12%.gastrolog.v1.ListCertificatesRequest\x1a&.gastrolog.v1.ListCertificatesResponse\x12[\n" +
-	"\x0eGetCertificate\x12#.gastrolog.v1.GetCertificateRequest\x1a$.gastrolog.v1.GetCertificateResponse\x12[\n" +
-	"\x0ePutCertificate\x12#.gastrolog.v1.PutCertificateRequest\x1a$.gastrolog.v1.PutCertificateResponse\x12d\n" +
-	"\x11DeleteCertificate\x12&.gastrolog.v1.DeleteCertificateRequest\x1a'.gastrolog.v1.DeleteCertificateResponse\x12O\n" +
+	"\x1aLOG_LEVEL_SOURCE_GLOB_RULE\x10\x032\xaa)\n" +
+	"\rSystemService\x12R\n" +
+	"\tGetSystem\x12\x1e.gastrolog.v1.GetSystemRequest\x1a\x1f.gastrolog.v1.GetSystemResponse\"\x04\x80\xb5\x18\x03\x12j\n" +
+	"\x11GetIngesterStatus\x12&.gastrolog.v1.GetIngesterStatusRequest\x1a'.gastrolog.v1.GetIngesterStatusResponse\"\x04\x80\xb5\x18\x03\x12j\n" +
+	"\x11PutRotationPolicy\x12&.gastrolog.v1.PutRotationPolicyRequest\x1a'.gastrolog.v1.PutRotationPolicyResponse\"\x04\x80\xb5\x18\x03\x12s\n" +
+	"\x14DeleteRotationPolicy\x12).gastrolog.v1.DeleteRotationPolicyRequest\x1a*.gastrolog.v1.DeleteRotationPolicyResponse\"\x04\x80\xb5\x18\x03\x12m\n" +
+	"\x12PutRetentionPolicy\x12'.gastrolog.v1.PutRetentionPolicyRequest\x1a(.gastrolog.v1.PutRetentionPolicyResponse\"\x04\x80\xb5\x18\x03\x12v\n" +
+	"\x15DeleteRetentionPolicy\x12*.gastrolog.v1.DeleteRetentionPolicyRequest\x1a+.gastrolog.v1.DeleteRetentionPolicyResponse\"\x04\x80\xb5\x18\x03\x12O\n" +
+	"\bPutVault\x12\x1d.gastrolog.v1.PutVaultRequest\x1a\x1e.gastrolog.v1.PutVaultResponse\"\x04\x80\xb5\x18\x03\x12X\n" +
+	"\vDeleteVault\x12 .gastrolog.v1.DeleteVaultRequest\x1a!.gastrolog.v1.DeleteVaultResponse\"\x04\x80\xb5\x18\x03\x12X\n" +
+	"\vPutIngester\x12 .gastrolog.v1.PutIngesterRequest\x1a!.gastrolog.v1.PutIngesterResponse\"\x04\x80\xb5\x18\x03\x12a\n" +
+	"\x0eDeleteIngester\x12#.gastrolog.v1.DeleteIngesterRequest\x1a$.gastrolog.v1.DeleteIngesterResponse\"\x04\x80\xb5\x18\x03\x12X\n" +
+	"\vGetSettings\x12 .gastrolog.v1.GetSettingsRequest\x1a!.gastrolog.v1.GetSettingsResponse\"\x04\x80\xb5\x18\x01\x12m\n" +
+	"\x12PutServiceSettings\x12'.gastrolog.v1.PutServiceSettingsRequest\x1a(.gastrolog.v1.PutServiceSettingsResponse\"\x04\x80\xb5\x18\x03\x12j\n" +
+	"\x11PutLookupSettings\x12&.gastrolog.v1.PutLookupSettingsRequest\x1a'.gastrolog.v1.PutLookupSettingsResponse\"\x04\x80\xb5\x18\x03\x12m\n" +
+	"\x12PutMaxMindSettings\x12'.gastrolog.v1.PutMaxMindSettingsRequest\x1a(.gastrolog.v1.PutMaxMindSettingsResponse\"\x04\x80\xb5\x18\x03\x12g\n" +
+	"\x10PutSetupSettings\x12%.gastrolog.v1.PutSetupSettingsRequest\x1a&.gastrolog.v1.PutSetupSettingsResponse\"\x04\x80\xb5\x18\x03\x12p\n" +
+	"\x13RegenerateJwtSecret\x12(.gastrolog.v1.RegenerateJwtSecretRequest\x1a).gastrolog.v1.RegenerateJwtSecretResponse\"\x04\x80\xb5\x18\x03\x12a\n" +
+	"\x0eGetPreferences\x12#.gastrolog.v1.GetPreferencesRequest\x1a$.gastrolog.v1.GetPreferencesResponse\"\x04\x80\xb5\x18\x02\x12a\n" +
+	"\x0ePutPreferences\x12#.gastrolog.v1.PutPreferencesRequest\x1a$.gastrolog.v1.PutPreferencesResponse\"\x04\x80\xb5\x18\x02\x12d\n" +
+	"\x0fGetSavedQueries\x12$.gastrolog.v1.GetSavedQueriesRequest\x1a%.gastrolog.v1.GetSavedQueriesResponse\"\x04\x80\xb5\x18\x02\x12^\n" +
+	"\rPutSavedQuery\x12\".gastrolog.v1.PutSavedQueryRequest\x1a#.gastrolog.v1.PutSavedQueryResponse\"\x04\x80\xb5\x18\x02\x12g\n" +
+	"\x10DeleteSavedQuery\x12%.gastrolog.v1.DeleteSavedQueryRequest\x1a&.gastrolog.v1.DeleteSavedQueryResponse\"\x04\x80\xb5\x18\x02\x12g\n" +
+	"\x10ListCertificates\x12%.gastrolog.v1.ListCertificatesRequest\x1a&.gastrolog.v1.ListCertificatesResponse\"\x04\x80\xb5\x18\x03\x12a\n" +
+	"\x0eGetCertificate\x12#.gastrolog.v1.GetCertificateRequest\x1a$.gastrolog.v1.GetCertificateResponse\"\x04\x80\xb5\x18\x03\x12a\n" +
+	"\x0ePutCertificate\x12#.gastrolog.v1.PutCertificateRequest\x1a$.gastrolog.v1.PutCertificateResponse\"\x04\x80\xb5\x18\x03\x12j\n" +
+	"\x11DeleteCertificate\x12&.gastrolog.v1.DeleteCertificateRequest\x1a'.gastrolog.v1.DeleteCertificateResponse\"\x04\x80\xb5\x18\x03\x12U\n" +
 	"\n" +
-	"PauseVault\x12\x1f.gastrolog.v1.PauseVaultRequest\x1a .gastrolog.v1.PauseVaultResponse\x12R\n" +
-	"\vResumeVault\x12 .gastrolog.v1.ResumeVaultRequest\x1a!.gastrolog.v1.ResumeVaultResponse\x12U\n" +
-	"\fTestIngester\x12!.gastrolog.v1.TestIngesterRequest\x1a\".gastrolog.v1.TestIngesterResponse\x12j\n" +
-	"\x13GetIngesterDefaults\x12(.gastrolog.v1.GetIngesterDefaultsRequest\x1a).gastrolog.v1.GetIngesterDefaultsResponse\x12^\n" +
-	"\x0fTriggerIngester\x12$.gastrolog.v1.TriggerIngesterRequest\x1a%.gastrolog.v1.TriggerIngesterResponse\x12X\n" +
-	"\rPutNodeConfig\x12\".gastrolog.v1.PutNodeConfigRequest\x1a#.gastrolog.v1.PutNodeConfigResponse\x12I\n" +
-	"\bPutRoute\x12\x1d.gastrolog.v1.PutRouteRequest\x1a\x1e.gastrolog.v1.PutRouteResponse\x12R\n" +
-	"\vDeleteRoute\x12 .gastrolog.v1.DeleteRouteRequest\x1a!.gastrolog.v1.DeleteRouteResponse\x12U\n" +
-	"\fGenerateName\x12!.gastrolog.v1.GenerateNameRequest\x1a\".gastrolog.v1.GenerateNameResponse\x12g\n" +
-	"\x12ValidateExpression\x12'.gastrolog.v1.ValidateExpressionRequest\x1a(.gastrolog.v1.ValidateExpressionResponse\x12T\n" +
-	"\vWatchSystem\x12 .gastrolog.v1.WatchSystemRequest\x1a!.gastrolog.v1.WatchSystemResponse0\x01\x12X\n" +
-	"\rGetRouteStats\x12\".gastrolog.v1.GetRouteStatsRequest\x1a#.gastrolog.v1.GetRouteStatsResponse\x12a\n" +
-	"\x10ListManagedFiles\x12%.gastrolog.v1.ListManagedFilesRequest\x1a&.gastrolog.v1.ListManagedFilesResponse\x12d\n" +
-	"\x11DeleteManagedFile\x12&.gastrolog.v1.DeleteManagedFileRequest\x1a'.gastrolog.v1.DeleteManagedFileResponse\x12a\n" +
-	"\x10TestCloudService\x12%.gastrolog.v1.TestCloudServiceRequest\x1a&.gastrolog.v1.TestCloudServiceResponse\x12[\n" +
-	"\x0eTestHTTPLookup\x12#.gastrolog.v1.TestHTTPLookupRequest\x1a$.gastrolog.v1.TestHTTPLookupResponse\x12a\n" +
-	"\x10PreviewCSVLookup\x12%.gastrolog.v1.PreviewCSVLookupRequest\x1a&.gastrolog.v1.PreviewCSVLookupResponse\x12d\n" +
-	"\x11PreviewJSONLookup\x12&.gastrolog.v1.PreviewJSONLookupRequest\x1a'.gastrolog.v1.PreviewJSONLookupResponse\x12d\n" +
-	"\x11PreviewYAMLLookup\x12&.gastrolog.v1.PreviewYAMLLookupRequest\x1a'.gastrolog.v1.PreviewYAMLLookupResponse\x12l\n" +
-	"\x13WatchIngesterStatus\x12(.gastrolog.v1.WatchIngesterStatusRequest\x1a).gastrolog.v1.WatchIngesterStatusResponse0\x01\x12^\n" +
-	"\x0fPutCloudService\x12$.gastrolog.v1.PutCloudServiceRequest\x1a%.gastrolog.v1.PutCloudServiceResponse\x12g\n" +
-	"\x12DeleteCloudService\x12'.gastrolog.v1.DeleteCloudServiceRequest\x1a(.gastrolog.v1.DeleteCloudServiceResponse\x12m\n" +
-	"\x14SetNodeStorageConfig\x12).gastrolog.v1.SetNodeStorageConfigRequest\x1a*.gastrolog.v1.SetNodeStorageConfigResponse\x12U\n" +
-	"\fListStorages\x12!.gastrolog.v1.ListStoragesRequest\x1a\".gastrolog.v1.ListStoragesResponse\x12U\n" +
-	"\fDeleteLookup\x12!.gastrolog.v1.DeleteLookupRequest\x1a\".gastrolog.v1.DeleteLookupResponse\x12U\n" +
-	"\fPutLogLevels\x12!.gastrolog.v1.PutLogLevelsRequest\x1a\".gastrolog.v1.PutLogLevelsResponse\x12d\n" +
-	"\x11ListLogComponents\x12&.gastrolog.v1.ListLogComponentsRequest\x1a'.gastrolog.v1.ListLogComponentsResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"PauseVault\x12\x1f.gastrolog.v1.PauseVaultRequest\x1a .gastrolog.v1.PauseVaultResponse\"\x04\x80\xb5\x18\x03\x12X\n" +
+	"\vResumeVault\x12 .gastrolog.v1.ResumeVaultRequest\x1a!.gastrolog.v1.ResumeVaultResponse\"\x04\x80\xb5\x18\x03\x12[\n" +
+	"\fTestIngester\x12!.gastrolog.v1.TestIngesterRequest\x1a\".gastrolog.v1.TestIngesterResponse\"\x04\x80\xb5\x18\x03\x12p\n" +
+	"\x13GetIngesterDefaults\x12(.gastrolog.v1.GetIngesterDefaultsRequest\x1a).gastrolog.v1.GetIngesterDefaultsResponse\"\x04\x80\xb5\x18\x02\x12d\n" +
+	"\x0fTriggerIngester\x12$.gastrolog.v1.TriggerIngesterRequest\x1a%.gastrolog.v1.TriggerIngesterResponse\"\x04\x80\xb5\x18\x03\x12^\n" +
+	"\rPutNodeConfig\x12\".gastrolog.v1.PutNodeConfigRequest\x1a#.gastrolog.v1.PutNodeConfigResponse\"\x04\x80\xb5\x18\x03\x12O\n" +
+	"\bPutRoute\x12\x1d.gastrolog.v1.PutRouteRequest\x1a\x1e.gastrolog.v1.PutRouteResponse\"\x04\x80\xb5\x18\x03\x12X\n" +
+	"\vDeleteRoute\x12 .gastrolog.v1.DeleteRouteRequest\x1a!.gastrolog.v1.DeleteRouteResponse\"\x04\x80\xb5\x18\x03\x12[\n" +
+	"\fGenerateName\x12!.gastrolog.v1.GenerateNameRequest\x1a\".gastrolog.v1.GenerateNameResponse\"\x04\x80\xb5\x18\x02\x12m\n" +
+	"\x12ValidateExpression\x12'.gastrolog.v1.ValidateExpressionRequest\x1a(.gastrolog.v1.ValidateExpressionResponse\"\x04\x80\xb5\x18\x03\x12Z\n" +
+	"\vWatchSystem\x12 .gastrolog.v1.WatchSystemRequest\x1a!.gastrolog.v1.WatchSystemResponse\"\x04\x80\xb5\x18\x020\x01\x12^\n" +
+	"\rGetRouteStats\x12\".gastrolog.v1.GetRouteStatsRequest\x1a#.gastrolog.v1.GetRouteStatsResponse\"\x04\x80\xb5\x18\x02\x12g\n" +
+	"\x10ListManagedFiles\x12%.gastrolog.v1.ListManagedFilesRequest\x1a&.gastrolog.v1.ListManagedFilesResponse\"\x04\x80\xb5\x18\x03\x12j\n" +
+	"\x11DeleteManagedFile\x12&.gastrolog.v1.DeleteManagedFileRequest\x1a'.gastrolog.v1.DeleteManagedFileResponse\"\x04\x80\xb5\x18\x03\x12g\n" +
+	"\x10TestCloudService\x12%.gastrolog.v1.TestCloudServiceRequest\x1a&.gastrolog.v1.TestCloudServiceResponse\"\x04\x80\xb5\x18\x03\x12a\n" +
+	"\x0eTestHTTPLookup\x12#.gastrolog.v1.TestHTTPLookupRequest\x1a$.gastrolog.v1.TestHTTPLookupResponse\"\x04\x80\xb5\x18\x03\x12g\n" +
+	"\x10PreviewCSVLookup\x12%.gastrolog.v1.PreviewCSVLookupRequest\x1a&.gastrolog.v1.PreviewCSVLookupResponse\"\x04\x80\xb5\x18\x02\x12j\n" +
+	"\x11PreviewJSONLookup\x12&.gastrolog.v1.PreviewJSONLookupRequest\x1a'.gastrolog.v1.PreviewJSONLookupResponse\"\x04\x80\xb5\x18\x02\x12j\n" +
+	"\x11PreviewYAMLLookup\x12&.gastrolog.v1.PreviewYAMLLookupRequest\x1a'.gastrolog.v1.PreviewYAMLLookupResponse\"\x04\x80\xb5\x18\x02\x12r\n" +
+	"\x13WatchIngesterStatus\x12(.gastrolog.v1.WatchIngesterStatusRequest\x1a).gastrolog.v1.WatchIngesterStatusResponse\"\x04\x80\xb5\x18\x020\x01\x12d\n" +
+	"\x0fPutCloudService\x12$.gastrolog.v1.PutCloudServiceRequest\x1a%.gastrolog.v1.PutCloudServiceResponse\"\x04\x80\xb5\x18\x03\x12m\n" +
+	"\x12DeleteCloudService\x12'.gastrolog.v1.DeleteCloudServiceRequest\x1a(.gastrolog.v1.DeleteCloudServiceResponse\"\x04\x80\xb5\x18\x03\x12s\n" +
+	"\x14SetNodeStorageConfig\x12).gastrolog.v1.SetNodeStorageConfigRequest\x1a*.gastrolog.v1.SetNodeStorageConfigResponse\"\x04\x80\xb5\x18\x03\x12[\n" +
+	"\fListStorages\x12!.gastrolog.v1.ListStoragesRequest\x1a\".gastrolog.v1.ListStoragesResponse\"\x04\x80\xb5\x18\x02\x12[\n" +
+	"\fDeleteLookup\x12!.gastrolog.v1.DeleteLookupRequest\x1a\".gastrolog.v1.DeleteLookupResponse\"\x04\x80\xb5\x18\x03\x12[\n" +
+	"\fPutLogLevels\x12!.gastrolog.v1.PutLogLevelsRequest\x1a\".gastrolog.v1.PutLogLevelsResponse\"\x04\x80\xb5\x18\x03\x12j\n" +
+	"\x11ListLogComponents\x12&.gastrolog.v1.ListLogComponentsRequest\x1a'.gastrolog.v1.ListLogComponentsResponse\"\x04\x80\xb5\x18\x02B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_system_proto_rawDescOnce sync.Once
@@ -10252,6 +10302,7 @@ func file_gastrolog_v1_system_proto_init() {
 	if File_gastrolog_v1_system_proto != nil {
 		return
 	}
+	file_gastrolog_v1_authz_proto_init()
 	file_gastrolog_v1_storage_proto_init()
 	file_gastrolog_v1_vault_proto_init()
 	file_gastrolog_v1_system_proto_msgTypes[7].OneofWrappers = []any{

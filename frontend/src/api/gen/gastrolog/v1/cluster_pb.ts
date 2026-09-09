@@ -49,6 +49,33 @@ proto3.util.setEnumType(AlarmPriority, "gastrolog.v1.AlarmPriority", [
 ]);
 
 /**
+ * ImportRejection classifies a failed chunk replication command so the
+ * sender can act on the cause without reading the error text.
+ *
+ * @generated from enum gastrolog.v1.ImportRejection
+ */
+export enum ImportRejection {
+  /**
+   * a failure with no classification
+   *
+   * @generated from enum value: IMPORT_REJECTION_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * the vault has no instance on the receiver yet; retry later
+   *
+   * @generated from enum value: IMPORT_REJECTION_VAULT_NOT_READY = 1;
+   */
+  VAULT_NOT_READY = 1,
+}
+// Retrieve enum metadata with: proto3.getEnumType(ImportRejection)
+proto3.util.setEnumType(ImportRejection, "gastrolog.v1.ImportRejection", [
+  { no: 0, name: "IMPORT_REJECTION_UNSPECIFIED" },
+  { no: 1, name: "IMPORT_REJECTION_VAULT_NOT_READY" },
+]);
+
+/**
  * ForwardApplyRequest carries a pre-marshaled ConfigCommand for the leader
  * to apply via raft.Apply(). Used by followers to proxy config writes.
  *
@@ -1614,6 +1641,13 @@ export class ChunkReplicationAck extends Message<ChunkReplicationAck> {
    */
   chunkId = new Uint8Array(0);
 
+  /**
+   * set when ok is false and the cause is known
+   *
+   * @generated from field: gastrolog.v1.ImportRejection rejection = 4;
+   */
+  rejection = ImportRejection.UNSPECIFIED;
+
   constructor(data?: PartialMessage<ChunkReplicationAck>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1625,6 +1659,7 @@ export class ChunkReplicationAck extends Message<ChunkReplicationAck> {
     { no: 1, name: "ok", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 2, name: "error", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 4, name: "rejection", kind: "enum", T: proto3.getEnumType(ImportRejection) },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationAck {
@@ -1777,18 +1812,13 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
   resumeToken = new Uint8Array(0);
 
   /**
-   * sealed chunks this holder should scan
+   * Emit aggregates in their combinable partial form (an avg as its sum and
+   * count) so the coordinator can merge per-node tables instead of gathering
+   * records.
    *
-   * @generated from field: repeated bytes sealed_chunk_ids = 4;
+   * @generated from field: bool partial_aggregates = 4;
    */
-  sealedChunkIds: Uint8Array[] = [];
-
-  /**
-   * include active/sealing chunks (leader only)
-   *
-   * @generated from field: bool search_pipeline_chunks = 5;
-   */
-  searchPipelineChunks = false;
+  partialAggregates = false;
 
   constructor(data?: PartialMessage<ForwardSearchRequest>) {
     super();
@@ -1801,8 +1831,7 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
     { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 4, name: "sealed_chunk_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
-    { no: 5, name: "search_pipeline_chunks", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 4, name: "partial_aggregates", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSearchRequest {
@@ -2534,6 +2563,13 @@ export class ForwardValidateVaultResponse extends Message<ForwardValidateVaultRe
    */
   cloudIndexAudit?: CloudIndexAudit;
 
+  /**
+   * Vault-level findings from that node that no single chunk can be blamed for.
+   *
+   * @generated from field: repeated string issues = 4;
+   */
+  issues: string[] = [];
+
   constructor(data?: PartialMessage<ForwardValidateVaultResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2545,6 +2581,7 @@ export class ForwardValidateVaultResponse extends Message<ForwardValidateVaultRe
     { no: 1, name: "valid", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 2, name: "chunks", kind: "message", T: ChunkValidation, repeated: true },
     { no: 3, name: "cloud_index_audit", kind: "message", T: CloudIndexAudit },
+    { no: 4, name: "issues", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardValidateVaultResponse {

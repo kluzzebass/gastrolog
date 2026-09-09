@@ -34,7 +34,7 @@ func newAuthTestClient(t *testing.T) (gastrologv1connect.AuthServiceClient, *sys
 // alwaysValidTokenValidator satisfies auth.TokenValidator for tests.
 type alwaysValidTokenValidator struct{}
 
-func (alwaysValidTokenValidator) IsTokenValid(context.Context, string, time.Time) (bool, error) {
+func (alwaysValidTokenValidator) IsTokenValid(context.Context, *auth.Claims) (bool, error) {
 	return true, nil
 }
 
@@ -46,7 +46,7 @@ func newAuthTestClientWithInterceptor(t *testing.T) (gastrologv1connect.AuthServ
 	cfgStore := sysmem.NewStore()
 	tokens := auth.NewTokenService([]byte("test-secret-32-bytes-long-key!!"), 7*24*time.Hour)
 	authServer := server.NewAuthServer(cfgStore, tokens, nil, false)
-	interceptor := auth.NewAuthInterceptor(tokens, cfgStore, alwaysValidTokenValidator{})
+	interceptor := auth.NewAuthInterceptor(auth.NewVerifier(tokens, alwaysValidTokenValidator{}), cfgStore)
 
 	_, handler := gastrologv1connect.NewAuthServiceHandler(authServer,
 		connect.WithInterceptors(interceptor),
@@ -345,10 +345,8 @@ func TestLogout_RevokesOnlyCurrentSession(t *testing.T) {
 		t.Fatal("expected refresh token B to exist before logout")
 	}
 
-	// Logout session A — sending its refresh token.
-	logoutReq := connect.NewRequest(&apiv1.LogoutRequest{
-		RefreshToken: refreshA,
-	})
+	// Logout session A — identified by the access token it presents.
+	logoutReq := connect.NewRequest(&apiv1.LogoutRequest{})
 	logoutReq.Header().Set("Authorization", "Bearer "+tokenA)
 	_, err = client.Logout(ctx, logoutReq)
 	if err != nil {

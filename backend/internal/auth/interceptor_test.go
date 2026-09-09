@@ -114,7 +114,7 @@ func newTestSetup(t *testing.T, counter *mockCounter) *testSetup {
 	t.Helper()
 
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
-	interceptor := auth.NewAuthInterceptor(tokens, counter, nil)
+	interceptor := auth.NewAuthInterceptor(auth.NewVerifier(tokens, nil), counter)
 	opts := connect.WithInterceptors(interceptor)
 
 	mux := http.NewServeMux()
@@ -284,7 +284,7 @@ func TestAuthenticatedEndpoint_InvalidToken(t *testing.T) {
 func TestAuthenticatedEndpoint_ValidToken(t *testing.T) {
 	t.Parallel()
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
-	token, _, err := tokens.Issue("uid-alice", "alice", "user")
+	token, _, err := tokens.Issue("uid-alice", "alice", "user", "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestAuthenticatedEndpoint_ValidToken(t *testing.T) {
 func TestAdminEndpoint_NonAdminToken(t *testing.T) {
 	t.Parallel()
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
-	token, _, err := tokens.Issue("uid-alice", "alice", "user")
+	token, _, err := tokens.Issue("uid-alice", "alice", "user", "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestAdminEndpoint_NonAdminToken(t *testing.T) {
 func TestAdminEndpoint_AdminToken(t *testing.T) {
 	t.Parallel()
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
-	token, _, err := tokens.Issue("uid-admin", "admin", "admin")
+	token, _, err := tokens.Issue("uid-admin", "admin", "admin", "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -411,7 +411,7 @@ func TestCreateUser_RequiresAdmin(t *testing.T) {
 	}
 
 	// Non-admin token → PermissionDenied.
-	userToken, _, _ := tokens.Issue("uid-alice", "alice", "user")
+	userToken, _, _ := tokens.Issue("uid-alice", "alice", "user", "")
 	userClient := gastrologv1connect.NewAuthServiceClient(http.DefaultClient, s.server.URL, withBearer(userToken))
 	_, err = userClient.CreateUser(context.Background(), connect.NewRequest(&apiv1.CreateUserRequest{}))
 	if err == nil {
@@ -422,7 +422,7 @@ func TestCreateUser_RequiresAdmin(t *testing.T) {
 	}
 
 	// Admin token → allowed (will fail on validation, not auth).
-	adminToken, _, _ := tokens.Issue("uid-admin", "admin", "admin")
+	adminToken, _, _ := tokens.Issue("uid-admin", "admin", "admin", "")
 	adminClient := gastrologv1connect.NewAuthServiceClient(http.DefaultClient, s.server.URL, withBearer(adminToken))
 	_, err = adminClient.CreateUser(context.Background(), connect.NewRequest(&apiv1.CreateUserRequest{}))
 	if err == nil {
@@ -431,5 +431,57 @@ func TestCreateUser_RequiresAdmin(t *testing.T) {
 	// Should get past auth and hit validation (InvalidArgument), not auth errors.
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Errorf("expected InvalidArgument, got %v", connect.CodeOf(err))
+	}
+}
+
+// TestStorageMutations_RequireAdmin — a cloud service's credentials are
+// write-only, so anyone who can rewrite the service points the operator's
+// stored keys at an endpoint of their own and the vault's uploader spends
+// them there on the next seal. The connection test spends them outright.
+// Reaching these verbs at all is admin-only.
+func TestStorageMutations_RequireAdmin(t *testing.T) {
+	t.Parallel()
+	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
+	userToken, _, err := tokens.Issue("uid-alice", "alice", "user", "")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	s := newTestSetup(t, &mockCounter{count: 1})
+	client := gastrologv1connect.NewSystemServiceClient(http.DefaultClient, s.server.URL, withBearer(userToken))
+	ctx := context.Background()
+
+	calls := map[string]func() error{
+		"PutCloudService": func() error {
+			_, err := client.PutCloudService(ctx, connect.NewRequest(&apiv1.PutCloudServiceRequest{
+				Config: &apiv1.CloudService{Name: "archive", Provider: "s3", Bucket: "attacker-bucket", Endpoint: "https://attacker.example.net"},
+			}))
+			return err
+		},
+		"DeleteCloudService": func() error {
+			_, err := client.DeleteCloudService(ctx, connect.NewRequest(&apiv1.DeleteCloudServiceRequest{Id: []byte("id")}))
+			return err
+		},
+		"TestCloudService": func() error {
+			_, err := client.TestCloudService(ctx, connect.NewRequest(&apiv1.TestCloudServiceRequest{Type: "file"}))
+			return err
+		},
+		"SetNodeStorageConfig": func() error {
+			_, err := client.SetNodeStorageConfig(ctx, connect.NewRequest(&apiv1.SetNodeStorageConfigRequest{
+				Config: &apiv1.NodeStorageConfig{NodeId: []byte("node")},
+			}))
+			return err
+		},
+	}
+	for name, call := range calls {
+		t.Run(name, func(t *testing.T) {
+			err := call()
+			if err == nil {
+				t.Fatalf("%s succeeded for a non-admin", name)
+			}
+			if connect.CodeOf(err) != connect.CodePermissionDenied {
+				t.Errorf("%s: code = %v, want PermissionDenied", name, connect.CodeOf(err))
+			}
+		})
 	}
 }

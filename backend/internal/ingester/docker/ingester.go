@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chanwatch"
+	"gastrolog/internal/panicguard"
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/querylang"
 )
@@ -102,32 +103,58 @@ func (ing *ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 		return err
 	}
 
+	// Discovery runs under a context this function can cancel on its own:
+	// a discovery loop that stops leaves the ingester alive but blind to
+	// new containers, so its failure must end the run rather than sit
+	// there.
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	var wg sync.WaitGroup
 
 	// Initial container discovery.
-	containers, err := ing.client.ContainerList(ctx)
+	containers, err := ing.client.ContainerList(runCtx)
 	if err != nil {
 		ing.logger.Warn("initial container list failed", "error", err)
 	} else {
 		for _, c := range containers {
-			ing.startContainer(ctx, c, out, &wg)
+			ing.startContainer(runCtx, c, out, &wg)
 		}
 	}
 
+	loopErr := make(chan error, 2)
+
 	// Launch events listener.
 	wg.Go(func() {
-		ing.eventLoop(ctx, out, &wg)
+		err := panicguard.Call(ing.logger, "docker event loop", func() error {
+			ing.eventLoop(runCtx, out, &wg)
+			return nil
+		})
+		if err != nil {
+			loopErr <- err
+		}
 	})
 
 	// Launch poll ticker.
 	if ing.pollInterval > 0 {
 		wg.Go(func() {
-			ing.pollLoop(ctx, out, &wg)
+			err := panicguard.Call(ing.logger, "docker poll loop", func() error {
+				ing.pollLoop(runCtx, out, &wg)
+				return nil
+			})
+			if err != nil {
+				loopErr <- err
+			}
 		})
 	}
 
-	// Wait for shutdown.
-	<-ctx.Done()
+	// Wait for shutdown, or for a discovery loop to fail.
+	var runErr error
+	select {
+	case <-ctx.Done():
+	case runErr = <-loopErr:
+		cancel()
+	}
 
 	// Cancel all per-container contexts.
 	ing.mu.Lock()
@@ -149,7 +176,7 @@ func (ing *ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 		ing.logger.Warn("failed to save state on shutdown", "error", err)
 	}
 
-	return nil
+	return runErr
 }
 
 // waitForDocker retries connecting to the Docker daemon with backoff.
@@ -208,7 +235,13 @@ func (ing *ingester) startContainer(ctx context.Context, info containerInfo, out
 	logger := ing.logger
 	gate := ing.pressureGate
 	wg.Go(func() {
-		streamContainer(cctx, ing.client, info, since, ing.stdout, ing.stderr, ing.id, logger, out, ing.updateTimestamp, gate)
+		// The guard wraps only the stream: a container that stopped
+		// streaming must leave the tracking map either way, or the poll
+		// loop never restarts it.
+		func() {
+			defer panicguard.Recover(logger, "docker log stream", "container", info.ID)
+			streamContainer(cctx, ing.client, info, since, ing.stdout, ing.stderr, ing.id, logger, out, ing.updateTimestamp, gate)
+		}()
 		ing.mu.Lock()
 		delete(ing.containers, info.ID)
 		ing.mu.Unlock()

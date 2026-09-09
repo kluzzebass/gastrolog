@@ -1290,6 +1290,18 @@ func encodeLogBatch(logs []*hraft.Log) []byte {
 // sub-entry's offset within the payload and its encoded bytes. Stops silently
 // on a bounds violation — malformed payloads cannot pass the record CRC, so
 // this is belt-and-braces like decodelog's length checks.
+// ForEachBatchEntry visits each encoded raft.Log inside a batch payload, for
+// tools that read the WAL outside this package. Bounds violations end the walk
+// silently — the record CRC already vouched for the bytes.
+func ForEachBatchEntry(payload []byte, fn func(enc []byte)) {
+	forEachBatchEntry(payload, func(_ int, enc []byte) { fn(enc) })
+}
+
+// DecodeLog decodes one encoded raft.Log as the WAL stores it.
+func DecodeLog(data []byte, log *hraft.Log) error {
+	return decodelog(data, log)
+}
+
 func forEachBatchEntry(payload []byte, fn func(off int, enc []byte)) {
 	if len(payload) < logBatchCountSize {
 		return

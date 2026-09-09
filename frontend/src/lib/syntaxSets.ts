@@ -18,7 +18,7 @@ export const DEFAULT_SYNTAX: SyntaxSets = {
     "barchart", "donut", "map",
   ]),
   pipeFunctions: new Set([
-    "count", "avg", "sum", "min", "max", "bin", "tonumber",
+    "count", "sum", "avg", "min", "max", "dcount", "median", "first", "last", "values", "bin", "tonumber",
     "tostring", "abs", "ceil", "floor", "round", "sqrt", "pow",
     "log", "log10", "log2", "exp",
     "len", "lower", "upper", "substr", "replace", "trim", "concat",

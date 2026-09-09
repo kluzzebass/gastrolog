@@ -77,21 +77,65 @@ func runQuery(cmd *cobra.Command, args []string) error {
 
 	// Stream search results.
 	ctx := cmd.Context()
-	var totalRecords int64
+	var tally queryTally
 	started := time.Now()
 
-	err := streamSearch(ctx, client, expr, limit, func(resp *gastrologv1.SearchResponse) error {
-		// Pipeline results (table output).
+	err := streamSearch(ctx, client, expr, limit, queryStreamHandler(&tally, format, fields, countOnly))
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(2)
+	}
+
+	found, unit := tally.results()
+
+	if countOnly {
+		fmt.Println(found)
+	}
+
+	elapsed := time.Since(started)
+	if format == "text" && !countOnly {
+		fmt.Fprintf(os.Stderr, "\n%d %s in %s\n", found, unit, elapsed.Truncate(time.Millisecond))
+	}
+
+	if found == 0 {
+		os.Exit(1)
+	}
+	return nil
+}
+
+// queryTally counts what a query returned. An aggregating pipeline answers
+// with a table instead of records, so both shapes are tracked: the reported
+// count and the exit status must reflect a result of either shape.
+type queryTally struct {
+	records int64
+	rows    int64
+}
+
+// results returns the count to report and the noun for it. Rows win when
+// present, since a pipeline that produced a table returned no records.
+func (t *queryTally) results() (int64, string) {
+	if t.rows > 0 {
+		return t.rows, "rows"
+	}
+	return t.records, "records"
+}
+
+// queryStreamHandler builds the per-response callback, printing unless
+// countOnly and tallying either way.
+func queryStreamHandler(tally *queryTally, format string, fields []string, countOnly bool) func(*gastrologv1.SearchResponse) error {
+	return func(resp *gastrologv1.SearchResponse) error {
 		if resp.TableResult != nil {
+			tally.rows += int64(len(resp.TableResult.Rows))
 			if countOnly {
-				return nil // count doesn't apply to pipeline results
+				return nil
 			}
 			printTableResult(resp.TableResult, format)
 			return nil
 		}
 
 		for _, rec := range resp.Records {
-			totalRecords++
+			tally.records++
 			if countOnly {
 				continue
 			}
@@ -100,26 +144,7 @@ func runQuery(cmd *cobra.Command, args []string) error {
 			}
 		}
 		return nil
-	})
-
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(2)
 	}
-
-	if countOnly {
-		fmt.Println(totalRecords)
-	}
-
-	elapsed := time.Since(started)
-	if format == "text" && !countOnly {
-		fmt.Fprintf(os.Stderr, "\n%d records in %s\n", totalRecords, elapsed.Truncate(time.Millisecond))
-	}
-
-	if totalRecords == 0 {
-		os.Exit(1)
-	}
-	return nil
 }
 
 // extractLimit parses a limit=N directive from the expression string.

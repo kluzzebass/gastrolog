@@ -7,6 +7,7 @@ import {
 } from "../../api/hooks";
 import { useTestCloudService } from "../../api/hooks/useVaults";
 import { useEditState } from "../../hooks/useEditState";
+import { useThemeClass } from "../../hooks/useThemeClass";
 import { endpointBlocked } from "../../utils/endpointScheme";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { SettingsCard } from "./SettingsCard";
@@ -51,6 +52,8 @@ interface CloudServiceEdit {
   endpoint: string;
   accessKey: string;
   secretKey: string;
+  credentialsConfigured: boolean;
+  clearCredentials: boolean;
   container: string;
   connectionString: string;
   credentialsJson: string;
@@ -62,12 +65,65 @@ interface CloudServiceEdit {
   reconcileSchedule: string;
 }
 
+/**
+ * Builds the PutCloudService payload for an edited service. Credentials go
+ * out exactly as typed: an empty one was never displayed and never changed,
+ * and the server reads that as "keep the stored credential".
+ */
+/** Whether the operator typed credentials for a connection test to use. */
+function testCredentialsTyped(e: CloudServiceEdit): boolean {
+  return (
+    e.accessKey !== "" ||
+    e.secretKey !== "" ||
+    e.connectionString !== "" ||
+    e.credentialsJson !== ""
+  );
+}
+
+/** Whether an unsaved edit changes where a connection test would go. */
+function destinationEdited(service: CloudService, e: CloudServiceEdit): boolean {
+  return (
+    e.provider !== service.provider ||
+    e.bucket !== service.bucket ||
+    e.region !== service.region ||
+    e.endpoint !== service.endpoint ||
+    e.container !== service.container
+  );
+}
+
+export function cloudServiceSaveRequest(id: string, e: CloudServiceEdit) {
+  return {
+    id,
+    clearCredentials: e.clearCredentials,
+    name: e.name,
+    provider: e.provider,
+    bucket: e.bucket,
+    region: e.region,
+    endpoint: e.endpoint,
+    accessKey: e.accessKey,
+    secretKey: e.secretKey,
+    container: e.container,
+    connectionString: e.connectionString,
+    credentialsJson: e.credentialsJson,
+    archivalMode: e.archivalMode,
+    transitions: e.transitions.map((t) => ({
+      after: t.after,
+      cloudStorageClass: t.cloudStorageClass,
+    })),
+    restoreSpeed: e.restoreSpeed,
+    restoreDays: e.restoreDays,
+    suspectGraceDays: e.suspectGraceDays,
+    reconcileSchedule: e.reconcileSchedule,
+  };
+}
+
 export function CloudServiceCard({
   service,
   dark,
   expanded,
   onToggle,
 }: Readonly<CloudServiceCardProps>) {
+  const c = useThemeClass(dark);
   const putCloudService = usePutCloudService();
   const deleteCloudService = useDeleteCloudService();
   const testCloud = useTestCloudService();
@@ -79,11 +135,15 @@ export function CloudServiceCard({
     bucket: service.bucket,
     region: service.region,
     endpoint: service.endpoint,
-    accessKey: service.accessKey,
-    secretKey: service.secretKey,
+    // Credentials are never delivered to the browser; the fields start
+    // empty and only a value the operator types is sent.
+    accessKey: "",
+    secretKey: "",
+    credentialsConfigured: service.credentialsConfigured,
+    clearCredentials: false,
     container: service.container,
-    connectionString: service.connectionString,
-    credentialsJson: service.credentialsJson,
+    connectionString: "",
+    credentialsJson: "",
     archivalMode: service.archivalMode || "none",
     transitions: service.transitions.map((t) => ({
       after: t.after,
@@ -98,33 +158,18 @@ export function CloudServiceCard({
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
   const edit = getEdit(encode(service.id));
   const endpointInvalid = endpointBlocked(edit.provider, edit.endpoint);
+  // A test that supplies no credentials of its own runs against the saved
+  // service in full — destination included — so unsaved destination edits
+  // are not what got tested. Say so rather than let a green result be read
+  // as a verdict on the changes on screen.
+  const testIgnoresEdits =
+    !testCredentialsTyped(edit) && destinationEdited(service, edit);
 
   const { handleSave, handleDelete } = useCrudHandlers({
     mutation: putCloudService,
     deleteMutation: deleteCloudService,
     label: "Cloud Storage",
-    onSaveTransform: (id, e: CloudServiceEdit) => ({
-      id,
-      name: e.name,
-      provider: e.provider,
-      bucket: e.bucket,
-      region: e.region,
-      endpoint: e.endpoint,
-      accessKey: e.accessKey,
-      secretKey: e.secretKey,
-      container: e.container,
-      connectionString: e.connectionString,
-      credentialsJson: e.credentialsJson,
-      archivalMode: e.archivalMode,
-      transitions: e.transitions.map((t) => ({
-        after: t.after,
-        cloudStorageClass: t.cloudStorageClass,
-      })),
-      restoreSpeed: e.restoreSpeed,
-      restoreDays: e.restoreDays,
-      suspectGraceDays: e.suspectGraceDays,
-      reconcileSchedule: e.reconcileSchedule,
-    }),
+    onSaveTransform: cloudServiceSaveRequest,
     onDeleteTransform: (id) => ({ id }),
   });
 
@@ -145,6 +190,11 @@ export function CloudServiceCard({
               testCloud.mutate(
                 {
                   type: "file",
+                  // Naming the saved service tests it as saved, using the
+                  // credentials the browser was never given. Supplying
+                  // credentials below instead tests exactly what was typed,
+                  // against the destination typed with them.
+                  cloudServiceId: encode(service.id),
                   params: {
                     sealed_backing: edit.provider,
                     bucket: edit.bucket,
@@ -167,6 +217,11 @@ export function CloudServiceCard({
           >
             {testCloud.isPending ? "Testing..." : "Test Connection"}
           </Button>
+          {testIgnoresEdits && !testResult && (
+            <span className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
+              Tests the saved configuration — enter credentials to test these changes.
+            </span>
+          )}
           {testResult && (
             <span className={`text-[0.8em] ${testResult.success ? "text-green-400" : "text-severity-error"}`}>
               {testResult.message}

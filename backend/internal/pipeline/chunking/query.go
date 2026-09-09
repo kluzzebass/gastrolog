@@ -14,8 +14,8 @@ import (
 // ErrNoOpenChunkManifest is returned when QueryOpenChunk is called without a manifest.
 var ErrNoOpenChunkManifest = errors.New("no open chunk manifest")
 
-// ErrManifestRecordOutOfRange is returned when a 1-based manifest record position
-// is zero or greater than TotalRecords.
+// ErrManifestRecordOutOfRange is returned when a manifest record position is
+// not below the number of records served.
 var ErrManifestRecordOutOfRange = errors.New("manifest record position out of range")
 
 // OpenChunkQueryInput configures virtual open-chunk reads (direction D).
@@ -170,13 +170,15 @@ func (r *OpenChunkReader) Len() uint64 {
 	return uint64(len(r.positions))
 }
 
-// ReadAt returns the record at global 1-based position pos within the
-// merged, deduplicated order.
+// ReadAt returns the record at position pos within the merged, deduplicated
+// order. Positions count from zero, as every record position in the system
+// does, so the position a search hands out for an open chunk names the same
+// record once the chunk is sealed.
 func (r *OpenChunkReader) ReadAt(pos uint64) (record.Record, error) {
-	if pos == 0 || pos > uint64(len(r.positions)) {
+	if pos >= uint64(len(r.positions)) {
 		return record.Record{}, ErrManifestRecordOutOfRange
 	}
-	p := r.positions[pos-1]
+	p := r.positions[pos]
 	return p.seg.RecordAtFilePos(p.filePos)
 }
 

@@ -3,6 +3,7 @@ import type { EChartsOption } from "echarts";
 import type { HistogramData } from "../utils/histogramData";
 import { formatDateShort, formatTimeHM, formatTimeOnly } from "../utils/temporal";
 import { SEVERITY_COLOR_MAP, GROUP_PALETTE, resolveColor } from "../components/charts/chartColors";
+import { histogramTooltipHtml } from "../components/charts/chartTooltips";
 
 /**
  * Builds an ordered color map for all group values found in the data.
@@ -187,46 +188,16 @@ export function useHistogramOption(deps: HistogramOptionDeps): HistogramOptionRe
     return formatTimeHM(d);
   };
 
-  // Build a single tooltip line with a colored dot, label, and count.
-  const tooltipLine = (color: string, label: string, count: number, isBold: boolean): string => {
-    const dot = `<span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${color};margin-right:5px;"></span>`;
-    let style: string;
-    if (isBold) style = "font-weight:bold";
-    else if (hoveredGroup) style = "opacity:0.5";
-    else style = "opacity:0.7";
-    const valueStyle = isBold ? "font-weight:bold" : "";
-    return `${dot}<span style="${style}">${label}</span> <span style="${valueStyle}">${count.toLocaleString()}</span>`;
-  };
-
-  // Build tooltip HTML for a bucket index.
-  const tooltipFormatter = (params: any) => {
-    const items: any[] = Array.isArray(params) ? params : [params];
-    if (items.length === 0) return "";
-    const bucketIdx = items[0].dataIndex as number;
-    const bucket = buckets[bucketIdx];
-    if (!bucket) return "";
-
-    const lines: string[] = [];
-    if (hasGroups) {
-      const groupSum = Object.values(bucket.groupCounts).reduce((a, b) => a + b, 0);
-      const other = bucket.count - groupSum;
-      if (other > 0) {
-        lines.push(tooltipLine(copperColor, "other", other, hoveredGroup === "other"));
-      }
-      for (const key of groupKeys.toReversed()) {
-        const count = bucket.groupCounts[key];
-        if (count && count > 0) {
-          lines.push(tooltipLine(resolveColor(colorMap.get(key) ?? copperColor), key, count, hoveredGroup === key));
-        }
-      }
-    }
-
-    const header = `<div style="opacity:0.7">${bucket.count.toLocaleString()} \u00B7 ${formatTime(bucket.ts)}</div>`;
-    if (bucket.hasCloudData) {
-      lines.push(`<div style="opacity:0.5;font-size:0.85em;margin-top:2px">includes interpolated cloud data</div>`);
-    }
-    return header + lines.join("<br/>");
-  };
+  const tooltipFormatter = (params: any) =>
+    histogramTooltipHtml(params, {
+      buckets,
+      hasGroups,
+      groupKeys,
+      colorMap,
+      copperColor,
+      hoveredGroup,
+      formatTime,
+    });
 
   // Sync formatter ref — must be called unconditionally on every render.
   useEffect(() => {

@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -12,11 +13,23 @@ import (
 	"time"
 
 	"gastrolog/internal/chanwatch"
+	"gastrolog/internal/ingester/limits"
 	"gastrolog/internal/ingester/syslogparse"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
+	"gastrolog/internal/panicguard"
 	"gastrolog/internal/pipeline/ingestion"
 )
+
+// refusedLogInterval spaces the "listener at capacity" warning. A peer that
+// hammers a full listener would otherwise write one line per refused
+// connection, burying the condition it is reporting.
+const refusedLogInterval = 10 * time.Second
+
+// errOversizeFrame marks a message the framing layer refused because it
+// crossed the frame ceiling. It is reported, not silently dropped: a sender
+// whose messages vanish deserves to see why in the node's log.
+var errOversizeFrame = errors.New("syslog: frame exceeds size limit")
 
 // Ingester accepts syslog messages via UDP and/or TCP.
 // It implements ingestion.Ingester.
@@ -33,6 +46,11 @@ type Ingester struct {
 	mu          sync.Mutex
 	udpConn     *net.UDPConn
 	tcpListener net.Listener
+
+	// conns caps concurrent TCP connections; refusedLog keeps a peer that
+	// hammers the cap from filling the log with one line per refusal.
+	conns      *limits.ConnLimiter
+	refusedLog logging.Throttle
 
 	// pressureGate throttles socket reads when the ingest pipeline is backed up.
 	// Pausing reads lets the kernel apply backpressure upstream: TCP senders
@@ -67,10 +85,12 @@ type Config struct {
 // New creates a new syslog ingester.
 func New(cfg Config) *Ingester {
 	return &Ingester{
-		id:      cfg.ID,
-		udpAddr: cfg.UDPAddr,
-		tcpAddr: cfg.TCPAddr,
-		logger:  comp.Ingester.Sub("syslog").Desc("Syslog ingester — RFC 3164 + RFC 5424 over UDP/TCP with auto-detection.").Apply(logging.Default(cfg.Logger)),
+		id:         cfg.ID,
+		udpAddr:    cfg.UDPAddr,
+		tcpAddr:    cfg.TCPAddr,
+		conns:      limits.NewConnLimiter(limits.MaxConnections),
+		refusedLog: logging.Throttle{Interval: refusedLogInterval},
+		logger:     comp.Ingester.Sub("syslog").Desc("Syslog ingester — RFC 3164 + RFC 5424 over UDP/TCP with auto-detection.").Apply(logging.Default(cfg.Logger)),
 	}
 }
 
@@ -82,9 +102,13 @@ func (r *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage
 	errCh := make(chan error, 2)
 
 	// Start UDP listener if configured.
+	// A panic in a listener loop is reported as a run failure rather than
+	// swallowed: the ingester manager retries a failed run, so the listener
+	// comes back instead of going quietly deaf.
 	if r.udpAddr != "" {
 		wg.Go(func() {
-			if err := r.runUDP(ctx); err != nil {
+			err := panicguard.Call(r.logger, "syslog UDP listener", func() error { return r.runUDP(ctx) })
+			if err != nil {
 				errCh <- err
 			}
 		})
@@ -93,7 +117,8 @@ func (r *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage
 	// Start TCP listener if configured.
 	if r.tcpAddr != "" {
 		wg.Go(func() {
-			if err := r.runTCP(ctx); err != nil {
+			err := panicguard.Call(r.logger, "syslog TCP listener", func() error { return r.runTCP(ctx) })
+			if err != nil {
 				errCh <- err
 			}
 		})
@@ -240,8 +265,25 @@ func (r *Ingester) runTCP(ctx context.Context) error {
 			continue
 		}
 
+		remote := conn.RemoteAddr().String()
+		// Past the cap, refuse immediately: a peer opening connections
+		// faster than they close must not exhaust the node's file
+		// descriptors or goroutines.
+		if !r.conns.Acquire() {
+			_ = conn.Close()
+			if n, ok := r.refusedLog.Allow("conn-limit"); ok {
+				r.logger.Warn("syslog TCP connection refused: listener at capacity",
+					"remote", remote, "max_connections", limits.MaxConnections, "suppressed", n)
+			}
+			continue
+		}
+
 		wg.Go(func() {
+			defer r.conns.Release()
 			defer func() { _ = conn.Close() }()
+			// A panic on a hostile frame costs this connection, not the
+			// node and every other vault and ingester running on it.
+			defer panicguard.Recover(r.logger, "syslog TCP connection", "remote", remote)
 			r.handleTCPConn(ctx, conn)
 		})
 	}
@@ -275,7 +317,14 @@ func (r *Ingester) handleTCPConn(ctx context.Context, conn net.Conn) {
 
 		line, err := r.readFrame(reader)
 		if err != nil {
-			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) && !isTimeout(err) {
+			switch {
+			case errors.Is(err, errOversizeFrame):
+				if n, ok := r.refusedLog.Allow("oversize-frame"); ok {
+					r.logger.Warn("syslog message rejected", "error", err,
+						"remote", remoteIP, "max_frame_bytes", limits.MaxFrameBytes, "suppressed", n)
+				}
+			case errors.Is(err, io.EOF), errors.Is(err, net.ErrClosed), isTimeout(err):
+			default:
 				r.logger.Debug("TCP read error", "error", err)
 			}
 			return
@@ -307,13 +356,25 @@ func (r *Ingester) readFrame(reader *bufio.Reader) ([]byte, error) {
 	return readNewlineDelimited(reader)
 }
 
+// readNewlineDelimited reads one newline-terminated message, refusing a line
+// that grows past the frame ceiling. bufio.Reader.ReadBytes would otherwise
+// keep appending for as long as a sender withholds the newline, so a single
+// connection could consume memory bounded only by the link speed.
 func readNewlineDelimited(reader *bufio.Reader) ([]byte, error) {
-	line, err := reader.ReadBytes('\n')
-	if err != nil {
-		return nil, err
+	var line []byte
+	for {
+		chunk, err := reader.ReadSlice('\n')
+		if len(line)+len(chunk) > limits.MaxFrameBytes {
+			return nil, fmt.Errorf("%w: line exceeds %d bytes", errOversizeFrame, limits.MaxFrameBytes)
+		}
+		line = append(line, chunk...)
+		if err == nil {
+			return trimCRLF(line), nil
+		}
+		if !errors.Is(err, bufio.ErrBufferFull) {
+			return nil, err
+		}
 	}
-	line = trimCRLF(line)
-	return line, nil
 }
 
 func trimCRLF(line []byte) []byte {
@@ -348,8 +409,8 @@ func (r *Ingester) readOctetCounted(reader *bufio.Reader) ([]byte, error) {
 			return nil, errors.New("invalid octet count")
 		}
 		length = length*10 + int(b-'0')
-		if length > 1<<20 { // 1MB sanity limit
-			return nil, errors.New("octet count too large")
+		if length > limits.MaxFrameBytes {
+			return nil, fmt.Errorf("%w: octet count exceeds %d", errOversizeFrame, limits.MaxFrameBytes)
 		}
 	}
 

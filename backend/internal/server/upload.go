@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/home"
 	"gastrolog/internal/system"
 )
@@ -38,15 +40,18 @@ func (s *Server) handleManagedFileUpload(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Auth check: verify JWT from Authorization header (unless noAuth mode).
-	if !s.noAuth && s.tokens != nil {
-		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if token == "" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+	// Admin only — a managed file's display name is what resolves a lookup
+	// source, so an upload can shadow an admin-configured source and steer
+	// enrichment. This route is a plain http.Handler that the Connect auth
+	// interceptor never sees, so it authorizes through the same verifier: JWT
+	// signature, expiry, server-side revocation, then role.
+	if !s.noAuth {
+		if s.tokens == nil {
+			http.Error(w, "authentication unavailable", http.StatusInternalServerError)
 			return
 		}
-		if _, err := s.tokens.Verify(token); err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		if _, err := s.apiVerifier().Authorize(r.Context(), apiv1.AuthLevel_AUTH_LEVEL_ADMIN, r.Header); err != nil {
+			writeAuthError(w, err)
 			return
 		}
 	}
@@ -55,9 +60,29 @@ func (s *Server) handleManagedFileUpload(w http.ResponseWriter, r *http.Request)
 	// beyond it still spill to disk unbounded. MaxBytesReader caps the total
 	// request body actually read.
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+
+	// The server's global ReadTimeout is sized for ordinary API calls, not
+	// a 256 MiB file transfer, so it would kill a legitimate slow upload
+	// well before MaxBytesReader's byte cap is ever reached. Clear it for
+	// this handler alone: MaxBytesReader is now the only bound on how much
+	// a stalled or trickling upload can cost, in bytes rather than time,
+	// same as any other endpoint. This requires compressWriter (compress.go)
+	// to implement Unwrap — every real client sends a compressible
+	// Accept-Encoding, so the ResponseWriter reaching this handler is a
+	// compressWriter, and without Unwrap, ResponseController can't reach
+	// the underlying connection to clear the deadline at all.
+	if err := http.NewResponseController(w).SetReadDeadline(time.Time{}); err != nil {
+		s.logger.Warn("upload: clear read deadline failed", "error", err)
+	}
+
 	if err := r.ParseMultipartForm(maxUploadMemory); err != nil { //nolint:gosec // G120: body is already bounded by MaxBytesReader above; the taint engine doesn't see it
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			http.Error(w, "upload timed out", http.StatusRequestTimeout)
 			return
 		}
 		http.Error(w, "invalid multipart form", http.StatusBadRequest)

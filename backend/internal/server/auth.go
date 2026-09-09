@@ -20,7 +20,7 @@ import (
 	"gastrolog/internal/system"
 )
 
-var usernameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,64}$`)
+var usernameRe = auth.UsernamePattern
 
 // AuthServer implements the AuthService.
 type AuthServer struct {
@@ -66,25 +66,35 @@ func (s *AuthServer) loadRefreshDuration(ctx context.Context) time.Duration {
 	return d
 }
 
-// issueRefreshToken generates a refresh token, stores its hash, and returns the opaque token.
-func (s *AuthServer) issueRefreshToken(ctx context.Context, userID glid.GLID) (string, error) {
+// mintRefreshToken generates an opaque refresh token and the row that records
+// its hash. id and createdAt identify the session; a rotation carries both
+// forward so the session survives while the token itself does not.
+func (s *AuthServer) mintRefreshToken(ctx context.Context, id, userID glid.GLID, createdAt time.Time) (string, system.RefreshToken, error) {
 	token, hash, err := auth.GenerateRefreshToken()
 	if err != nil {
-		return "", err
+		return "", system.RefreshToken{}, err
 	}
-	refreshDuration := s.loadRefreshDuration(ctx)
-	now := time.Now().UTC()
-	rt := system.RefreshToken{
-		ID:        glid.New(),
+	return token, system.RefreshToken{
+		ID:        id,
 		UserID:    userID,
 		TokenHash: hash,
-		ExpiresAt: now.Add(refreshDuration),
-		CreatedAt: now,
+		ExpiresAt: time.Now().UTC().Add(s.loadRefreshDuration(ctx)),
+		CreatedAt: createdAt,
+	}, nil
+}
+
+// openSession starts a login session, returning the opaque refresh token and
+// the session ID to stamp into the access token.
+func (s *AuthServer) openSession(ctx context.Context, userID glid.GLID) (string, glid.GLID, error) {
+	sessionID := glid.New()
+	token, rt, err := s.mintRefreshToken(ctx, sessionID, userID, time.Now().UTC())
+	if err != nil {
+		return "", glid.GLID{}, err
 	}
 	if err := s.cfgStore.CreateRefreshToken(ctx, rt); err != nil {
-		return "", fmt.Errorf("store refresh token: %w", err)
+		return "", glid.GLID{}, fmt.Errorf("store refresh token: %w", err)
 	}
-	return token, nil
+	return token, sessionID, nil
 }
 
 // loadPasswordPolicy reads the password policy from server system.
@@ -199,16 +209,14 @@ func (s *AuthServer) Register(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("create user: %w", err))
 	}
 
-	// Issue access token.
-	token, expiresAt, err := s.tokens.Issue(userID.String(), username, "admin")
+	refreshToken, sessionID, err := s.openSession(ctx, userID)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue token: %w", err))
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("open session: %w", err))
 	}
 
-	// Issue refresh token.
-	refreshToken, err := s.issueRefreshToken(ctx, userID)
+	token, expiresAt, err := s.tokens.Issue(userID.String(), username, "admin", sessionID.String())
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue refresh token: %w", err))
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue token: %w", err))
 	}
 
 	return connect.NewResponse(&apiv1.RegisterResponse{
@@ -244,15 +252,14 @@ func (s *AuthServer) Login(
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid credentials"))
 	}
 
-	token, expiresAt, err := s.tokens.Issue(user.ID.String(), username, user.Role)
+	refreshToken, sessionID, err := s.openSession(ctx, user.ID)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue token: %w", err))
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("open session: %w", err))
 	}
 
-	// Issue refresh token.
-	refreshToken, err := s.issueRefreshToken(ctx, user.ID)
+	token, expiresAt, err := s.tokens.Issue(user.ID.String(), username, user.Role, sessionID.String())
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue refresh token: %w", err))
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue token: %w", err))
 	}
 
 	return connect.NewResponse(&apiv1.LoginResponse{
@@ -305,29 +312,34 @@ func (s *AuthServer) RefreshToken(
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("user no longer exists"))
 	}
 
-	// Check TokenInvalidatedAt — any refresh token issued before this is rejected.
-	if !user.TokenInvalidatedAt.IsZero() && stored.CreatedAt.Before(user.TokenInvalidatedAt) {
+	// An invalidation covers every session already open at that instant, the
+	// one started exactly on it included.
+	if !user.TokenInvalidatedAt.IsZero() && !stored.CreatedAt.After(user.TokenInvalidatedAt) {
 		if err := s.cfgStore.DeleteRefreshToken(ctx, stored.ID); err != nil {
 			s.logger.Warn("failed to delete revoked refresh token", "token_id", stored.ID, "err", err)
 		}
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("refresh token revoked"))
 	}
 
-	// Rotation: delete the old token.
-	if err := s.cfgStore.DeleteRefreshToken(ctx, stored.ID); err != nil {
-		s.logger.Warn("failed to delete old refresh token", "err", err)
+	// Rotation: the exchange is one indivisible step, so of two callers
+	// presenting the same token only one is handed a live session. Losing
+	// means the token was already spent, which is indistinguishable from
+	// presenting a token that never existed.
+	newRefreshToken, next, err := s.mintRefreshToken(ctx, stored.ID, stored.UserID, stored.CreatedAt)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("mint refresh token: %w", err))
+	}
+	rotated, err := s.cfgStore.RotateRefreshToken(ctx, hash, next)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("rotate refresh token: %w", err))
+	}
+	if !rotated {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid refresh token"))
 	}
 
-	// Issue new access token.
-	accessToken, expiresAt, err := s.tokens.Issue(user.ID.String(), user.Username, user.Role)
+	accessToken, expiresAt, err := s.tokens.Issue(user.ID.String(), user.Username, user.Role, stored.ID.String())
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue token: %w", err))
-	}
-
-	// Issue new refresh token.
-	newRefreshToken, err := s.issueRefreshToken(ctx, user.ID)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue refresh token: %w", err))
 	}
 
 	return connect.NewResponse(&apiv1.RefreshTokenResponse{
@@ -656,7 +668,10 @@ func (s *AuthServer) DeleteUser(
 	return connect.NewResponse(&apiv1.DeleteUserResponse{}), nil
 }
 
-// Logout invalidates the current user's token by setting TokenInvalidatedAt to now.
+// Logout ends the session this request is authenticated as. Deleting the
+// session's refresh-token row stops both tokens at once: the refresh token can
+// no longer be exchanged, and the access token names a session that is gone, so
+// the token validator rejects it. The user's other sessions are untouched.
 func (s *AuthServer) Logout(
 	ctx context.Context,
 	req *connect.Request[apiv1.LogoutRequest],
@@ -666,18 +681,18 @@ func (s *AuthServer) Logout(
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("no claims in context"))
 	}
 
-	// Delete only the refresh token the client sent — other sessions are unaffected.
-	if rt := req.Msg.RefreshToken; rt != "" {
-		hash := auth.HashRefreshToken(rt)
-		stored, err := s.cfgStore.GetRefreshTokenByHash(ctx, hash)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("lookup refresh token: %w", err))
-		}
-		if stored != nil {
-			if err := s.cfgStore.DeleteRefreshToken(ctx, stored.ID); err != nil {
-				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete refresh token: %w", err))
-			}
-		}
+	// Synthetic claims from a listener that skips authentication name no
+	// session, so there is nothing to end.
+	if claims.SessionID == "" {
+		return connect.NewResponse(&apiv1.LogoutResponse{}), nil
+	}
+
+	sessionID, err := glid.ParseUUID(claims.SessionID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid session claim"))
+	}
+	if err := s.cfgStore.DeleteRefreshToken(ctx, sessionID); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete refresh token: %w", err))
 	}
 
 	return connect.NewResponse(&apiv1.LogoutResponse{}), nil

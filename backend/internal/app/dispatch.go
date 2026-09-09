@@ -613,7 +613,7 @@ func (d *configDispatcher) ingesterDesired(ctx context.Context, cfg system.Inges
 // Parallel ingesters run on every eligible node; singleton ingesters run
 // on the Raft-assigned eligible node.
 func (d *configDispatcher) shouldRunIngester(ctx context.Context, cfg system.IngesterConfig, singleton bool) bool {
-	if !cfg.AllNodes && len(cfg.NodeIDs) > 0 && !slices.Contains(cfg.NodeIDs, d.localNodeID) {
+	if !cfg.EligibleOn(d.localNodeID) {
 		return false
 	}
 	if !singleton {

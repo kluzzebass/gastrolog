@@ -15,12 +15,28 @@ import (
 type Claims struct {
 	Role   string `json:"role"`
 	UserID string `json:"uid,omitempty"`
+	// SessionID names the refresh-token row this token was issued from.
+	// Deleting that row ends the session, this token included.
+	SessionID string `json:"sid,omitempty"`
+	// IssuedAtNano is the issue time in Unix nanoseconds. The registered
+	// "iat" claim serializes to whole seconds, too coarse to rank a token
+	// against a revocation timestamp recorded in the same second.
+	IssuedAtNano int64 `json:"iat_ns,omitempty"`
 	jwt.RegisteredClaims
 }
 
 // Username returns the subject (username) from the token.
 func (c *Claims) Username() string {
 	return c.Subject
+}
+
+// IssuedAtPrecise returns the issue time at full precision. It reports false
+// for a token carrying no such claim, which revocation treats as unrankable.
+func (c *Claims) IssuedAtPrecise() (time.Time, bool) {
+	if c.IssuedAtNano == 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(0, c.IssuedAtNano).UTC(), true
 }
 
 // secretDuration bundles the signing secret and token lifetime for atomic swap.
@@ -50,18 +66,21 @@ func (ts *TokenService) SetSecret(secret []byte) {
 	ts.state.Store(&secretDuration{secret: secret, duration: old.duration})
 }
 
-// Issue creates a signed JWT for the given user.
-func (ts *TokenService) Issue(userID, username, role string) (string, time.Time, error) {
+// Issue creates a signed JWT for the given user, bound to the session
+// identified by sessionID.
+func (ts *TokenService) Issue(userID, username, role, sessionID string) (string, time.Time, error) {
 	sd := ts.state.Load()
 	now := time.Now().UTC()
 	expiresAt := now.Add(sd.duration)
 
 	claims := Claims{
-		Role:      role,
-		UserID:    userID,
-		Subject:   username,
-		IssuedAt:  jwt.NewNumericDate(now),
-		ExpiresAt: jwt.NewNumericDate(expiresAt),
+		Role:         role,
+		UserID:       userID,
+		SessionID:    sessionID,
+		IssuedAtNano: now.UnixNano(),
+		Subject:      username,
+		IssuedAt:     jwt.NewNumericDate(now),
+		ExpiresAt:    jwt.NewNumericDate(expiresAt),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

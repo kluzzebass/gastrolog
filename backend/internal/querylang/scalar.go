@@ -16,7 +16,8 @@ import (
 // This list is the single source of truth. It is used by:
 //   - registerBuiltins() to register implementations
 //   - knownScalarFuncs (parser) to detect expression predicates
-//   - The frontend tokenizer mirrors this list in SCALAR_FUNCTIONS
+//   - the syntax service, which the frontend queries for its keyword sets;
+//     the frontend's offline fallback is checked against it by a test
 var ScalarFuncNames = []string{
 	// Type coercion.
 	"tonumber", "tostring",

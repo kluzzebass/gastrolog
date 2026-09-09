@@ -255,21 +255,21 @@ func TestOpenChunkReaderReadAt(t *testing.T) {
 	if reader.Len() != 2 {
 		t.Fatalf("Len() = %d, want 2", reader.Len())
 	}
-	last, err := reader.ReadAt(2)
+	last, err := reader.ReadAt(1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(last.Raw) != "b" {
 		t.Fatalf("last record = %q, want b", last.Raw)
 	}
-	first, err := reader.ReadAt(1)
+	first, err := reader.ReadAt(0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(first.Raw) != "a" {
 		t.Fatalf("first record = %q, want a", first.Raw)
 	}
-	for _, pos := range []uint64{0, 3} {
+	for _, pos := range []uint64{2, 3} {
 		if _, err := reader.ReadAt(pos); err != chunking.ErrManifestRecordOutOfRange {
 			t.Fatalf("ReadAt(%d) err = %v, want ErrManifestRecordOutOfRange", pos, err)
 		}
@@ -350,13 +350,13 @@ func TestOpenChunkReaderMatchesForwardOrder(t *testing.T) {
 		t.Fatalf("reader.Len() = %d, want %d", reader.Len(), len(forward))
 	}
 	for i, want := range forward {
-		got, err := reader.ReadAt(uint64(i) + 1)
+		got, err := reader.ReadAt(uint64(i))
 		if err != nil {
-			t.Fatalf("ReadAt(%d): %v", i+1, err)
+			t.Fatalf("ReadAt(%d): %v", i, err)
 		}
 		if got.EventID.Compare(want.EventID) != 0 || string(got.Raw) != string(want.Raw) {
 			t.Fatalf("ReadAt(%d) = %v %q, forward = %v %q",
-				i+1, got.EventID, got.Raw, want.EventID, want.Raw)
+				i, got.EventID, got.Raw, want.EventID, want.Raw)
 		}
 	}
 }
@@ -406,9 +406,9 @@ func TestOpenChunkReaderOpenCounts(t *testing.T) {
 	defer func() { _ = reader.Close() }()
 	// Reverse scan plus a repeat pass: 8 positional reads over 2 segments.
 	for pass := 0; pass < 2; pass++ {
-		for pos := reader.Len(); pos >= 1; pos-- {
-			if _, err := reader.ReadAt(pos); err != nil {
-				t.Fatalf("ReadAt(%d): %v", pos, err)
+		for pos := reader.Len(); pos > 0; pos-- {
+			if _, err := reader.ReadAt(pos - 1); err != nil {
+				t.Fatalf("ReadAt(%d): %v", pos-1, err)
 			}
 		}
 	}

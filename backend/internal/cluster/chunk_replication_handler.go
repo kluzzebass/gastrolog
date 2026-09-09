@@ -233,11 +233,15 @@ func (s *Server) handleReplicationImportCommit(cmd *gastrologv1.ChunkReplication
 		if isTombstonedErr(err) {
 			return &gastrologv1.ChunkReplicationAck{Ok: true, ChunkId: chunkIDBytes}
 		}
-		return &gastrologv1.ChunkReplicationAck{
+		ack := &gastrologv1.ChunkReplicationAck{
 			Ok:      false,
 			Error:   "import failed: " + err.Error(),
 			ChunkId: chunkIDBytes,
 		}
+		if errors.Is(err, chunk.ErrVaultNotFound) || errors.Is(err, chunk.ErrVaultNotLocal) {
+			ack.Rejection = gastrologv1.ImportRejection_IMPORT_REJECTION_VAULT_NOT_READY
+		}
+		return ack
 	}
 	return &gastrologv1.ChunkReplicationAck{Ok: true, ChunkId: chunkIDBytes}
 }

@@ -5,93 +5,148 @@ package gastrolog.v1;
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
 import "google/protobuf/timestamp.proto";
+import "gastrolog/v1/authz.proto";
 import "gastrolog/v1/storage.proto";
 import "gastrolog/v1/vault.proto";
 
 // SystemService provides configuration management.
 service SystemService {
   // GetConfig returns the current configuration.
-  rpc GetSystem(GetSystemRequest) returns (GetSystemResponse);
+  rpc GetSystem(GetSystemRequest) returns (GetSystemResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // GetIngesterStatus returns status for a specific ingester.
-  rpc GetIngesterStatus(GetIngesterStatusRequest) returns (GetIngesterStatusResponse);
+  rpc GetIngesterStatus(GetIngesterStatusRequest) returns (GetIngesterStatusResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // PutRotationPolicy creates or updates a rotation policy.
-  rpc PutRotationPolicy(PutRotationPolicyRequest) returns (PutRotationPolicyResponse);
+  rpc PutRotationPolicy(PutRotationPolicyRequest) returns (PutRotationPolicyResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // DeleteRotationPolicy removes a rotation policy.
-  rpc DeleteRotationPolicy(DeleteRotationPolicyRequest) returns (DeleteRotationPolicyResponse);
+  rpc DeleteRotationPolicy(DeleteRotationPolicyRequest) returns (DeleteRotationPolicyResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // PutRetentionPolicy creates or updates a retention policy.
-  rpc PutRetentionPolicy(PutRetentionPolicyRequest) returns (PutRetentionPolicyResponse);
+  rpc PutRetentionPolicy(PutRetentionPolicyRequest) returns (PutRetentionPolicyResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // DeleteRetentionPolicy removes a retention policy.
-  rpc DeleteRetentionPolicy(DeleteRetentionPolicyRequest) returns (DeleteRetentionPolicyResponse);
+  rpc DeleteRetentionPolicy(DeleteRetentionPolicyRequest) returns (DeleteRetentionPolicyResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // PutVault creates or updates a vault.
-  rpc PutVault(PutVaultRequest) returns (PutVaultResponse);
+  rpc PutVault(PutVaultRequest) returns (PutVaultResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // DeleteVault removes a vault (must be empty).
-  rpc DeleteVault(DeleteVaultRequest) returns (DeleteVaultResponse);
+  rpc DeleteVault(DeleteVaultRequest) returns (DeleteVaultResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // PutIngester creates or updates an ingester.
-  rpc PutIngester(PutIngesterRequest) returns (PutIngesterResponse);
+  rpc PutIngester(PutIngesterRequest) returns (PutIngesterResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // DeleteIngester removes an ingester.
-  rpc DeleteIngester(DeleteIngesterRequest) returns (DeleteIngesterResponse);
+  rpc DeleteIngester(DeleteIngesterRequest) returns (DeleteIngesterResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // GetSettings returns system settings (auth, query, scheduler, TLS, lookup).
-  rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
+  rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse) {
+    option (auth_level) = AUTH_LEVEL_PUBLIC;
+  }
 
   // PutServiceSettings updates auth, query, scheduler, TLS, and cluster settings.
   // Only fields explicitly set in the request are merged.
-  rpc PutServiceSettings(PutServiceSettingsRequest) returns (PutServiceSettingsResponse);
+  rpc PutServiceSettings(PutServiceSettingsRequest) returns (PutServiceSettingsResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // PutLookupSettings updates HTTP/JSON/YAML/MMDB/CSV/static lookup tables.
-  rpc PutLookupSettings(PutLookupSettingsRequest) returns (PutLookupSettingsResponse);
+  rpc PutLookupSettings(PutLookupSettingsRequest) returns (PutLookupSettingsResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // PutMaxMindSettings updates MaxMind auto-download configuration.
-  rpc PutMaxMindSettings(PutMaxMindSettingsRequest) returns (PutMaxMindSettingsResponse);
+  rpc PutMaxMindSettings(PutMaxMindSettingsRequest) returns (PutMaxMindSettingsResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // PutSetupSettings updates setup-wizard dismissal state.
-  rpc PutSetupSettings(PutSetupSettingsRequest) returns (PutSetupSettingsResponse);
+  rpc PutSetupSettings(PutSetupSettingsRequest) returns (PutSetupSettingsResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // RegenerateJwtSecret generates a new random JWT signing secret, replacing the
   // existing one. All active sessions are immediately invalidated cluster-wide.
-  rpc RegenerateJwtSecret(RegenerateJwtSecretRequest) returns (RegenerateJwtSecretResponse);
+  rpc RegenerateJwtSecret(RegenerateJwtSecretRequest) returns (RegenerateJwtSecretResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // GetPreferences returns the current user's preferences.
-  rpc GetPreferences(GetPreferencesRequest) returns (GetPreferencesResponse);
+  rpc GetPreferences(GetPreferencesRequest) returns (GetPreferencesResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // PutPreferences updates the current user's preferences.
-  rpc PutPreferences(PutPreferencesRequest) returns (PutPreferencesResponse);
+  rpc PutPreferences(PutPreferencesRequest) returns (PutPreferencesResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // GetSavedQueries returns the current user's saved queries.
-  rpc GetSavedQueries(GetSavedQueriesRequest) returns (GetSavedQueriesResponse);
+  rpc GetSavedQueries(GetSavedQueriesRequest) returns (GetSavedQueriesResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // PutSavedQuery creates or updates a saved query by name.
-  rpc PutSavedQuery(PutSavedQueryRequest) returns (PutSavedQueryResponse);
+  rpc PutSavedQuery(PutSavedQueryRequest) returns (PutSavedQueryResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // DeleteSavedQuery removes a saved query by name.
-  rpc DeleteSavedQuery(DeleteSavedQueryRequest) returns (DeleteSavedQueryResponse);
+  rpc DeleteSavedQuery(DeleteSavedQueryRequest) returns (DeleteSavedQueryResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // ListCertificates returns all certificates.
-  rpc ListCertificates(ListCertificatesRequest) returns (ListCertificatesResponse);
+  rpc ListCertificates(ListCertificatesRequest) returns (ListCertificatesResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // GetCertificate returns a certificate by ID (includes PEM content).
-  rpc GetCertificate(GetCertificateRequest) returns (GetCertificateResponse);
+  rpc GetCertificate(GetCertificateRequest) returns (GetCertificateResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // PutCertificate creates or updates a certificate.
-  rpc PutCertificate(PutCertificateRequest) returns (PutCertificateResponse);
+  rpc PutCertificate(PutCertificateRequest) returns (PutCertificateResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // DeleteCertificate removes a certificate.
-  rpc DeleteCertificate(DeleteCertificateRequest) returns (DeleteCertificateResponse);
+  rpc DeleteCertificate(DeleteCertificateRequest) returns (DeleteCertificateResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // PauseVault pauses ingestion for a vault.
-  rpc PauseVault(PauseVaultRequest) returns (PauseVaultResponse);
+  rpc PauseVault(PauseVaultRequest) returns (PauseVaultResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // ResumeVault resumes ingestion for a vault.
-  rpc ResumeVault(ResumeVaultRequest) returns (ResumeVaultResponse);
+  rpc ResumeVault(ResumeVaultRequest) returns (ResumeVaultResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // TestIngester tests connectivity for an ingester configuration without
   // saving it.
@@ -106,71 +161,113 @@ service SystemService {
   // the responding node only. Port availability is such a fact, so a success
   // here is not clearance to bind on every assigned node — the listener
   // trial-bind path answers for one node, whichever received the call.
-  rpc TestIngester(TestIngesterRequest) returns (TestIngesterResponse);
+  rpc TestIngester(TestIngesterRequest) returns (TestIngesterResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // GetIngesterDefaults returns default parameter values for each ingester type.
-  rpc GetIngesterDefaults(GetIngesterDefaultsRequest) returns (GetIngesterDefaultsResponse);
+  rpc GetIngesterDefaults(GetIngesterDefaultsRequest) returns (GetIngesterDefaultsResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // TriggerIngester sends a one-shot trigger to a running ingester.
   // Only supported by ingesters that implement the Triggerable interface (e.g. scatterbox).
-  rpc TriggerIngester(TriggerIngesterRequest) returns (TriggerIngesterResponse);
+  rpc TriggerIngester(TriggerIngesterRequest) returns (TriggerIngesterResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // PutNodeConfig creates or updates a node configuration.
-  rpc PutNodeConfig(PutNodeConfigRequest) returns (PutNodeConfigResponse);
+  rpc PutNodeConfig(PutNodeConfigRequest) returns (PutNodeConfigResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // PutRoute creates or updates a route.
-  rpc PutRoute(PutRouteRequest) returns (PutRouteResponse);
+  rpc PutRoute(PutRouteRequest) returns (PutRouteResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // DeleteRoute removes a route.
-  rpc DeleteRoute(DeleteRouteRequest) returns (DeleteRouteResponse);
+  rpc DeleteRoute(DeleteRouteRequest) returns (DeleteRouteResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // GenerateName returns a random petname for use as a default entity name.
-  rpc GenerateName(GenerateNameRequest) returns (GenerateNameResponse);
+  rpc GenerateName(GenerateNameRequest) returns (GenerateNameResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // ValidateExpression parses and semantically validates a route match
   // expression. gastrolog-4kkoo (Phase 5): drives live editor feedback in
   // the route match-expression editor — distinct from PutRoute's save-time validation.
   // The check is read-only and node-local; no Raft Apply.
-  rpc ValidateExpression(ValidateExpressionRequest) returns (ValidateExpressionResponse);
+  rpc ValidateExpression(ValidateExpressionRequest) returns (ValidateExpressionResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // WatchConfig streams a notification whenever configuration changes.
-  rpc WatchSystem(WatchSystemRequest) returns (stream WatchSystemResponse);
+  rpc WatchSystem(WatchSystemRequest) returns (stream WatchSystemResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // GetRouteStats returns live routing statistics.
-  rpc GetRouteStats(GetRouteStatsRequest) returns (GetRouteStatsResponse);
+  rpc GetRouteStats(GetRouteStatsRequest) returns (GetRouteStatsResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // ListManagedFiles returns all managed files.
-  rpc ListManagedFiles(ListManagedFilesRequest) returns (ListManagedFilesResponse);
+  rpc ListManagedFiles(ListManagedFilesRequest) returns (ListManagedFilesResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // DeleteManagedFile removes an managed file.
-  rpc DeleteManagedFile(DeleteManagedFileRequest) returns (DeleteManagedFileResponse);
+  rpc DeleteManagedFile(DeleteManagedFileRequest) returns (DeleteManagedFileResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // TestCloudService tests connectivity for a cloud storage configuration without saving it.
-  rpc TestCloudService(TestCloudServiceRequest) returns (TestCloudServiceResponse);
+  rpc TestCloudService(TestCloudServiceRequest) returns (TestCloudServiceResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // TestHTTPLookup tests an HTTP lookup configuration with a sample value.
-  rpc TestHTTPLookup(TestHTTPLookupRequest) returns (TestHTTPLookupResponse);
+  rpc TestHTTPLookup(TestHTTPLookupRequest) returns (TestHTTPLookupResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // PreviewCSVLookup reads a managed CSV file and returns column headers, sample rows, and total row count.
-  rpc PreviewCSVLookup(PreviewCSVLookupRequest) returns (PreviewCSVLookupResponse);
+  rpc PreviewCSVLookup(PreviewCSVLookupRequest) returns (PreviewCSVLookupResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // PreviewJSONLookup reads a managed JSON file and returns pretty-printed content for structure inspection.
-  rpc PreviewJSONLookup(PreviewJSONLookupRequest) returns (PreviewJSONLookupResponse);
+  rpc PreviewJSONLookup(PreviewJSONLookupRequest) returns (PreviewJSONLookupResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // PreviewYAMLLookup reads a managed YAML file and returns pretty-printed content for structure inspection.
-  rpc PreviewYAMLLookup(PreviewYAMLLookupRequest) returns (PreviewYAMLLookupResponse);
+  rpc PreviewYAMLLookup(PreviewYAMLLookupRequest) returns (PreviewYAMLLookupResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // WatchIngesterStatus streams a single ingester's status whenever underlying state changes
   // (config edits, alive-state transitions, or broadcast stats updates). Event-driven replacement
   // for polling GetIngesterStatus. Initial snapshot sent on subscribe.
-  rpc WatchIngesterStatus(WatchIngesterStatusRequest) returns (stream WatchIngesterStatusResponse);
+  rpc WatchIngesterStatus(WatchIngesterStatusRequest) returns (stream WatchIngesterStatusResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // Cloud services
-  rpc PutCloudService(PutCloudServiceRequest) returns (PutCloudServiceResponse);
-  rpc DeleteCloudService(DeleteCloudServiceRequest) returns (DeleteCloudServiceResponse);
+  rpc PutCloudService(PutCloudServiceRequest) returns (PutCloudServiceResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
+  rpc DeleteCloudService(DeleteCloudServiceRequest) returns (DeleteCloudServiceResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // Node storage
-  rpc SetNodeStorageConfig(SetNodeStorageConfigRequest) returns (SetNodeStorageConfigResponse);
+  rpc SetNodeStorageConfig(SetNodeStorageConfigRequest) returns (SetNodeStorageConfigResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // ListStorages returns every configured file storage cluster-wide, with
   // live guard state (free/total, resolved thresholds, verdicts) merged in
@@ -178,24 +275,36 @@ service SystemService {
   // of ListVaults (gastrolog-3cobq4). Local storages read the orchestrator
   // directly; remote storages read the peer broadcast cache, the same
   // PeerState channel VaultInfo uses for remote vault stats.
-  rpc ListStorages(ListStoragesRequest) returns (ListStoragesResponse);
+  rpc ListStorages(ListStoragesRequest) returns (ListStoragesResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // DeleteLookup removes a lookup table by name (any type).
-  rpc DeleteLookup(DeleteLookupRequest) returns (DeleteLookupResponse);
+  rpc DeleteLookup(DeleteLookupRequest) returns (DeleteLookupResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // Log levels (gastrolog-3flfp). PutLogLevels replaces the cluster-wide
   // log-level configuration; the FSM dispatcher propagates it to every
   // node, where the ComponentFilterHandler atomically swaps its rule set.
-  rpc PutLogLevels(PutLogLevelsRequest) returns (PutLogLevelsResponse);
+  rpc PutLogLevels(PutLogLevelsRequest) returns (PutLogLevelsResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // ListLogComponents enumerates the component paths the receiving node's
   // binary has constructed, with each path's effective level resolved
   // against the current rule set. Used by the CLI (tab-completion) and
   // UI (tree view + "explicit vs inherited" annotations).
-  rpc ListLogComponents(ListLogComponentsRequest) returns (ListLogComponentsResponse);
+  rpc ListLogComponents(ListLogComponentsRequest) returns (ListLogComponentsResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 }
 
-message GetSystemRequest {}
+message GetSystemRequest {
+  // When true, return cloud service credentials (for export/backup).
+  // Admin only; any other caller gets the redacted response.
+  bool include_secrets = 1;
+}
 
 message GetSystemResponse {
   repeated VaultConfig vaults = 1;
@@ -557,7 +666,9 @@ message DeleteIngesterResponse {
 }
 
 message GetSettingsRequest {
-  bool include_secrets = 1; // When true, return actual secret values (for export/backup).
+  // When true, return actual secret values (for export/backup).
+  // Admin only; any other caller gets the redacted response.
+  bool include_secrets = 1;
 }
 
 // Sub-messages for GetSettingsResponse (read-only fields included).
@@ -636,6 +747,7 @@ message HTTPLookupEntry {
   int32 cache_size = 6;     // optional, default 10000
   repeated string response_paths = 7; // jq expressions, e.g. "$.data.user"
   repeated HTTPLookupParam parameters = 8; // ordered param definitions for URL template
+  bool allow_private_destinations = 9; // reach loopback / private / unique-local targets, denied by default (never link-local)
 }
 
 // JSONFileLookupEntry defines a JSON file-backed lookup table for field enrichment.
@@ -976,6 +1088,14 @@ message TriggerIngesterResponse {}
 message TestCloudServiceRequest {
   string type = 1;
   map<string, string> params = 2;
+
+  // Optional: an existing cloud service whose stored credentials fill in
+  // the credential params left empty here, so an operator can test a saved
+  // service without retyping secrets the API never returned. The fallback
+  // only applies when params carry the same endpoint the service is stored
+  // with — otherwise the request would spend those credentials on a
+  // destination the caller chose.
+  bytes cloud_service_id = 3;
 }
 
 message TestCloudServiceResponse {
@@ -1202,6 +1322,12 @@ message PreviewYAMLLookupResponse {
 
 message PutCloudServiceRequest {
   CloudService config = 1;
+
+  // Drop the stored credentials instead of keeping the ones config leaves
+  // empty. This is how a service moves to its provider's ambient
+  // credential chain — an IAM role, ADC — now that an empty credential
+  // field means "unchanged".
+  bool clear_credentials = 2;
 }
 
 message PutCloudServiceResponse {

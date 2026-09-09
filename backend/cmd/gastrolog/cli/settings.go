@@ -118,7 +118,9 @@ func putRequestDescriptor(putRoot string) protoreflect.MessageDescriptor {
 func newGroupCmd(name string) *cobra.Command {
 	g, err := findGroup(name)
 	if err != nil {
-		// Programming error: hardcoded group names must match settingsGroups.
+		// A group name with no entry in settingsGroups is a programming
+		// error; the panic fires when the CLI command tree is built, which
+		// every CLI test does.
 		panic(err)
 	}
 

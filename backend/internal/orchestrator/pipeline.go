@@ -206,7 +206,7 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 			return fsm
 		}
 		spec.Locate = chunking.VaultSegmentLocator{Root: root}
-		spec.ChunkRoot = filepath.Join(root, "chunks")
+		spec.ChunkRoot = pipelineChunkRoot(root)
 		spec.Applier = applier
 		spec.IsLeader = isLeader
 		spec.ChunkPolicy = policy
@@ -270,6 +270,11 @@ func (o *Orchestrator) onPipelineChunkBuilt(vaultID glid.GLID, fsm *vaultctlfsm.
 		o.noteRegisterSkip(vaultID, id, "vault instance or reconciler not ready")
 		return
 	}
+	// The blob this node just built is final whether or not the seal has
+	// committed, so its secondary indexes are built now. Nothing else builds
+	// them for a pipeline-sealed chunk: the legacy post-seal path is not used
+	// and the missing-index sweep runs only at startup.
+	o.scheduleIndexRebuildIfNeeded(context.Background(), vaultID, ti, manifestEntryToChunkMeta(*e, true))
 	ti.Reconciler.ackOwnHolderReceipt(*e)
 	if e.State == chunk.ChunkStateSealed {
 		o.schedulePipelineCloudUpload(vaultID, id)
@@ -469,7 +474,17 @@ func (o *Orchestrator) originRoot(vaultID glid.GLID) (string, error) {
 	if o.segmentsDir == "" {
 		return "", errors.New("segments directory unset: configure orchestrator.Config.SegmentsDir from node home")
 	}
-	return filepath.Join(o.segmentsDir, vaultID.String()), nil
+	return pipelineVaultRoot(o.segmentsDir, vaultID), nil
+}
+
+// pipelineVaultRoot is a vault's segmentation root under the node's segments
+// directory; pipelineChunkRoot is where its built chunks live beneath that.
+func pipelineVaultRoot(segmentsDir string, vaultID glid.GLID) string {
+	return filepath.Join(segmentsDir, vaultID.String())
+}
+
+func pipelineChunkRoot(vaultRoot string) string {
+	return filepath.Join(vaultRoot, "chunks")
 }
 
 // isPipelineIngestVault reports whether this vault receives records through the
@@ -541,7 +556,6 @@ func (o *Orchestrator) deletePipelineVaultLocked(vaultID glid.GLID) {
 // snapshot, and segmentsDir is write-once at construction. The caller does the
 // stat/registration I/O afterwards. Both properties are required, not
 // incidental — the Raft apply pump calls this.
-// Mirrors the path math in originRoot + buildPipelineVaultSpec (spec.ChunkRoot).
 func (o *Orchestrator) pipelineVaultChunkRoot(vaultID glid.GLID) (string, bool) {
 	if o.segmentsDir == "" {
 		return "", false
@@ -550,7 +564,7 @@ func (o *Orchestrator) pipelineVaultChunkRoot(vaultID glid.GLID) (string, bool) 
 	if !registered || !reg.home {
 		return "", false
 	}
-	return filepath.Join(o.segmentsDir, vaultID.String(), "chunks"), true
+	return pipelineChunkRoot(pipelineVaultRoot(o.segmentsDir, vaultID)), true
 }
 
 // pipelineVaultStagingRoot returns the segment staging root for a vault
@@ -706,11 +720,13 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 	// changed, so unchanged vaults never flap their pipeline state. The cron
 	// rotation job is reconciled every pass regardless (its schedule may change
 	// independent of the registration key, and it is idempotent).
+	chunkHomes := make(map[glid.GLID]bool, len(desired))
 	for vid := range desired {
 		home := o.isVaultHome(sys, vid)
 		fsm, applier, isLeader, hasHandle := o.vaultCtlHandle(vid)
 		policy, cronExpr := o.resolveChunkPolicy(sys, vid)
 		chunkEnabled := home && hasHandle
+		chunkHomes[vid] = chunkEnabled
 		want := pipelineVaultReg{home: home, hasHandle: hasHandle, policy: policy}
 		if prev, ok := o.lookupPipelineVault(vid); ok {
 			if prev == want {
@@ -734,14 +750,23 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 		o.finishPendingPipelineCtlRestore(vid)
 	}
 
-	for vid := range desired {
+	o.rewireChunkHomesAfterReload(chunkHomes)
+	return nil
+}
+
+// rewireChunkHomesAfterReload re-wires chunking for the vaults this node
+// chunks for. Only those have a chunking registration to rewire; on every
+// other node the vault is unknown to chunking by design, not by failure.
+func (o *Orchestrator) rewireChunkHomesAfterReload(chunkHomes map[glid.GLID]bool) {
+	for vid, enabled := range chunkHomes {
+		if !enabled {
+			continue
+		}
 		if err := o.rewirePipelineAfterCtlRestore(vid); err != nil {
 			o.logger.Warn("pipeline rewire after config reload failed",
 				"vault", vid, "error", err)
 		}
 	}
-
-	return nil
 }
 
 // overlayPipelineChunkMetaBounds fills missing timestamp bounds on active/sealing

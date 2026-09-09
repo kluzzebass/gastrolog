@@ -184,7 +184,7 @@ func TestAggregatorBareCount(t *testing.T) {
 		Aggs: []querylang.AggExpr{{Func: "count"}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestAggregatorCountExpression(t *testing.T) {
 		}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestAggregatorGroupByField(t *testing.T) {
 		Groups: []querylang.GroupExpr{{Field: &querylang.FieldRef{Name: "method"}}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestAggregatorMultipleAggs(t *testing.T) {
 		},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestAggregatorMinMax(t *testing.T) {
 		},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +336,7 @@ func TestAggregatorBinTime(t *testing.T) {
 		}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +384,7 @@ func TestAggregatorBinWithCustomField(t *testing.T) {
 		}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,7 +414,7 @@ func TestAggregatorGapFill(t *testing.T) {
 		}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +444,7 @@ func TestAggregatorGapFillWithTimeBounds(t *testing.T) {
 		}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -472,7 +472,7 @@ func TestAggregatorMultiDimensionalGrouping(t *testing.T) {
 		},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,7 +519,7 @@ func TestAggregatorMissingFields(t *testing.T) {
 		}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,7 +545,7 @@ func TestAggregatorNonNumericSkipped(t *testing.T) {
 		}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -569,7 +569,7 @@ func TestAggregatorAllNonNumeric(t *testing.T) {
 		}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -592,7 +592,7 @@ func TestAggregatorNoRecords(t *testing.T) {
 		},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -616,7 +616,7 @@ func TestAggregatorNoRecordsWithGroupBy(t *testing.T) {
 		Groups: []querylang.GroupExpr{{Field: &querylang.FieldRef{Name: "method"}}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,7 +633,7 @@ func TestAggregatorCardinalityCap(t *testing.T) {
 		Groups: []querylang.GroupExpr{{Field: &querylang.FieldRef{Name: "id"}}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -667,7 +667,7 @@ func TestAggregatorExpressionArg(t *testing.T) {
 		}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -693,7 +693,7 @@ func TestAggregatorParsedPipeline(t *testing.T) {
 	}
 
 	stats := pipeline.Pipes[0].(*querylang.StatsOp)
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -730,7 +730,7 @@ func TestAggregatorBinOnlyGrouping(t *testing.T) {
 		Aggs:   []querylang.AggExpr{{Func: "count"}},
 		Groups: []querylang.GroupExpr{{Bin: &querylang.BinExpr{Duration: "1h"}}},
 	}
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -766,7 +766,7 @@ func TestAggregatorSourceTSBin(t *testing.T) {
 		}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -800,7 +800,7 @@ func TestAggregatorMissingSourceTS(t *testing.T) {
 		}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -825,7 +825,7 @@ func TestAggregatorUnknownFunction(t *testing.T) {
 		Aggs: []querylang.AggExpr{{Func: "percentile99"}},
 	}
 
-	_, err := NewAggregator(stats)
+	_, err := NewAggregator(stats, NewBudget())
 	if err == nil {
 		t.Fatal("expected error for unknown function")
 	}
@@ -839,7 +839,7 @@ func TestAggregatorDcount(t *testing.T) {
 		}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -863,7 +863,7 @@ func TestAggregatorMedianOdd(t *testing.T) {
 		}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -886,7 +886,7 @@ func TestAggregatorMedianEven(t *testing.T) {
 		}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -909,7 +909,7 @@ func TestAggregatorFirstLast(t *testing.T) {
 		},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -936,7 +936,7 @@ func TestAggregatorValues(t *testing.T) {
 		}},
 	}
 
-	agg, err := NewAggregator(stats)
+	agg, err := NewAggregator(stats, NewBudget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -999,7 +999,7 @@ func TestAggregatorMultipleBinGroups(t *testing.T) {
 		},
 	}
 
-	_, err := NewAggregator(stats)
+	_, err := NewAggregator(stats, NewBudget())
 	if err == nil {
 		t.Fatal("expected error for multiple bin() groups")
 	}

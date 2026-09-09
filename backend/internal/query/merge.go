@@ -1,48 +1,84 @@
 package query
 
 import (
+	"iter"
+
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 )
 
-// cursorEntry represents a cursor with its current record in the merge heap.
-type cursorEntry struct {
-	vaultID   glid.GLID
-	chunkID   chunk.ChunkID
-	rec       chunk.Record
-	ref       chunk.RecordRef
-	reordered bool // true when chunk was scanned without TS index (resume by IngestTS, not position)
+// mergeOrdered interleaves two record streams that are each already in
+// OrderBy.CompareRecords order into a single stream in that same order — so
+// which stream a record arrived on never affects where it lands.
+//
+// A stream is advanced only after its current record has been consumed, so a
+// source that reuses its record buffer between yields cannot overwrite a
+// record the consumer still holds.
+func mergeOrdered(a, b iter.Seq2[chunk.Record, error], orderBy OrderBy, reverse bool) iter.Seq2[chunk.Record, error] {
+	return func(yield func(chunk.Record, error) bool) {
+		aNext, aStop := iter.Pull2(a)
+		defer aStop()
+		bNext, bStop := iter.Pull2(b)
+		defer bStop()
+
+		aRec, aErr, aOK := aNext()
+		bRec, bErr, bOK := bNext()
+		for aOK || bOK {
+			if aOK && aErr != nil {
+				yield(chunk.Record{}, aErr)
+				return
+			}
+			if bOK && bErr != nil {
+				yield(chunk.Record{}, bErr)
+				return
+			}
+
+			takeA := aOK
+			if aOK && bOK {
+				takeA = orderBy.CompareRecords(aRec, bRec, reverse) <= 0
+			}
+			if takeA {
+				if !yield(aRec, nil) {
+					return
+				}
+				aRec, aErr, aOK = aNext()
+				continue
+			}
+			if !yield(bRec, nil) {
+				return
+			}
+			bRec, bErr, bOK = bNext()
+		}
+	}
 }
 
-// tsHeap is a heap of cursor entries ordered by a configurable timestamp field.
-// The less function determines both the timestamp field and direction (min/max).
+// cursorEntry represents a cursor with its current record in the merge heap.
+type cursorEntry struct {
+	vaultID glid.GLID
+	chunkID chunk.ChunkID
+	rec     chunk.Record
+	ref     chunk.RecordRef
+	// reordered is true when the record came from rank-based TS index
+	// scanning, which yields in timestamp order rather than physical write
+	// order — so this chunk resumes by timestamp, not by position.
+	reordered bool
+}
+
+// tsHeap is a heap of cursor entries in the cluster's canonical record order.
 type tsHeap struct {
 	entries []*cursorEntry
 	less    func(a, b *cursorEntry) bool
 }
 
-// newTSHeap creates a heap that orders entries by the given OrderBy field.
-// When reverse is true, the heap yields newest-first (max-heap).
+// newTSHeap creates a heap that orders entries by OrderBy.CompareRecords —
+// the cluster's one record order, ties included. When reverse is true, the
+// heap yields newest-first (max-heap).
 func newTSHeap(orderBy OrderBy, reverse bool, capacity int) *tsHeap {
-	var less func(a, b *cursorEntry) bool
-	switch orderBy {
-	case OrderByIngestTS:
-		if reverse {
-			less = func(a, b *cursorEntry) bool { return a.rec.IngestTS.After(b.rec.IngestTS) }
-		} else {
-			less = func(a, b *cursorEntry) bool { return a.rec.IngestTS.Before(b.rec.IngestTS) }
-		}
-	case OrderBySourceTS:
-		if reverse {
-			less = func(a, b *cursorEntry) bool { return a.rec.SourceTS.After(b.rec.SourceTS) }
-		} else {
-			less = func(a, b *cursorEntry) bool { return a.rec.SourceTS.Before(b.rec.SourceTS) }
-		}
-	}
-
 	return &tsHeap{
 		entries: make([]*cursorEntry, 0, capacity),
-		less:    less,
+		less: func(a, b *cursorEntry) bool {
+			return orderBy.CompareRecords(a.rec, b.rec, reverse) < 0
+		},
 	}
 }
 

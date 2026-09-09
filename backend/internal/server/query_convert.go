@@ -66,7 +66,9 @@ func protoToQuery(pq *apiv1.Query) (query.Query, *querylang.Pipeline, error) {
 	if len(pq.KvPredicates) > 0 {
 		q.KV = make([]query.KeyValueFilter, len(pq.KvPredicates))
 		for i, kv := range pq.KvPredicates {
-			q.KV[i] = query.KeyValueFilter{Key: kv.Key, Value: kv.Value}
+			// The proto predicate has no presence flag; an empty value is its
+			// way of asking for the key alone.
+			q.KV[i] = query.KeyValueFilter{Key: kv.Key, Value: kv.Value, AnyValue: kv.Value == ""}
 		}
 	}
 
@@ -328,6 +330,16 @@ func ProtoToResumeToken(data []byte) (*query.ResumeToken, error) {
 	if protoToken.HighwaterTs != nil {
 		token.HighwaterTS = protoToken.HighwaterTs.AsTime()
 	}
+	if ev := protoToken.HighwaterEvent; ev != nil {
+		token.HighwaterEvent = chunk.EventID{
+			IngesterID: glid.FromBytes(ev.IngesterId),
+			NodeID:     glid.FromBytes(ev.NodeId),
+			IngestSeq:  ev.IngestSeq,
+		}
+		if ev.IngestTs != nil {
+			token.HighwaterEvent.IngestTS = ev.IngestTs.AsTime()
+		}
+	}
 	return token, nil
 }
 
@@ -382,9 +394,6 @@ func VaultTokenToPositions(data []byte) ([]query.MultiVaultPosition, error) {
 			ChunkID:  chunkID,
 			Position: pos.Position,
 		}
-		if pos.ResumeTs != nil {
-			mvp.ResumeTS = pos.ResumeTs.AsTime()
-		}
 		positions[i] = mvp
 	}
 	return positions, nil
@@ -403,9 +412,6 @@ func PositionsToVaultToken(positions []query.MultiVaultPosition) []byte {
 			VaultId:  pos.VaultID.ToProto(),
 			ChunkId:  glid.GLID(pos.ChunkID).ToProto(),
 			Position: pos.Position,
-		}
-		if !pos.ResumeTS.IsZero() {
-			vp.ResumeTs = timestamppb.New(pos.ResumeTS)
 		}
 		inner.Positions[i] = vp
 	}
@@ -459,6 +465,14 @@ func ResumeTokenToProto(token *query.ResumeToken) []byte {
 	}
 	if !token.HighwaterTS.IsZero() {
 		protoToken.HighwaterTs = timestamppb.New(token.HighwaterTS)
+	}
+	if !token.HighwaterEvent.IngesterID.IsZero() {
+		protoToken.HighwaterEvent = &apiv1.ResumeCursorEvent{
+			IngesterId: token.HighwaterEvent.IngesterID.Bytes(),
+			NodeId:     token.HighwaterEvent.NodeID.Bytes(),
+			IngestTs:   timestamppb.New(token.HighwaterEvent.IngestTS),
+			IngestSeq:  token.HighwaterEvent.IngestSeq,
+		}
 	}
 
 	data, err := proto.Marshal(protoToken)

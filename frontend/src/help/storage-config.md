@@ -32,6 +32,17 @@ Cloud storage endpoints are cluster-wide — not tied to any specific node. Clou
 - **GCS** — Google Cloud Storage. Requires Bucket and a service account Credentials JSON.
 - **Azure** — Azure Blob Storage. Requires a Container name and Connection String.
 
+### Credentials are write-only
+
+Stored credentials are never sent back to the browser or returned by the API. A cloud service card shows whether credentials are stored, not what they are, and its credential fields are always empty when the card opens:
+
+- **Leave a credential field empty** and the stored value is kept, so saving an unrelated edit never disturbs it.
+- **Type a value** and it replaces the stored one for that field alone — enough to rotate a secret key without re-entering the access key.
+- **Remove the stored credentials** is the explicit way to drop them and fall back to the provider's ambient chain, since an empty field no longer means "remove this". The CLI spells it `--clear-credentials`.
+- **Test Connection** on a saved service tests it as saved — stored credentials against the stored bucket, region and endpoint, ignoring unsaved edits on the card. To test a change first, enter the credentials for it and the test runs against exactly what you typed. Stored credentials are only ever spent on the destination they were stored for, and only for an admin.
+
+`gastrolog config export` is the one path that retrieves credentials; it requires the admin role and names what it carries in the document's `contains_secrets` section.
+
 ### Cloud-backed vaults and file storage
 
 A cloud-backed vault is a file vault with a cloud service binding. It still needs file storage on each replica's node:

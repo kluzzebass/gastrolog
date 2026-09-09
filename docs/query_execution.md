@@ -41,7 +41,7 @@ flowchart LR
 |-----------|--------|
 | `last=<dur>` | Sets `Start = now-dur`, `End = now` |
 | `start=<t>` / `end=<t>` | Explicit IngestTS bounds (RFC3339 or relative) |
-| `source_start=` / `source_end=` | SourceTS bounds (runtime filter) |
+| `source_start=` / `source_end=` | SourceTS bounds: the seek key under `order=source_ts`, a runtime filter otherwise. `start=`/`end=` stay ingest bounds under every ordering |
 | `limit=<n>` | Max records to return |
 | `reverse=true` | Newest-first ordering |
 | `order=source_ts` | Switch ordering from default IngestTS |
@@ -289,14 +289,127 @@ flowchart TD
     MergeAll --> Client
 ```
 
+The query travels to a peer as text: the coordinator prints the parsed filter
+and pipeline back into query syntax and the peer parses it again. That printer
+(`Expr.String()`, `Pipeline.String()`) is therefore a wire format, not a
+diagnostic: every predicate kind prints as syntax the parser reads back as the
+same predicate, values are quoted whenever the lexer could not take them as a
+bareword (the empty string included), and a pipeline without a filter prints
+with its leading `|`. A round-trip test and a fuzzer pin this.
+
 The coordinator determines which vaults live on peer nodes via
 `remoteVaultsByNode()`. For each remote vault, a streaming `ForwardSearch` RPC
 is opened. Results flow back without buffering — `kWayMerge()` performs
 selection-based merging across N streams (N is typically 1–3 vaults per node).
 
-**Resume tokens** are split: local chunk positions stay on the coordinator,
-remote vault tokens are opaque blobs forwarded back to their originating nodes
-on the next page request.
+**Every merge uses one order**: `OrderBy.CompareRecords` — the ordering
+timestamp, then `chunk.EventID`'s own total order (IngestTS, NodeID,
+IngesterID, IngestSeq), with `reverse` negating the whole comparison. That
+applies at all three levels: a node's `tsHeap` fan-in across its own vaults and
+chunks, the coordinator's `kWayMerge` fan-in across remote vaults, and the
+local/remote merge on top of them.
+
+A timestamp tie is ordinary rather than exotic — under `order=source_ts` a
+whole second of syslog shares one timestamp, so a `head`/`tail` cutoff lands
+inside a tie group as a matter of course. Ranking such records by which side
+was "local", by vault ID, or by an entry's position in a concurrently-built
+merge slice would make the same query return a different window depending on
+which node the client connected to and on how routing fanned copies across
+vaults. EventID's fields are intrinsic to the event and identical on every copy
+of it, so every node ranks any two records the same way.
+
+**Histograms travel ahead of records.** Each remote vault's histogram arrives
+whole in its stream's first message, and `SearchStream`'s `getHistogram` must
+answer from that message alone. The coordinator reads every vault's histogram
+*before* it starts draining any vault's records, so a getter that waited for
+its stream to finish would deadlock the fan-out: the record channel fills, the
+peer's producer parks on a send nobody is reading, and the coordinator is still
+waiting on the histogram. It only bites past the channel's depth, which is why
+paged queries never showed it and an unlimited one did.
+
+**Resume tokens** carry the coordinator's local chunk positions plus one
+canonical cursor for the merged stream: the last emitted record's timestamp on
+the ordering axis and its EventID. Remote vaults are not resumed by their own
+tokens; the next page bounds every source at the cursor's timestamp
+(inclusively) and the merge skips whatever sits at or before the cursor in
+canonical order, so a page boundary inside a group of records sharing a
+timestamp neither repeats nor drops any of them, from any node. Positions are
+kept only for chunks scanned in physical order. A chunk scanned through its
+timestamp index (every sealed chunk, and any ordering other than the default)
+yields in index order, so no physical position can resume it; it carries none,
+and the next page restarts it under the cursor, which the narrowed time bound
+lets the rank scan seek to directly. An open pipeline chunk has no source
+index yet; under `order=source_ts` it is put in canonical order in memory —
+one pass collects each surviving record's ordering key and position, charged
+against the memory budget, and the records are read back sorted. The engine applies its own token's cursor,
+so pagination is exact at the engine boundary too, not only through the
+server. This is what makes `order=source_ts` pageable on the same terms as
+the default ordering.
+
+## Query Memory Budget
+
+Pipeline operators control their own result limits, so `RunPipeline` clears the
+incoming `Limit` before scanning: a scan limit would cut an aggregator's or a
+sort's *input*, making `| stats count` report the count of an arbitrary prefix
+and `| sort` order one. What bounds the work instead is a per-query memory
+budget (`query.MaxQueryMemoryBytes`, 256 MiB), which bounds retained bytes
+without changing the answer.
+
+Every path that retains data charges it: the record buffer behind an uncapped
+sort, the top-N working set behind a capped one, the slot array a `tail`/`slice`
+declares, the dedup seen-event set, stats group state, and the collections
+inside `dcount`, `median`, `values`, `first`, and `last`. Records are charged
+*after* field extraction, since the JSON/logfmt fields that materialization
+moves into `Attrs` are most of what a buffered record retains. Exceeding the
+budget fails the query with a `query.MemoryLimitError` naming the structure that
+overflowed and the ceiling; the RPC layer surfaces it as `ResourceExhausted`.
+The budget never trims a result to fit.
+
+Two older caps do produce a partial table, and both label it: exceeding
+`MaxGroupCardinality` stops admitting new `stats` groups, and gap-fill stops
+padding empty bins when it would exhaust the cardinality cap or the budget.
+Both set `TableResult.Truncated`, which travels to the client, so the partial
+result is flagged rather than silent — but it is still partial, which is a
+different contract from the budget's outright failure.
+
+The budget is **per query, per node**. Each node executing part of a fan-out
+gets its own, and the coordinator runs its whole share — the local scan and the
+records streaming back from peers — on one ledger. There is no cluster-wide
+total: the exhaustion being prevented is a node running out of memory, a
+per-node resource, and a shared counter would need a cluster round trip on the
+per-record path.
+
+A pipeline that ends in `stats` or `timechart` with combinable aggregates
+(`count`, `sum`, `min`, `max`, `avg`) is split at the aggregating operator. Every node
+runs the filter, the operators ahead of the aggregate, and the aggregate
+itself; the coordinator merges the per-node tables by the operator's structure
+— the leading columns are the group keys, the rest are the aggregates in
+declaration order, each combined by its own rule — and then runs the operators
+after the aggregate (`where`, `eval`, `sort`, `head`, …) once over the merged
+table. Column names play no part in the merge, so an alias cannot hide an
+aggregate, and a filter after `stats` sees the cluster's count rather than each
+node's share of it. Every node is asked for *partial* aggregates: an `avg`
+arrives as its sum and its count, and the coordinator divides once, so the
+cluster average never needs the records.
+
+A pipeline the cluster cannot answer by merging per-node results — a `head`,
+`tail`, or `slice` that would otherwise apply once per node, a `dedup` whose
+window spans nodes, or an aggregate like `dcount`/`median`/`values` that
+cannot be recombined from partials — runs once on the coordinator over every
+node's records. Those records are
+*streamed* through it, merged with the local scan in query order, not collected
+first: the coordinator retains only what the pipeline's own operators hold, so
+memory tracks the answer rather than the match set. An uncapped `sort` is the
+one shape that genuinely has to hold every record, and the budget is what
+bounds it. A `timechart` behind such an operator bins from that merged stream
+rather than from the coordinator's chunk metadata, so its buckets hold the
+survivors of the cap applied cluster-wide; without an explicit time range they
+span those survivors, whichever node coordinates.
+
+The ceiling is a fixed constant rather than a setting. A node runs queries for
+every vault it leads, so raising it to make one query fit would re-arm the same
+exhaustion for every other vault on that node; the remedy for a query that does
+not fit belongs in the query.
 
 ## Merge Loop
 

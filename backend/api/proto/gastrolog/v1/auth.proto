@@ -2,46 +2,72 @@ syntax = "proto3";
 
 package gastrolog.v1;
 
+import "gastrolog/v1/authz.proto";
+
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
 // AuthService provides user registration, login, and password management.
 service AuthService {
   // Register creates the first user account during initial setup.
   // Returns FailedPrecondition if any users already exist.
-  rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc Register(RegisterRequest) returns (RegisterResponse) {
+    option (auth_level) = AUTH_LEVEL_PUBLIC;
+  }
 
   // Login authenticates a user and returns a token.
-  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc Login(LoginRequest) returns (LoginResponse) {
+    option (auth_level) = AUTH_LEVEL_PUBLIC;
+  }
 
   // RefreshToken exchanges a valid refresh token for a new access + refresh token pair.
-  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse) {
+    option (auth_level) = AUTH_LEVEL_PUBLIC;
+  }
 
   // ChangePassword updates the authenticated user's password.
-  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // GetAuthStatus returns whether the system needs initial setup.
-  rpc GetAuthStatus(GetAuthStatusRequest) returns (GetAuthStatusResponse);
+  rpc GetAuthStatus(GetAuthStatusRequest) returns (GetAuthStatusResponse) {
+    option (auth_level) = AUTH_LEVEL_PUBLIC;
+  }
 
   // CreateUser creates a new user account. Admin only.
-  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // ListUsers returns all user accounts. Admin only.
-  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // UpdateUserRole changes a user's role. Admin only.
-  rpc UpdateUserRole(UpdateUserRoleRequest) returns (UpdateUserRoleResponse);
+  rpc UpdateUserRole(UpdateUserRoleRequest) returns (UpdateUserRoleResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // ResetPassword sets a new password for a user. Admin only.
-  rpc ResetPassword(ResetPasswordRequest) returns (ResetPasswordResponse);
+  rpc ResetPassword(ResetPasswordRequest) returns (ResetPasswordResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // RenameUser changes a user's username. Admin only.
-  rpc RenameUser(RenameUserRequest) returns (RenameUserResponse);
+  rpc RenameUser(RenameUserRequest) returns (RenameUserResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // DeleteUser removes a user account. Admin only.
-  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // Logout invalidates the current user's token.
-  rpc Logout(LogoutRequest) returns (LogoutResponse);
+  rpc Logout(LogoutRequest) returns (LogoutResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 }
 
 message Token {
@@ -149,10 +175,8 @@ message DeleteUserRequest {
 
 message DeleteUserResponse {}
 
-message LogoutRequest {
-  // The refresh token to revoke. Only this token is deleted — other
-  // sessions for the same user are unaffected.
-  string refresh_token = 1;
-}
+// LogoutRequest carries no fields: the session to end is the one the caller's
+// access token names, so a client cannot ask to end somebody else's.
+message LogoutRequest {}
 
 message LogoutResponse {}

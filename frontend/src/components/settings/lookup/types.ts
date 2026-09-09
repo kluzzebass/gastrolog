@@ -20,6 +20,7 @@ export interface HTTPLookupDraft {
   timeout: string;
   cacheTtl: string;
   cacheSize: number;
+  allowPrivateDestinations: boolean;
 }
 
 export interface JSONFileLookupDraft {
@@ -75,7 +76,7 @@ export const mmdbDefaultName: Record<string, string> = { city: "geoip", asn: "as
 // ---------------------------------------------------------------------------
 
 export function emptyHttpDraft(): HTTPLookupDraft {
-  return { name: "", urlTemplate: "", headers: {}, responsePaths: [], parameters: [], timeout: "", cacheTtl: "", cacheSize: 0 };
+  return { name: "", urlTemplate: "", headers: {}, responsePaths: [], parameters: [], timeout: "", cacheTtl: "", cacheSize: 0, allowPrivateDestinations: false };
 }
 
 export function emptyJsonDraft(): JSONFileLookupDraft {
@@ -108,6 +109,7 @@ export function httpEntryToDraft(h: HTTPLookupEntry): HTTPLookupDraft {
     timeout: h.timeout,
     cacheTtl: h.cacheTtl,
     cacheSize: h.cacheSize,
+    allowPrivateDestinations: h.allowPrivateDestinations,
   };
 }
 
@@ -195,7 +197,8 @@ export function httpLookupEqual(draft: HTTPLookupDraft, saved: HTTPLookupEntry):
     !arraysEqual(draft.responsePaths, saved.responsePaths) ||
     draft.timeout !== saved.timeout ||
     draft.cacheTtl !== saved.cacheTtl ||
-    draft.cacheSize !== saved.cacheSize
+    draft.cacheSize !== saved.cacheSize ||
+    draft.allowPrivateDestinations !== saved.allowPrivateDestinations
   ) return false;
   if (!paramsEqual(draft.parameters, saved.parameters)) return false;
   const dKeys = Object.keys(draft.headers);

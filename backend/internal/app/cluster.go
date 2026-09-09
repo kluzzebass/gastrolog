@@ -775,15 +775,14 @@ func orphanRefusalError(targetNodeID string, orphans []orphanedVault) error {
 		names = append(names, fmt.Sprintf("%q (%s)", v.Name, v.ID))
 	}
 	return fmt.Errorf(
-		"refusing to remove node %s: would orphan %d vault(s): %s — "+
+		"refusing to remove node %s: %w: %d vault(s): %s — "+
 			"drain these vaults to other nodes first, or re-run with --force to acknowledge data loss",
-		targetNodeID, len(orphans), strings.Join(names, ", "))
+		targetNodeID, cluster.ErrWouldOrphanVaults, len(orphans), strings.Join(names, ", "))
 }
 
-// ErrWouldDropBelowRF is the sentinel wrapped by every RF-preservation
-// refusal, so callers can distinguish "this removal degrades redundancy"
-// from a genuine internal failure without matching on message text.
-var ErrWouldDropBelowRF = errors.New("removal would drop a vault below its replication factor")
+// ErrWouldDropBelowRF is cluster.ErrWouldDropBelowRF, the sentinel wrapped by
+// every RF-preservation refusal.
+var ErrWouldDropBelowRF = cluster.ErrWouldDropBelowRF
 
 // degradedVault describes one vault whose surviving placements after a
 // removal would be fewer than its configured replication factor, with
@@ -1029,7 +1028,7 @@ func lookupNodeAddr(clusterSrv *cluster.Server, targetNodeID string) (string, er
 			return srv.Address, nil
 		}
 	}
-	return "", fmt.Errorf("node %s not in cluster configuration", targetNodeID)
+	return "", fmt.Errorf("%w: %s", cluster.ErrNodeNotInCluster, targetNodeID)
 }
 
 // forwardSuffrage forwards a suffrage change to the current leader via cluster gRPC.

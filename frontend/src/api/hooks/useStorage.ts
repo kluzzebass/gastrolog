@@ -24,8 +24,11 @@ export function usePutCloudService() {
       restoreDays?: number;
       suspectGraceDays?: number;
       reconcileSchedule?: string;
+      // Drop the stored credentials rather than keep the ones left empty.
+      clearCredentials?: boolean;
     }) => {
       return systemClient.putCloudService({
+        clearCredentials: args.clearCredentials ?? false,
         config: {
           id: decode(args.id),
           name: args.name,

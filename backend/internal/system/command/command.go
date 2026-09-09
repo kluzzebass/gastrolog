@@ -651,6 +651,18 @@ func NewDeleteRefreshToken(id glid.GLID) *gastrologv1.SystemCommand {
 	}
 }
 
+// NewRotateRefreshToken creates a ConfigCommand for RotateRefreshToken.
+func NewRotateRefreshToken(oldTokenHash string, next system.RefreshToken) *gastrologv1.SystemCommand {
+	return &gastrologv1.SystemCommand{
+		Command: &gastrologv1.SystemCommand_RotateRefreshToken{
+			RotateRefreshToken: &gastrologv1.RotateRefreshTokenCommand{
+				OldTokenHash: oldTokenHash,
+				Next:         createRefreshTokenCmd(next),
+			},
+		},
+	}
+}
+
 // NewDeleteUserRefreshTokens creates a ConfigCommand for DeleteUserRefreshTokens.
 func NewDeleteUserRefreshTokens(userID glid.GLID) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
@@ -671,6 +683,16 @@ func ExtractCreateRefreshToken(cmd *gastrologv1.CreateRefreshTokenCommand) (syst
 		ExpiresAt: cmd.GetExpiresAt().AsTime(),
 		CreatedAt: cmd.GetCreatedAt().AsTime(),
 	}, nil
+}
+
+// ExtractRotateRefreshToken returns the hash of the token being consumed and
+// the token that replaces it.
+func ExtractRotateRefreshToken(cmd *gastrologv1.RotateRefreshTokenCommand) (string, system.RefreshToken, error) {
+	next, err := ExtractCreateRefreshToken(cmd.GetNext())
+	if err != nil {
+		return "", system.RefreshToken{}, err
+	}
+	return cmd.GetOldTokenHash(), next, nil
 }
 
 // ExtractDeleteRefreshToken extracts the UUID from a DeleteRefreshTokenCommand.

@@ -179,17 +179,30 @@ func (s *SystemServer) GetSystem(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetSystemRequest],
 ) (*connect.Response[apiv1.GetSystemResponse], error) {
-	resp, err := s.buildFullSystem(ctx)
+	resp, err := s.buildSystem(ctx, req.Msg.IncludeSecrets && isAdmin(ctx))
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("load config: %w", err))
 	}
 	return connect.NewResponse(resp), nil
 }
 
-// buildFullSystem assembles a complete GetConfigResponse from the config store.
-// Used by GetConfig and by mutation handlers to return the updated config inline.
-// Returns an error if any config section fails to load — never returns partial data.
+// isAdmin reports whether the caller holds the admin role. An
+// unauthenticated caller — the public GetSettings path — is not an admin.
+func isAdmin(ctx context.Context) bool {
+	claims := auth.ClaimsFromContext(ctx)
+	return claims != nil && claims.Role == "admin"
+}
+
+// buildFullSystem assembles a complete GetConfigResponse from the config store,
+// with every secret redacted. Mutation handlers use it to return the updated
+// config inline: a config write is not a secret-retrieval path.
 func (s *SystemServer) buildFullSystem(ctx context.Context) (*apiv1.GetSystemResponse, error) {
+	return s.buildSystem(ctx, false)
+}
+
+// buildSystem assembles a complete GetConfigResponse from the config store.
+// Returns an error if any config section fails to load — never returns partial data.
+func (s *SystemServer) buildSystem(ctx context.Context, includeSecrets bool) (*apiv1.GetSystemResponse, error) {
 	resp := &apiv1.GetSystemResponse{}
 	if s.sysStore != nil {
 		err := errors.Join(
@@ -200,7 +213,7 @@ func (s *SystemServer) buildFullSystem(ctx context.Context) (*apiv1.GetSystemRes
 			s.loadConfigRoutes(ctx, resp),
 			s.loadConfigNodeConfigs(ctx, resp),
 			s.loadConfigManagedFiles(ctx, resp),
-			s.loadConfigCloudServices(ctx, resp),
+			s.loadConfigCloudServices(ctx, resp, includeSecrets),
 			s.loadConfigNodeStorageConfigs(ctx, resp),
 			s.loadConfigLogLevels(ctx, resp),
 		)
@@ -225,7 +238,8 @@ func (s *SystemServer) currentClusterCtlRaftIndex() uint64 {
 }
 
 // buildFullSettingsResponse builds the authenticated GetSettingsResponse payload.
-// includeSecrets mirrors GetSettingsRequest.include_secrets.
+// includeSecrets mirrors GetSettingsRequest.include_secrets after the caller's
+// role has been checked — callers pass false for anyone but an admin.
 func (s *SystemServer) buildFullSettingsResponse(ctx context.Context, includeSecrets bool) (*apiv1.GetSettingsResponse, error) {
 	ss, err := s.loadServerSettings(ctx)
 	if err != nil {
@@ -429,7 +443,11 @@ func (s *SystemServer) loadConfigNodeConfigs(ctx context.Context, resp *apiv1.Ge
 	return nil
 }
 
-func (s *SystemServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.GetSystemResponse) error {
+// loadConfigCloudServices attaches the cluster's cloud services. Credential
+// fields are populated only when includeSecrets is set; otherwise the
+// response carries CredentialsConfigured, which says whether the service
+// has usable credentials without saying what they are.
+func (s *SystemServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.GetSystemResponse, includeSecrets bool) error {
 	services, err := s.sysStore.ListCloudServices(ctx)
 	if err != nil {
 		return fmt.Errorf("list cloud services: %w", err)
@@ -442,26 +460,30 @@ func (s *SystemServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.
 				CloudStorageClass: t.CloudStorageClass,
 			}
 		}
-		resp.CloudServices = append(resp.CloudServices, &apiv1.CloudService{
-			Id:                cs.ID.ToProto(),
-			Name:              cs.Name,
-			Provider:          cs.Provider,
-			Bucket:            cs.Bucket,
-			Region:            cs.Region,
-			Endpoint:          cs.Endpoint,
-			AccessKey:         cs.AccessKey,
-			SecretKey:         cs.SecretKey,
-			Container:         cs.Container,
-			ConnectionString:  cs.ConnectionString,
-			CredentialsJson:   cs.CredentialsJSON,
-			StorageClass:      cs.StorageClass,
-			ArchivalMode:      cs.ArchivalMode,
-			Transitions:       transitions,
-			RestoreSpeed:      cs.RestoreSpeed,
-			RestoreDays:       cs.RestoreDays,
-			SuspectGraceDays:  cs.SuspectGraceDays,
-			ReconcileSchedule: cs.ReconcileSchedule,
-		})
+		out := &apiv1.CloudService{
+			Id:                    cs.ID.ToProto(),
+			Name:                  cs.Name,
+			Provider:              cs.Provider,
+			Bucket:                cs.Bucket,
+			Region:                cs.Region,
+			Endpoint:              cs.Endpoint,
+			Container:             cs.Container,
+			StorageClass:          cs.StorageClass,
+			ArchivalMode:          cs.ArchivalMode,
+			Transitions:           transitions,
+			RestoreSpeed:          cs.RestoreSpeed,
+			RestoreDays:           cs.RestoreDays,
+			SuspectGraceDays:      cs.SuspectGraceDays,
+			ReconcileSchedule:     cs.ReconcileSchedule,
+			CredentialsConfigured: cs.HasCredentials(),
+		}
+		if includeSecrets {
+			out.AccessKey = cs.AccessKey
+			out.SecretKey = cs.SecretKey
+			out.ConnectionString = cs.ConnectionString
+			out.CredentialsJson = cs.CredentialsJSON
+		}
+		resp.CloudServices = append(resp.CloudServices, out)
 	}
 	return nil
 }
@@ -521,7 +543,7 @@ func (s *SystemServer) GetSettings(
 		}), nil
 	}
 
-	resp, err := s.buildFullSettingsResponse(ctx, req.Msg.IncludeSecrets)
+	resp, err := s.buildFullSettingsResponse(ctx, req.Msg.IncludeSecrets && isAdmin(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -1068,6 +1090,8 @@ func httpLookupsToProto(lookups []system.HTTPLookupConfig) []*apiv1.HTTPLookupEn
 			Timeout:       l.Timeout,
 			CacheTtl:      l.CacheTTL,
 			CacheSize:     int32(l.CacheSize), //nolint:gosec // reasonable config value
+
+			AllowPrivateDestinations: l.AllowPrivateDestinations,
 		}
 	}
 	return out
@@ -1092,6 +1116,8 @@ func httpLookupsFromProto(entries []*apiv1.HTTPLookupEntry) []system.HTTPLookupC
 			Timeout:       e.Timeout,
 			CacheTTL:      e.CacheTtl,
 			CacheSize:     int(e.CacheSize),
+
+			AllowPrivateDestinations: e.AllowPrivateDestinations,
 		})
 	}
 	return out
@@ -1391,6 +1417,10 @@ func validateSubmittedLookups(l *apiv1.PutLookupSettings) *connect.Error {
 			return connect.NewError(connect.CodeInvalidArgument,
 				fmt.Errorf("http lookup %q: url_template is required", e.GetName()))
 		}
+		if err := lookup.ValidateURLTemplate(e.GetUrlTemplate()); err != nil {
+			return connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("http lookup %q: %w", e.GetName(), err))
+		}
 	}
 	for _, e := range l.GetJsonFileLookups() {
 		if connErr := validateFileLookup("json file", e.GetName(), e.GetFileId()); connErr != nil {
@@ -1493,6 +1523,13 @@ func (s *SystemServer) TestHTTPLookup(
 		Headers:       cfg.Headers,
 		ResponsePaths: cfg.ResponsePaths,
 		CacheSize:     int(cfg.CacheSize),
+		Name:          cfg.GetName(),
+		Logger:        s.logger,
+
+		// Never from the request: the flag says an operator vouched for a
+		// destination on their own network, which only a stored lookup can
+		// claim. An ad-hoc config in a test call vouches for nothing.
+		AllowPrivateDestinations: s.storedLookupAllowsPrivate(ctx, cfg.GetName(), cfg.GetUrlTemplate()),
 	}
 	if cfg.Timeout != "" {
 		d, err := time.ParseDuration(cfg.Timeout)
@@ -1504,8 +1541,21 @@ func (s *SystemServer) TestHTTPLookup(
 		lcfg.Timeout = d
 	}
 
-	h := lookup.NewHTTP(lcfg)
-	result := h.TestFetch(ctx, req.Msg.Values)
+	h, err := lookup.NewHTTP(lcfg)
+	if err != nil {
+		return connect.NewResponse(&apiv1.TestHTTPLookupResponse{
+			Error: fmt.Sprintf("invalid url template %q: %v", cfg.UrlTemplate, err),
+		}), nil
+	}
+	result, fetchErr := h.TestFetch(ctx, req.Msg.Values)
+	if fetchErr != nil {
+		// The failure belongs in the response, not in the RPC status: the
+		// caller is diagnosing a lookup configuration, and the reason is the
+		// answer they asked for.
+		return connect.NewResponse(&apiv1.TestHTTPLookupResponse{
+			Error: fmt.Sprintf("lookup request failed: %v", fetchErr),
+		}), nil
+	}
 
 	return connect.NewResponse(&apiv1.TestHTTPLookupResponse{
 		Success: true,
@@ -1513,6 +1563,28 @@ func (s *SystemServer) TestHTTPLookup(
 			Fields: result,
 		}},
 	}), nil
+}
+
+// storedLookupAllowsPrivate reports whether a saved lookup with this name and
+// URL template carries the operator's opt-in for private destinations. Matching
+// the template too means editing the URL in the form drops the exemption until
+// the edit is saved, so the test cannot probe an address the stored entry never
+// pointed at.
+func (s *SystemServer) storedLookupAllowsPrivate(ctx context.Context, name, urlTemplate string) bool {
+	if name == "" {
+		return false
+	}
+	ss, err := s.sysStore.LoadServerSettings(ctx)
+	if err != nil {
+		s.logger.Warn("lookup test: load settings failed, denying private destinations", "error", err)
+		return false
+	}
+	for _, l := range ss.Lookup.HTTPLookups {
+		if l.Name == name && l.URLTemplate == urlTemplate {
+			return l.AllowPrivateDestinations
+		}
+	}
+	return false
 }
 
 // PreviewCSVLookup reads a managed CSV file and returns column headers,

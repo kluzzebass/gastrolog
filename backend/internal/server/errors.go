@@ -5,6 +5,9 @@ import (
 	"fmt"
 
 	"connectrpc.com/connect"
+
+	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/query"
 )
 
 // errRequired returns an InvalidArgument connect error for a missing
@@ -18,7 +21,15 @@ func errRequired(field string) *connect.Error {
 // errInternal wraps an error as a CodeInternal connect error. Replaces:
 //
 //	connect.NewError(connect.CodeInternal, err)
+//
+// A vault that is not on this node is not an internal failure: the caller
+// (usually a coordinator fanning out) gets NotFound, which crosses the
+// forwarding boundary as a code and lets it treat the answer as placement
+// churn rather than degradation.
 func errInternal(err error) *connect.Error {
+	if orchestrator.IsPlacementChurnErr(err) {
+		return connect.NewError(connect.CodeNotFound, err)
+	}
 	return connect.NewError(connect.CodeInternal, err)
 }
 
@@ -50,6 +61,17 @@ func errAlreadyExists(err error) *connect.Error {
 // errUnauthenticated wraps an error as a CodeUnauthenticated connect error.
 func errUnauthenticated(err error) *connect.Error {
 	return connect.NewError(connect.CodeUnauthenticated, err)
+}
+
+// errQueryExecution wraps a query execution failure. A query that outgrew its
+// memory budget is reported as ResourceExhausted rather than Internal: the
+// query asked for more than a node will give it, which the caller can act on
+// by narrowing the query, and which monitoring should not read as a node fault.
+func errQueryExecution(err error) *connect.Error {
+	if _, ok := errors.AsType[*query.MemoryLimitError](err); ok {
+		return connect.NewError(connect.CodeResourceExhausted, err)
+	}
+	return connect.NewError(connect.CodeInternal, err)
 }
 
 // errRequiredMsg returns an InvalidArgument error with a custom message.

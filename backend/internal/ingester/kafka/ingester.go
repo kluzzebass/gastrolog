@@ -15,6 +15,7 @@ import (
 	"github.com/twmb/franz-go/pkg/sasl/scram"
 
 	"gastrolog/internal/chanwatch"
+	"gastrolog/internal/ingester/limits"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
 	"gastrolog/internal/pipeline/ingestion"
@@ -23,6 +24,11 @@ import (
 const (
 	backoffMin = 100 * time.Millisecond
 	backoffMax = 5 * time.Second
+
+	// droppedAttrLogInterval spaces the "headers dropped" warning so a
+	// producer emitting the same oversized record cannot bury the
+	// condition under one line per record.
+	droppedAttrLogInterval = 10 * time.Second
 )
 
 // SASLConfig holds SASL authentication parameters.
@@ -48,6 +54,11 @@ type Ingester struct {
 	cfg    Config
 	logger *slog.Logger
 
+	// droppedAttrLog throttles the report of headers the record ceiling
+	// refused. A producer emitting the same oversized record continuously
+	// would otherwise write one line per record.
+	droppedAttrLog logging.Throttle
+
 	// pressureGate throttles PollFetches calls when the ingest pipeline is
 	// backed up. Kafka offset tracking makes pausing lossless — we resume
 	// from the same offset when pressure clears. Injected by the
@@ -64,8 +75,9 @@ func (ing *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 // New creates a new Kafka ingester.
 func New(cfg Config) *Ingester {
 	return &Ingester{
-		cfg:    cfg,
-		logger: comp.Ingester.Sub("kafka").Desc("Kafka consumer ingester — pulls log messages from configured Kafka topics.").Apply(logging.Default(cfg.Logger)),
+		cfg:            cfg,
+		droppedAttrLog: logging.Throttle{Interval: droppedAttrLogInterval},
+		logger:         comp.Ingester.Sub("kafka").Desc("Kafka consumer ingester — pulls log messages from configured Kafka topics.").Apply(logging.Default(cfg.Logger)),
 	}
 }
 
@@ -125,7 +137,14 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 		now := time.Now()
 
 		fetches.EachRecord(func(rec *kgo.Record) {
-			msg := buildMessage(rec, ing.cfg.ID, now)
+			msg, loss := buildMessage(rec, ing.cfg.ID, now)
+			if loss.Any() {
+				if n, ok := ing.droppedAttrLog.Allow("record-attrs"); ok {
+					ing.logger.Warn("kafka record headers dropped",
+						"topic", rec.Topic, "dropped", loss.Dropped, "displaced", loss.Displaced,
+						"max_attrs", limits.Records.Count, "suppressed", n)
+				}
+			}
 			select {
 			case out <- msg:
 			case <-ctx.Done():
@@ -180,23 +199,38 @@ func (ing *Ingester) handleFetchErrors(fetches kgo.Fetches, backoff *time.Durati
 	return true
 }
 
-// buildMessage converts a kgo.Record into an ingestion.IngesterMessage.
-func buildMessage(rec *kgo.Record, ingesterID string, now time.Time) ingestion.IngesterMessage {
-	attrs := make(map[string]string, len(rec.Headers)+5)
-	attrs["ingester_type"] = "kafka"
-	attrs["kafka_topic"] = rec.Topic
-	attrs["kafka_partition"] = strconv.Itoa(int(rec.Partition))
-	attrs["kafka_offset"] = strconv.FormatInt(rec.Offset, 10)
+// buildMessage converts a kgo.Record into an ingestion.IngesterMessage,
+// reporting what it could not keep. Headers are producer-chosen in both
+// count and length and each becomes an index term, so the excess is dropped
+// — but never silently, and never at the cost of the record itself.
+func buildMessage(rec *kgo.Record, ingesterID string, now time.Time) (ingestion.IngesterMessage, limits.AttrLoss) {
+	attrs := make(map[string]string, min(len(rec.Headers), limits.Records.Count)+4)
+
+	// Headers first, in the order the producer sent them, so the same
+	// record always keeps the same headers.
+	var loss limits.AttrLoss
 	for _, h := range rec.Headers {
-		attrs[h.Key] = string(h.Value)
+		if err := limits.Records.Add(attrs, h.Key, string(h.Value)); err != nil {
+			loss.Dropped++
+		}
 	}
+
+	// The ingester's own attributes are set last and outside the budget:
+	// they identify where the record came from, so a header flood must
+	// neither crowd them out nor forge them. A header of the same name
+	// loses, and SetOwn counts the loss.
+	loss.SetOwn(attrs, "ingester_type", "kafka")
+	loss.SetOwn(attrs, "kafka_topic", rec.Topic)
+	loss.SetOwn(attrs, "kafka_partition", strconv.Itoa(int(rec.Partition)))
+	loss.SetOwn(attrs, "kafka_offset", strconv.FormatInt(rec.Offset, 10))
+
 	return ingestion.IngesterMessage{
 		Attrs:      attrs,
 		Raw:        rec.Value,
 		SourceTS:   rec.Timestamp,
 		IngestTS:   now,
 		IngesterID: ingesterID,
-	}
+	}, loss
 }
 
 // buildSASLMechanism constructs the appropriate SASL mechanism.

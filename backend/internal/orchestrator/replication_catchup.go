@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
-	"strings"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -83,7 +82,7 @@ func (o *Orchestrator) scheduleCatchupForNode(vaultID glid.GLID, nodeID string, 
 		ctx, cancel := context.WithTimeout(context.Background(), cluster.CatchupTimeout)
 		defer cancel()
 		if err := o.catchupFollower(ctx, vaultID, nodeID); err != nil {
-			if attempt < maxCatchupRetries && strings.Contains(err.Error(), "not ready") {
+			if attempt < maxCatchupRetries && errors.Is(err, errFollowerNotReady) {
 				o.replicationLogger.Info("catchup: follower not ready, will retry",
 					"vault", vaultID, "node", nodeID,
 					"attempt", attempt+1)
@@ -100,6 +99,10 @@ func (o *Orchestrator) scheduleCatchupForNode(vaultID glid.GLID, nodeID string, 
 // catchupFollower copies all sealed chunks from the leader's vault instance
 // to a follower node. Each chunk's records are streamed via TransferRecords,
 // producing an identical sealed chunk on the follower.
+// errFollowerNotReady marks a catch-up attempt the follower could not take yet
+// because its vault instance is still being built; the attempt is retried.
+var errFollowerNotReady = errors.New("follower not ready")
+
 func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, nodeID string) error {
 	if o.isPipelineIngestVault(vaultID) {
 		return nil
@@ -162,9 +165,8 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, n
 			// survive the cluster RPC boundary (the handler concatenates
 			// strings) so we substring-match both error wordings:
 			// "vault not found" and "instance not registered on this node".
-			msg := err.Error()
-			if strings.Contains(msg, "vault not found") || strings.Contains(msg, "instance not registered on this node") {
-				return fmt.Errorf("follower %s not ready for vault %s (still building): %w", nodeID, vaultID, err)
+			if IsPlacementChurnErr(err) {
+				return fmt.Errorf("%w: follower %s, vault %s (still building): %w", errFollowerNotReady, nodeID, vaultID, err)
 			}
 			o.replicationLogger.Warn("replication catchup: transfer failed",
 				"chunk", meta.ID.String(), "follower", nodeID, "error", err)

@@ -691,7 +691,7 @@ func openKVIndexes(chunkID chunk.ChunkID, im index.IndexManager) kvIndexes {
 
 // lookupKVIndex looks up a single KV filter across all available indexes.
 func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index.IndexManager) kvLookupResult {
-	if f.Key == "" && f.Value == "" {
+	if f.Key == "" && f.AnyValue {
 		return kvLookupResult{}
 	}
 
@@ -713,7 +713,7 @@ func (e *Engine) lookupKVStandard(f KeyValueFilter, chunkID chunk.ChunkID, keyLo
 	var detailParts []string
 
 	switch {
-	case f.Value == "":
+	case f.AnyValue:
 		result, detailParts = lookupKeyOnly(chunkID, keyLower, idx)
 	case f.Key == "":
 		result, detailParts = lookupValueOnly(chunkID, valLower, idx)
@@ -879,7 +879,7 @@ func lookupKVJSONByFilter(f KeyValueFilter, keyLower, valLower string, jsonReade
 	}
 
 	// Key exists (any value) or non-eq comparison: path-only lookup.
-	if f.Value == "" || f.Op != querylang.OpEq {
+	if f.AnyValue || f.Op != querylang.OpEq {
 		result.available = true
 		jsonPath := dotToNull(keyLower)
 		if pos, found := jsonReader.LookupPath(jsonPath); found {
@@ -955,7 +955,7 @@ func formatKVFilter(f KeyValueFilter) string {
 		key = "*"
 	}
 	value := f.Value
-	if value == "" {
+	if f.AnyValue {
 		value = "*"
 	}
 	return key + f.Op.String() + value

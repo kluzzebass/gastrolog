@@ -1,0 +1,121 @@
+# Regenerated 2026-08-27 after dependency bumps (govulncheck ./... from backend/).
+# 10 -> 2 reachable vulnerabilities; remaining 2 are github.com/docker/docker with no fix
+# published upstream at time of regeneration (Fixed in: N/A).
+
+=== Symbol Results ===
+
+Vulnerability #1: GO-2026-4887
+    Moby has AuthZ plugin bypass when provided oversized request bodies in
+    github.com/docker/docker
+  More info: https://pkg.go.dev/vuln/GO-2026-4887
+  Module: github.com/docker/docker
+    Found in: github.com/docker/docker@v28.5.2+incompatible
+    Fixed in: N/A
+    Example traces found:
+      #1: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls api.init
+      #2: internal/ingester/docker/docker.go:15:2: docker.init calls container.init, which calls blkiodev.init
+      #3: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls build.init
+      #4: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls checkpoint.init
+      #5: internal/lookup/http.go:287:26: lookup.HTTP.doFetch calls http.Client.Do, which eventually calls client.CheckRedirect
+      #6: internal/ingester/docker/docker.go:131:37: docker.sdkDockerClient.ContainerLogs calls client.Client.ContainerInspect
+      #7: internal/ingester/docker/docker.go:83:33: docker.sdkDockerClient.ContainerList calls client.Client.ContainerList
+      #8: internal/ingester/docker/docker.go:147:34: docker.sdkDockerClient.ContainerLogs calls client.Client.ContainerLogs
+      #9: internal/ingester/docker/docker.go:164:30: docker.sdkDockerClient.Events calls client.Client.Events
+      #10: internal/ingester/docker/docker.go:208:33: docker.sdkDockerClient.Ping calls client.Client.ServerVersion
+      #11: internal/ingester/docker/docker.go:74:44: docker.newSDKDockerClient calls client.NewClientWithOpts
+      #12: internal/lookup/http.go:287:26: lookup.HTTP.doFetch calls http.Client.Do, which eventually calls client.NewClientWithOpts
+      #13: internal/ingester/docker/docker.go:55:41: docker.newSDKDockerClient calls client.WithAPIVersionNegotiation
+      #14: internal/ingester/docker/docker.go:71:50: docker.newSDKDockerClient calls client.WithHTTPClient
+      #15: internal/ingester/docker/docker.go:54:24: docker.newSDKDockerClient calls client.WithHost
+      #16: internal/ingester/docker/docker.go:71:87: docker.newSDKDockerClient calls client.WithScheme
+      #17: internal/server/system_ingesters.go:474:23: server.SystemServer.TestIngester calls client.emptyIDError.Error
+      #18: internal/server/system_ingesters.go:474:23: server.SystemServer.TestIngester calls client.errConnectionFailed.Error
+      #19: internal/blobstore/s3.go:250:47: blobstore.S3Store.List calls errors.AsType[*github.com/aws/aws-sdk-go-v2/service/s3/types.NotFound], which eventually calls client.errConnectionFailed.Unwrap
+      #20: internal/server/system_ingesters.go:474:23: server.SystemServer.TestIngester calls client.httpError.Error
+      #21: internal/chunk/file/manager.go:3137:16: file.Manager.ReadWriteTimestamps calls errors.Is, which eventually calls client.httpError.Is
+      #22: internal/blobstore/s3.go:250:47: blobstore.S3Store.List calls errors.AsType[*github.com/aws/aws-sdk-go-v2/service/s3/types.NotFound], which eventually calls client.httpError.Unwrap
+      #23: internal/ingester/docker/docker.go:18:2: docker.init calls client.init
+      #24: internal/ingester/docker/docker.go:15:2: docker.init calls container.init, which calls common.init
+      #25: internal/ingester/docker/docker.go:15:2: docker.init calls container.init
+      #26: internal/ingester/docker/docker.go:16:2: docker.init calls events.init
+      #27: internal/ingester/docker/docker.go:157:14: docker.sdkDockerClient.Events calls filters.Arg
+      #28: internal/ingester/docker/docker.go:83:33: docker.sdkDockerClient.ContainerList calls client.Client.ContainerList, which calls filters.Args.Len
+      #29: internal/ingester/docker/docker.go:156:32: docker.sdkDockerClient.Events calls filters.NewArgs
+      #30: internal/ingester/docker/docker.go:83:33: docker.sdkDockerClient.ContainerList calls client.Client.ContainerList, which calls filters.ToParamWithVersion
+      #31: internal/ingester/docker/docker.go:17:2: docker.init calls filters.init
+      #32: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls image.init
+      #33: internal/ingester/docker/docker.go:15:2: docker.init calls container.init, which calls mount.init
+      #34: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls network.init
+      #35: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls registry.init
+      #36: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which eventually calls runtime.init
+      #37: internal/ingester/docker/docker.go:15:2: docker.init calls container.init, which calls storage.init
+      #38: internal/ingester/docker/docker.go:15:2: docker.init calls container.init, which calls strslice.init
+      #39: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls swarm.init
+      #40: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls system.init
+      #41: internal/ingester/docker/docker.go:147:34: docker.sdkDockerClient.ContainerLogs calls client.Client.ContainerLogs, which calls time.GetTimestamp
+      #42: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls time.init
+      #43: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls types.init
+      #44: internal/ingester/docker/docker.go:83:33: docker.sdkDockerClient.ContainerList calls client.Client.ContainerList, which eventually calls versions.LessThan
+      #45: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls versions.init
+      #46: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls volume.init
+
+Vulnerability #2: GO-2026-4883
+    Moby has an Off-by-one error in its plugin privilege validation in
+    github.com/docker/docker
+  More info: https://pkg.go.dev/vuln/GO-2026-4883
+  Module: github.com/docker/docker
+    Found in: github.com/docker/docker@v28.5.2+incompatible
+    Fixed in: N/A
+    Example traces found:
+      #1: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls api.init
+      #2: internal/ingester/docker/docker.go:15:2: docker.init calls container.init, which calls blkiodev.init
+      #3: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls build.init
+      #4: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls checkpoint.init
+      #5: internal/lookup/http.go:287:26: lookup.HTTP.doFetch calls http.Client.Do, which eventually calls client.CheckRedirect
+      #6: internal/ingester/docker/docker.go:131:37: docker.sdkDockerClient.ContainerLogs calls client.Client.ContainerInspect
+      #7: internal/ingester/docker/docker.go:83:33: docker.sdkDockerClient.ContainerList calls client.Client.ContainerList
+      #8: internal/ingester/docker/docker.go:147:34: docker.sdkDockerClient.ContainerLogs calls client.Client.ContainerLogs
+      #9: internal/ingester/docker/docker.go:164:30: docker.sdkDockerClient.Events calls client.Client.Events
+      #10: internal/ingester/docker/docker.go:208:33: docker.sdkDockerClient.Ping calls client.Client.ServerVersion
+      #11: internal/lookup/http.go:287:26: lookup.HTTP.doFetch calls http.Client.Do, which eventually calls client.NewClientWithOpts
+      #12: internal/ingester/docker/docker.go:74:44: docker.newSDKDockerClient calls client.NewClientWithOpts
+      #13: internal/ingester/docker/docker.go:55:41: docker.newSDKDockerClient calls client.WithAPIVersionNegotiation
+      #14: internal/ingester/docker/docker.go:71:50: docker.newSDKDockerClient calls client.WithHTTPClient
+      #15: internal/ingester/docker/docker.go:54:24: docker.newSDKDockerClient calls client.WithHost
+      #16: internal/ingester/docker/docker.go:71:87: docker.newSDKDockerClient calls client.WithScheme
+      #17: internal/server/system_ingesters.go:474:23: server.SystemServer.TestIngester calls client.emptyIDError.Error
+      #18: internal/server/system_ingesters.go:474:23: server.SystemServer.TestIngester calls client.errConnectionFailed.Error
+      #19: internal/blobstore/s3.go:250:47: blobstore.S3Store.List calls errors.AsType[*github.com/aws/aws-sdk-go-v2/service/s3/types.NotFound], which eventually calls client.errConnectionFailed.Unwrap
+      #20: internal/server/system_ingesters.go:474:23: server.SystemServer.TestIngester calls client.httpError.Error
+      #21: internal/chunk/file/manager.go:3137:16: file.Manager.ReadWriteTimestamps calls errors.Is, which eventually calls client.httpError.Is
+      #22: internal/blobstore/s3.go:250:47: blobstore.S3Store.List calls errors.AsType[*github.com/aws/aws-sdk-go-v2/service/s3/types.NotFound], which eventually calls client.httpError.Unwrap
+      #23: internal/ingester/docker/docker.go:18:2: docker.init calls client.init
+      #24: internal/ingester/docker/docker.go:15:2: docker.init calls container.init, which calls common.init
+      #25: internal/ingester/docker/docker.go:15:2: docker.init calls container.init
+      #26: internal/ingester/docker/docker.go:16:2: docker.init calls events.init
+      #27: internal/ingester/docker/docker.go:157:14: docker.sdkDockerClient.Events calls filters.Arg
+      #28: internal/ingester/docker/docker.go:83:33: docker.sdkDockerClient.ContainerList calls client.Client.ContainerList, which calls filters.Args.Len
+      #29: internal/ingester/docker/docker.go:156:32: docker.sdkDockerClient.Events calls filters.NewArgs
+      #30: internal/ingester/docker/docker.go:83:33: docker.sdkDockerClient.ContainerList calls client.Client.ContainerList, which calls filters.ToParamWithVersion
+      #31: internal/ingester/docker/docker.go:17:2: docker.init calls filters.init
+      #32: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls image.init
+      #33: internal/ingester/docker/docker.go:15:2: docker.init calls container.init, which calls mount.init
+      #34: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls network.init
+      #35: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls registry.init
+      #36: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which eventually calls runtime.init
+      #37: internal/ingester/docker/docker.go:15:2: docker.init calls container.init, which calls storage.init
+      #38: internal/ingester/docker/docker.go:15:2: docker.init calls container.init, which calls strslice.init
+      #39: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls swarm.init
+      #40: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls system.init
+      #41: internal/ingester/docker/docker.go:147:34: docker.sdkDockerClient.ContainerLogs calls client.Client.ContainerLogs, which calls time.GetTimestamp
+      #42: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls time.init
+      #43: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls types.init
+      #44: internal/ingester/docker/docker.go:83:33: docker.sdkDockerClient.ContainerList calls client.Client.ContainerList, which eventually calls versions.LessThan
+      #45: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls versions.init
+      #46: internal/ingester/docker/docker.go:18:2: docker.init calls client.init, which calls volume.init
+
+Your code is affected by 2 vulnerabilities from 1 module.
+This scan also found 1 vulnerability in packages you import and 4
+vulnerabilities in modules you require, but your code doesn't appear to call
+these vulnerabilities.
+Use '-show verbose' for more details.

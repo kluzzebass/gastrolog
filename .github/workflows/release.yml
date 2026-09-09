@@ -19,7 +19,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
+          go-version-file: backend/go.mod
           cache: false
 
       - name: Set up Bun
@@ -55,7 +55,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
+          go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
       - name: Download embedded assets
@@ -78,7 +78,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
+          go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
       - name: Download embedded assets

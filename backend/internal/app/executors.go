@@ -280,7 +280,6 @@ func forwardSearchAfterParse(
 			return nil, nil, nil, nil, fmt.Errorf("invalid resume token: %w", err)
 		}
 	}
-
 	searchIter, getToken := eng.Search(ctx, q, resume)
 	getTokenBytes := func() []byte {
 		token := getToken()
@@ -299,13 +298,15 @@ func forwardSearchAfterParse(
 // the iterator directly — the streaming handler sends records as it iterates.
 func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 	return func(ctx context.Context, req *gastrologv1.ForwardSearchRequest) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
-		if glid.FromBytes(req.GetVaultId()).IsZero() {
+		vaultID := glid.FromBytes(req.GetVaultId())
+		if vaultID.IsZero() {
 			return nil, nil, nil, nil, errors.New("invalid vault_id")
 		}
 		q, pipeline, err := server.ParseExpression(req.GetQuery())
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("parse query: %w", err)
 		}
+		q.PartialAggregates = req.GetPartialAggregates()
 
 		eng, err := server.ForwardSearchEngine(o, req)
 		if err != nil {
@@ -315,8 +316,15 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 			return nil, nil, nil, nil, nil
 		}
 
-		includeHist := server.ForwardSearchIncludesHistogram(req, q)
-		return forwardSearchAfterParse(ctx, eng, q, pipeline, req.GetResumeToken(), includeHist)
+		includeHist := server.ForwardSearchIncludesHistogram(q)
+		it, getToken, table, hist, err := forwardSearchAfterParse(ctx, eng, q, pipeline, req.GetResumeToken(), includeHist)
+		if err != nil {
+			server.NoteSearchOutcome(o.Alerts(), err, nil)
+			return nil, nil, nil, nil, err
+		}
+		// This node's copy of the vault is the one being read, so its alarm
+		// is raised or cleared here, where the read outcome is known.
+		return server.ObserveSearchIterator(o.Alerts(), vaultID, it), getToken, table, hist, nil
 	}
 }
 
@@ -656,44 +664,23 @@ func newChunkEventSubscriber(o *orchestrator.Orchestrator) cluster.ChunkEventSub
 	}
 }
 
-// chunkChangeEventToForwardProto mirrors server.chunkChangeEventToProto
-// but produces the cluster-internal ForwardWatchChunksResponse rather
-// than the public WatchChunksResponse. Vault type lookup happens here
-// (same orchestrator registry) so peer messages already carry the
-// inspector-required field; the API node's per-message wrap then just
-// copies fields.
+// chunkChangeEventToForwardProto produces the cluster-internal
+// ForwardWatchChunksResponse through the same converters the public watch
+// uses, adding the vault type so peer messages already carry the
+// inspector-required field and the API node's per-message wrap just copies
+// fields.
 func chunkChangeEventToForwardProto(o *orchestrator.Orchestrator, ev orchestrator.ChunkChangeEvent) *gastrologv1.ForwardWatchChunksResponse {
 	msg := &gastrologv1.ForwardWatchChunksResponse{
 		VaultId: ev.VaultID.ToProto(),
 		ChunkId: ev.ChunkID[:],
-		Op:      chunkOpToForwardProto(ev.Op),
+		Op:      server.ChunkOpToProto(ev.Op),
+		Meta:    server.ChunkChangeMetaToProto(ev),
 	}
-	if ev.Meta != nil {
-		msg.Meta = server.ChunkMetaToProto(*ev.Meta)
-		msg.Meta.VaultId = ev.VaultID.ToProto()
+	if msg.Meta != nil {
 		msg.Meta.VaultType = o.VaultType(ev.VaultID)
 	}
 	if ev.Op == orchestrator.ChunkChangeOpProgress {
 		msg.RecordCount = ev.RecordCount
 	}
 	return msg
-}
-
-func chunkOpToForwardProto(op orchestrator.ChunkChangeOp) gastrologv1.ChunkChangeOp {
-	switch op {
-	case orchestrator.ChunkChangeOpUnspecified:
-		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_UNSPECIFIED
-	case orchestrator.ChunkChangeOpCreated:
-		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_CREATED
-	case orchestrator.ChunkChangeOpProgress:
-		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_PROGRESS
-	case orchestrator.ChunkChangeOpSealed:
-		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_SEALED
-	case orchestrator.ChunkChangeOpDeleted:
-		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_DELETED
-	case orchestrator.ChunkChangeOpUploaded:
-		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_UPLOADED
-	default:
-		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_UNSPECIFIED
-	}
 }

@@ -8,6 +8,7 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/applywait"
+	"gastrolog/internal/raftutil"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -50,7 +51,7 @@ func NewVaultApplyForwarder(r *hraft.Raft, groupID string, applyWait *applywait.
 // FSM has caught up to the leader's applied index, so an immediate local read
 // sees post-mutation state.
 func (f *VaultApplyForwarder) Apply(data []byte) error {
-	err := applyRetryingLeadershipTransfer(func() error {
+	err := raftutil.ApplyRetryingLeadershipTransfer(func() error {
 		return f.raft.Apply(data, f.timeout).Error()
 	}, nil)
 	if err != nil {

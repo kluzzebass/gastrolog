@@ -174,6 +174,7 @@ func (f *FSM) Apply(l *raft.Log) any {
 
 	case *gastrologv1.SystemCommand_CreateRefreshToken,
 		*gastrologv1.SystemCommand_DeleteRefreshToken,
+		*gastrologv1.SystemCommand_RotateRefreshToken,
 		*gastrologv1.SystemCommand_DeleteUserRefreshTokens:
 		return f.applyRefreshToken(ctx, cmd)
 
@@ -272,7 +273,7 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 			return nil, err
 		}
 		if node == nil {
-			return nil, fmt.Errorf("set node state: node %s not found", id)
+			return nil, fmt.Errorf("set node state: %w: %s", system.ErrNodeNotFound, id)
 		}
 		if err := system.ValidateNodeStateTransition(node.State, newState); err != nil {
 			return nil, err
@@ -647,6 +648,17 @@ func (f *FSM) applyRefreshToken(ctx context.Context, cmd *gastrologv1.SystemComm
 			return err
 		}
 		return f.store.DeleteRefreshToken(ctx, id)
+
+	case *gastrologv1.SystemCommand_RotateRefreshToken:
+		oldHash, next, err := command.ExtractRotateRefreshToken(c.RotateRefreshToken)
+		if err != nil {
+			return err
+		}
+		// Whether the old token was still there is not an apply outcome —
+		// every replica reaches the same state either way. The proposer reads
+		// the replacement back to learn whether it won.
+		_, err = f.store.RotateRefreshToken(ctx, oldHash, next)
+		return err
 
 	case *gastrologv1.SystemCommand_DeleteUserRefreshTokens:
 		userID, err := command.ExtractDeleteUserRefreshTokens(c.DeleteUserRefreshTokens)

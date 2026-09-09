@@ -7,6 +7,7 @@ import (
 	"gastrolog/internal/glid"
 	"iter"
 	"slices"
+	"strings"
 	"sync"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
@@ -60,13 +61,14 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 	for nodeID, vaultIDs := range byNode {
 		for _, vid := range vaultIDs {
 			wg.Go(func() {
-				// Remote opaque resume tokens are deliberately not propagated
-				// (the merge-level highwater drives pagination — see
-				// searchDirect), so the token getter is dropped here.
+				// Remote positions are never carried across pages; the remote
+				// resumes at the coordinator's cursor, which its own engine
+				// applies ahead of the page limit — so the token getter is
+				// dropped here.
 				recCh, _, eCh, _, getHist := s.remoteSearcher.SearchStream(ctx, nodeID, &apiv1.ForwardSearchRequest{
 					VaultId:     vid.ToProto(),
 					Query:       queryExpr,
-					ResumeToken: remoteTokens[vid],
+					ResumeToken: remoteTokenOrCursor(q, remoteTokens[vid]),
 				})
 				mu.Lock()
 				streams = append(streams, vaultStream{records: recCh, errCh: eCh, getHistogram: getHist, vaultID: vid})
@@ -301,15 +303,11 @@ func stopAll(states []mergeState) {
 	}
 }
 
-// buildMergeLess returns a comparison function for merge entries.
+// buildMergeLess orders merge entries by query.OrderBy.CompareRecords — ties
+// included, since this slice's own order is goroutine-completion order.
 func buildMergeLess(orderBy query.OrderBy, reverse bool) func(a, b mergeEntry) bool {
 	return func(a, b mergeEntry) bool {
-		ta := orderBy.RecordTS(a.rec)
-		tb := orderBy.RecordTS(b.rec)
-		if reverse {
-			return ta.After(tb)
-		}
-		return ta.Before(tb)
+		return orderBy.CompareRecords(a.rec, b.rec, reverse) < 0
 	}
 }
 
@@ -342,6 +340,26 @@ func runMerge(yield func(chunk.Record, error) bool, states []mergeState, entries
 			return
 		}
 	}
+}
+
+// forwardedPipelineExpression serializes a pipeline query for a remote node
+// as "<filter> <directives> | <pipe> | <pipe>…". The query already carries the
+// filter (protoToQuery copies the pipeline's filter into BoolExpr), so only
+// the pipe operators are appended: emitting Pipeline.String() would repeat the
+// filter behind a pipe, where the remote parser reads it as an operator. The
+// vault predicate is dropped because ForwardSearchRequest.VaultId names the
+// vault explicitly. Timestamps are absolute so every node bins identically.
+func forwardedPipelineExpression(q query.Query, pipeline *querylang.Pipeline) string {
+	if q.BoolExpr == nil {
+		q.BoolExpr = pipeline.Filter
+	}
+	_, q.BoolExpr = query.ExtractVaultFilter(q.BoolExpr, nil)
+	parts := make([]string, 0, len(pipeline.Pipes)+1)
+	parts = append(parts, q.String())
+	for _, op := range pipeline.Pipes {
+		parts = append(parts, op.String())
+	}
+	return strings.TrimSpace(strings.Join(parts, " | "))
 }
 
 // collectRemotePipeline fans out a pipeline query to all remote vaults and
@@ -377,16 +395,7 @@ func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, 
 		return nil, nil
 	}
 
-	// Reconstruct expression with absolute timestamps so remote nodes
-	// produce identical timechart bucket boundaries.
-	// Pipeline.String() uses " | " between parts but omits a leading "|"
-	// when there is no filter. Prefix with "| " to ensure the remote parser
-	// sees the pipe operator.
-	pipelineStr := pipeline.String()
-	if len(pipelineStr) > 0 && pipelineStr[0] != '|' {
-		pipelineStr = "| " + pipelineStr
-	}
-	remoteExpr := q.String() + " " + pipelineStr
+	remoteExpr := forwardedPipelineExpression(q, pipeline)
 
 	// Fan out RPCs concurrently — one goroutine per remote vault.
 	type pipelineFetch struct {
@@ -410,8 +419,9 @@ func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, 
 			// search's latency policy, and wg.Wait() is bounded by the
 			// query timeout just as search's remote merge is.
 			responses[i], fetchErrors[i] = s.remoteSearcher.Search(ctx, f.nodeID, &apiv1.ForwardSearchRequest{
-				VaultId: f.vid.ToProto(),
-				Query:   remoteExpr,
+				VaultId:           f.vid.ToProto(),
+				Query:             remoteExpr,
+				PartialAggregates: q.PartialAggregates,
 			})
 		})
 	}

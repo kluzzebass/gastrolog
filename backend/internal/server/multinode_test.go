@@ -10,8 +10,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,9 +21,11 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
+	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/convert"
+	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
@@ -69,6 +73,7 @@ type multiNodeHarness struct {
 	peerJobs          *mnPeerJobs
 	peerRouteStats    *mnPeerRouteStats
 	peerIngesterStats *mnPeerIngesterStats
+	remote            *directRemoteSearcher
 	peerVaultStats    *mnPeerVaultStats
 	peerStorageStats  *mnPeerStorageStats
 	// alerts is each node's alert.Collector; populated only with
@@ -77,6 +82,9 @@ type multiNodeHarness struct {
 	// routingFwd is the in-process ForwardRPC stand-in; tests can remove a
 	// node's handler to simulate an unreachable raiser.
 	routingFwd *directUnaryForwarder
+	// remoteSearcher is the in-process ForwardSearch stand-in; tests can
+	// remove a node from it to simulate a search fan-out that fails.
+	remoteSearcher *directRemoteSearcher
 }
 
 // Node returns the test node by ID, fataling if not found.
@@ -103,6 +111,10 @@ type mnOption func(*mnConfig)
 type mnConfig struct {
 	// noVault is a set of node IDs that should have no vault.
 	noVault map[string]bool
+	// fileVault is a set of node IDs whose vault is file-backed: the on-disk
+	// chunk manager that serves sealed GLCBs, so tests can drive the same
+	// read path a production data node uses.
+	fileVault map[string]bool
 	// environmentLabel / environmentColor are set on the coordinator's
 	// server.Config to exercise the env-banner field propagation through
 	// GetSystem.
@@ -124,6 +136,18 @@ type mnConfig struct {
 	// tests that DO need it (waiting for a real tick) opt in per node via
 	// WithDiskGuard.
 	diskGuardNodes map[string]bool
+	// histogramAtStreamEnd is set by WithHistogramAtStreamEnd.
+	histogramAtStreamEnd bool
+}
+
+// WithHistogramAtStreamEnd makes the ForwardSearch stand-in withhold each
+// remote vault's histogram until its whole record stream has been produced —
+// a contract the coordinator cannot work with, since it reads the histogram
+// before it drains any records. Only a test asserting that should ask for it.
+func WithHistogramAtStreamEnd() mnOption {
+	return func(c *mnConfig) {
+		c.histogramAtStreamEnd = true
+	}
 }
 
 // WithoutVault creates a node that has an orchestrator but no vault.
@@ -132,6 +156,16 @@ func WithoutVault(nodeIDs ...string) mnOption {
 	return func(c *mnConfig) {
 		for _, id := range nodeIDs {
 			c.noVault[id] = true
+		}
+	}
+}
+
+// WithFileVault gives the named nodes a file-backed vault instead of the
+// default memory vault.
+func WithFileVault(nodeIDs ...string) mnOption {
+	return func(c *mnConfig) {
+		for _, id := range nodeIDs {
+			c.fileVault[id] = true
 		}
 	}
 }
@@ -215,7 +249,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		t.Fatal("setupMultiNode requires at least 2 node IDs")
 	}
 
-	cfg := &mnConfig{noVault: make(map[string]bool), diskGuardNodes: make(map[string]bool)}
+	cfg := &mnConfig{noVault: make(map[string]bool), fileVault: make(map[string]bool), diskGuardNodes: make(map[string]bool)}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -249,7 +283,14 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		if cfg.noVault[id] {
 			nodes[id] = setupMNNodeNoVault(t, id, cfgStore, alertsByNode[id], cfg.diskGuardNodes[id])
 		} else {
-			node := setupMNNode(t, id, cfgStore, alertsByNode[id], cfg.diskGuardNodes[id])
+			var node multinodeTestNode
+			vaultType := system.VaultTypeMemory
+			if cfg.fileVault[id] {
+				node = setupMNNodeFileVault(t, id, cfgStore, alertsByNode[id], cfg.diskGuardNodes[id])
+				vaultType = system.VaultTypeFile
+			} else {
+				node = setupMNNode(t, id, cfgStore, alertsByNode[id], cfg.diskGuardNodes[id])
+			}
 			// Write VaultConfig directly with all storage fields, plus a
 			// synthetic placement for this node.
 			placements := []system.VaultPlacement{
@@ -258,7 +299,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 			_ = cfgStore.PutVault(ctx, system.VaultConfig{
 				ID:   node.vaultID,
 				Name: "vault-" + id,
-				Type: system.VaultTypeMemory,
+				Type: vaultType,
 			})
 			_ = cfgStore.SetVaultPlacements(ctx, node.vaultID, placements)
 			nodes[id] = node
@@ -273,7 +314,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		}
 		remoteOrchestrators[id] = nodes[id].orch
 	}
-	remoteSearcher := &directRemoteSearcher{nodes: remoteOrchestrators}
+	remoteSearcher := &directRemoteSearcher{nodes: remoteOrchestrators, histogramAtStreamEnd: cfg.histogramAtStreamEnd}
 	remoteIndexer := &directRemoteIndexer{nodes: remoteOrchestrators}
 
 	peerJobs := &mnPeerJobs{peers: map[string][]*gastrologv1.Job{}, changes: notify.NewSignal()}
@@ -300,17 +341,18 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 
 	coordNode := nodes[coordinatorID]
 	srvCfg := server.Config{
-		NodeID:            coordinatorID,
-		RemoteSearcher:    remoteSearcher,
-		RemoteIndexer:     remoteIndexer,
-		RoutingForwarder:  routingFwd,
-		PeerJobs:          peerJobs,
-		PeerRouteStats:    peerRouteStats,
-		PeerIngesterStats: peerIngesterStats,
-		PeerVaultStats:    peerVaultStats,
-		PeerStorageStats:  peerStorageStats,
-		EnvironmentLabel:  cfg.environmentLabel,
-		EnvironmentColor:  cfg.environmentColor,
+		NodeID:               coordinatorID,
+		RemoteSearcher:       remoteSearcher,
+		RemoteIndexer:        remoteIndexer,
+		RemoteVaultValidator: &directRemoteVaultValidator{nodes: remoteOrchestrators},
+		RoutingForwarder:     routingFwd,
+		PeerJobs:             peerJobs,
+		PeerRouteStats:       peerRouteStats,
+		PeerIngesterStats:    peerIngesterStats,
+		PeerVaultStats:       peerVaultStats,
+		PeerStorageStats:     peerStorageStats,
+		EnvironmentLabel:     cfg.environmentLabel,
+		EnvironmentColor:     cfg.environmentColor,
 	}
 
 	if cfg.clusterStats {
@@ -349,6 +391,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	})
 
 	return &multiNodeHarness{
+		remote:            remoteSearcher,
 		coordinator:       coordinatorID,
 		nodes:             nodes,
 		cfgStore:          cfgStore,
@@ -365,6 +408,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		peerStorageStats:  peerStorageStats,
 		alerts:            alertsByNode,
 		routingFwd:        routingFwd,
+		remoteSearcher:    remoteSearcher,
 	}
 }
 
@@ -406,6 +450,36 @@ func setupMNNode(t *testing.T, nodeID string, loader system.Store, alerts *alert
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, v.CM, v.IM, v.QE))
 
 	return multinodeTestNode{nodeID: nodeID, orch: orch, vaultID: vaultID, vault: v}
+}
+
+// setupMNNodeFileVault builds a node whose vault is the on-disk chunk
+// manager, index manager and query engine — the components a production
+// data node serves sealed GLCB chunks through.
+func setupMNNodeFileVault(t *testing.T, nodeID string, loader system.Store, alerts *alert.Collector, diskGuard bool) multinodeTestNode {
+	t.Helper()
+
+	orch, err := orchestrator.New(mnOrchConfig(nodeID, loader, t.TempDir(), alerts, diskGuard))
+	if err != nil {
+		t.Fatalf("orchestrator.New: %v", err)
+	}
+
+	dir := t.TempDir()
+	cm, err := chunkfile.NewManager(chunkfile.Config{
+		Dir:            dir,
+		Now:            time.Now,
+		RotationPolicy: chunk.NewRecordCountPolicy(10000),
+	})
+	if err != nil {
+		t.Fatalf("file chunk manager: %v", err)
+	}
+	t.Cleanup(func() { _ = cm.Close() })
+	im := indexfile.NewManager(dir, nil, nil, cm)
+	qe := query.New(cm, im, nil)
+
+	vaultID := glid.New()
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, cm, im, qe))
+
+	return multinodeTestNode{nodeID: nodeID, orch: orch, vaultID: vaultID, vault: memtest.Vault{CM: cm, IM: im, QE: qe}}
 }
 
 func setupMNNodeNoVault(t *testing.T, nodeID string, loader system.Store, alerts *alert.Collector, diskGuard bool) multinodeTestNode {
@@ -641,8 +715,32 @@ func (p *mnPeerStorageStats) FindStorageState(storageID string) *gastrologv1.Sto
 
 // directRemoteSearcher calls directly into the target node's orchestrator,
 // simulating ForwardSearch/ForwardFollow/ForwardExplain RPCs without gRPC.
+// mnSearchStreamSlots is how many record batches the ForwardSearch stand-in
+// buffers ahead of the coordinator, mirroring the real forwarder. It bounds how
+// far a peer runs ahead before its producer parks, so tests reasoning about a
+// parked producer derive their bounds from this rather than restating it.
+const mnSearchStreamSlots = 16
+
 type directRemoteSearcher struct {
 	nodes map[string]*orchestrator.Orchestrator
+	// recordStreams counts SearchStream calls — the record gathers a
+	// coordinator opened — so a test can tell a merged-table answer from a
+	// gathered one.
+	recordStreams atomic.Int64
+	// streamers tracks the per-vault SearchStream producer goroutines so a
+	// test can wait for them to exit. Production's producer is released by
+	// request-context cancellation; without something to wait on, a leak is
+	// indistinguishable from a prompt exit.
+	streamers sync.WaitGroup
+	// batchesSent counts record batches this stand-in pushed into a stream's
+	// channel. A consumer that stops early leaves the producer parked on a
+	// full channel, so a count short of the total says it never had to drain
+	// the whole match set.
+	batchesSent atomic.Int64
+	// histogramAtStreamEnd makes getHistogram wait for the whole record stream
+	// instead of answering from the first message. Only a test asserting that
+	// the coordinator deadlocks against such a peer sets it.
+	histogramAtStreamEnd bool
 }
 
 func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *gastrologv1.ForwardSearchRequest) (*gastrologv1.ForwardSearchResponse, error) {
@@ -669,6 +767,7 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
+	q.PartialAggregates = req.GetPartialAggregates()
 
 	// Pipeline query: run locally and return table.
 	if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
@@ -685,7 +784,7 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 
 	// Compute histogram for legacy full-vault forwards only.
 	var histProto []*gastrologv1.HistogramBucket
-	if server.ForwardSearchIncludesHistogram(req, q) {
+	if server.ForwardSearchIncludesHistogram(q) {
 		histogram := eng.ComputeHistogram(ctx, q, 50)
 		for _, b := range histogram {
 			histProto = append(histProto, &gastrologv1.HistogramBucket{
@@ -719,7 +818,8 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 	func() []byte,
 	func() []*gastrologv1.HistogramBucket,
 ) {
-	recCh := make(chan []*gastrologv1.ExportRecord, 16)
+	d.recordStreams.Add(1)
+	recCh := make(chan []*gastrologv1.ExportRecord, mnSearchStreamSlots)
 	errCh := make(chan error, 1)
 	nilToken := func() []byte { return nil }
 	nilHist := func() []*gastrologv1.HistogramBucket { return nil }
@@ -780,7 +880,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 
 	// Compute histogram for legacy full-vault forwards only.
 	var histProto []*gastrologv1.HistogramBucket
-	if server.ForwardSearchIncludesHistogram(req, q) {
+	if server.ForwardSearchIncludesHistogram(q) {
 		histogram := eng.ComputeHistogram(ctx, q, 50)
 		for _, b := range histogram {
 			histProto = append(histProto, &gastrologv1.HistogramBucket{
@@ -790,9 +890,19 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 			})
 		}
 	}
+	// Mirrors the forwarder's contract: a remote search's histogram is known
+	// from the stream's first message, so the getter answers without the
+	// caller having read any records. Under histogramAtStreamEnd the getter
+	// waits for the producer instead, which strands a coordinator that asks
+	// for the histogram before it starts draining records.
 	histReady := make(chan struct{})
-	close(histReady)
-	getHistogram := func() []*gastrologv1.HistogramBucket { return histProto }
+	getHistogram := func() []*gastrologv1.HistogramBucket {
+		<-histReady
+		return histProto
+	}
+	if !d.histogramAtStreamEnd {
+		close(histReady)
+	}
 
 	// Decode the resume token
 	// the same way the production ForwardSearch handler does. Without this,
@@ -819,9 +929,14 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 	}
 
 	// Stream records in batches.
+	d.streamers.Add(1)
 	go func() {
+		defer d.streamers.Done()
 		defer close(recCh)
 		defer close(errCh)
+		if d.histogramAtStreamEnd {
+			defer close(histReady)
+		}
 
 		const batchSize = 200
 		batch := make([]*gastrologv1.ExportRecord, 0, batchSize)
@@ -834,6 +949,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 			if len(batch) >= batchSize {
 				select {
 				case recCh <- batch:
+					d.batchesSent.Add(1)
 				case <-ctx.Done():
 					return
 				}
@@ -843,6 +959,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		if len(batch) > 0 {
 			select {
 			case recCh <- batch:
+				d.batchesSent.Add(1)
 			case <-ctx.Done():
 			}
 		}
@@ -1029,6 +1146,30 @@ func (d *directRemoteSearcher) ExportToVault(_ context.Context, _ string, _ *gas
 // directRemoteIndexer dispatches GetIndexes to a peer's orchestrator
 // in-process. Used by the multi-node harness to exercise the GetIndexes
 // fan-out path without a real cluster RPC stack.
+// directRemoteVaultValidator answers ForwardValidateVault in-process the way
+// newValidateVaultExecutor and forwardValidateVault do on a real peer.
+type directRemoteVaultValidator struct {
+	nodes map[string]*orchestrator.Orchestrator
+}
+
+func (d *directRemoteVaultValidator) ValidateVault(ctx context.Context, nodeID string, req *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error) {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return nil, fmt.Errorf("unknown node: %s", nodeID)
+	}
+	vaultID := glid.FromBytes(req.GetVaultId())
+	metas, err := orch.ListLocalChunkMetas(vaultID)
+	if err != nil {
+		return nil, err
+	}
+	resp := server.ValidateVaultLocal(ctx, orch, vaultID, metas, "")
+	var audit *gastrologv1.CloudIndexAudit
+	if audits := resp.GetCloudIndexAudits(); len(audits) > 0 {
+		audit = audits[0]
+	}
+	return &gastrologv1.ForwardValidateVaultResponse{Valid: resp.GetValid(), Chunks: resp.GetChunks(), CloudIndexAudit: audit, Issues: resp.GetIssues()}, nil
+}
+
 type directRemoteIndexer struct {
 	nodes map[string]*orchestrator.Orchestrator
 }
@@ -1869,6 +2010,413 @@ func TestMultiNode_PipelineGlobalHistogram(t *testing.T) {
 	}
 	if len(histogram) == 0 {
 		t.Error("expected histogram in pipeline global response, got none")
+	}
+}
+
+// addMNRoundRobin appends count records to node, one every stride seconds
+// starting at t0+offset. Three nodes seeded with stride 3 and offsets 0/1/2
+// produce a cluster whose records interleave one for one in time, so any
+// cluster-wide cap has exactly one right answer and a cap applied per node
+// has a visibly wrong one.
+func addMNRoundRobin(node multinodeTestNode, prefix string, count int, t0 time.Time, offset, stride int) {
+	for i := range count {
+		ts := t0.Add(time.Duration(offset+i*stride) * time.Second)
+		node.vault.CM.Append(chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "%s-%d", prefix, i),
+		})
+	}
+}
+
+// setupInterleavedCluster seeds a coordinator and two data nodes with
+// per-node records whose timestamps interleave, and returns the raw messages
+// in cluster-wide order.
+func setupInterleavedCluster(t *testing.T, perNode int) (*multiNodeHarness, []string) {
+	t.Helper()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"})
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	prefixes := []string{"coord", "one", "two"}
+	nodes := []string{"coord", "data-1", "data-2"}
+	for i, id := range nodes {
+		addMNRoundRobin(h.Node(t, id), prefixes[i], perNode, t0, i, len(nodes))
+	}
+	var order []string
+	for i := range perNode {
+		for _, p := range prefixes {
+			order = append(order, fmt.Sprintf("%s-%d", p, i))
+		}
+	}
+	return h, order
+}
+
+func rawsOf(records []*gastrologv1.Record) []string {
+	out := make([]string, len(records))
+	for i, r := range records {
+		out[i] = string(r.Raw)
+	}
+	return out
+}
+
+// A cap is a cluster-wide operator. head, tail and slice must select from the
+// merged record stream, so each returns exactly its window of the cluster's
+// order — never one node's window, and never one window per node.
+func TestMultiNode_ClusterWideCapSelectsAcrossNodes(t *testing.T) {
+	t.Parallel()
+	const perNode = 10
+	h, order := setupInterleavedCluster(t, perNode)
+	total := perNode * 3
+
+	// Premise: all three nodes really do contribute. Without this the cap
+	// assertions below would pass against a coordinator that never fanned out.
+	if got := len(searchAll(t, h.client, "")); got != total {
+		t.Fatalf("cluster holds %d records, not %d — the fan-out under test is not happening", got, total)
+	}
+
+	tests := []struct {
+		expr string
+		want []string
+	}{
+		{"| head 5", order[:5]},
+		{"| tail 5", order[total-5:]},
+		{"| slice 3 7", order[2:7]},
+	}
+	for _, tc := range tests {
+		t.Run(tc.expr, func(t *testing.T) {
+			got := rawsOf(searchAll(t, h.client, tc.expr))
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("%s returned %v, want %v", tc.expr, got, tc.want)
+			}
+		})
+	}
+
+	// The same caps feeding an aggregate: the count must be the cap, not the
+	// cap once per node.
+	for _, expr := range []string{"| head 5 | stats count", "| tail 5 | stats count", "| slice 3 7 | stats count"} {
+		t.Run(expr, func(t *testing.T) {
+			table := searchTable(t, h.client, expr)
+			if table == nil || len(table.Rows) != 1 {
+				t.Fatalf("%s: expected one row, got %v", expr, table)
+			}
+			if got := table.Rows[0].Values[0]; got != "5" {
+				t.Errorf("%s = %s, want 5 (a per-node cap would give %d)", expr, got, 5*3)
+			}
+		})
+	}
+}
+
+// Aggregates that cannot be recombined from per-node partials are computed
+// once, on the coordinator, over every node's records. The answers must be
+// the global ones.
+func TestMultiNode_NonDistributiveAggregatesAreGlobal(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"})
+
+	// Values 1..12 dealt round-robin across the three nodes, with timestamps
+	// that put them back in ascending order cluster-wide.
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	nodes := []string{"coord", "data-1", "data-2"}
+	for v := 1; v <= 12; v++ {
+		node := h.Node(t, nodes[(v-1)%3])
+		ts := t0.Add(time.Duration(v) * time.Second)
+		node.vault.CM.Append(chunk.Record{
+			IngestTS: ts, WriteTS: ts,
+			Raw:   fmt.Appendf(nil, "val=%d", v),
+			Attrs: map[string]string{"val": fmt.Sprintf("%d", v)},
+		})
+	}
+
+	tests := []struct {
+		expr string
+		col  string
+		want string
+	}{
+		{"| stats count", "count", "12"},
+		{"| stats avg(val)", "avg_val", "6.5"},
+		{"| stats dcount(val)", "dcount_val", "12"},
+		{"| stats median(val)", "median_val", "6.5"},
+		{"| stats values(val)", "values_val", "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.expr, func(t *testing.T) {
+			table := searchTable(t, h.client, tc.expr)
+			if table == nil || len(table.Rows) != 1 {
+				t.Fatalf("expected one row, got %v", table)
+			}
+			idx := slices.Index(table.Columns, tc.col)
+			if idx < 0 {
+				t.Fatalf("no column %q in %v", tc.col, table.Columns)
+			}
+			if got := table.Rows[0].Values[idx]; got != tc.want {
+				t.Errorf("%s = %q, want %q", tc.expr, got, tc.want)
+			}
+		})
+	}
+}
+
+// addMNTieGroup appends records to node that all share one ordering timestamp
+// but carry distinct event identities, so only EventID separates them. Two
+// nodes seeded from interleaved seqs hold one tie group split across the
+// cluster.
+func addMNTieGroup(node multinodeTestNode, ts time.Time, ingesterID glid.GLID, seqs []int) {
+	for _, seq := range seqs {
+		node.vault.CM.Append(chunk.Record{
+			SourceTS: ts,
+			IngestTS: ts,
+			WriteTS:  ts,
+			EventID:  chunk.EventID{IngesterID: ingesterID, IngestTS: ts, IngestSeq: uint32(seq)}, //nolint:gosec // G115: small non-negative test sequence
+			Raw:      fmt.Appendf(nil, "evt-%02d", seq),
+		})
+	}
+}
+
+// The window a cap returns must not depend on which node the client happened
+// to connect to. A tie-break that favoured whichever vaults were local would
+// hand two nodes two different answers to the same query — and a timestamp
+// tie is ordinary, not exotic: a whole second of syslog shares one source
+// timestamp, so a cutoff lands inside a tie group as a matter of course.
+//
+// The tie here is on ingest_ts because memory-backed vaults expose no
+// source-TS rank index, so order=source_ts cannot run through this harness at
+// all. The merge compares whichever timestamp OrderBy names and then the same
+// EventID key either way; the source_ts tie group is covered directly against
+// the merge in internal/query.
+func TestMultiNode_CapInsideATieGroupIsCoordinatorIndependent(t *testing.T) {
+	t.Parallel()
+	ts := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	ingesterID := glid.New()
+	// evt-00..evt-07, dealt alternately so any correct window draws from both.
+	evens := []int{0, 2, 4, 6}
+	odds := []int{1, 3, 5, 7}
+
+	// The same cluster viewed from each side: in the first harness the
+	// even-numbered records are local to the coordinator, in the second the
+	// odd-numbered ones are.
+	answer := func(t *testing.T, coordSeqs, peerSeqs []int) string {
+		t.Helper()
+		h := setupMultiNode(t, []string{"coord", "peer"})
+		addMNTieGroup(h.Node(t, "coord"), ts, ingesterID, coordSeqs)
+		addMNTieGroup(h.Node(t, "peer"), ts, ingesterID, peerSeqs)
+
+		// Premise: both sides contribute and nothing is deduped away, so the
+		// tie-break is what decides the window.
+		if got := len(searchAll(t, h.client, "")); got != 8 {
+			t.Fatalf("coordinator sees %d records, want 8", got)
+		}
+
+		// values() reports its distinct values in stream order, so the table
+		// shows the exact merged order the cap selected from.
+		table := searchTable(t, h.client, "| head 3 | stats values(raw)")
+		if table == nil || len(table.Rows) != 1 {
+			t.Fatalf("expected one row, got %v", table)
+		}
+		return table.Rows[0].Values[0]
+	}
+
+	fromEvens := answer(t, evens, odds)
+	fromOdds := answer(t, odds, evens)
+
+	if fromEvens != fromOdds {
+		t.Errorf("head 3 inside a tie group returned %q from one coordinator and %q from the other", fromEvens, fromOdds)
+	}
+	if want := "evt-00, evt-01, evt-02"; fromEvens != want {
+		t.Errorf("head 3 = %q, want %q (canonical event order)", fromEvens, want)
+	}
+}
+
+// A consumer that stops early must release the fan-out, not leave a peer
+// streaming the rest of the match set into a channel nobody reads.
+//
+// Two properties, both observable rather than timed: the peer's producer
+// goroutine has exited by the time the request is over (the WaitGroup returns;
+// a goroutine still running hangs the test and names itself in the dump), and
+// it parked instead of draining the match set (it cannot push past one
+// consumed batch plus a full channel — a ceiling derived from those
+// capacities below, not from how producer and consumer race).
+//
+// The teardown itself is belt-and-braces in the server — the request context
+// releases both the engine iterator inside the producer and its channel send —
+// so this asserts the outcome, not which of the two fires. The iterator-level
+// teardown at the break is pinned directly in internal/query.
+func TestMultiNode_EarlyTerminationReleasesTheFanOut(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+
+	// Far more records than the stand-in's channel can hold, so the producer
+	// must park rather than run to completion on its own.
+	const (
+		remoteRecords = 4000
+		batchSize     = 200
+		totalBatches  = remoteRecords / batchSize
+		// The consumer takes ten records plus the merge's one-record
+		// pull-ahead, all inside the first batch, so exactly one batch ever
+		// leaves the channel. The producer therefore cannot push more than
+		// that one plus a full channel before it parks. This ceiling is
+		// derived from those capacities, not from how the two race.
+		maxPushable = mnSearchStreamSlots + 1
+	)
+	addMNRecords(t, h.Node(t, "data-1"), "one", remoteRecords, nil)
+
+	// "| head 10 | stats count" runs the streaming aggregation over the merged
+	// stream and breaks out of it after ten records.
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, err := h.client.Search(ctx, connect.NewRequest(&gastrologv1.SearchRequest{
+		Query: &gastrologv1.Query{Expression: "| head 10 | stats count"},
+	}))
+	if err != nil {
+		cancel()
+		t.Fatalf("Search: %v", err)
+	}
+	var count string
+	for stream.Receive() {
+		if tbl := stream.Msg().TableResult; tbl != nil && len(tbl.Rows) > 0 {
+			count = tbl.Rows[0].Values[0]
+		}
+	}
+	if err := stream.Err(); err != nil && err != io.EOF {
+		cancel()
+		t.Fatalf("stream error: %v", err)
+	}
+	if count != "10" {
+		cancel()
+		t.Fatalf("count = %q, want 10 — the query did not terminate early, so this proves nothing", count)
+	}
+
+	// The request is over; production cancels its context here.
+	cancel()
+	h.remoteSearcher.streamers.Wait()
+
+	// Parked, not drained.
+	if sent := h.remoteSearcher.batchesSent.Load(); sent > maxPushable {
+		t.Errorf("peer pushed %d of %d batches after the consumer stopped at 10 records; it cannot exceed %d without someone draining the channel",
+			sent, totalBatches, maxPushable)
+	}
+}
+
+// searchWithDeadline runs a Search RPC under a deadline and returns the
+// records it managed to stream plus the terminating error. The deadline is a
+// failure detector for a query that cannot finish, not a lever on timing.
+func searchWithDeadline(t *testing.T, client gastrologv1connect.QueryServiceClient, expr string, d time.Duration) ([]*gastrologv1.Record, []*gastrologv1.HistogramBucket, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+
+	stream, err := client.Search(ctx, connect.NewRequest(&gastrologv1.SearchRequest{
+		Query: &gastrologv1.Query{Expression: expr},
+	}))
+	if err != nil {
+		return nil, nil, err
+	}
+	var records []*gastrologv1.Record
+	var histogram []*gastrologv1.HistogramBucket
+	for stream.Receive() {
+		records = append(records, stream.Msg().Records...)
+		if len(stream.Msg().Histogram) > 0 {
+			histogram = stream.Msg().Histogram
+		}
+	}
+	if err := stream.Err(); err != nil && err != io.EOF {
+		return records, histogram, err
+	}
+	return records, histogram, nil
+}
+
+// The coordinator reads each remote vault's histogram before it starts
+// draining that vault's records, so a forwarder that only produces the
+// histogram once its whole stream has been sent strands the query: the record
+// channel fills, the peer's producer parks on a send nobody is reading, and
+// the coordinator is still waiting for the histogram. It only shows up past
+// the channel's depth, which is why paged queries never hit it and an
+// unlimited one does.
+func TestMultiNode_HistogramDoesNotSerializeTheRecordStream(t *testing.T) {
+	t.Parallel()
+	// Well past the stand-in's channel depth (mnSearchStreamSlots batches of
+	// 200), so the peer's producer must park before its stream ends.
+	const remoteRecords = 4000
+
+	seed := func(h *multiNodeHarness) {
+		addMNRecords(t, h.Node(t, "data-1"), "one", remoteRecords, nil)
+	}
+
+	// Premise: with the histogram withheld until end of stream, the query
+	// cannot complete at all.
+	t.Run("premise: waiting for the whole stream strands the query", func(t *testing.T) {
+		t.Parallel()
+		h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"), WithHistogramAtStreamEnd())
+		seed(h)
+
+		records, _, err := searchWithDeadline(t, h.client, "", 3*time.Second)
+		if err == nil {
+			t.Fatalf("query returned %d records instead of stranding: the stall this test guards is not reachable, so the assertion below proves nothing", len(records))
+		}
+		if got := connect.CodeOf(err); got != connect.CodeDeadlineExceeded {
+			t.Fatalf("code: got %v, want %v (err: %v)", got, connect.CodeDeadlineExceeded, err)
+		}
+	})
+
+	t.Run("histogram from the first message streams every record", func(t *testing.T) {
+		t.Parallel()
+		h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+		seed(h)
+
+		records, histogram, err := searchWithDeadline(t, h.client, "", 30*time.Second)
+		if err != nil {
+			t.Fatalf("search: %v", err)
+		}
+		if len(records) != remoteRecords {
+			t.Errorf("streamed %d records, want %d", len(records), remoteRecords)
+		}
+
+		// The histogram has to be right as well as prompt: publishing it early
+		// must not drop or truncate the merged counts.
+		var total int64
+		for _, b := range histogram {
+			total += b.Count
+		}
+		if total != remoteRecords {
+			t.Errorf("histogram counts sum to %d over %d buckets, want %d", total, len(histogram), remoteRecords)
+		}
+	})
+}
+
+// An export moves data. When a node holding part of the match set cannot be
+// reached, the job must fail — writing whatever arrived and reporting the
+// export Complete hands back a target vault quietly missing records, with
+// nothing in the result to say so.
+func TestMultiNode_ExportFailsWhenASourceNodeIsUnreachable(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"})
+
+	// Every source record lives on data-1; the coordinator's own vault is the
+	// export target, so excludeTargetVault leaves data-1 as the only source.
+	addMNRecords(t, h.Node(t, "data-1"), "one", 20, map[string]string{"src": "one"})
+	target := h.Node(t, "coord").vaultID
+
+	// Premise: the coordinator really does reach data-1 for this query, so the
+	// export below has something to lose.
+	if got := len(searchAll(t, h.client, "src=one")); got != 20 {
+		t.Fatalf("coordinator sees %d records, want 20 — the fan-out under test is not happening", got)
+	}
+
+	delete(h.remoteSearcher.nodes, "data-1")
+
+	resp, err := h.client.ExportToVault(context.Background(), connect.NewRequest(&gastrologv1.ExportToVaultRequest{
+		Expression: "src=one",
+		Target:     target.String(),
+	}))
+	if err != nil {
+		t.Fatalf("ExportToVault: %v", err)
+	}
+	job := waitForJob(t, h.jobSrv, resp.Msg.JobId)
+
+	if job.Status != gastrologv1.JobStatus_JOB_STATUS_FAILED {
+		t.Fatalf("export reported %v with a source node unreachable; it must fail rather than write a partial vault", job.Status)
+	}
+	if !strings.Contains(job.Error, "gather cluster records") {
+		t.Errorf("export error %q does not name the failed cluster gather", job.Error)
+	}
+	if job.RecordsDone != 0 {
+		t.Errorf("export wrote %d records before failing; the gather must fail before anything is appended", job.RecordsDone)
 	}
 }
 

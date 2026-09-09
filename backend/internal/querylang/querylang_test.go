@@ -504,14 +504,14 @@ func TestExprString(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"error", "token(error)"},
+		{"error", "error"},
 		{"level=error", "level=error"},
 		{"level=*", "level=*"},
 		{"*=error", "*=error"},
-		{"NOT error", "NOT token(error)"},
-		{"a AND b", "(token(a) AND token(b))"},
-		{"a OR b", "(token(a) OR token(b))"},
-		{`/error\d+/`, `regex(/error\d+/)`},
+		{"NOT error", "NOT error"},
+		{"a AND b", "(a AND b)"},
+		{"a OR b", "(a OR b)"},
+		{`/error\d+/`, `/error\d+/`},
 		// Values with special chars must be quoted to survive re-parsing.
 		{`key="Bearer ***"`, `key="Bearer ***"`},
 		{`key="hello world"`, `key="hello world"`},
@@ -900,9 +900,9 @@ func TestGlobExprString(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"error*", "glob(error*)"},
-		{"*timeout", "glob(*timeout)"},
-		{"err?r", "glob(err?r)"},
+		{"error*", "error*"},
+		{"*timeout", "*timeout"},
+		{"err?r", "err?r"},
 	}
 
 	for _, tt := range tests {
@@ -1316,12 +1316,12 @@ func TestParseExprPredicateBacktrackNoCompareOp(t *testing.T) {
 	t.Parallel()
 	// "len(foo)" without a comparison operator should backtrack.
 	// "len" becomes a token, "(foo)" becomes a grouped expression with token "foo".
-	// Result: implicit AND of token(len) and token(foo).
+	// Result: implicit AND of len and foo.
 	expr, err := Parse("len(foo)")
 	if err != nil {
 		t.Fatalf("Parse(\"len(foo)\") error: %v", err)
 	}
-	// Should be AND(token(len), token(foo)) since backtrack makes "len" a token
+	// Should be AND(len, foo) since backtrack makes "len" a token
 	// and "(foo)" a parenthesized group.
 	and, ok := expr.(*AndExpr)
 	if !ok {
@@ -1338,8 +1338,8 @@ func TestExprPredicateString(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"len(message) > 100", "expr(len(message)>100)"},
-		{"abs(value) = 0", "expr(abs(value)=0)"},
+		{"len(message) > 100", "len(message)>100"},
+		{"abs(value) = 0", "abs(value)=0"},
 	}
 
 	for _, tt := range tests {

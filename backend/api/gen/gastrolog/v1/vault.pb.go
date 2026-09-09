@@ -2425,8 +2425,11 @@ type ValidateVaultResponse struct {
 	// hosts this vault, so `valid` describes a partial view. Absent on the
 	// happy path.
 	ContributionReport *ContributionReport `protobuf:"bytes,4,opt,name=contribution_report,json=contributionReport,proto3" json:"contribution_report,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Findings about the vault as a whole that no single chunk can be blamed
+	// for, such as a search across it failing.
+	Issues        []string `protobuf:"bytes,5,rep,name=issues,proto3" json:"issues,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ValidateVaultResponse) Reset() {
@@ -2483,6 +2486,13 @@ func (x *ValidateVaultResponse) GetCloudIndexAudits() []*CloudIndexAudit {
 func (x *ValidateVaultResponse) GetContributionReport() *ContributionReport {
 	if x != nil {
 		return x.ContributionReport
+	}
+	return nil
+}
+
+func (x *ValidateVaultResponse) GetIssues() []string {
+	if x != nil {
+		return x.Issues
 	}
 	return nil
 }
@@ -4288,7 +4298,7 @@ var File_gastrolog_v1_vault_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\n" +
-	"\x18gastrolog/v1/vault.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x13\n" +
+	"\x18gastrolog/v1/vault.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18gastrolog/v1/authz.proto\"\x13\n" +
 	"\x11ListVaultsRequest\"E\n" +
 	"\x12ListVaultsResponse\x12/\n" +
 	"\x06vaults\x18\x01 \x03(\v2\x17.gastrolog.v1.VaultInfoR\x06vaults\"\xbc\x02\n" +
@@ -4473,12 +4483,13 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x14ReindexVaultResponse\x12\x15\n" +
 	"\x06job_id\x18\x04 \x01(\fR\x05jobId\",\n" +
 	"\x14ValidateVaultRequest\x12\x14\n" +
-	"\x05vault\x18\x01 \x01(\tR\x05vault\"\x84\x02\n" +
+	"\x05vault\x18\x01 \x01(\tR\x05vault\"\x9c\x02\n" +
 	"\x15ValidateVaultResponse\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x125\n" +
 	"\x06chunks\x18\x02 \x03(\v2\x1d.gastrolog.v1.ChunkValidationR\x06chunks\x12K\n" +
 	"\x12cloud_index_audits\x18\x03 \x03(\v2\x1d.gastrolog.v1.CloudIndexAuditR\x10cloudIndexAudits\x12Q\n" +
-	"\x13contribution_report\x18\x04 \x01(\v2 .gastrolog.v1.ContributionReportR\x12contributionReport\"s\n" +
+	"\x13contribution_report\x18\x04 \x01(\v2 .gastrolog.v1.ContributionReportR\x12contributionReport\x12\x16\n" +
+	"\x06issues\x18\x05 \x03(\tR\x06issues\"s\n" +
 	"\x0fChunkValidation\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12\x14\n" +
 	"\x05valid\x18\x02 \x01(\bR\x05valid\x12\x16\n" +
@@ -4630,30 +4641,30 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x18CHUNK_CHANGE_OP_PROGRESS\x10\x02\x12\x1a\n" +
 	"\x16CHUNK_CHANGE_OP_SEALED\x10\x03\x12\x1b\n" +
 	"\x17CHUNK_CHANGE_OP_DELETED\x10\x04\x12\x1c\n" +
-	"\x18CHUNK_CHANGE_OP_UPLOADED\x10\x052\x96\r\n" +
-	"\fVaultService\x12O\n" +
+	"\x18CHUNK_CHANGE_OP_UPLOADED\x10\x052\x88\x0e\n" +
+	"\fVaultService\x12U\n" +
 	"\n" +
-	"ListVaults\x12\x1f.gastrolog.v1.ListVaultsRequest\x1a .gastrolog.v1.ListVaultsResponse\x12I\n" +
-	"\bGetVault\x12\x1d.gastrolog.v1.GetVaultRequest\x1a\x1e.gastrolog.v1.GetVaultResponse\x12O\n" +
+	"ListVaults\x12\x1f.gastrolog.v1.ListVaultsRequest\x1a .gastrolog.v1.ListVaultsResponse\"\x04\x80\xb5\x18\x03\x12O\n" +
+	"\bGetVault\x12\x1d.gastrolog.v1.GetVaultRequest\x1a\x1e.gastrolog.v1.GetVaultResponse\"\x04\x80\xb5\x18\x03\x12U\n" +
 	"\n" +
-	"ListChunks\x12\x1f.gastrolog.v1.ListChunksRequest\x1a .gastrolog.v1.ListChunksResponse\x12I\n" +
-	"\bGetChunk\x12\x1d.gastrolog.v1.GetChunkRequest\x1a\x1e.gastrolog.v1.GetChunkResponse\x12O\n" +
+	"ListChunks\x12\x1f.gastrolog.v1.ListChunksRequest\x1a .gastrolog.v1.ListChunksResponse\"\x04\x80\xb5\x18\x03\x12O\n" +
+	"\bGetChunk\x12\x1d.gastrolog.v1.GetChunkRequest\x1a\x1e.gastrolog.v1.GetChunkResponse\"\x04\x80\xb5\x18\x03\x12U\n" +
 	"\n" +
-	"GetIndexes\x12\x1f.gastrolog.v1.GetIndexesRequest\x1a .gastrolog.v1.GetIndexesResponse\x12U\n" +
-	"\fAnalyzeChunk\x12!.gastrolog.v1.AnalyzeChunkRequest\x1a\".gastrolog.v1.AnalyzeChunkResponse\x12I\n" +
-	"\bGetStats\x12\x1d.gastrolog.v1.GetStatsRequest\x1a\x1e.gastrolog.v1.GetStatsResponse\x12U\n" +
-	"\fReindexVault\x12!.gastrolog.v1.ReindexVaultRequest\x1a\".gastrolog.v1.ReindexVaultResponse\x12X\n" +
-	"\rValidateVault\x12\".gastrolog.v1.ValidateVaultRequest\x1a#.gastrolog.v1.ValidateVaultResponse\x12j\n" +
-	"\x13ReconcileCloudIndex\x12(.gastrolog.v1.ReconcileCloudIndexRequest\x1a).gastrolog.v1.ReconcileCloudIndexResponse\x12T\n" +
-	"\vExportVault\x12 .gastrolog.v1.ExportVaultRequest\x1a!.gastrolog.v1.ExportVaultResponse0\x01\x12X\n" +
-	"\rImportRecords\x12\".gastrolog.v1.ImportRecordsRequest\x1a#.gastrolog.v1.ImportRecordsResponse\x12L\n" +
-	"\tSealVault\x12\x1e.gastrolog.v1.SealVaultRequest\x1a\x1f.gastrolog.v1.SealVaultResponse\x12p\n" +
-	"\x15RetryUnreadableChunks\x12*.gastrolog.v1.RetryUnreadableChunksRequest\x1a+.gastrolog.v1.RetryUnreadableChunksResponse\x12U\n" +
-	"\fArchiveChunk\x12!.gastrolog.v1.ArchiveChunkRequest\x1a\".gastrolog.v1.ArchiveChunkResponse\x12U\n" +
-	"\fRestoreChunk\x12!.gastrolog.v1.RestoreChunkRequest\x1a\".gastrolog.v1.RestoreChunkResponse\x12T\n" +
-	"\vWatchChunks\x12 .gastrolog.v1.WatchChunksRequest\x1a!.gastrolog.v1.WatchChunksResponse0\x01\x12a\n" +
-	"\x10RepatriateOrphan\x12%.gastrolog.v1.RepatriateOrphanRequest\x1a&.gastrolog.v1.RepatriateOrphanResponse\x12g\n" +
-	"\x12GetPipelineBacklog\x12'.gastrolog.v1.GetPipelineBacklogRequest\x1a(.gastrolog.v1.GetPipelineBacklogResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"GetIndexes\x12\x1f.gastrolog.v1.GetIndexesRequest\x1a .gastrolog.v1.GetIndexesResponse\"\x04\x80\xb5\x18\x03\x12[\n" +
+	"\fAnalyzeChunk\x12!.gastrolog.v1.AnalyzeChunkRequest\x1a\".gastrolog.v1.AnalyzeChunkResponse\"\x04\x80\xb5\x18\x03\x12O\n" +
+	"\bGetStats\x12\x1d.gastrolog.v1.GetStatsRequest\x1a\x1e.gastrolog.v1.GetStatsResponse\"\x04\x80\xb5\x18\x03\x12[\n" +
+	"\fReindexVault\x12!.gastrolog.v1.ReindexVaultRequest\x1a\".gastrolog.v1.ReindexVaultResponse\"\x04\x80\xb5\x18\x03\x12^\n" +
+	"\rValidateVault\x12\".gastrolog.v1.ValidateVaultRequest\x1a#.gastrolog.v1.ValidateVaultResponse\"\x04\x80\xb5\x18\x03\x12p\n" +
+	"\x13ReconcileCloudIndex\x12(.gastrolog.v1.ReconcileCloudIndexRequest\x1a).gastrolog.v1.ReconcileCloudIndexResponse\"\x04\x80\xb5\x18\x03\x12Z\n" +
+	"\vExportVault\x12 .gastrolog.v1.ExportVaultRequest\x1a!.gastrolog.v1.ExportVaultResponse\"\x04\x80\xb5\x18\x030\x01\x12^\n" +
+	"\rImportRecords\x12\".gastrolog.v1.ImportRecordsRequest\x1a#.gastrolog.v1.ImportRecordsResponse\"\x04\x80\xb5\x18\x03\x12R\n" +
+	"\tSealVault\x12\x1e.gastrolog.v1.SealVaultRequest\x1a\x1f.gastrolog.v1.SealVaultResponse\"\x04\x80\xb5\x18\x03\x12v\n" +
+	"\x15RetryUnreadableChunks\x12*.gastrolog.v1.RetryUnreadableChunksRequest\x1a+.gastrolog.v1.RetryUnreadableChunksResponse\"\x04\x80\xb5\x18\x03\x12[\n" +
+	"\fArchiveChunk\x12!.gastrolog.v1.ArchiveChunkRequest\x1a\".gastrolog.v1.ArchiveChunkResponse\"\x04\x80\xb5\x18\x03\x12[\n" +
+	"\fRestoreChunk\x12!.gastrolog.v1.RestoreChunkRequest\x1a\".gastrolog.v1.RestoreChunkResponse\"\x04\x80\xb5\x18\x03\x12Z\n" +
+	"\vWatchChunks\x12 .gastrolog.v1.WatchChunksRequest\x1a!.gastrolog.v1.WatchChunksResponse\"\x04\x80\xb5\x18\x020\x01\x12g\n" +
+	"\x10RepatriateOrphan\x12%.gastrolog.v1.RepatriateOrphanRequest\x1a&.gastrolog.v1.RepatriateOrphanResponse\"\x04\x80\xb5\x18\x03\x12m\n" +
+	"\x12GetPipelineBacklog\x12'.gastrolog.v1.GetPipelineBacklogRequest\x1a(.gastrolog.v1.GetPipelineBacklogResponse\"\x04\x80\xb5\x18\x02B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_vault_proto_rawDescOnce sync.Once
@@ -4838,6 +4849,7 @@ func file_gastrolog_v1_vault_proto_init() {
 	if File_gastrolog_v1_vault_proto != nil {
 		return
 	}
+	file_gastrolog_v1_authz_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

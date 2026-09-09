@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"gastrolog/internal/glid"
+	"iter"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -351,13 +353,13 @@ func TestPipelineNeedsGlobalRecords(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "stats with avg is non-distributive",
+			name: "stats with avg combines from per-node sums and counts",
 			ops: []querylang.PipeOp{
 				&querylang.StatsOp{Aggs: []querylang.AggExpr{
 					{Func: "avg", Arg: &querylang.FieldRef{Name: "duration"}},
 				}},
 			},
-			want: true,
+			want: false,
 		},
 		{
 			name: "stats with dcount is non-distributive",
@@ -392,7 +394,7 @@ func TestPipelineNeedsGlobalRecords(t *testing.T) {
 			ops: []querylang.PipeOp{
 				&querylang.StatsOp{Aggs: []querylang.AggExpr{
 					{Func: "count"},
-					{Func: "avg", Arg: &querylang.FieldRef{Name: "duration"}},
+					{Func: "dcount", Arg: &querylang.FieldRef{Name: "duration"}},
 				}},
 			},
 			want: true,
@@ -410,7 +412,19 @@ func TestPipelineNeedsGlobalRecords(t *testing.T) {
 	}
 }
 
-func TestRunPipelineOnRecords(t *testing.T) {
+// recordSeq presents a slice of records as the ordered stream a remote node
+// would produce.
+func recordSeq(records []chunk.Record) iter.Seq2[chunk.Record, error] {
+	return func(yield func(chunk.Record, error) bool) {
+		for _, rec := range records {
+			if !yield(rec, nil) {
+				return
+			}
+		}
+	}
+}
+
+func TestRunPipelineWithRemote(t *testing.T) {
 	// Set up a single-vault engine with 20 local records.
 	vaultID := glid.New()
 	s := memtest.MustNewVault(t, chunkmem.Config{
@@ -462,9 +476,9 @@ func TestRunPipelineOnRecords(t *testing.T) {
 		End:   t0.Add(60 * time.Minute),
 	}
 
-	result, err := eng.RunPipelineOnRecords(context.Background(), q, pipeline, extra)
+	result, err := eng.RunPipelineWithRemote(context.Background(), q, pipeline, recordSeq(extra), query.NewBudget())
 	if err != nil {
-		t.Fatalf("RunPipelineOnRecords: %v", err)
+		t.Fatalf("RunPipelineWithRemote: %v", err)
 	}
 	if result.Table == nil {
 		t.Fatal("expected table result")
@@ -480,5 +494,23 @@ func TestRunPipelineOnRecords(t *testing.T) {
 	}
 	if count != 10 {
 		t.Errorf("stats count = %d, want 10 (head should cap merged records)", count)
+	}
+
+	// The cap must also select the right records: local and remote interleave
+	// every 30s, so the first ten alternate between the two sources. A head
+	// that ran per-source instead of over the merged stream would return ten
+	// local records here.
+	headOnly := &querylang.Pipeline{Pipes: []querylang.PipeOp{&querylang.HeadOp{N: 10}}}
+	result, err = eng.RunPipelineWithRemote(context.Background(), q, headOnly, recordSeq(extra), query.NewBudget())
+	if err != nil {
+		t.Fatalf("RunPipelineWithRemote head-only: %v", err)
+	}
+	var got []string
+	for _, rec := range result.Records {
+		got = append(got, string(rec.Raw))
+	}
+	want := []string{"local-0", "remote-0", "local-1", "remote-1", "local-2", "remote-2", "local-3", "remote-3", "local-4", "remote-4"}
+	if !slices.Equal(got, want) {
+		t.Errorf("head 10 over the merged stream = %v, want %v", got, want)
 	}
 }

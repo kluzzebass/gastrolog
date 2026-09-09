@@ -898,9 +898,11 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	}
 	qe := query.New(cm, im, qeLogger)
 
-	// Post-seal index builds disabled for pipeline soak — re-enable before shipping.
+	// The index manager builds a sealed chunk's secondary indexes; the
+	// chunk manager carries it as its post-seal builder, and the startup
+	// missing-index sweep only visits vaults whose chunk manager has one.
 	if processor, ok := cm.(chunk.ChunkPostSealProcessor); ok {
-		processor.SetIndexBuilders(nil)
+		processor.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
 	}
 
 	ti := &VaultInstance{
@@ -1012,7 +1014,7 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 	qe := query.New(cm, im, qeLogger)
 
 	if processor, ok := cm.(chunk.ChunkPostSealProcessor); ok {
-		processor.SetIndexBuilders(nil)
+		processor.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
 	}
 
 	ti := &VaultInstance{

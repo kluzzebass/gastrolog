@@ -14,16 +14,34 @@ import (
 
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/ingester/bodyutil"
+	"gastrolog/internal/ingester/limits"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
 	"gastrolog/internal/pipeline/ingestion"
 )
 
-// Attribute limits to prevent abuse.
+// maxPushBodyBytes bounds one push request after decompression. Loki
+// senders batch to a few megabytes at most; the ceiling is what stops a
+// small compressed payload from expanding into the node's memory.
+const maxPushBodyBytes = 10 << 20
+
+// Transport-level timeouts, bounding a client that opens a connection and
+// never finishes it (headers, body, or response read) before the pipeline
+// ever sees a message. Unlike the main API server, this ingester has no
+// long-lived streaming responses — every push is a single request/response
+// — so WriteTimeout is safe to set here. WriteTimeout is reset when the
+// request header finishes reading, so its clock also runs across the
+// X-Wait-Ack path's wait for persistence (sendAcked blocking on ackCh).
+// That wait is not itself interrupted by the deadline — the handler stays
+// parked on ackCh regardless. What the deadline changes is the connection:
+// once it elapses the server drops it, so a shipper waiting past this
+// bound sees a failed request and retries, which can double-ingest the
+// message if it had already reached the pipeline before the ack was lost.
 const (
-	maxAttrs        = 32  // maximum number of attributes per message
-	maxAttrKeyLen   = 64  // maximum length of attribute key
-	maxAttrValueLen = 256 // maximum length of attribute value
+	readHeaderTimeout = 10 * time.Second
+	readTimeout       = 30 * time.Second // bodies capped at 10MiB (bodyutil.ReadBody)
+	writeTimeout      = 30 * time.Second
+	idleTimeout       = 120 * time.Second
 )
 
 // Ingester accepts log messages via the Loki Push API (POST /loki/api/v1/push).
@@ -95,7 +113,10 @@ func (r *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage
 
 	r.server = &http.Server{
 		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 
 	// Create listener.
@@ -186,8 +207,11 @@ func (r *Ingester) handlePush(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Ingester) decodePushBody(w http.ResponseWriter, req *http.Request) ([]ingestion.IngesterMessage, bool) {
-	data, err := bodyutil.ReadBody(req.Body, req.Header.Get("Content-Encoding"), 10<<20)
+	data, err := bodyutil.ReadBody(req.Body, req.Header.Get("Content-Encoding"), maxPushBodyBytes)
 	if err != nil {
+		// A rejected body means the sender's records did not land. Say so
+		// on both sides rather than only answering 400.
+		r.logger.Warn("push body rejected", "error", err, "remote", req.RemoteAddr)
 		http.Error(w, "failed to read body: "+err.Error(), http.StatusBadRequest)
 		return nil, false
 	}
@@ -290,9 +314,9 @@ func (r *Ingester) parseValue(val Value, streamLabels map[string]string) (ingest
 	}
 
 	// Build attrs from stream labels (with validation).
-	attrs := make(map[string]string, min(len(streamLabels), maxAttrs))
+	attrs := make(map[string]string, min(len(streamLabels), limits.Labels.Count))
 	for k, v := range streamLabels {
-		if err := addAttr(attrs, k, v); err != nil {
+		if err := limits.Labels.Add(attrs, k, v); err != nil {
 			return ingestion.IngesterMessage{}, fmt.Errorf("stream label: %w", err)
 		}
 	}
@@ -304,7 +328,7 @@ func (r *Ingester) parseValue(val Value, streamLabels map[string]string) (ingest
 			return ingestion.IngesterMessage{}, fmt.Errorf("metadata must be an object: %w", err)
 		}
 		for k, v := range metadata {
-			if err := addAttr(attrs, k, v); err != nil {
+			if err := limits.Labels.Add(attrs, k, v); err != nil {
 				return ingestion.IngesterMessage{}, fmt.Errorf("metadata: %w", err)
 			}
 		}
@@ -320,19 +344,4 @@ func (r *Ingester) parseValue(val Value, streamLabels map[string]string) (ingest
 		IngestTS:   time.Now(),
 		IngesterID: r.id,
 	}, nil
-}
-
-// addAttr adds an attribute with validation. Returns error if limits exceeded.
-func addAttr(attrs map[string]string, key, value string) error {
-	if len(attrs) >= maxAttrs {
-		return fmt.Errorf("too many attributes (max %d)", maxAttrs)
-	}
-	if len(key) > maxAttrKeyLen {
-		return fmt.Errorf("attribute key too long: %d > %d", len(key), maxAttrKeyLen)
-	}
-	if len(value) > maxAttrValueLen {
-		return fmt.Errorf("attribute value too long: %d > %d", len(value), maxAttrValueLen)
-	}
-	attrs[key] = value
-	return nil
 }

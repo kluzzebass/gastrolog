@@ -19,8 +19,9 @@ import (
 	"gastrolog/internal/tokenizer"
 )
 
-// kvExtractors is the default set of KV extractors used by runtime filters.
-// Must match the extractors registered in the KV indexer factories.
+// kvExtractors is the set of KV extractors runtime filters apply. The KV
+// indexer factories take theirs from the same tokenizer.DefaultExtractors, so
+// the index and the filter agree by construction.
 var kvExtractors = tokenizer.DefaultExtractors()
 
 // pipeEval is a shared, stateless evaluator for expression predicates.
@@ -450,6 +451,26 @@ func seekAndRead(cursor chunk.RecordCursor, chunkID chunk.ChunkID, pos uint64) (
 }
 
 // applyFilters returns true if the record passes all filters.
+// resumeAfterFilter keeps only records strictly after the query's resume
+// cursor in canonical order on the OrderBy axis. When either side carries no
+// ingester identity, ties cannot be ordered: records at the boundary
+// timestamp are kept rather than dropped.
+func resumeAfterFilter(q Query) recordFilter {
+	last := chunk.Record{EventID: q.ResumeAfterEvent, IngestTS: q.ResumeAfterTS, SourceTS: q.ResumeAfterTS}
+	reverse := q.Reverse()
+	cursorHasIdentity := !last.EventID.IngesterID.IsZero()
+	return func(rec chunk.Record) bool {
+		if !cursorHasIdentity || rec.EventID.IngesterID.IsZero() {
+			ts := q.OrderBy.RecordTS(rec)
+			if reverse {
+				return !ts.After(q.ResumeAfterTS)
+			}
+			return !ts.Before(q.ResumeAfterTS)
+		}
+		return q.OrderBy.CompareRecords(rec, last, reverse) > 0
+	}
+}
+
 func applyFilters(rec chunk.Record, filters []recordFilter) bool {
 	for _, f := range filters {
 		if !f(rec) {
@@ -580,7 +601,7 @@ func matchesKeyValue(rec chunk.Record, queryFilters []KeyValueFilter) bool {
 	cache := newMsgPairCache(rec.Raw)
 
 	for _, f := range queryFilters {
-		if f.Key == "" && f.Value == "" {
+		if f.Key == "" && f.AnyValue {
 			continue
 		}
 		if v, ok := firstClassFieldValue(f.Key, rec); ok {
@@ -598,8 +619,8 @@ func matchesKeyValue(rec chunk.Record, queryFilters []KeyValueFilter) bool {
 
 // matchFirstClassFilter checks if a first-class field value matches a filter.
 func matchFirstClassFilter(v string, f KeyValueFilter) bool {
-	if f.Value == "" || f.Value == "*" {
-		return true // key-exists check
+	if f.AnyValue {
+		return true
 	}
 	// Timestamp fields need parse-based comparison because different
 	// formatters produce different precision (Go: nanoseconds via
@@ -718,7 +739,7 @@ func firstClassFieldValue(key string, rec chunk.Record) (string, bool) {
 // matching strategy. Returns true if the filter matched.
 func matchesSingleKVFilter(recAttrs chunk.Attributes, raw []byte, cache *msgPairCache, f KeyValueFilter) bool {
 	switch {
-	case f.Value == "":
+	case f.AnyValue:
 		return matchesKVKeyOnly(recAttrs, raw, cache, f)
 	case f.Key == "":
 		return matchesKVValueOnly(recAttrs, cache, f)
@@ -1094,7 +1115,7 @@ func applyKeyValueIndex(b *scannerBuilder, indexes index.IndexManager, chunkID c
 	// For each filter, union positions from both attr and kv indexes.
 	// Across filters, intersect positions.
 	for _, f := range filters {
-		if f.Key == "" && f.Value == "" {
+		if f.Key == "" && f.AnyValue {
 			continue
 		}
 
@@ -1120,7 +1141,7 @@ func applyKeyValueIndex(b *scannerBuilder, indexes index.IndexManager, chunkID c
 // and returns the union of positions from all applicable indexes.
 func kvIndexFilterPositions(s *kvIndexSet, f KeyValueFilter) []uint64 {
 	switch {
-	case f.Value == "":
+	case f.AnyValue:
 		return kvIndexKeyOnly(s, f)
 	case f.Key == "":
 		return kvIndexValueOnly(s, f)
@@ -1259,7 +1280,7 @@ func ConjunctionToFilters(conj *querylang.Conjunction) (tokens []string, kv []Ke
 		case querylang.PredKV:
 			kv = append(kv, KeyValueFilter{Key: p.Key, Value: p.Value, KeyPat: p.KeyPat, ValuePat: p.ValuePat, Op: p.Op})
 		case querylang.PredKeyExists:
-			kv = append(kv, KeyValueFilter{Key: p.Key, Value: "", KeyPat: p.KeyPat})
+			kv = append(kv, KeyValueFilter{Key: p.Key, AnyValue: true, KeyPat: p.KeyPat})
 		case querylang.PredValueExists:
 			kv = append(kv, KeyValueFilter{Key: "", Value: p.Value, ValuePat: p.ValuePat})
 		case querylang.PredRegex:

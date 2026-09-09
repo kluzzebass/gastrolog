@@ -10,7 +10,15 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"gastrolog/internal/safefetch"
 )
+
+// loopbackClient reaches the loopback test server the way an operator-permitted
+// private destination would; the production download uses the default policy.
+func loopbackClient() *http.Client {
+	return safefetch.Client(safefetch.Policy{AllowPrivate: true}, 0)
+}
 
 func TestDownloadDB(t *testing.T) {
 	t.Parallel()
@@ -54,10 +62,10 @@ func TestDownloadDB(t *testing.T) {
 	})
 
 	t.Run("DownloadDB_integration", func(t *testing.T) {
-		// Use downloadDBWithURL to test full flow with our test server.
-		err := downloadDBWithURL(context.Background(), "123456", "test-license-key", "GeoLite2-City", destDir, srv.URL)
+		// Use downloadDBWithClient to test full flow with our test server.
+		err := downloadDBWithClient(context.Background(), "123456", "test-license-key", "GeoLite2-City", destDir, srv.URL, loopbackClient())
 		if err != nil {
-			t.Fatalf("downloadDBWithURL: %v", err)
+			t.Fatalf("downloadDBWithClient: %v", err)
 		}
 		finalPath := filepath.Join(destDir, "GeoLite2-City.mmdb")
 		got, err := os.ReadFile(finalPath)
@@ -70,7 +78,7 @@ func TestDownloadDB(t *testing.T) {
 	})
 
 	t.Run("DownloadDB_bad_auth", func(t *testing.T) {
-		err := downloadDBWithURL(context.Background(), "wrong", "wrong", "GeoLite2-City", t.TempDir(), srv.URL)
+		err := downloadDBWithClient(context.Background(), "wrong", "wrong", "GeoLite2-City", t.TempDir(), srv.URL, loopbackClient())
 		if err == nil {
 			t.Fatal("expected error for bad auth")
 		}

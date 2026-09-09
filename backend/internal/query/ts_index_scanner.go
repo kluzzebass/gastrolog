@@ -103,7 +103,7 @@ func tsIndexRankBounds(view tsIndexView, chunkID chunk.ChunkID, q Query) (start,
 	}
 
 	start = 0
-	lower, upper := q.TimeBounds()
+	lower, upper := q.OrderBounds()
 	if !lower.IsZero() {
 		r, found, err := view.findRank(chunkID, lower)
 		if err != nil {
@@ -286,8 +286,12 @@ func yieldMmapTSIndexRank(
 	if !applyFilters(rec, filters) {
 		return nil
 	}
+	// The ingest window applies to IngestTS whatever the ordering; the source
+	// window is one of the record filters above. Follow's resume timestamp is
+	// on the ordering axis.
 	lower, upper := q.TimeBounds()
-	if !mmapRecordVisible(q.OrderBy.RecordTS(rec), lower, upper, q.ResumeTS, q.Reverse()) {
+	if !mmapRecordVisible(rec.IngestTS, lower, upper, time.Time{}, false) ||
+		!mmapRecordVisible(q.OrderBy.RecordTS(rec), time.Time{}, time.Time{}, q.ResumeTS, q.Reverse()) {
 		return nil
 	}
 	if !yield(recordWithRef{VaultID: vaultID, Record: rec, Ref: ref, Reordered: true}, nil) {

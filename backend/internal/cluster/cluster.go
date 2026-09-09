@@ -388,6 +388,21 @@ func (s *Server) AddNonvoter(id, addr string, timeout time.Duration) error {
 	return s.raft.AddNonvoter(hraft.ServerID(id), hraft.ServerAddress(addr), 0, timeout).Error()
 }
 
+// Removal refusals and misses. Wrapped by the removal path so the RPC layer
+// can answer with FailedPrecondition or NotFound without reading message
+// text, and so the CLI can tell an already-gone node from a failure.
+var (
+	// ErrWouldDropBelowRF is the sentinel wrapped by every RF-preservation
+	// refusal: the removal would drop a vault below its replication factor.
+	ErrWouldDropBelowRF = errors.New("removal would drop a vault below its replication factor")
+	// ErrWouldOrphanVaults is the sentinel wrapped by every orphan refusal:
+	// the removal would leave a vault with no holder at all.
+	ErrWouldOrphanVaults = errors.New("removal would orphan a vault")
+	// ErrNodeNotInCluster is returned when the node named is not in the
+	// Raft configuration.
+	ErrNodeNotInCluster = errors.New("node not in cluster configuration")
+)
+
 // DemoteVoter demotes an existing voter to a nonvoter.
 // The node continues receiving log replication but no longer participates in elections.
 func (s *Server) DemoteVoter(id string, timeout time.Duration) error {
@@ -630,7 +645,7 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) startCombined() error {
-	opts := s.baseServerOpts(maxChunkTransferBytes, true)
+	opts := s.baseServerOpts(maxChunkTransferBytes)
 	s.grpcSrv = grpc.NewServer(opts...)
 	s.tm.Register(s.grpcSrv)
 	if s.raft != nil {
@@ -646,7 +661,7 @@ func (s *Server) startWithLaneIsolation() error {
 	s.tm.SetInboundLaneRegistry(registry)
 	s.sniDemux = newSNIDemuxListener(s.listener, registry)
 
-	serviceOpts := s.baseServerOpts(maxChunkTransferBytes, true)
+	serviceOpts := s.baseServerOpts(maxChunkTransferBytes)
 	s.grpcSrv = grpc.NewServer(serviceOpts...)
 	if s.raft != nil {
 		raftadmin.Register(s.grpcSrv, s.raft)
@@ -682,11 +697,7 @@ func (s *Server) EnsureRaftGroupLane(groupID string) error {
 	// Register transport group state before serving inbound RPCs so demuxed
 	// connections never hit dispatchRPC with an unregistered group.
 	s.tm.GroupTransport(groupID)
-	raftOpts := append(s.baseServerOpts(maxRaftLaneRecvBytes, false),
-		grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor),
-		grpc.ChainStreamInterceptor(s.pauseStreamInterceptor),
-	)
-	srv := grpc.NewServer(raftOpts...)
+	srv := grpc.NewServer(s.baseServerOpts(maxRaftLaneRecvBytes)...)
 	s.tm.RegisterGroup(srv, groupID)
 	s.raftGroupServers[groupID] = srv
 	return s.serveListener(ln, srv, "cluster-raft-"+groupID)
@@ -706,20 +717,23 @@ func (s *Server) RemoveRaftGroupLane(groupID string) {
 	}
 }
 
-func (s *Server) baseServerOpts(maxRecv int, fullInterceptors bool) []grpc.ServerOption {
+// baseServerOpts builds the options shared by every inbound gRPC stack on the
+// cluster port. Under TLS every stack — service lane and raft lanes alike —
+// gets the mTLS interceptors: hashicorp/raft authenticates no peer of its own,
+// so without them an uncredentialed dial to a lane commits entries to the
+// replicated FSM.
+func (s *Server) baseServerOpts(maxRecv int) []grpc.ServerOption {
 	var opts []grpc.ServerOption
 	opts = append(opts, grpc.MaxRecvMsgSize(maxRecv))
 
 	if s.cfg.TLS != nil {
 		tlsCfg := s.cfg.TLS.ServerTLSConfig()
-		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsCfg)))
-		if fullInterceptors {
-			opts = append(opts,
-				grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor, s.mTLSUnaryInterceptor),
-				grpc.ChainStreamInterceptor(s.pauseStreamInterceptor, s.mTLSStreamInterceptor),
-			)
-		}
-	} else if fullInterceptors {
+		opts = append(opts,
+			grpc.Creds(credentials.NewTLS(tlsCfg)),
+			grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor, s.mTLSUnaryInterceptor),
+			grpc.ChainStreamInterceptor(s.pauseStreamInterceptor, s.mTLSStreamInterceptor),
+		)
+	} else {
 		opts = append(opts,
 			grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor),
 			grpc.ChainStreamInterceptor(s.pauseStreamInterceptor),

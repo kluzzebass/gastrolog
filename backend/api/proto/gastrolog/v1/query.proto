@@ -5,44 +5,63 @@ package gastrolog.v1;
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
 import "google/protobuf/timestamp.proto";
+import "gastrolog/v1/authz.proto";
 import "gastrolog/v1/vault.proto"; // ContributionReport for partial fan-out merges
 
 // QueryService provides log querying capabilities.
 service QueryService {
   // Search executes a query and streams matching records.
-  rpc Search(SearchRequest) returns (stream SearchResponse);
+  rpc Search(SearchRequest) returns (stream SearchResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // Follow executes a query and streams matching records, then continues
   // streaming new records as they arrive (like tail -f).
-  rpc Follow(FollowRequest) returns (stream FollowResponse);
+  rpc Follow(FollowRequest) returns (stream FollowResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // Explain returns the query execution plan without executing.
-  rpc Explain(ExplainRequest) returns (ExplainResponse);
+  rpc Explain(ExplainRequest) returns (ExplainResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // GetContext returns records surrounding a specific record, across all vaults.
   // Uses the anchor record's write timestamp to find nearby records.
-  rpc GetContext(GetContextRequest) returns (GetContextResponse);
+  rpc GetContext(GetContextRequest) returns (GetContextResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // GetSyntax returns the query language keyword sets for frontend tokenization.
   // Called once at startup so the frontend stays in sync with the backend.
-  rpc GetSyntax(GetSyntaxRequest) returns (GetSyntaxResponse);
+  rpc GetSyntax(GetSyntaxRequest) returns (GetSyntaxResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // ValidateQuery checks whether a query expression is syntactically valid.
   // Returns the first error position and message if invalid.
-  rpc ValidateQuery(ValidateQueryRequest) returns (ValidateQueryResponse);
+  rpc ValidateQuery(ValidateQueryRequest) returns (ValidateQueryResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // GetPipelineFields returns the available fields and completions at a
   // given cursor position within a pipeline expression.
-  rpc GetPipelineFields(GetPipelineFieldsRequest) returns (GetPipelineFieldsResponse);
+  rpc GetPipelineFields(GetPipelineFieldsRequest) returns (GetPipelineFieldsResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // GetFields samples matching records and extracts field names with value
   // distributions using the backend's full extractor suite (KV, logfmt,
   // access log). Replaces the frontend's client-side field extraction.
-  rpc GetFields(GetFieldsRequest) returns (GetFieldsResponse);
+  rpc GetFields(GetFieldsRequest) returns (GetFieldsResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // ExportToVault materializes search results into a target vault as a
   // background job. Returns a job ID for progress tracking.
-  rpc ExportToVault(ExportToVaultRequest) returns (ExportToVaultResponse);
+  rpc ExportToVault(ExportToVaultRequest) returns (ExportToVaultResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 }
 
 message SearchRequest {
@@ -193,12 +212,24 @@ message ResumeToken {
   // shifting between pages.
   google.protobuf.Timestamp frozen_start = 2;
   google.protobuf.Timestamp frozen_end = 3;
-  // Highwater TS from the last emitted record. Acts as an exclusive
-  // boundary on the next page (reverse: upper bound; forward: lower
-  // bound) so pagination survives mid-scroll chunk lifecycle (seal,
-  // transition, retention) without re-emitting already-seen records,
-  // even when per-chunk positions become stale and unusable.
+  // Timestamp of the last record the previous page emitted, on the query's
+  // ordering axis. The next page bounds its scan at this instant inclusively
+  // and skips everything at or before highwater_event in canonical order, so
+  // records sharing the boundary timestamp are neither repeated nor lost.
+  // Survives mid-scroll chunk lifecycle (seal, transition, retention) even
+  // when per-chunk positions become stale and unusable.
   google.protobuf.Timestamp highwater_ts = 4;
+  // Identity of the record highwater_ts was taken from. With the timestamp
+  // it names one canonical position: (timestamp, then EventID order).
+  ResumeCursorEvent highwater_event = 5;
+}
+
+// ResumeCursorEvent is the EventID of the record a resume token points at.
+message ResumeCursorEvent {
+  bytes ingester_id = 1;
+  bytes node_id = 2;
+  google.protobuf.Timestamp ingest_ts = 3;
+  uint32 ingest_seq = 4;
 }
 
 // InnerVaultToken is the serialized per-vault resume state.
@@ -211,10 +242,6 @@ message VaultPosition {
   bytes vault_id = 1;
   bytes chunk_id = 2;
   uint64 position = 3; // MaxUint64 indicates chunk is exhausted
-  // resume_ts is used instead of position for chunks without TS indexes
-  // (e.g., cloud-backed). On resume, the scanner re-reads the chunk and
-  // skips records already past this timestamp.
-  google.protobuf.Timestamp resume_ts = 4;
 }
 
 message ChunkPlan {

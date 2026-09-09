@@ -86,10 +86,15 @@ type PredicateExpr struct {
 
 func (PredicateExpr) expr() {}
 
+// String prints the predicate in query syntax. The result is what the
+// coordinator forwards to remote nodes, so it must parse back to the same
+// predicate: values are quoted whenever the lexer could not read them back as
+// a bareword, and glob patterns stay unquoted so their metacharacters keep
+// their meaning.
 func (p *PredicateExpr) String() string {
 	switch p.Kind {
 	case PredToken:
-		return fmt.Sprintf("token(%s)", p.Value)
+		return quoteIfNeeded(p.Value)
 	case PredKV:
 		key := p.Key
 		if p.KeyPat == nil {
@@ -99,47 +104,44 @@ func (p *PredicateExpr) String() string {
 		if p.ValuePat == nil {
 			val = quoteIfNeeded(val)
 		}
-		return fmt.Sprintf("%s%s%s", key, p.Op, val)
+		return key + p.Op.String() + val
 	case PredKeyExists:
-		return p.Key + "=*"
+		key := p.Key
+		if p.KeyPat == nil {
+			key = quoteIfNeeded(key)
+		}
+		return key + "=*"
 	case PredValueExists:
-		return "*=" + p.Value
+		val := p.Value
+		if p.ValuePat == nil {
+			val = quoteIfNeeded(val)
+		}
+		return "*=" + val
 	case PredRegex:
-		return fmt.Sprintf("regex(/%s/)", p.Value)
+		return "/" + strings.ReplaceAll(p.Value, "/", `\/`) + "/"
 	case PredGlob:
-		return fmt.Sprintf("glob(%s)", p.Value)
+		return p.Value
 	case PredExpr:
-		return fmt.Sprintf("expr(%s%s%s)", p.ExprLHS.String(), p.Op, p.Value)
+		return p.ExprLHS.String() + p.Op.String() + quoteIfNeeded(p.Value)
 	default:
 		return fmt.Sprintf("unknown(%d)", p.Kind)
 	}
 }
 
-// quoteIfNeeded wraps s in double quotes if it contains characters that would
-// be misinterpreted by the lexer as glob metacharacters, operators, or whitespace.
-// Values that are safe as barewords are returned unchanged.
+// quoteIfNeeded wraps s in double quotes if the lexer could not read it back
+// as a bareword: it is empty, or it contains whitespace, glob metacharacters,
+// or operator characters. Values that are safe as barewords are returned
+// unchanged.
 func quoteIfNeeded(s string) string {
+	if s == "" {
+		return `""`
+	}
 	for i := range len(s) {
-		if !isBarewordSafe(s[i]) {
+		if !isBarewordChar(s[i]) {
 			return `"` + escapeQuoted(s) + `"`
 		}
 	}
 	return s
-}
-
-// isBarewordSafe returns true if ch can appear unquoted in a bareword.
-// Mirrors isBarewordChar in lexer.go.
-func isBarewordSafe(ch byte) bool {
-	switch ch {
-	case ' ', '\t', '\n', '\r':
-		return false
-	case '(', ')', '=', '*', '?', '[', '"', '\'', '/', '>', '<', '!':
-		return false
-	case '|', ',', '+', '%', '#':
-		return false
-	default:
-		return true
-	}
 }
 
 // escapeQuoted escapes backslashes and double quotes inside a quoted string.

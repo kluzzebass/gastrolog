@@ -7,7 +7,6 @@ import (
 	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"maps"
-	"slices"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
@@ -289,12 +288,7 @@ func (o *Orchestrator) applyIngester(recvCfg system.IngesterConfig, assignments 
 		return fmt.Errorf("unknown ingester type: %s", recvCfg.Type)
 	}
 
-	// Selected-node gate: NodeIDs only restricts placement when AllNodes is
-	// false. AllNodes=true means every cluster node is eligible regardless of
-	// the (legacy) NodeIDs list. Mirrors shouldRunIngester in app/dispatch.go;
-	// without the AllNodes short-circuit, cold restart only starts the
-	// ingester on whichever node happens to be in NodeIDs.
-	if !recvCfg.AllNodes && len(recvCfg.NodeIDs) > 0 && !slices.Contains(recvCfg.NodeIDs, o.localNodeID) {
+	if !recvCfg.EligibleOn(o.localNodeID) {
 		return nil
 	}
 

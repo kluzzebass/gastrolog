@@ -19,8 +19,10 @@ import (
 	"gastrolog/internal/sysmetrics"
 )
 
-// StatsVaultSnapshot is the stats collector's view of a vault.
-// Mirrors orchestrator.VaultSnapshot without importing it.
+// StatsVaultSnapshot is the stats collector's view of a vault. It is a
+// separate type from orchestrator.VaultSnapshot because cluster sits below
+// orchestrator in the dependency graph; the wiring seam in app converts one
+// into the other, and that adapter is the only place the two shapes meet.
 //
 // ID is the canonical glid.GLID. Earlier shapes stored it as the
 // String() form and then cast `[]byte(s.ID)` for the broadcast,

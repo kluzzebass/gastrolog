@@ -18,7 +18,15 @@ import (
 	"io"
 	"strconv"
 	"strings"
+
+	"gastrolog/internal/ingester/limits"
 )
+
+// ErrOversizeFrame marks a frame the parser refused because a wire-supplied
+// length crossed a ceiling. Callers report it rather than dropping the
+// connection silently: a sender whose messages vanish deserves to see why in
+// the node's log.
+var ErrOversizeFrame = errors.New("relp: frame exceeds size limit")
 
 // Message represents a single RELP frame received from the client.
 type Message struct {
@@ -33,6 +41,12 @@ type Session struct {
 	r      *bufio.Reader
 	w      io.Writer
 	opened bool
+
+	// onFrame is called as each complete frame leaves the wire. The
+	// boundary is per frame, not per ReceiveLog: the first call reads the
+	// open handshake and the first syslog frame, so a caller timing a
+	// partially-read frame must learn about both.
+	onFrame func()
 }
 
 // NewSession creates a RELP session over the given read/write streams.
@@ -43,6 +57,10 @@ func NewSession(r io.Reader, w io.Writer) *Session {
 		w: w,
 	}
 }
+
+// OnFrame registers a callback invoked once each complete frame has been
+// read, before the caller does anything with it.
+func (s *Session) OnFrame(fn func()) { s.onFrame = fn }
 
 // ReceiveLog returns the next syslog message from the RELP stream.
 // On the first call it transparently handles the "open" handshake.
@@ -95,6 +113,13 @@ func (s *Session) AnswerError(msg *Message, reason string) error {
 //
 // Frame format: TXNR SP COMMAND SP DATALEN [SP DATA] LF
 func (s *Session) readFrame() (*Message, error) {
+	if s.onFrame != nil {
+		defer s.onFrame()
+	}
+	return s.readFrameBody()
+}
+
+func (s *Session) readFrameBody() (*Message, error) {
 	// Read TXNR.
 	txnrStr, err := s.readToken()
 	if err != nil {
@@ -120,6 +145,12 @@ func (s *Session) readFrame() (*Message, error) {
 	if err != nil {
 		return nil, fmt.Errorf("relp: invalid datalen %q: %w", datalenStr, err)
 	}
+	// DATALEN sizes the allocation below, and it is whatever the sender
+	// says. Unchecked, one frame claiming gigabytes exhausts the node
+	// before a single payload byte arrives.
+	if datalen > limits.MaxFrameBytes {
+		return nil, fmt.Errorf("%w: datalen %d exceeds %d", ErrOversizeFrame, datalen, limits.MaxFrameBytes)
+	}
 
 	// Read DATA (exactly datalen bytes) if present.
 	var data []byte
@@ -144,30 +175,31 @@ func (s *Session) readFrame() (*Message, error) {
 // readToken reads bytes until a space delimiter and returns the token.
 // The space is consumed but not included in the result.
 func (s *Session) readToken() (string, error) {
-	var buf []byte
-	for {
-		b, err := s.r.ReadByte()
-		if err != nil {
-			return "", err
-		}
-		if b == ' ' {
-			return string(buf), nil
-		}
-		buf = append(buf, b)
-	}
+	token, _, err := s.readTokenUntil(false)
+	return token, err
 }
 
 // readTokenOrLF reads bytes until a space or LF delimiter.
 // Returns the token and which delimiter was found.
 func (s *Session) readTokenOrLF() (string, byte, error) {
+	return s.readTokenUntil(true)
+}
+
+// readTokenUntil accumulates a header token up to its delimiter. The length
+// cap is what stops a sender that never emits a delimiter from growing this
+// buffer for as long as it keeps writing.
+func (s *Session) readTokenUntil(acceptLF bool) (string, byte, error) {
 	var buf []byte
 	for {
 		b, err := s.r.ReadByte()
 		if err != nil {
 			return "", 0, err
 		}
-		if b == ' ' || b == '\n' {
+		if b == ' ' || (acceptLF && b == '\n') {
 			return string(buf), b, nil
+		}
+		if len(buf) >= limits.MaxTokenBytes {
+			return "", 0, fmt.Errorf("%w: header token exceeds %d bytes", ErrOversizeFrame, limits.MaxTokenBytes)
 		}
 		buf = append(buf, b)
 	}

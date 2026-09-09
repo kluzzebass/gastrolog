@@ -88,7 +88,7 @@ func ValidateNodeStateTransition(from, to NodeState) error {
 	if slices.Contains(legal, to) {
 		return nil
 	}
-	return fmt.Errorf("illegal node state transition: %s → %s", from, to)
+	return fmt.Errorf("%w: %s → %s", ErrIllegalNodeStateTransition, from, to)
 }
 
 // NodeConfig represents a cluster node configuration with its
@@ -178,6 +178,61 @@ type CloudService struct {
 	RestoreDays       uint32                   `json:"restoreDays,omitempty"`       // S3 restore window
 	SuspectGraceDays  uint32                   `json:"suspectGraceDays,omitempty"`  // default 7
 	ReconcileSchedule string                   `json:"reconcileSchedule,omitempty"` // default "0 3 * * *"
+}
+
+// HasCredentials reports whether the service carries the credential
+// material its provider needs. Each provider takes a different shape — S3
+// wants both keys, Azure a connection string, GCS a service account JSON —
+// and every provider also accepts an ambient credential chain (IAM role,
+// ADC, environment), which is what false means. This is the fact the API
+// exposes in place of the credentials themselves.
+func (cs CloudService) HasCredentials() bool {
+	switch cs.Provider {
+	case "s3":
+		return cs.AccessKey != "" && cs.SecretKey != ""
+	case "azure":
+		return cs.ConnectionString != ""
+	case "gcs":
+		return cs.CredentialsJSON != ""
+	default:
+		return false
+	}
+}
+
+// WithPreservedCredentials fills each empty credential field from prior.
+// Reads never return credentials, so a client re-sending a service it just
+// read has none to send: an empty credential on a write means "keep the
+// stored one", and only a value the operator actually supplied replaces it.
+func (cs CloudService) WithPreservedCredentials(prior CloudService) CloudService {
+	keep := func(next, stored string) string {
+		if next == "" {
+			return stored
+		}
+		return next
+	}
+	cs.AccessKey = keep(cs.AccessKey, prior.AccessKey)
+	cs.SecretKey = keep(cs.SecretKey, prior.SecretKey)
+	cs.ConnectionString = keep(cs.ConnectionString, prior.ConnectionString)
+	cs.CredentialsJSON = keep(cs.CredentialsJSON, prior.CredentialsJSON)
+	return cs
+}
+
+// WithoutUnusedCredentials drops credential material the service's provider
+// does not read. Switching an S3 service to GCS would otherwise leave its
+// access and secret key sitting in the config store forever, unreachable
+// and unauditable, since nothing reads them and no edit can clear them.
+func (cs CloudService) WithoutUnusedCredentials() CloudService {
+	if cs.Provider != "s3" {
+		cs.AccessKey = ""
+		cs.SecretKey = ""
+	}
+	if cs.Provider != "azure" {
+		cs.ConnectionString = ""
+	}
+	if cs.Provider != "gcs" {
+		cs.CredentialsJSON = ""
+	}
+	return cs
 }
 
 // StoreParams returns this cloud service's blobstore factory params — the

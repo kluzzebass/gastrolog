@@ -5,62 +5,95 @@ package gastrolog.v1;
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
 import "google/protobuf/timestamp.proto";
+import "gastrolog/v1/authz.proto";
 
 // VaultService provides vault and chunk management.
 service VaultService {
   // ListVaults returns all registered vaults.
-  rpc ListVaults(ListVaultsRequest) returns (ListVaultsResponse);
+  rpc ListVaults(ListVaultsRequest) returns (ListVaultsResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // GetVault returns details for a specific vault.
-  rpc GetVault(GetVaultRequest) returns (GetVaultResponse);
+  rpc GetVault(GetVaultRequest) returns (GetVaultResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // ListChunks returns all chunks in a vault.
-  rpc ListChunks(ListChunksRequest) returns (ListChunksResponse);
+  rpc ListChunks(ListChunksRequest) returns (ListChunksResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // GetChunk returns details for a specific chunk.
-  rpc GetChunk(GetChunkRequest) returns (GetChunkResponse);
+  rpc GetChunk(GetChunkRequest) returns (GetChunkResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // GetIndexes returns index status for a chunk.
-  rpc GetIndexes(GetIndexesRequest) returns (GetIndexesResponse);
+  rpc GetIndexes(GetIndexesRequest) returns (GetIndexesResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // AnalyzeChunk returns detailed index analysis for a chunk.
-  rpc AnalyzeChunk(AnalyzeChunkRequest) returns (AnalyzeChunkResponse);
+  rpc AnalyzeChunk(AnalyzeChunkRequest) returns (AnalyzeChunkResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // GetStats returns overall statistics for a vault.
-  rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
+  rpc GetStats(GetStatsRequest) returns (GetStatsResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // ReindexVault rebuilds all indexes for sealed chunks in a vault.
-  rpc ReindexVault(ReindexVaultRequest) returns (ReindexVaultResponse);
+  rpc ReindexVault(ReindexVaultRequest) returns (ReindexVaultResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // ValidateVault checks chunk and index integrity for a vault.
-  rpc ValidateVault(ValidateVaultRequest) returns (ValidateVaultResponse);
+  rpc ValidateVault(ValidateVaultRequest) returns (ValidateVaultResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // ReconcileCloudIndex rebuilds each node's cloud index from the blob store.
   // Repairs a cache: never deletes an object, never touches cluster state.
-  rpc ReconcileCloudIndex(ReconcileCloudIndexRequest) returns (ReconcileCloudIndexResponse);
+  rpc ReconcileCloudIndex(ReconcileCloudIndexRequest) returns (ReconcileCloudIndexResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // ExportVault streams all records from a vault for backup.
-  rpc ExportVault(ExportVaultRequest) returns (stream ExportVaultResponse);
+  rpc ExportVault(ExportVaultRequest) returns (stream ExportVaultResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // ImportRecords appends a batch of records to a vault.
-  rpc ImportRecords(ImportRecordsRequest) returns (ImportRecordsResponse);
+  rpc ImportRecords(ImportRecordsRequest) returns (ImportRecordsResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // SealVault seals the active chunk of a vault.
-  rpc SealVault(SealVaultRequest) returns (SealVaultResponse);
+  rpc SealVault(SealVaultRequest) returns (SealVaultResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // RetryUnreadableChunks resets every unreadable chunk's retry backoff
   // for a vault, so the next retention sweep retries them all immediately.
   // Operator-driven recovery action; see gastrolog-25vur.
-  rpc RetryUnreadableChunks(RetryUnreadableChunksRequest) returns (RetryUnreadableChunksResponse);
+  rpc RetryUnreadableChunks(RetryUnreadableChunksRequest) returns (RetryUnreadableChunksResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // ArchiveChunk transitions a cloud-backed sealed chunk to an offline
   // storage class (Glacier, Deep Archive, Azure Archive). The chunk stays
   // in the vault but becomes unreadable until restored.
-  rpc ArchiveChunk(ArchiveChunkRequest) returns (ArchiveChunkResponse);
+  rpc ArchiveChunk(ArchiveChunkRequest) returns (ArchiveChunkResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // RestoreChunk initiates retrieval of an archived chunk. On S3 this is
   // async (RestoreObject). The chunk becomes readable once restore completes.
-  rpc RestoreChunk(RestoreChunkRequest) returns (RestoreChunkResponse);
+  rpc RestoreChunk(RestoreChunkRequest) returns (RestoreChunkResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // WatchChunks opens a server-streaming subscription that pushes a
   // notification every time chunk metadata changes on this node (seal,
@@ -68,7 +101,9 @@ service VaultService {
   // notification as a signal to refetch via ListChunks — no chunk data
   // is carried in the stream itself. Same pattern as WatchConfig.
   // See gastrolog-1jijm.
-  rpc WatchChunks(WatchChunksRequest) returns (stream WatchChunksResponse);
+  rpc WatchChunks(WatchChunksRequest) returns (stream WatchChunksResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 
   // RepatriateOrphan re-introduces a sealed local chunk into the
   // vault-ctl FSM manifest. Operator-driven recovery for "unknown
@@ -77,13 +112,17 @@ service VaultService {
   // the ManifestEntry from the local chunk's idx.log headers and
   // proposes CmdRepatriateChunk to the vault-ctl FSM. Refuses if the
   // chunk is already FSM-tracked or tombstoned. See gastrolog-32bf2.
-  rpc RepatriateOrphan(RepatriateOrphanRequest) returns (RepatriateOrphanResponse);
+  rpc RepatriateOrphan(RepatriateOrphanRequest) returns (RepatriateOrphanResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
 
   // GetPipelineBacklog returns vault-ctl registry/manifest state plus
   // cluster-wide on-disk segment counts (working, completed, head,
   // pre-head) so operators can see chunking pipeline depth in the
   // inspector without shell access.
-  rpc GetPipelineBacklog(GetPipelineBacklogRequest) returns (GetPipelineBacklogResponse);
+  rpc GetPipelineBacklog(GetPipelineBacklogRequest) returns (GetPipelineBacklogResponse) {
+    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+  }
 }
 
 message ListVaultsRequest {}
@@ -473,6 +512,10 @@ message ValidateVaultResponse {
   // hosts this vault, so `valid` describes a partial view. Absent on the
   // happy path.
   ContributionReport contribution_report = 4;
+
+  // Findings about the vault as a whole that no single chunk can be blamed
+  // for, such as a search across it failing.
+  repeated string issues = 5;
 }
 
 message ChunkValidation {

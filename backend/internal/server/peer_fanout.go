@@ -10,6 +10,8 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/orchestrator"
+
+	"connectrpc.com/connect"
 )
 
 // peerInspectorTimeout caps how long a single peer's inspector RPC may
@@ -73,7 +75,10 @@ func peerFanOut[T any](
 				// reconfiguration and aren't operational failures.
 				// Benign errors are elided from results but must not be
 				// reported as degradation.
-				benign := orchestrator.IsPlacementChurnErr(err)
+				// In process the sentinels are visible; across the
+				// forwarding boundary they arrive as NotFound, the code
+				// errInternal gives a vault that is not on the peer.
+				benign := orchestrator.IsPlacementChurnErr(err) || connect.CodeOf(err) == connect.CodeNotFound
 				level := slog.LevelWarn
 				if benign {
 					level = slog.LevelDebug

@@ -18,6 +18,7 @@ import (
 	"gastrolog/internal/index/analyzer"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/query"
 	"gastrolog/internal/system"
 )
 
@@ -585,8 +586,11 @@ func (s *VaultServer) ValidateVault(
 		return nil, connErr
 	}
 
+	// A node that holds no instance of the vault has nothing local to check;
+	// the peers that do hold it answer through the fan-out below. Any other
+	// failure to list is real and is reported.
 	metas, err := s.orch.ListLocalChunkMetas(vaultID)
-	if err != nil {
+	if err != nil && !errors.Is(err, orchestrator.ErrVaultNotReady) {
 		return nil, mapVaultError(err)
 	}
 
@@ -634,6 +638,9 @@ func mergeOneValidation(resp *apiv1.ValidateVaultResponse, remote *apiv1.Forward
 		}
 		resp.Chunks = append(resp.Chunks, cv)
 	}
+	for _, issue := range remote.GetIssues() {
+		resp.Issues = append(resp.Issues, fmt.Sprintf("on %s: %s", nodeID, issue))
+	}
 	audit := remote.GetCloudIndexAudit()
 	if audit == nil {
 		return
@@ -669,7 +676,49 @@ func ValidateVaultLocal(ctx context.Context, orch *orchestrator.Orchestrator, va
 			resp.Valid = false
 		}
 	}
+	if len(metas) > 0 {
+		noteSearchProbe(resp, searchProbe(ctx, orch, vaultID))
+	}
 	return resp
+}
+
+// searchProbe runs the vault through the access pattern a search uses — one
+// cursor per chunk, all held open across the merge — in both directions. The
+// per-chunk checks read one chunk at a time and cannot see a failure that only
+// appears when every chunk is open at once.
+func searchProbe(ctx context.Context, orch *orchestrator.Orchestrator, vaultID glid.GLID) error {
+	eng := orch.QueryEngine(vaultID)
+	if eng == nil {
+		return nil
+	}
+	for _, reverse := range []bool{false, true} {
+		it, _ := eng.Search(ctx, query.Query{Limit: 1, IsReverse: reverse}, nil)
+		for _, err := range it {
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// noteSearchProbe records a probe failure against the chunk it names, or
+// against the vault when no chunk can be blamed.
+func noteSearchProbe(resp *apiv1.ValidateVaultResponse, err error) {
+	if err == nil {
+		return
+	}
+	resp.Valid = false
+	if re, ok := errors.AsType[*query.VaultReadError](err); ok {
+		for _, cv := range resp.Chunks {
+			if chunk.ChunkID(glid.FromBytes(cv.GetChunkId())) == re.ChunkID {
+				cv.Valid = false
+				cv.Issues = append(cv.Issues, fmt.Sprintf("search cannot read this chunk: %v", re.Err))
+				return
+			}
+		}
+	}
+	resp.Issues = append(resp.Issues, fmt.Sprintf("search across the vault fails: %v", err))
 }
 
 // validateCloudIndexLocal audits the vault's cloud objects, or returns nil when
@@ -980,16 +1029,8 @@ func chunkChangeEventToProto(ev orchestrator.ChunkChangeEvent) *apiv1.WatchChunk
 	msg := &apiv1.WatchChunksResponse{
 		VaultId: ev.VaultID.ToProto(),
 		ChunkId: ev.ChunkID[:],
-		Op:      chunkOpToProto(ev.Op),
-	}
-	if ev.Meta != nil {
-		// Mirror VaultChunkMetaToProto: the inner ChunkMeta needs
-		// vault_id populated so the frontend's per-vault grouping
-		// matches against the same vaultId the ListChunks path uses.
-		// Bare ChunkMetaToProto leaves that field zero, which sends
-		// the chunk into the renderer's "unknown" group and hides it.
-		msg.Meta = ChunkMetaToProto(*ev.Meta)
-		msg.Meta.VaultId = ev.VaultID.ToProto()
+		Op:      ChunkOpToProto(ev.Op),
+		Meta:    ChunkChangeMetaToProto(ev),
 	}
 	if ev.Op == orchestrator.ChunkChangeOpProgress {
 		msg.RecordCount = ev.RecordCount
@@ -997,7 +1038,23 @@ func chunkChangeEventToProto(ev orchestrator.ChunkChangeEvent) *apiv1.WatchChunk
 	return msg
 }
 
-func chunkOpToProto(op orchestrator.ChunkChangeOp) apiv1.ChunkChangeOp {
+// ChunkChangeMetaToProto converts a change event's chunk metadata, or nil when
+// the event carries none. The inner ChunkMeta needs vault_id populated so the
+// frontend's per-vault grouping matches the vaultId the ListChunks path uses;
+// bare ChunkMetaToProto leaves it zero, which sends the chunk into the
+// renderer's "unknown" group and hides it. The cluster-internal watch
+// forwarder converts through here too, so the two watch paths cannot drift.
+func ChunkChangeMetaToProto(ev orchestrator.ChunkChangeEvent) *apiv1.ChunkMeta {
+	if ev.Meta == nil {
+		return nil
+	}
+	meta := ChunkMetaToProto(*ev.Meta)
+	meta.VaultId = ev.VaultID.ToProto()
+	return meta
+}
+
+// ChunkOpToProto converts a chunk change operation to its proto value.
+func ChunkOpToProto(op orchestrator.ChunkChangeOp) apiv1.ChunkChangeOp {
 	switch op {
 	case orchestrator.ChunkChangeOpUnspecified:
 		return apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_UNSPECIFIED

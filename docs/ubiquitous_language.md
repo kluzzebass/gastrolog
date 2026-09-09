@@ -1103,6 +1103,11 @@ Live on `Config` directly (not as entities):
 - **SchedulerConfig** — scheduler cadence and concurrency.
 - **TLSConfig** — ACME settings for external API TLS.
 - **LookupConfig** — external lookup table configuration (HTTP, SQLite).
+- **Destination policy** — the rule deciding which resolved addresses an
+  outbound fetch may reach (`internal/safefetch`). Denies everything outside
+  public unicast; a stored lookup's `AllowPrivateDestinations` is the
+  operator's opt-in for a service on their own network, and never reaches
+  link-local or address-translation ranges.
 - **ClusterConfig** — broadcast interval override; other cluster tunables.
 - **MaxMindConfig** — GeoIP database location.
 
@@ -1112,16 +1117,33 @@ Live on `Config` directly (not as entities):
   zero-or-more refresh tokens. Managed via `SystemCommand_CreateUser`,
   `UpdatePassword`, etc.
 
-- **Role** — coarse permission set. Today: `admin`, `operator`,
-  `viewer` (exact set is in
-  [`auth/roles.go`](../backend/internal/auth/roles.go)).
+- **Role** — coarse permission set carried on `User.Role` and in the JWT.
+  Two values: `admin` and `user`, enforced where a role is written
+  ([`server/auth.go`](../backend/internal/server/auth.go)).
+
+- **AuthLevel** — the authorization an RPC requires, declared on the
+  method itself via the `auth_level` option in
+  [`authz.proto`](../backend/api/proto/gastrolog/v1/authz.proto):
+  `PUBLIC` (no token), `AUTHENTICATED` (any role), `ADMIN` (role
+  `admin`). The interceptor builds its table from the method
+  descriptors and denies any procedure that declares no level.
 
 - **JWT** (access token) — short-lived bearer token. Carries claims:
-  `sub` (username), `role`, `exp`, `iat`.
+  `sub` (username), `role`, `sid` (session), `exp`, `iat`, and `iat_ns`
+  (issue time at the precision revocation ranks against).
 
-- **RefreshToken** — long-lived credential, stored in the cluster-ctl Raft.
-  Used to mint a new JWT without re-entering password. Expires on
-  password change or logout via `DeleteUserRefreshTokens`.
+- **Session** — one login on one device. Identified by the ID of its
+  refresh-token row, which the access token names in its `sid` claim.
+  Rotation keeps the session; logout deletes the row, which ends the
+  refresh token and the access token together, leaving the user's other
+  sessions alone.
+
+- **RefreshToken** — long-lived credential, stored in the cluster-ctl Raft,
+  one row per session. Exchanged for a new JWT without re-entering the
+  password; the exchange is a single Raft entry, so concurrent use of one
+  token yields one live session, not two. A password change, rename, role
+  change, or user delete ends every session via
+  `DeleteUserRefreshTokens`.
 
 - **Cluster TLS** — mTLS material (`CA`, `Node cert`, `Node key`)
   generated at cluster-init. Used exclusively for intra-cluster gRPC.

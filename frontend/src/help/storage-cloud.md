@@ -17,6 +17,8 @@ A **file vault with a cloud service binding**. The active chunk lives on local d
 
 ## Cloud Providers
 
+Credentials for every provider are write-only: the fields below are always empty when a saved service is opened, an empty field keeps the stored credential, and a typed one replaces it. See [Storage settings](help:storage-config) for the full rule.
+
 ### S3 / S3-compatible
 
 Supports Amazon S3, MinIO, Cloudflare R2, Backblaze B2, Wasabi, Hetzner, DigitalOcean Spaces, and other S3-compatible services.
@@ -54,5 +56,5 @@ When Credentials JSON is empty, the GCS client uses ADC: the `GOOGLE_APPLICATION
 - Each sealed chunk is stored as a single blob in GLCB format (seekable zstd compression).
 - Queries read cloud-backed chunks via HTTP range requests — only the needed frames are downloaded, not the entire blob.
 - Cloud services are configured in the [Storage settings](help:storage-config) tab and referenced by name on a file vault's **Cloud Storage** field to make it cloud-backed.
-- Use the **Test Connection** button in cloud service settings to verify credentials.
+- Use the **Test Connection** button in cloud service settings to verify credentials. On a saved service it runs against the saved configuration and its stored credentials, so there is nothing to retype — enter credentials to test an unsaved change instead.
 - Follower replicas keep a local compressed copy for queries — they do not upload to the cloud (only the leader uploads).

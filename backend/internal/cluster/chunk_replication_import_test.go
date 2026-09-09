@@ -10,13 +10,16 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/system"
 )
 
 // Streaming ImportSealed is verified at two layers:
@@ -451,5 +454,86 @@ func TestImportSealedChunk_LeaderFrameBounds(t *testing.T) {
 	}
 	if maxFrame < 1024 {
 		t.Errorf("maxFrame = %d, suspiciously small — frames may not be carrying records", maxFrame)
+	}
+}
+
+// An importer that fails because the vault has no instance on this node yet
+// is a follower still building, not a broken transfer. The ack carries that
+// as a typed rejection so the sender can retry without reading the message.
+func TestImportStreaming_VaultNotReadyIsTypedRejection(t *testing.T) {
+	for name, cause := range map[string]error{
+		"vault not found": fmt.Errorf("import: %w: vaultInst x", chunk.ErrVaultNotFound),
+		"not local":       fmt.Errorf("import: %w: vault y", chunk.ErrVaultNotLocal),
+	} {
+		t.Run(name, func(t *testing.T) {
+			importer := func(_ context.Context, _ glid.GLID, _ chunk.ChunkID, next chunk.RecordIterator) error {
+				for {
+					if _, err := next(); err != nil {
+						break
+					}
+				}
+				return cause
+			}
+			s := newImportTestServer(importer)
+			defer s.stopCancel()
+			vaultID := glid.New()
+			chunkIDProto := glid.New().ToProto()
+			var pending *pendingImport
+			s.handleReplicationCommand(context.Background(), &gastrologv1.ChunkReplicationCommand{
+				VaultId: vaultID.ToProto(),
+				Command: &gastrologv1.ChunkReplicationCommand_ImportBegin{ImportBegin: &gastrologv1.ChunkReplicationImportBegin{ChunkId: chunkIDProto}},
+			}, &pending)
+			ack := s.handleReplicationCommand(context.Background(), &gastrologv1.ChunkReplicationCommand{
+				VaultId: vaultID.ToProto(),
+				Command: &gastrologv1.ChunkReplicationCommand_ImportCommit{ImportCommit: &gastrologv1.ChunkReplicationImportCommit{ChunkId: chunkIDProto}},
+			}, &pending)
+			if ack.Ok {
+				t.Fatal("commit must fail")
+			}
+			if ack.GetRejection() != gastrologv1.ImportRejection_IMPORT_REJECTION_VAULT_NOT_READY {
+				t.Fatalf("rejection = %v, want VAULT_NOT_READY (error %q)", ack.GetRejection(), ack.Error)
+			}
+		})
+	}
+
+	// Any other failure carries no classification.
+	importer := func(_ context.Context, _ glid.GLID, _ chunk.ChunkID, next chunk.RecordIterator) error {
+		for {
+			if _, err := next(); err != nil {
+				break
+			}
+		}
+		return errors.New("disk full")
+	}
+	s := newImportTestServer(importer)
+	defer s.stopCancel()
+	var pending *pendingImport
+	id := glid.New().ToProto()
+	s.handleReplicationCommand(context.Background(), &gastrologv1.ChunkReplicationCommand{VaultId: glid.New().ToProto(), Command: &gastrologv1.ChunkReplicationCommand_ImportBegin{ImportBegin: &gastrologv1.ChunkReplicationImportBegin{ChunkId: id}}}, &pending)
+	ack := s.handleReplicationCommand(context.Background(), &gastrologv1.ChunkReplicationCommand{VaultId: glid.New().ToProto(), Command: &gastrologv1.ChunkReplicationCommand_ImportCommit{ImportCommit: &gastrologv1.ChunkReplicationImportCommit{ChunkId: id}}}, &pending)
+	if ack.Ok || ack.GetRejection() != gastrologv1.ImportRejection_IMPORT_REJECTION_UNSPECIFIED {
+		t.Fatalf("an unclassified failure must carry no rejection, got ok=%v rejection=%v", ack.Ok, ack.GetRejection())
+	}
+}
+
+// A forwarded command the leader's FSM rejects comes back as
+// FailedPrecondition, distinct from a leader that could not apply at all.
+func TestForwardApplyRejectionIsFailedPrecondition(t *testing.T) {
+	for name, cause := range map[string]error{
+		"illegal transition": fmt.Errorf("set node state: %w: live → removed", system.ErrIllegalNodeStateTransition),
+		"unknown node":       fmt.Errorf("set node state: %w: n9", system.ErrNodeNotFound),
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := &Server{applyFn: func(context.Context, []byte) (uint64, error) { return 0, cause }}
+			_, err := s.forwardApply(context.Background(), &gastrologv1.ForwardApplyRequest{})
+			if status.Code(err) != codes.FailedPrecondition {
+				t.Fatalf("code = %v, want FailedPrecondition (%v)", status.Code(err), err)
+			}
+		})
+	}
+	s := &Server{applyFn: func(context.Context, []byte) (uint64, error) { return 0, errors.New("raft apply: timeout") }}
+	_, err := s.forwardApply(context.Background(), &gastrologv1.ForwardApplyRequest{})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("code = %v, want Internal for an unclassified failure", status.Code(err))
 	}
 }

@@ -12,16 +12,20 @@ type Pipeline struct {
 	Pipes  []PipeOp // pipe operators in order (right of |)
 }
 
-// String returns a human-readable representation of the pipeline.
+// String prints the pipeline in query syntax, parseable back to the same
+// pipeline. Without a filter it starts with the pipe, so the first operator
+// is not read as a filter word.
 func (p *Pipeline) String() string {
 	var parts []string
 	if p.Filter != nil {
 		parts = append(parts, p.Filter.String())
+	} else {
+		parts = append(parts, "")
 	}
 	for _, op := range p.Pipes {
 		parts = append(parts, op.String())
 	}
-	return strings.Join(parts, " | ")
+	return strings.TrimSpace(strings.Join(parts, " | "))
 }
 
 // PipeOp is the interface for pipe operators (stats, where, etc.).

@@ -325,7 +325,7 @@ func TestHardLimitPolicyBasic(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			state := ActiveChunkState{Bytes: tc.stateBytes}
+			state := ActiveChunkState{Bytes: tc.stateBytes, RawBytes: tc.stateBytes}
 			record := Record{Raw: make([]byte, tc.rawLen)}
 
 			got := policy.ShouldRotate(state, record)
@@ -338,7 +338,7 @@ func TestHardLimitPolicyBasic(t *testing.T) {
 
 func TestHardLimitPolicyTriggerName(t *testing.T) {
 	policy := NewHardLimitPolicy(100, 100)
-	state := ActiveChunkState{Bytes: 200}
+	state := ActiveChunkState{Bytes: 200, RawBytes: 200}
 	record := Record{Raw: []byte("x")}
 
 	got := policy.ShouldRotate(state, record)
@@ -701,7 +701,7 @@ func TestHardLimitAlwaysWins(t *testing.T) {
 
 	composite := NewCompositePolicy(neverPolicy, hardLimit)
 
-	state := ActiveChunkState{Bytes: 900}
+	state := ActiveChunkState{Bytes: 900, RawBytes: 900}
 	record := Record{Raw: make([]byte, 200)} // Would push over 1000
 
 	if composite.ShouldRotate(state, record) == nil {
@@ -753,5 +753,28 @@ func BenchmarkRecordOnDiskSize(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		RecordOnDiskSize(record)
+	}
+}
+
+// Each file has its own 32-bit offset space, so each is limited on its own:
+// attributes alone can force a rotation while the raw file is nearly empty,
+// and two files each under their limit do not rotate merely because they sum
+// past one of them.
+func TestHardLimitPolicyLimitsEachFileSeparately(t *testing.T) {
+	policy := NewHardLimitPolicy(1000, 100)
+	attrs := Attributes{"k": "vvvvvvvvvvvvvvvvvvvv"}
+	encoded, err := attrs.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	attrHeavy := ActiveChunkState{RawBytes: 50, AttrBytes: 100 - uint64(len(encoded)) + 1, Bytes: 150}
+	if got := policy.ShouldRotate(attrHeavy, Record{Raw: []byte("x"), Attrs: attrs}); got == nil {
+		t.Fatal("attributes past their limit must rotate even with the raw file nearly empty")
+	}
+
+	bothUnder := ActiveChunkState{RawBytes: 900, AttrBytes: 50, Bytes: 1200}
+	if got := policy.ShouldRotate(bothUnder, Record{Raw: make([]byte, 50), Attrs: attrs}); got != nil {
+		t.Fatalf("both files under their limits must not rotate, got %q", *got)
 	}
 }

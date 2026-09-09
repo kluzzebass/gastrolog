@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/system"
 	"io"
+	"io/fs"
 	"iter"
-	"os"
-	"strings"
 	"sync"
 
 	"gastrolog/internal/chunk"
@@ -27,7 +27,6 @@ import (
 // it returns a TableResult with a nil iterator. The histogram slice (if
 // non-nil) provides an approximate volume histogram for the searched vault.
 // Used by the ForwardSearch handler to serve remote search requests.
-// The request may carry sealed-chunk subset fields for distributed search.
 // The returned getToken function returns a resume token for the next page
 // (nil if exhausted).
 type SearchExecutor func(ctx context.Context, req *gastrologv1.ForwardSearchRequest) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error)
@@ -437,7 +436,7 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 			// EOF can occur when a chunk is deleted mid-read (e.g., ImportToVault
 			// replacing a forwarded-record chunk on a follower). Treat as
 			// end-of-results — the data is still available via retry.
-			if errors.Is(iterErr, io.EOF) || isMissingLocalChunkFileError(iterErr) {
+			if errors.Is(iterErr, io.EOF) || errors.Is(iterErr, fs.ErrNotExist) {
 				break
 			}
 			return status.Errorf(codes.Internal, "search record: %v", iterErr)
@@ -465,20 +464,6 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 		resp.HasMore = len(resp.ResumeToken) > 0
 	}
 	return stream.SendMsg(resp)
-}
-
-func isMissingLocalChunkFileError(err error) bool {
-	if errors.Is(err, os.ErrNotExist) {
-		return true
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "no such file or directory") {
-		return false
-	}
-	return strings.Contains(msg, "open raw.log") ||
-		strings.Contains(msg, "open idx.log") ||
-		strings.Contains(msg, "open attr.log") ||
-		strings.Contains(msg, "open attr_dict")
 }
 
 // forwardGetContext handles the ForwardGetContext RPC. Runs GetContext on a
@@ -633,6 +618,7 @@ func (s *Server) forwardValidateVault(ctx context.Context, req *gastrologv1.Forw
 		Valid:           resp.GetValid(),
 		Chunks:          resp.GetChunks(),
 		CloudIndexAudit: audit,
+		Issues:          resp.GetIssues(),
 	}, nil
 }
 
@@ -771,6 +757,12 @@ func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApply
 	}
 	appliedIndex, err := s.applyFn(ctx, req.GetCommand())
 	if err != nil {
+		if errors.Is(err, system.ErrIllegalNodeStateTransition) || errors.Is(err, system.ErrNodeNotFound) || errors.Is(err, system.ErrCommandRejected) {
+			// The command was well formed; the leader's state did not
+			// permit it. The forwarder turns this code back into a typed
+			// rejection on the follower.
+			return nil, status.Errorf(codes.FailedPrecondition, "apply: %v", err)
+		}
 		return nil, status.Errorf(codes.Internal, "apply: %v", err)
 	}
 	return &gastrologv1.ForwardApplyResponse{AppliedIndex: appliedIndex}, nil

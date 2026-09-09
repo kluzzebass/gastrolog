@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"errors"
 	"fmt"
+	"gastrolog/internal/chunk"
 	"testing"
 )
 
@@ -26,14 +27,19 @@ func TestIsPlacementChurnErr(t *testing.T) {
 		{"direct ErrInstanceNotLocal", ErrInstanceNotLocal, true},
 		{"wrapped ErrInstanceNotLocal", fmt.Errorf("seal: %w: vaultInst x in vault y", ErrInstanceNotLocal), true},
 		{
-			"cross-RPC legacy vault-not-found",
-			errors.New("follower rejected command: import failed: vault not found: vaultInst T in vault V"),
+			"cross-RPC vault-not-found carried as the shared chunk sentinel",
+			fmt.Errorf("follower rejected command: %w: import failed: vaultInst T in vault V", chunk.ErrVaultNotFound),
 			true,
 		},
 		{
-			"cross-RPC new instance-not-local",
-			errors.New("follower rejected command: seal failed: vault instance not registered on this node: vault V"),
+			"cross-RPC not-local carried as the shared chunk sentinel",
+			fmt.Errorf("follower rejected command: %w: seal failed: vault V", chunk.ErrVaultNotLocal),
 			true,
+		},
+		{
+			"prose alone no longer classifies",
+			errors.New("follower rejected command: import failed: vault not found: vaultInst T in vault V"),
+			false,
 		},
 		{
 			"unrelated 'not found'",

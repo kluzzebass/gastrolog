@@ -9,6 +9,7 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging/comp"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -764,6 +765,8 @@ func (m *Manager) activeChunkState() chunk.ActiveChunkState {
 		LastWriteTS: m.active.meta.writeEnd,
 		CreatedAt:   m.active.createdAt,
 		Bytes:       totalBytes,
+		RawBytes:    m.active.rawOffset,
+		AttrBytes:   m.active.attrOffset,
 		Records:     m.active.recordCount,
 	}
 }
@@ -1052,10 +1055,9 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	// the same per-chunk read lock as multi-file mmap cursors
 	// (release-on-Close). Multi-file is the fallback.
 	if sealed && m.hasLocalGLCB(id) {
-		if cursor, err := m.openLocalGLCBCursor(id); err == nil {
-			return cursor, nil
+		if cursor, err := m.sealedGLCBCursorOrFallback(id); cursor != nil || err != nil {
+			return cursor, err
 		}
-		// Corrupt or partial data.glcb — fall through to multi-file.
 	}
 
 	// Acquire the per-chunk read lock BEFORE opening files. CompressChunk
@@ -1102,11 +1104,9 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	// waited, route to it; it is the canonical sealed artifact.
 	if sealedNow && m.hasLocalGLCB(id) {
 		chunkLock.RUnlock()
-		if cursor, err := m.openLocalGLCBCursor(id); err == nil {
-			return cursor, nil
+		if cursor, err := m.sealedGLCBCursorOrFallback(id); cursor != nil || err != nil {
+			return cursor, err
 		}
-		// Corrupt or partial data.glcb — fall back to multi-file, which
-		// still exists in that case (removal only follows a good GLCB).
 		chunkLock.RLock()
 	}
 	sealed = sealedNow
@@ -3399,7 +3399,7 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 	// 2. Build indexes. Now reads through OpenCursor → GLCB cursor.
 	for _, builder := range m.indexBuilders {
 		if err := builder.Build(ctx, id); err != nil {
-			if isMissingLocalChunkFileError(err) {
+			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
 			m.logger.Warn("index build failed", "chunk", id, "error", err)
@@ -3429,20 +3429,6 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 	}
 
 	return nil
-}
-
-func isMissingLocalChunkFileError(err error) bool {
-	if errors.Is(err, os.ErrNotExist) {
-		return true
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "no such file or directory") {
-		return false
-	}
-	return strings.Contains(msg, "open raw.log") ||
-		strings.Contains(msg, "open idx.log") ||
-		strings.Contains(msg, "open attr.log") ||
-		strings.Contains(msg, "open attr_dict")
 }
 
 // RefreshDiskSizes recomputes bytes and diskBytes for a sealed chunk from the
@@ -3480,7 +3466,6 @@ func (m *Manager) openLocalGLCBCursor(id chunk.ChunkID) (chunk.RecordCursor, err
 		chunkLock.RUnlock()
 		return nil, err
 	}
-	blob.Retain()
 	rd, err := blob.Reader()
 	if err != nil {
 		blob.Release()
@@ -3498,6 +3483,21 @@ func (m *Manager) openLocalGLCBCursor(id chunk.ChunkID) (chunk.RecordCursor, err
 // hasLocalGLCB reports whether the chunk's data.glcb is present on disk.
 // Used by read-path dispatch to prefer the GLCB cursor when available.
 // Resolves the externally-registered path for pipeline-built chunks.
+// sealedGLCBCursorOrFallback opens a sealed chunk through its data.glcb. On
+// failure it returns (nil, nil) to let the caller fall back to the multi-file
+// layout only when that layout exists; otherwise the GLCB error is the real
+// one and is returned rather than laundered into a missing-legacy-file error.
+func (m *Manager) sealedGLCBCursorOrFallback(id chunk.ChunkID) (chunk.RecordCursor, error) {
+	cursor, err := m.openLocalGLCBCursor(id)
+	if err == nil {
+		return cursor, nil
+	}
+	if _, statErr := os.Stat(m.rawLogPath(id)); statErr == nil {
+		return nil, nil
+	}
+	return nil, fmt.Errorf("chunk %s: open %s: %w", id, m.glcbPath(id), err)
+}
+
 func (m *Manager) hasLocalGLCB(id chunk.ChunkID) bool {
 	if v, ok := m.glcbMapped.Load(id); ok {
 		e := v.(*mappedGLCBEntry)

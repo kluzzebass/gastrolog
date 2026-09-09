@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -182,8 +183,8 @@ func TestRemoveNode_SelfWithoutAllowSelfRejected(t *testing.T) {
 func TestRemoveNode_GateRefusalIsFailedPrecondition(t *testing.T) {
 	t.Parallel()
 	for name, gateErr := range map[string]error{
-		"orphan": errors.New(`refusing to remove node n1: would orphan 1 vault(s): "logs" (v1) — drain these vaults to other nodes first, or re-run with --force to acknowledge data loss`),
-		"rf":     errors.New(`refusing to remove node n1: removal would drop a vault below its replication factor — 1 vault(s) affected: "logs" (v1): 2 of 3 replicas would survive, 0 eligible node(s) to re-place onto — add an eligible node or drain these vaults first, or re-run with --force to accept reduced redundancy`),
+		"orphan": fmt.Errorf(`refusing to remove node n1: %w: 1 vault(s): "logs" (v1) — drain these vaults to other nodes first, or re-run with --force to acknowledge data loss`, cluster.ErrWouldOrphanVaults),
+		"rf":     fmt.Errorf(`refusing to remove node n1: %w — 1 vault(s) affected: "logs" (v1): 2 of 3 replicas would survive, 0 eligible node(s) to re-place onto — add an eligible node or drain these vaults first, or re-run with --force to accept reduced redundancy`, cluster.ErrWouldDropBelowRF),
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -221,5 +222,20 @@ func TestRemoveNode_InternalErrorStaysInternal(t *testing.T) {
 	}
 	if got := connect.CodeOf(err); got != connect.CodeInternal {
 		t.Fatalf("expected Internal, got %s: %v", got, err)
+	}
+}
+
+// A node that is no longer in the configuration is NotFound, which the CLI's
+// preStop path treats as an already-done removal.
+func TestRemoveNode_MissingNodeIsNotFound(t *testing.T) {
+	t.Parallel()
+	rec := &removeNodeRecorder{err: fmt.Errorf("%w: n1", cluster.ErrNodeNotInCluster)}
+	client, _ := setupRemoveNodeTest(t, rec)
+
+	_, err := client.RemoveNode(context.Background(), connect.NewRequest(&gastrologv1.RemoveNodeRequest{
+		NodeId: []byte(glid.New().String()),
+	}))
+	if got := connect.CodeOf(err); got != connect.CodeNotFound {
+		t.Fatalf("expected NotFound, got %s: %v", got, err)
 	}
 }

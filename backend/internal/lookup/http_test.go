@@ -9,6 +9,20 @@ import (
 	"time"
 )
 
+// newLoopbackHTTP builds an HTTP lookup table pointed at a test server. Test
+// servers listen on loopback, which the destination policy denies by default,
+// so these tables opt in the way an operator would for a lookup service hosted
+// on their own network.
+func newLoopbackHTTP(t *testing.T, cfg HTTPConfig) *HTTP {
+	t.Helper()
+	cfg.AllowPrivateDestinations = true
+	h, err := NewHTTP(cfg)
+	if err != nil {
+		t.Fatalf("NewHTTP(%q): %v", cfg.URLTemplate, err)
+	}
+	return h
+}
+
 func TestHTTPLookup_Basic(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -16,7 +30,7 @@ func TestHTTPLookup_Basic(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
+	h := newLoopbackHTTP(t, HTTPConfig{URLTemplate: srv.URL + "/{value}"})
 	result := h.LookupValues(context.Background(), map[string]string{"value": "123"})
 
 	if result == nil {
@@ -39,7 +53,7 @@ func TestHTTPLookup_CacheHit(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}", CacheTTL: time.Minute})
+	h := newLoopbackHTTP(t, HTTPConfig{URLTemplate: srv.URL + "/{value}", CacheTTL: time.Minute})
 
 	// First call hits the server.
 	r1 := h.LookupValues(context.Background(), map[string]string{"value": "456"})
@@ -67,7 +81,7 @@ func TestHTTPLookup_CacheTTLExpiry(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}", CacheTTL: time.Millisecond})
+	h := newLoopbackHTTP(t, HTTPConfig{URLTemplate: srv.URL + "/{value}", CacheTTL: time.Millisecond})
 
 	h.LookupValues(context.Background(), map[string]string{"value": "789"})
 	time.Sleep(5 * time.Millisecond) // Let TTL expire.
@@ -84,7 +98,7 @@ func TestHTTPLookup_HTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
+	h := newLoopbackHTTP(t, HTTPConfig{URLTemplate: srv.URL + "/{value}"})
 	result := h.LookupValues(context.Background(), map[string]string{"value": "err"})
 
 	if result != nil {
@@ -99,7 +113,7 @@ func TestHTTPLookup_Timeout(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}", Timeout: 50 * time.Millisecond})
+	h := newLoopbackHTTP(t, HTTPConfig{URLTemplate: srv.URL + "/{value}", Timeout: 50 * time.Millisecond})
 	result := h.LookupValues(context.Background(), map[string]string{"value": "slow"})
 
 	if result != nil {
@@ -114,7 +128,7 @@ func TestHTTPLookup_NonStringValues(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
+	h := newLoopbackHTTP(t, HTTPConfig{URLTemplate: srv.URL + "/{value}"})
 	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result == nil {
@@ -141,7 +155,7 @@ func TestHTTPLookup_NestedObjectsSerialized(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
+	h := newLoopbackHTTP(t, HTTPConfig{URLTemplate: srv.URL + "/{value}"})
 	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result == nil {
@@ -170,7 +184,7 @@ func TestHTTPLookup_URLTemplateSubstitution(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/users/{value}/info"})
+	h := newLoopbackHTTP(t, HTTPConfig{URLTemplate: srv.URL + "/users/{value}/info"})
 	h.LookupValues(context.Background(), map[string]string{"value": "user42"})
 
 	if receivedPath != "/users/user42/info" {
@@ -190,7 +204,7 @@ func TestHTTPLookup_URLEncoding(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/lookup/{value}"})
+	h := newLoopbackHTTP(t, HTTPConfig{URLTemplate: srv.URL + "/lookup/{value}"})
 	h.LookupValues(context.Background(), map[string]string{"value": "hello world/foo"})
 
 	if receivedPath != "/lookup/hello%20world%2Ffoo" {
@@ -208,7 +222,7 @@ func TestHTTPLookup_CustomHeaders(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{
+	h := newLoopbackHTTP(t, HTTPConfig{
 		URLTemplate: srv.URL + "/{value}",
 		Headers: map[string]string{
 			"Authorization": "Bearer secret-token",
@@ -232,7 +246,7 @@ func TestHTTPLookup_SuffixesDiscovery(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
+	h := newLoopbackHTTP(t, HTTPConfig{URLTemplate: srv.URL + "/{value}"})
 
 	// Before any lookup, suffixes should be nil/empty.
 	if s := h.Suffixes(); len(s) != 0 {
@@ -263,7 +277,7 @@ func TestHTTPLookup_EmptyResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
+	h := newLoopbackHTTP(t, HTTPConfig{URLTemplate: srv.URL + "/{value}"})
 	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result != nil {
@@ -272,7 +286,7 @@ func TestHTTPLookup_EmptyResponse(t *testing.T) {
 }
 
 func TestHTTPLookup_EmptyValue(t *testing.T) {
-	h := NewHTTP(HTTPConfig{URLTemplate: "http://localhost/{value}"})
+	h := newLoopbackHTTP(t, HTTPConfig{URLTemplate: "http://localhost/{value}"})
 	result := h.LookupValues(context.Background(), map[string]string{"value": ""})
 
 	if result != nil {
@@ -287,7 +301,7 @@ func TestHTTPLookup_InvalidJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
+	h := newLoopbackHTTP(t, HTTPConfig{URLTemplate: srv.URL + "/{value}"})
 	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result != nil {
@@ -302,7 +316,7 @@ func TestHTTPLookup_RejectsNonJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
+	h := newLoopbackHTTP(t, HTTPConfig{URLTemplate: srv.URL + "/{value}"})
 	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result != nil {
@@ -316,7 +330,7 @@ func TestHTTPLookup_RejectsMissingContentType(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
+	h := newLoopbackHTTP(t, HTTPConfig{URLTemplate: srv.URL + "/{value}"})
 	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result != nil {
@@ -331,7 +345,7 @@ func TestHTTPLookup_ResponsePath(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{
+	h := newLoopbackHTTP(t, HTTPConfig{
 		URLTemplate:   srv.URL + "/{value}",
 		ResponsePaths: []string{"$.data.user"},
 	})
@@ -355,7 +369,7 @@ func TestHTTPLookup_ResponsePathArray(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{
+	h := newLoopbackHTTP(t, HTTPConfig{
 		URLTemplate:   srv.URL + "/{value}",
 		ResponsePaths: []string{"$.results[0]"},
 	})
@@ -376,7 +390,7 @@ func TestHTTPLookup_ResponsePathMiss(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{
+	h := newLoopbackHTTP(t, HTTPConfig{
 		URLTemplate:   srv.URL + "/{value}",
 		ResponsePaths: []string{"$.data.user"},
 	})
@@ -394,7 +408,7 @@ func TestHTTPLookup_MultipleResponsePaths(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{
+	h := newLoopbackHTTP(t, HTTPConfig{
 		URLTemplate:   srv.URL + "/{value}",
 		ResponsePaths: []string{"$.user", "$.account"},
 	})
@@ -421,7 +435,7 @@ func TestHTTPLookup_ResponsePathScalar(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{
+	h := newLoopbackHTTP(t, HTTPConfig{
 		URLTemplate:   srv.URL + "/{value}",
 		ResponsePaths: []string{"$.headers.host"},
 	})
@@ -445,7 +459,7 @@ func TestHTTPLookup_ResponsePathArrayFlat(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{
+	h := newLoopbackHTTP(t, HTTPConfig{
 		URLTemplate:   srv.URL + "/{value}",
 		ResponsePaths: []string{"$.data.tags"},
 	})
@@ -472,7 +486,7 @@ func TestHTTPLookup_ResponsePathArrayOfObjects(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{
+	h := newLoopbackHTTP(t, HTTPConfig{
 		URLTemplate:   srv.URL + "/{value}",
 		ResponsePaths: []string{"$.items"},
 	})
@@ -496,7 +510,7 @@ func TestHTTPLookup_AcceptsContentTypeWithCharset(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
+	h := newLoopbackHTTP(t, HTTPConfig{URLTemplate: srv.URL + "/{value}"})
 	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result == nil {

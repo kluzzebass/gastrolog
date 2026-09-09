@@ -52,6 +52,10 @@ func printValidation(vaultName string, msg *v1.ValidateVaultResponse) {
 		fmt.Printf("Vault %s: DAMAGE FOUND\n", vaultName)
 	}
 
+	for _, issue := range msg.GetIssues() {
+		fmt.Printf("  %s\n", issue)
+	}
+
 	for _, cv := range msg.GetChunks() {
 		if cv.GetValid() {
 			continue

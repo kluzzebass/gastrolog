@@ -17,7 +17,7 @@ func NewSealCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "seal <vault-name-or-id>",
 		Short: "Seal the active chunk and start a new one",
-		Long:  "Seal the active chunk in a vault. Triggers compress + index + (cloud) upload.",
+		Long:  "Seal the active chunk in a vault ahead of its rotation policy. For a pipeline vault this seals the open chunk manifest on the vault's home; the sealed chunk is then built, indexed and uploaded like any other.",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runSeal,
 	}

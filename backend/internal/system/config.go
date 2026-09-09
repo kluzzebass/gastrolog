@@ -2,6 +2,7 @@ package system
 
 import (
 	"gastrolog/internal/glid"
+	"slices"
 	"time"
 )
 
@@ -107,6 +108,11 @@ type QueryConfig struct {
 	MaxResultCount int `json:"max_result_count,omitempty"`
 }
 
+// DefaultMaxResultCount is the result cap a fresh install is bootstrapped with.
+// An operator is free to change it, including to 0 for no cap: Search is
+// cursor-paginated, so the client decides how much of a result set it pulls.
+const DefaultMaxResultCount = 10_000
+
 // SchedulerConfig holds configuration for the job scheduler.
 type SchedulerConfig struct {
 	MaxConcurrentJobs int `json:"max_concurrent_jobs,omitempty"` // default 4
@@ -159,6 +165,12 @@ type HTTPLookupConfig struct {
 	Timeout       string            `json:"timeout,omitempty"`        // Go duration string, optional
 	CacheTTL      string            `json:"cache_ttl,omitempty"`      // Go duration string, optional
 	CacheSize     int               `json:"cache_size,omitempty"`     // optional, default 10000
+
+	// AllowPrivateDestinations lets this lookup reach loopback, private and
+	// unique-local addresses, which outbound requests are denied by default.
+	// Set it for a lookup service the operator hosts on the cluster's own
+	// network; link-local space stays out of reach either way.
+	AllowPrivateDestinations bool `json:"allow_private_destinations,omitempty"`
 }
 
 // JSONFileLookupConfig defines a JSON file-backed lookup table.
@@ -257,6 +269,14 @@ type User struct {
 }
 
 // RefreshToken represents a stored refresh token (hash only, not the opaque token itself).
+// EligibleOn reports whether the ingester may run on nodeID. AllNodes makes
+// every node eligible regardless of the (legacy) NodeIDs list; otherwise a
+// non-empty NodeIDs restricts placement to the nodes listed, and an empty
+// list means every node.
+func (c IngesterConfig) EligibleOn(nodeID string) bool {
+	return c.AllNodes || len(c.NodeIDs) == 0 || slices.Contains(c.NodeIDs, nodeID)
+}
+
 type RefreshToken struct {
 	ID        glid.GLID `json:"id"`
 	UserID    glid.GLID `json:"user_id"`
