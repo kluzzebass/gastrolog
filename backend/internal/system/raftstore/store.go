@@ -33,18 +33,25 @@ type Forwarder interface {
 	Forward(ctx context.Context, data []byte) (uint64, error)
 }
 
+// Applier submits a command to the replicated log and reports when it has
+// been applied. *raft.Raft satisfies it in production; tests substitute a
+// fabric that applies to several FSMs without running Raft.
+type Applier interface {
+	Apply(cmd []byte, timeout time.Duration) raft.ApplyFuture
+}
+
 // Store implements system.Store by routing writes through raft.Apply() for
 // persistence and reading from the FSM's in-memory store.
 type Store struct {
 	fsm          *raftfsm.FSM
-	raft         *raft.Raft
+	raft         Applier
 	applyTimeout time.Duration
 	forwarder    Forwarder // nil for single-node
 	barriers     barrierGate
 }
 
 // New creates a new Store.
-func New(r *raft.Raft, fsm *raftfsm.FSM, applyTimeout time.Duration) *Store {
+func New(r Applier, fsm *raftfsm.FSM, applyTimeout time.Duration) *Store {
 	return &Store{
 		fsm:          fsm,
 		raft:         r,
