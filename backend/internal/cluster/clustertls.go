@@ -15,7 +15,6 @@ import (
 	"gastrolog/internal/multiraft"
 
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // tlsFile is the on-disk format for persisted cluster TLS material.
@@ -230,6 +229,12 @@ func (c *ClusterTLS) TransportCredentialsForServerName(serverName string) creden
 	return &laneDynamicCreds{ctls: c, serverName: serverName}
 }
 
+// ErrClusterTLSUnloaded is returned by a cluster-credential handshake
+// attempted before the node holds cluster TLS material. Dialling on is not
+// an option: the peer's raft lanes demand a client certificate, and a
+// plaintext connection to a TLS listener cannot complete either way.
+var ErrClusterTLSUnloaded = errors.New("cluster TLS not loaded")
+
 // laneDynamicCreds implements credentials.TransportCredentials with a fixed
 // TLS ServerName for lane-specific verification after SNI demux.
 type laneDynamicCreds struct {
@@ -238,15 +243,29 @@ type laneDynamicCreds struct {
 }
 
 func (d *laneDynamicCreds) ClientHandshake(ctx context.Context, authority string, rawConn net.Conn) (net.Conn, credentials.AuthInfo, error) {
-	return d.current().ClientHandshake(ctx, authority, rawConn)
+	creds, err := d.current()
+	if err != nil {
+		return nil, nil, err
+	}
+	return creds.ClientHandshake(ctx, authority, rawConn)
 }
 
 func (d *laneDynamicCreds) ServerHandshake(rawConn net.Conn) (net.Conn, credentials.AuthInfo, error) {
-	return d.current().ServerHandshake(rawConn)
+	creds, err := d.current()
+	if err != nil {
+		return nil, nil, err
+	}
+	return creds.ServerHandshake(rawConn)
 }
 
 func (d *laneDynamicCreds) Info() credentials.ProtocolInfo {
-	return d.current().Info()
+	if creds, err := d.current(); err == nil {
+		return creds.Info()
+	}
+	// These credentials are TLS or nothing. Reporting the protocol they
+	// will use keeps an inspecting caller from reading the unloaded window
+	// as a plaintext connection.
+	return credentials.ProtocolInfo{SecurityProtocol: "tls"}
 }
 
 func (d *laneDynamicCreds) Clone() credentials.TransportCredentials {
@@ -257,10 +276,16 @@ func (d *laneDynamicCreds) OverrideServerName(name string) error {
 	return nil
 }
 
-func (d *laneDynamicCreds) current() credentials.TransportCredentials {
+// current resolves the TLS material for this lane at handshake time.
+//
+// Unloaded state fails the handshake. A caller that genuinely runs without
+// cluster TLS asks for insecure credentials by name; these credentials
+// exist to carry cluster identity, and quietly handing back plaintext when
+// the identity is missing is a downgrade the operator never sees.
+func (d *laneDynamicCreds) current() (credentials.TransportCredentials, error) {
 	cfg := d.ctls.clientTLSConfigForServerName(d.serverName)
 	if cfg == nil {
-		return insecure.NewCredentials()
+		return nil, fmt.Errorf("%w (lane %s)", ErrClusterTLSUnloaded, d.serverName)
 	}
-	return credentials.NewTLS(cfg)
+	return credentials.NewTLS(cfg), nil
 }

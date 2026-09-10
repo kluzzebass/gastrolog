@@ -553,19 +553,27 @@ func (mc *managedConn) activePurposeCount() int {
 	return n
 }
 
-func (m *PeerConnManager) dialTransportCreds(spec ConnSpec) (credentials.TransportCredentials, string) {
-	if spec.Lane == LaneRaft {
-		serverName := multiraft.LaneSNI(spec.GroupID)
-		if m.clusterTLS != nil && m.clusterTLS.State() != nil {
-			return m.clusterTLS.TransportCredentialsForServerName(serverName), serverName
-		}
-		return insecure.NewCredentials(), serverName
-	}
+// dialTransportCreds picks the transport for one peer connection.
+//
+// A node with no ClusterTLS holder at all is running without cluster TLS by
+// construction and dials plaintext. A node that has a holder but no material
+// in it is a different situation: it is meant to speak TLS and cannot yet.
+// Dialling plaintext there is a credential downgrade, so the dial is refused
+// instead — silently degrading is how an operator ends up believing the
+// cluster port is authenticated when it is not.
+func (m *PeerConnManager) dialTransportCreds(spec ConnSpec) (credentials.TransportCredentials, string, error) {
 	serverName := SNIServiceLane
-	if m.clusterTLS != nil && m.clusterTLS.State() != nil {
-		return m.clusterTLS.TransportCredentials(), serverName
+	if spec.Lane == LaneRaft {
+		serverName = multiraft.LaneSNI(spec.GroupID)
 	}
-	return insecure.NewCredentials(), serverName
+	if m.clusterTLS == nil {
+		return insecure.NewCredentials(), serverName, nil
+	}
+	if m.clusterTLS.State() == nil {
+		return nil, serverName, fmt.Errorf("dial peer %s on lane %s: %w",
+			spec.PeerNodeID, serverName, ErrClusterTLSUnloaded)
+	}
+	return m.clusterTLS.TransportCredentialsForServerName(serverName), serverName, nil
 }
 
 func (m *PeerConnManager) dial(spec ConnSpec, poolIndex int) (*managedConn, error) {
@@ -573,7 +581,10 @@ func (m *PeerConnManager) dial(spec ConnSpec, poolIndex int) (*managedConn, erro
 	if err != nil {
 		return nil, err
 	}
-	creds, serverName := m.dialTransportCreds(spec)
+	creds, serverName, err := m.dialTransportCreds(spec)
+	if err != nil {
+		return nil, err
+	}
 
 	mc := &managedConn{
 		id:             m.nextConnID.Add(1),
