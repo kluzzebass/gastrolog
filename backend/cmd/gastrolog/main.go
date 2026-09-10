@@ -179,7 +179,7 @@ func main() {
 
 	serverCmd.Flags().String("listen", ":4564", "listen address (host:port)")
 	serverCmd.Flags().String("vaults", "", "vault storage directory (default: <home>/vaults)")
-	serverCmd.Flags().Bool("no-auth", false, "disable authentication (all requests treated as admin)")
+	serverCmd.Flags().Bool("no-auth", false, "disable authentication, treating every request as admin (development only; refused unless --listen binds loopback)")
 	serverCmd.Flags().String("cluster-addr", ":4566", "cluster gRPC listen address")
 	serverCmd.Flags().String("cluster-advertise", "", "address peers store and dial to reach this node (empty = use bind address); set to a stable DNS name in environments with rotating pod IPs (e.g. Kubernetes)")
 	serverCmd.Flags().Int("service-pool-max-per-peer", 0, "max parallel outbound service-lane gRPC connections per peer (0 = default 4)")

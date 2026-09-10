@@ -366,6 +366,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 
 	coordNode := nodes[coordinatorID]
 	srvCfg := server.Config{
+		NoAuth:               true,
 		NodeID:               coordinatorID,
 		RemoteSearcher:       remoteSearcher,
 		RemoteIndexer:        remoteIndexer,

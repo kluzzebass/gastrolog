@@ -59,6 +59,7 @@ func mnSystemClientFor(t *testing.T, h *multiNodeHarness, nodeID string) gastrol
 	t.Helper()
 	node := h.Node(t, nodeID)
 	srv := server.New(node.orch, h.store(t, nodeID), orchestrator.Factories{VaultsDir: t.TempDir()}, nil, server.Config{
+		NoAuth:           true,
 		NodeID:           nodeID,
 		RoutingForwarder: newDirectUnaryForwarder(t, h.nodes, nodeID, t.TempDir()),
 	})

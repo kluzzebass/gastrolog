@@ -106,7 +106,7 @@ func TestEmbeddedTransportSearch(t *testing.T) {
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Create server
-	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{NoAuth: true})
 	handler := srv.Handler()
 
 	// Create client with embedded transport (like REPL uses)

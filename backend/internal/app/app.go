@@ -11,6 +11,7 @@ import (
 	"gastrolog/internal/glid"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -620,9 +621,15 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		disp.ReplayConfigFromStore(ctx)
 	}
 
+	if err := checkNoAuthIsLocal(cfg.NoAuth, cfg.ServerAddr); err != nil {
+		return err
+	}
 	tokens, err := buildAuthTokens(ctx, logger, cfgStore, cfg.NoAuth)
 	if err != nil {
 		return err
+	}
+	if cfg.NoAuth {
+		alertCollector.Raise(noAuthAlarmType, "", "listening on "+cfg.ServerAddr)
 	}
 
 	// Build cluster operation callbacks (raft mode only).
@@ -1453,6 +1460,42 @@ func loadBroadcastInterval(ctx context.Context, cfgStore system.Store) time.Dura
 		return d
 	}
 	return defaultBroadcastInterval
+}
+
+// noAuthAlarmType stands while authentication is disabled. It is the only
+// thing telling an operator why every caller is an admin.
+const noAuthAlarmType = "authentication-disabled"
+
+// checkNoAuthIsLocal refuses --no-auth on a listener that anything but this
+// machine can reach. The flag hands admin to every caller, so the blast
+// radius is exactly the set of hosts that can open the port; a development
+// convenience is only that while the set is one.
+func checkNoAuthIsLocal(noAuth bool, serverAddr string) error {
+	if !noAuth || serverAddr == "" {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(serverAddr)
+	if err != nil {
+		return fmt.Errorf("--no-auth: cannot read the listen address %q: %w", serverAddr, err)
+	}
+	if isLoopbackHost(host) {
+		return nil
+	}
+	return fmt.Errorf("--no-auth disables authentication and %s is reachable from other hosts; "+
+		"bind localhost instead, or drop --no-auth", serverAddr)
+}
+
+// isLoopbackHost reports whether a listen host reaches this machine only. An
+// empty host is the wildcard, which every interface answers.
+func isLoopbackHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func buildAuthTokens(ctx context.Context, logger *slog.Logger, cfgStore system.Store, noAuth bool) (*auth.TokenService, error) {

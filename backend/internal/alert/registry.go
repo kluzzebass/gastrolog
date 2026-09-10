@@ -391,6 +391,16 @@ var catalog = []AlarmType{
 	// ask, and the actionable detail (build/start errors) is already in the
 	// log. An alarm whose response is "check the log" is a log.
 	{
+		// Node-scoped and standing for the life of the process: the flag is
+		// read once at startup and there is no way to turn it off without a
+		// restart, so there is nothing to clear.
+		IDPrefix: "authentication-disabled",
+		Priority: High,
+		Source:   "server",
+		Cause:    "This node is serving its API with authentication disabled. Every caller that can reach the listener is treated as an administrator, and the audit log attributes their actions to a synthetic account.",
+		Response: "Restart the node without --no-auth. The flag is refused on any listen address other than loopback, so the exposure is limited to this machine, but every process on it has full administrative access until then.",
+	},
+	{
 		IDPrefix: "pipeline-backlog-approaching",
 		Priority: Low,
 		Source:   "storage",

@@ -109,6 +109,12 @@ type Config struct {
 	// NoAuth disables authentication. All requests are treated as admin.
 	NoAuth bool
 
+	// TrustContextClaims attaches no authenticator and serves whatever
+	// identity is already on the request context. Only correct where
+	// something upstream established that identity; on a listener that
+	// faces a network it publishes every RPC to every caller.
+	TrustContextClaims bool
+
 	// HomeDir is the gastrolog home directory path. Used for auto-downloaded
 	// lookup databases. Empty when running with in-memory system.
 	HomeDir string
@@ -267,6 +273,7 @@ type Server struct {
 	tokens                     *auth.TokenService
 	certManager                CertManager
 	noAuth                     bool
+	trustContextClaims         bool
 	logger                     *slog.Logger
 	cluster                    ClusterStatusProvider
 	peerStats                  NodeStatsProvider
@@ -349,6 +356,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		tokens:                     tokens,
 		certManager:                cfg.CertManager,
 		noAuth:                     cfg.NoAuth,
+		trustContextClaims:         cfg.TrustContextClaims,
 		logger:                     compServer.Apply(logging.Default(cfg.Logger)),
 		cluster:                    cfg.Cluster,
 		peerStats:                  cfg.PeerStats,
@@ -657,12 +665,19 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		interceptors := []connect.Interceptor{newRPCErrorLogInterceptor(s.logger), authInterceptor}
 		interceptors = append(interceptors, s.routingInterceptor()...)
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(interceptors...))
-	default:
-		// No auth configured (tests without NoAuth flag). Still attach the
-		// RPC error logger; routing interceptor is appended only in cluster mode.
-		ri := s.routingInterceptor()
+	case s.trustContextClaims:
+		// Identity was established before the request reached this mux, so
+		// there is nothing to authenticate here.
 		interceptors := []connect.Interceptor{newRPCErrorLogInterceptor(s.logger)}
-		interceptors = append(interceptors, ri...)
+		interceptors = append(interceptors, s.routingInterceptor()...)
+		handlerOpts = append(handlerOpts, connect.WithInterceptors(interceptors...))
+	default:
+		// Built with neither a token service nor NoAuth: there is no way to
+		// tell callers apart, so every RPC is refused. Serving instead would
+		// publish the whole API to anyone who reaches the listener, and the
+		// only signal would be its absence.
+		interceptors := []connect.Interceptor{newRPCErrorLogInterceptor(s.logger), &auth.DenyAllInterceptor{}}
+		interceptors = append(interceptors, s.routingInterceptor()...)
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(interceptors...))
 	}
 

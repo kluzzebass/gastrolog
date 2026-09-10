@@ -160,7 +160,7 @@ non-container deployments:
 | `--write-bootstrap-token <path>` | Bootstrap node only: write the token for joiners to pick up. |
 | `--bootstrap-token-file <path>` | Joiner only: read the token from this path with polling. |
 | `--initial-admin-file <path>` | Bootstrap node only: provision admin credentials from a file. |
-| `--no-auth` | Disable authentication. Testing only. |
+| `--no-auth` | Disable authentication; every request is treated as admin. Development only, and refused unless `--listen` binds loopback. Raises a standing `authentication-disabled` alarm while active. |
 
 ## Why bother containerizing?
 
