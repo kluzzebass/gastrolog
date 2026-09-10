@@ -196,12 +196,14 @@ func (s *SystemServer) PutIngester(
 	}
 
 	// Reject duplicate names.
+	if connErr := checkNameConflict(ctx, s.sysStore, "ingester", id, req.Msg.Config.Name, s.sysStore.ListIngesters,
+		func(i system.IngesterConfig) (glid.GLID, string) { return i.ID, i.Name }); connErr != nil {
+		return nil, connErr
+	}
+
 	ingesters, err := s.sysStore.ListIngesters(ctx)
 	if err != nil {
 		return nil, errInternal(err)
-	}
-	if connErr := checkNameConflict("ingester", id, req.Msg.Config.Name, ingesters, func(i system.IngesterConfig) (glid.GLID, string) { return i.ID, i.Name }); connErr != nil {
-		return nil, connErr
 	}
 
 	nodeIDs := make([]string, len(req.Msg.Config.NodeIds))

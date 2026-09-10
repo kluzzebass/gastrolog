@@ -827,11 +827,8 @@ func (s *SystemServer) PutNodeConfig(
 	nodeUUID := glid.FromBytes(idBytes)
 
 	// Reject duplicate names.
-	nodes, err := s.sysStore.ListNodes(ctx)
-	if err != nil {
-		return nil, errInternal(err)
-	}
-	if connErr := checkNameConflict("node", nodeUUID, name, nodes, func(n system.NodeConfig) (glid.GLID, string) { return n.ID, n.Name }); connErr != nil {
+	if connErr := checkNameConflict(ctx, s.sysStore, "node", nodeUUID, name, s.sysStore.ListNodes,
+		func(n system.NodeConfig) (glid.GLID, string) { return n.ID, n.Name }); connErr != nil {
 		return nil, connErr
 	}
 
@@ -1848,7 +1845,37 @@ func evalJQ(query string, params map[string]string, data any) (result, errMsg st
 
 // checkNameConflict returns an AlreadyExists error if another entity of the
 // same type already has the given name. Empty names are allowed to coexist.
-func checkNameConflict[S ~[]E, E any](entityType string, id glid.GLID, name string, existing S, identify func(E) (glid.GLID, string)) *connect.Error {
+//
+// A clean local list is not proof the name is free. Any node serves any
+// request, and this one may not have applied the write that took the name,
+// so a clean pass is repeated behind an apply-wait barrier. A conflict found
+// locally needs no barrier: the entity is already in this node's view.
+func checkNameConflict[E any](
+	ctx context.Context,
+	store system.Store,
+	entityType string,
+	id glid.GLID,
+	name string,
+	list func(context.Context) ([]E, error),
+	identify func(E) (glid.GLID, string),
+) *connect.Error {
+	existing, err := list(ctx)
+	if err != nil {
+		return errInternal(err)
+	}
+	if connErr := nameAlreadyInUse(entityType, id, name, existing, identify); connErr != nil {
+		return connErr
+	}
+	if err := store.Barrier(ctx); err != nil {
+		return errInternal(err)
+	}
+	if existing, err = list(ctx); err != nil {
+		return errInternal(err)
+	}
+	return nameAlreadyInUse(entityType, id, name, existing, identify)
+}
+
+func nameAlreadyInUse[E any](entityType string, id glid.GLID, name string, existing []E, identify func(E) (glid.GLID, string)) *connect.Error {
 	for _, e := range existing {
 		eid, ename := identify(e)
 		if eid != id && ename == name {
@@ -1857,4 +1884,25 @@ func checkNameConflict[S ~[]E, E any](entityType string, id glid.GLID, name stri
 		}
 	}
 	return nil
+}
+
+// getConfirmed reads one config entity by ID and, when this node's view has
+// no such entity, catches up behind an apply-wait barrier before reporting it
+// absent. A miss on a node that has not applied the create is
+// indistinguishable from a genuine absence, and a read-modify-write that
+// believes the miss overwrites whatever the entity already held.
+func getConfirmed[T any](
+	ctx context.Context,
+	store system.Store,
+	id glid.GLID,
+	get func(context.Context, glid.GLID) (*T, error),
+) (*T, error) {
+	found, err := get(ctx, id)
+	if err != nil || found != nil {
+		return found, err
+	}
+	if err := store.Barrier(ctx); err != nil {
+		return nil, err
+	}
+	return get(ctx, id)
 }

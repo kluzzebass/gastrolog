@@ -10,6 +10,7 @@
 package configfabric
 
 import (
+	"errors"
 	"sync"
 	"time"
 
@@ -19,6 +20,12 @@ import (
 	"gastrolog/internal/system/raftfsm"
 	"gastrolog/internal/system/raftstore"
 )
+
+// ErrStalled is what a stalled node's writes fail with. It stands for any
+// reason a node cannot get an entry committed — no quorum, partitioned from
+// the leader, forward timed out — all of which leave the node unable to
+// bring its own view current.
+var ErrStalled = errors.New("configfabric: node cannot reach the log")
 
 // Mode is how entries reach nodes other than the writer.
 type Mode int
@@ -47,6 +54,7 @@ type Node struct {
 	fsm     *raftfsm.FSM
 	store   *raftstore.Store
 	applied uint64 // index of the last log entry applied here
+	stalled bool
 }
 
 // New builds a fabric of n nodes in Immediate mode.
@@ -98,6 +106,22 @@ func (f *Fabric) Lag(i int) uint64 {
 	return uint64(len(f.log)) - f.nodes[i].applied
 }
 
+// Stall makes node i's writes fail, so a test can exercise a node that
+// cannot bring its view current. Entries already held for it still arrive
+// through Deliver.
+func (f *Fabric) Stall(i int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nodes[i].stalled = true
+}
+
+// Resume undoes Stall.
+func (f *Fabric) Resume(i int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nodes[i].stalled = false
+}
+
 // Store is the node's config store: reads serve its own FSM, writes go
 // through the fabric.
 func (n *Node) Store() system.Store { return n.store }
@@ -108,6 +132,9 @@ func (n *Node) Apply(cmd []byte, _ time.Duration) raft.ApplyFuture {
 	f := n.fabric
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if n.stalled {
+		return &future{err: ErrStalled}
+	}
 	index := uint64(len(f.log)) + 1
 	f.log = append(f.log, raft.Log{Index: index, Term: 1, Type: raft.LogCommand, Data: cmd})
 	resp := n.applyUpTo(index)
@@ -141,8 +168,9 @@ func (n *Node) applyUpTo(index uint64) any {
 type future struct {
 	index uint64
 	resp  any
+	err   error
 }
 
-func (f *future) Error() error  { return nil }
+func (f *future) Error() error  { return f.err }
 func (f *future) Index() uint64 { return f.index }
 func (f *future) Response() any { return f.resp }

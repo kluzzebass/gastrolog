@@ -263,12 +263,14 @@ func (s *SystemServer) PutVault(
 	}
 
 	// Reject duplicate names.
+	if connErr := checkNameConflict(ctx, s.sysStore, "vault", vaultCfg.ID, vaultCfg.Name, s.sysStore.ListVaults,
+		func(v system.VaultConfig) (glid.GLID, string) { return v.ID, v.Name }); connErr != nil {
+		return nil, connErr
+	}
+
 	vaults, err := s.sysStore.ListVaults(ctx)
 	if err != nil {
 		return nil, errInternal(err)
-	}
-	if connErr := checkNameConflict("vault", vaultCfg.ID, vaultCfg.Name, vaults, func(v system.VaultConfig) (glid.GLID, string) { return v.ID, v.Name }); connErr != nil {
-		return nil, connErr
 	}
 
 	// Resolve the vault's cache/memory budgets: the wire distinguishes

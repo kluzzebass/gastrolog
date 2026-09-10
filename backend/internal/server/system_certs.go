@@ -137,11 +137,8 @@ func (s *SystemServer) PutCertificate(
 	}
 
 	// Reject duplicate names.
-	certs, err := s.sysStore.ListCertificates(ctx)
-	if err != nil {
-		return nil, errInternal(err)
-	}
-	if connErr := checkNameConflict("certificate", certID, req.Msg.Name, certs, func(c system.CertPEM) (glid.GLID, string) { return c.ID, c.Name }); connErr != nil {
+	if connErr := checkNameConflict(ctx, s.sysStore, "certificate", certID, req.Msg.Name, s.sysStore.ListCertificates,
+		func(c system.CertPEM) (glid.GLID, string) { return c.ID, c.Name }); connErr != nil {
 		return nil, connErr
 	}
 

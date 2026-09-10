@@ -38,11 +38,8 @@ func (s *SystemServer) PutCloudService(
 	}
 
 	// Reject duplicate names.
-	services, err := s.sysStore.ListCloudServices(ctx)
-	if err != nil {
-		return nil, errInternal(err)
-	}
-	if connErr := checkNameConflict("cloud service", id, req.Msg.Config.Name, services, func(cs system.CloudService) (glid.GLID, string) { return cs.ID, cs.Name }); connErr != nil {
+	if connErr := checkNameConflict(ctx, s.sysStore, "cloud service", id, req.Msg.Config.Name, s.sysStore.ListCloudServices,
+		func(cs system.CloudService) (glid.GLID, string) { return cs.ID, cs.Name }); connErr != nil {
 		return nil, connErr
 	}
 
@@ -56,7 +53,11 @@ func (s *SystemServer) PutCloudService(
 	// object store. clear_credentials is the explicit way to drop them and
 	// fall back to the provider's ambient chain. Merged before validation so
 	// the checks below see the credentials the service will actually run with.
-	existing, err := s.sysStore.GetCloudService(ctx, id)
+	//
+	// getConfirmed, not a plain read: the handler runs wherever the request
+	// landed, and a node that has not applied the service yet would find
+	// nothing to preserve and store the service with its credentials wiped.
+	existing, err := getConfirmed(ctx, s.sysStore, id, s.sysStore.GetCloudService)
 	if err != nil {
 		return nil, errInternal(err)
 	}

@@ -465,6 +465,28 @@ func (h *multiNodeHarness) store(t *testing.T, nodeID string) system.Store {
 // deliverAll replicates every held-back config write to every node.
 func (h *multiNodeHarness) deliverAll() { h.fabric.DeliverAll() }
 
+// stallNode makes a node's config writes fail, standing in for a node that
+// cannot reach the leader and so cannot bring its own view current.
+func (h *multiNodeHarness) stallNode(t *testing.T, nodeID string) {
+	t.Helper()
+	h.fabric.Stall(h.fabricIndex(t, nodeID))
+}
+
+// resumeNode undoes stallNode.
+func (h *multiNodeHarness) resumeNode(t *testing.T, nodeID string) {
+	t.Helper()
+	h.fabric.Resume(h.fabricIndex(t, nodeID))
+}
+
+func (h *multiNodeHarness) fabricIndex(t *testing.T, nodeID string) int {
+	t.Helper()
+	i, ok := h.nodeIndex[nodeID]
+	if !ok {
+		t.Fatalf("unknown node %q; have %v", nodeID, h.nodeIDs())
+	}
+	return i
+}
+
 // mnOrchConfig builds the common orchestrator.Config shared by
 // setupMNNode/setupMNNodeNoVault. alerts is nil for harnesses that didn't
 // ask for WithClusterStats/WithAlertClock — left unset rather than

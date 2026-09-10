@@ -36,11 +36,8 @@ func (s *SystemServer) PutRoute(
 	}
 
 	// Reject duplicate names.
-	routes, err := s.sysStore.ListRoutes(ctx)
-	if err != nil {
-		return nil, errInternal(err)
-	}
-	if connErr := checkNameConflict("route", id, req.Msg.Config.Name, routes, func(r system.RouteConfig) (glid.GLID, string) { return r.ID, r.Name }); connErr != nil {
+	if connErr := checkNameConflict(ctx, s.sysStore, "route", id, req.Msg.Config.Name, s.sysStore.ListRoutes,
+		func(r system.RouteConfig) (glid.GLID, string) { return r.ID, r.Name }); connErr != nil {
 		return nil, connErr
 	}
 
