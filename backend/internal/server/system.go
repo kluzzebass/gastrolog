@@ -1515,18 +1515,30 @@ func (s *SystemServer) TestHTTPLookup(
 		}), nil
 	}
 
-	lcfg := lookup.HTTPConfig{
-		URLTemplate:   cfg.UrlTemplate,
-		Headers:       cfg.Headers,
-		ResponsePaths: cfg.ResponsePaths,
-		CacheSize:     int(cfg.CacheSize),
-		Name:          cfg.GetName(),
-		Logger:        s.logger,
+	// Never from the request: the flag says an operator vouched for a
+	// destination on their own network, which only a stored lookup can
+	// claim. An ad-hoc config in a test call vouches for nothing.
+	stored, allowPrivate := s.storedLookup(ctx, cfg.GetName(), cfg.GetUrlTemplate())
 
-		// Never from the request: the flag says an operator vouched for a
-		// destination on their own network, which only a stored lookup can
-		// claim. An ad-hoc config in a test call vouches for nothing.
-		AllowPrivateDestinations: s.storedLookupAllowsPrivate(ctx, cfg.GetName(), cfg.GetUrlTemplate()),
+	headers, responsePaths := cfg.Headers, cfg.ResponsePaths
+	if allowPrivate {
+		// The destination is only reachable because a saved lookup vouches
+		// for it, so the request sent there is the saved one too. Otherwise
+		// this procedure is a way to put arbitrary headers in front of a
+		// host on the cluster's own network. Testing an unsaved header set
+		// against a public endpoint is unaffected: anyone who can call this
+		// could reach that endpoint directly.
+		headers, responsePaths = stored.Headers, stored.ResponsePaths
+	}
+
+	lcfg := lookup.HTTPConfig{
+		URLTemplate:              cfg.UrlTemplate,
+		Headers:                  headers,
+		ResponsePaths:            responsePaths,
+		CacheSize:                int(cfg.CacheSize),
+		Name:                     cfg.GetName(),
+		Logger:                   s.logger,
+		AllowPrivateDestinations: allowPrivate,
 	}
 	if cfg.Timeout != "" {
 		d, err := time.ParseDuration(cfg.Timeout)
@@ -1562,26 +1574,26 @@ func (s *SystemServer) TestHTTPLookup(
 	}), nil
 }
 
-// storedLookupAllowsPrivate reports whether a saved lookup with this name and
-// URL template carries the operator's opt-in for private destinations. Matching
+// storedLookup returns the saved lookup with this name and URL template, and
+// whether it carries the operator's opt-in for private destinations. Matching
 // the template too means editing the URL in the form drops the exemption until
 // the edit is saved, so the test cannot probe an address the stored entry never
 // pointed at.
-func (s *SystemServer) storedLookupAllowsPrivate(ctx context.Context, name, urlTemplate string) bool {
+func (s *SystemServer) storedLookup(ctx context.Context, name, urlTemplate string) (system.HTTPLookupConfig, bool) {
 	if name == "" {
-		return false
+		return system.HTTPLookupConfig{}, false
 	}
 	ss, err := s.sysStore.LoadServerSettings(ctx)
 	if err != nil {
 		s.logger.Warn("lookup test: load settings failed, denying private destinations", "error", err)
-		return false
+		return system.HTTPLookupConfig{}, false
 	}
 	for _, l := range ss.Lookup.HTTPLookups {
 		if l.Name == name && l.URLTemplate == urlTemplate {
-			return l.AllowPrivateDestinations
+			return l, l.AllowPrivateDestinations
 		}
 	}
-	return false
+	return system.HTTPLookupConfig{}, false
 }
 
 // PreviewCSVLookup reads a managed CSV file and returns column headers,
