@@ -994,7 +994,11 @@ func (s *Server) initiateShutdown(drain bool) {
 
 // Handler returns an http.Handler for the server.
 // This is useful for testing or embedding in another server.
+//
+// It is the same chain the listeners serve, middleware included. A test
+// that drove a thinner one could not see a security header that was never
+// added, a CORS rule that was reordered, or a rate limit that stopped
+// applying.
 func (s *Server) Handler() http.Handler {
-	mux := s.buildMux()
-	return s.trackingMiddleware(mux)
+	return s.wrapMiddleware(s.buildMux())
 }
