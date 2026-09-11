@@ -30,8 +30,12 @@ type Tree[K, V any] struct {
 }
 
 // Create creates a new, empty B+ tree at path using the given codec.
+// fileMode keeps the index readable only by the user the node runs as. The
+// enclosing directory is 0o750, but a directory's mode is not the file's.
+const fileMode = 0o600
+
 func Create[K, V any](path string, codec Codec[K, V]) (*Tree[K, V], error) {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // G304: path is caller-controlled
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, fileMode) //nolint:gosec // G304: path is caller-controlled
 	if err != nil {
 		return nil, fmt.Errorf("btree create: %w", err)
 	}

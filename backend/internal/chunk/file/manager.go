@@ -434,7 +434,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	if cfg.Dir == "" {
 		return nil, ErrMissingDir
 	}
-	cfg.FileMode = cmp.Or(cfg.FileMode, 0o644)
+	cfg.FileMode = cmp.Or(cfg.FileMode, DefaultFileMode)
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}

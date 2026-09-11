@@ -32,7 +32,13 @@ const (
 // Default values.
 const (
 	DefaultMaxChunkBytes = 64 * 1024 * 1024 // 64 MiB
-	DefaultFileMode      = 0o644
+
+	// DefaultFileMode keeps chunk data readable only by the user the node
+	// runs as. The enclosing directory is 0o750, but a directory's mode is
+	// not the file's: widen the directory, copy the file elsewhere, or
+	// restore it from a backup, and a world-readable mode is what survives.
+	// Operators who need something wider set fileMode on the vault.
+	DefaultFileMode = 0o600
 )
 
 var (
