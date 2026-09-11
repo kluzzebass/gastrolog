@@ -38,6 +38,13 @@ var contentSecurityPolicy = strings.Join([]string{
 	"frame-ancestors 'none'",
 }, "; ")
 
+// strictTransportSecurity tells a browser to reach this host over TLS for a
+// year, subdomains included. No preload directive: preloading is a
+// submission to a list baked into browsers and is effectively irreversible,
+// which is not a decision a log server should make for the domain it
+// happens to be deployed under.
+const strictTransportSecurity = "max-age=31536000; includeSubDomains"
+
 // securityHeadersMiddleware sets standard HTTP security headers on every response.
 func securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -46,6 +53,12 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
+		if r.TLS != nil {
+			// Only over TLS. A browser ignores this header on a plain HTTP
+			// response, and sending it there would claim a guarantee the
+			// connection carrying it does not have.
+			w.Header().Set("Strict-Transport-Security", strictTransportSecurity)
+		}
 		next.ServeHTTP(w, r)
 	})
 }

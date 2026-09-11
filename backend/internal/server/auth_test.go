@@ -363,3 +363,40 @@ func TestLogout_RevokesOnlyCurrentSession(t *testing.T) {
 		t.Error("expected refresh token B to survive logout of session A")
 	}
 }
+
+// The two ways a login fails must be indistinguishable in the response as
+// well as in the work they cost, or the error itself tells an
+// unauthenticated caller which usernames exist.
+func TestLoginFailuresAreIndistinguishable(t *testing.T) {
+	t.Parallel()
+	client, _ := newAuthTestClient(t)
+	ctx := context.Background()
+
+	if _, err := client.Register(ctx, connect.NewRequest(&apiv1.RegisterRequest{
+		Username: "dave",
+		Password: "password123",
+	})); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	_, wrongPassword := client.Login(ctx, connect.NewRequest(&apiv1.LoginRequest{
+		Username: "dave",
+		Password: "wrongpassword",
+	}))
+	_, unknownUser := client.Login(ctx, connect.NewRequest(&apiv1.LoginRequest{
+		Username: "ghost",
+		Password: "wrongpassword",
+	}))
+
+	if wrongPassword == nil || unknownUser == nil {
+		t.Fatal("both logins must fail")
+	}
+	if connect.CodeOf(wrongPassword) != connect.CodeOf(unknownUser) {
+		t.Errorf("codes differ: wrong password %v, unknown user %v",
+			connect.CodeOf(wrongPassword), connect.CodeOf(unknownUser))
+	}
+	if wrongPassword.Error() != unknownUser.Error() {
+		t.Errorf("messages differ:\n  wrong password: %v\n  unknown user:   %v",
+			wrongPassword, unknownUser)
+	}
+}

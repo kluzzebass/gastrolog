@@ -101,7 +101,7 @@ func (s *VaultServer) now() time.Time { return time.Now() }
 // ErrVaultNotFound maps to CodeNotFound; ErrVaultNotReady to Unavailable;
 // everything else to CodeInternal.
 func mapVaultError(err error) *connect.Error {
-	if errors.Is(err, orchestrator.ErrVaultNotFound) {
+	if errors.Is(err, orchestrator.ErrVaultNotFound) || errors.Is(err, chunk.ErrChunkNotFound) {
 		return errNotFound(err)
 	}
 	if errors.Is(err, orchestrator.ErrVaultNotReady) {
