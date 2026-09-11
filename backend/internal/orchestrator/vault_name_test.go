@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"gastrolog/internal/glid"
@@ -9,23 +10,48 @@ import (
 	"gastrolog/internal/system"
 )
 
-// staticSystemLoader serves one fixed config, which is all VaultAlarmLabel
-// needs: the vault name's owner is the config, not the vault registry.
-type staticSystemLoader struct{ sys *system.System }
+// staticSystemLoader serves one config, which is all VaultAlarmLabel needs:
+// the vault name's owner is the config, not the vault registry.
+//
+// Changing it means swapping the whole config, never editing the one already
+// served. The orchestrator's scheduler loads config from its own goroutines,
+// so an in-place edit races them and the detector then fails whichever tests
+// happened to be running.
+type staticSystemLoader struct {
+	mu  sync.RWMutex
+	sys *system.System
+}
 
-func (l *staticSystemLoader) Load(context.Context) (*system.System, error) { return l.sys, nil }
+func newStaticSystemLoader(vaults ...system.VaultConfig) *staticSystemLoader {
+	l := &staticSystemLoader{}
+	l.setVaults(vaults...)
+	return l
+}
+
+func (l *staticSystemLoader) Load(context.Context) (*system.System, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.sys, nil
+}
+
+func (l *staticSystemLoader) setVaults(vaults ...system.VaultConfig) {
+	sys := &system.System{}
+	sys.Config.Vaults = vaults
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.sys = sys
+}
 
 func orchWithVaults(t *testing.T, vaults ...system.VaultConfig) *Orchestrator {
 	t.Helper()
-	sys := &system.System{}
-	sys.Config.Vaults = vaults
 	orch, err := New(Config{
 		SegmentsDir:  t.TempDir(),
-		SystemLoader: &staticSystemLoader{sys: sys},
+		SystemLoader: newStaticSystemLoader(vaults...),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	t.Cleanup(func() { _ = orch.Scheduler().Stop() })
 	return orch
 }
 
@@ -53,17 +79,17 @@ func TestVaultAlarmLabelNamesTheVault(t *testing.T) {
 func TestVaultAlarmLabelFollowsARename(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
-	sys := &system.System{}
-	sys.Config.Vaults = []system.VaultConfig{{ID: vaultID, Name: "app-logs"}}
-	orch, err := New(Config{SegmentsDir: t.TempDir(), SystemLoader: &staticSystemLoader{sys: sys}})
+	loader := newStaticSystemLoader(system.VaultConfig{ID: vaultID, Name: "app-logs"})
+	orch, err := New(Config{SegmentsDir: t.TempDir(), SystemLoader: loader})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	t.Cleanup(func() { _ = orch.Scheduler().Stop() })
 
 	if got := orch.VaultAlarmLabel(vaultID); got != `"app-logs"` {
 		t.Fatalf("VaultAlarmLabel = %s, want %s", got, `"app-logs"`)
 	}
-	sys.Config.Vaults[0].Name = "application-logs"
+	loader.setVaults(system.VaultConfig{ID: vaultID, Name: "application-logs"})
 	if got := orch.VaultAlarmLabel(vaultID); got != `"application-logs"` {
 		t.Errorf("VaultAlarmLabel after rename = %s, want %s", got, `"application-logs"`)
 	}

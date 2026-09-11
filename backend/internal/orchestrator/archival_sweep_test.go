@@ -30,7 +30,7 @@ import (
 // directly and don't want background cron work. Tests that exercise the
 // scheduler-driven TriggerArchivalSweep path use archivalTestSetupLive instead.
 func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition) (
-	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, glid.GLID, *sysmem.Store,
+	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, glid.GLID, *sysmem.Store, *testClock,
 ) {
 	t.Helper()
 	return archivalTestSetupOpts(t, transitions, true)
@@ -39,14 +39,17 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 // archivalTestSetupLive is archivalTestSetup with the scheduler left running, so
 // scheduler-dispatched one-time jobs (TriggerArchivalSweep) actually execute.
 func archivalTestSetupLive(t *testing.T, transitions []system.CloudStorageTransition) (
-	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, glid.GLID, *sysmem.Store,
+	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, glid.GLID, *sysmem.Store, *testClock,
 ) {
 	t.Helper()
 	return archivalTestSetupOpts(t, transitions, false)
 }
 
+// The returned clock is the orchestrator's time source. Tests age chunks by
+// advancing it; replacing o.now after construction instead races every
+// scheduler goroutine that reads it.
 func archivalTestSetupOpts(t *testing.T, transitions []system.CloudStorageTransition, stopScheduler bool) (
-	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, glid.GLID, *sysmem.Store,
+	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, glid.GLID, *sysmem.Store, *testClock,
 ) {
 	t.Helper()
 	vaultID := glid.New()
@@ -79,9 +82,11 @@ func archivalTestSetupOpts(t *testing.T, transitions []system.CloudStorageTransi
 		RestoreDays:  7,
 	})
 
+	clock := newTestClock(time.Now())
 	orch := newTestOrch(t, Config{
 		LocalNodeID:  nodeID,
 		SystemLoader: &transitionSystemLoader{store: store},
+		Now:          clock.Now,
 	})
 	if stopScheduler {
 		_ = orch.Scheduler().Stop()
@@ -95,7 +100,7 @@ func archivalTestSetupOpts(t *testing.T, transitions []system.CloudStorageTransi
 
 	t.Cleanup(func() { _ = cm.Close() })
 
-	return orch, cloudStore, cm, vaultID, store
+	return orch, cloudStore, cm, vaultID, store, clock
 }
 
 // ingestSealUpload ingests N records, seals, and runs PostSealProcess (compress + cloud upload).
@@ -128,7 +133,7 @@ func ingestSealUpload(t *testing.T, cm *chunkfile.Manager, n int) []chunk.ChunkI
 
 func TestArchivalSweepArchivesOldChunks(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
+	orch, _, cm, _, _, clock := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", CloudStorageClass: "GLACIER"},
 	})
 
@@ -145,7 +150,7 @@ func TestArchivalSweepArchivesOldChunks(t *testing.T) {
 	}
 
 	// Hack WriteEnd to be 2 days ago by using a frozen Now on the orchestrator.
-	orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	clock.Advance(48 * time.Hour)
 
 	orch.archivalSweepAll()
 
@@ -157,14 +162,14 @@ func TestArchivalSweepArchivesOldChunks(t *testing.T) {
 
 func TestArchivalSweepDeletesExpiredChunks(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
+	orch, _, cm, _, _, clock := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", CloudStorageClass: ""}, // delete after 1 day
 	})
 
 	ids := ingestSealUpload(t, cm, 50)
 
 	// Age the chunks past the threshold.
-	orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	clock.Advance(48 * time.Hour)
 	orch.archivalSweepAll()
 
 	// Chunk should be deleted.
@@ -176,7 +181,7 @@ func TestArchivalSweepDeletesExpiredChunks(t *testing.T) {
 
 func TestArchivalSweepIgnoresInactiveServices(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, store := archivalTestSetup(t, []system.CloudStorageTransition{
+	orch, _, cm, _, store, clock := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", CloudStorageClass: "GLACIER"},
 	})
 
@@ -188,7 +193,7 @@ func TestArchivalSweepIgnoresInactiveServices(t *testing.T) {
 	cs.ArchivalMode = "none"
 	_ = store.PutCloudService(context.Background(), cs)
 
-	orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	clock.Advance(48 * time.Hour)
 	orch.archivalSweepAll()
 
 	meta, _ := cm.Meta(ids[0])
@@ -199,7 +204,7 @@ func TestArchivalSweepIgnoresInactiveServices(t *testing.T) {
 
 func TestArchivalSweepMultiStepTransition(t *testing.T) {
 	t.Parallel()
-	orch, cloudStore, cm, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
+	orch, cloudStore, cm, _, _, clock := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", CloudStorageClass: "cold"},
 		{After: "30d", CloudStorageClass: "deep-freeze"},
 	})
@@ -207,7 +212,7 @@ func TestArchivalSweepMultiStepTransition(t *testing.T) {
 	ids := ingestSealUpload(t, cm, 50)
 
 	// 2 days old → should match first transition (cold).
-	orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	clock.Advance(48 * time.Hour)
 	orch.archivalSweepAll()
 
 	meta, _ := cm.Meta(ids[0])
@@ -223,7 +228,7 @@ func TestArchivalSweepMultiStepTransition(t *testing.T) {
 	// which the bug never prevented. ArchiveChunk short-circuited on a bare
 	// "archived" bool, so a chunk already in ANY class never moved to a colder
 	// one and silently stopped migrating to cheaper storage.
-	orch.now = func() time.Time { return time.Now().Add(31 * 24 * time.Hour) }
+	clock.Advance(31 * 24 * time.Hour)
 	orch.archivalSweepAll()
 
 	if got := blobStorageClass(t, cloudStore, ids[0]); got != "deep-freeze" {
@@ -264,7 +269,7 @@ func blobStorageClass(t *testing.T, cloudStore *blobstore.Memory, id chunk.Chunk
 // no sleeping — and the async one-time job is drained with WaitIdle.
 func TestTriggerArchivalSweepEvaluatesImmediately(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _ := archivalTestSetupLive(t, []system.CloudStorageTransition{
+	orch, _, cm, _, _, clock := archivalTestSetupLive(t, []system.CloudStorageTransition{
 		{After: "1d", CloudStorageClass: "GLACIER"},
 	})
 
@@ -274,7 +279,7 @@ func TestTriggerArchivalSweepEvaluatesImmediately(t *testing.T) {
 	}
 
 	// Age the chunks past the 1d threshold via the injected clock.
-	orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	clock.Advance(48 * time.Hour)
 
 	orch.TriggerArchivalSweep()
 	requireIdle(t, orch.Scheduler(), 5*time.Second)
@@ -290,14 +295,14 @@ func TestTriggerArchivalSweepEvaluatesImmediately(t *testing.T) {
 // transition threshold is left untouched even when the trigger fires.
 func TestTriggerArchivalSweepBelowThresholdNoOp(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _ := archivalTestSetupLive(t, []system.CloudStorageTransition{
+	orch, _, cm, _, _, clock := archivalTestSetupLive(t, []system.CloudStorageTransition{
 		{After: "5d", CloudStorageClass: "GLACIER"},
 	})
 
 	ids := ingestSealUpload(t, cm, 50)
 
 	// Only 2 days old — below the 5d threshold.
-	orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	clock.Advance(48 * time.Hour)
 
 	orch.TriggerArchivalSweep()
 	requireIdle(t, orch.Scheduler(), 5*time.Second)
@@ -347,7 +352,7 @@ func (g *gatedSystemLoader) releaseAll() {
 // one run's terminal job event never reached the inspector.
 func TestTriggerArchivalSweepConcurrentTriggersClaimOnce(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _ := archivalTestSetupLive(t, []system.CloudStorageTransition{
+	orch, _, cm, _, _, _ := archivalTestSetupLive(t, []system.CloudStorageTransition{
 		{After: "1d", CloudStorageClass: "GLACIER"},
 	})
 	_ = ingestSealUpload(t, cm, 10)
@@ -405,7 +410,7 @@ func TestTriggerArchivalSweepConcurrentTriggersClaimOnce(t *testing.T) {
 // fresh evaluation.
 func TestTriggerArchivalSweepCoalesces(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _ := archivalTestSetupLive(t, []system.CloudStorageTransition{
+	orch, _, cm, _, _, _ := archivalTestSetupLive(t, []system.CloudStorageTransition{
 		{After: "1d", CloudStorageClass: "GLACIER"},
 	})
 	_ = ingestSealUpload(t, cm, 10)
@@ -433,7 +438,7 @@ func TestTriggerArchivalSweepCoalesces(t *testing.T) {
 
 func TestReconcileSweepMarksSuspectOnMissing(t *testing.T) {
 	t.Parallel()
-	orch, cloudStore, cm, _, _ := archivalTestSetup(t, nil)
+	orch, cloudStore, cm, _, _, _ := archivalTestSetup(t, nil)
 
 	ids := ingestSealUpload(t, cm, 50)
 
@@ -463,7 +468,7 @@ func TestReconcileSweepMarksSuspectOnMissing(t *testing.T) {
 
 func TestReconcileSweepRemovesAfterGracePeriod(t *testing.T) {
 	t.Parallel()
-	orch, cloudStore, cm, _, store := archivalTestSetup(t, nil)
+	orch, cloudStore, cm, _, store, clock := archivalTestSetup(t, nil)
 
 	ids := ingestSealUpload(t, cm, 50)
 
@@ -487,7 +492,7 @@ func TestReconcileSweepRemovesAfterGracePeriod(t *testing.T) {
 	}
 
 	// Advance past grace period.
-	orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	clock.Advance(48 * time.Hour)
 	orch.reconcileSweepAll()
 
 	// Now the chunk should be removed from the index.
@@ -499,7 +504,7 @@ func TestReconcileSweepRemovesAfterGracePeriod(t *testing.T) {
 
 func TestReconcileSweepClearsSuspectWhenBlobReturns(t *testing.T) {
 	t.Parallel()
-	orch, cloudStore, cm, _, _ := archivalTestSetup(t, nil)
+	orch, cloudStore, cm, _, _, _ := archivalTestSetup(t, nil)
 
 	ids := ingestSealUpload(t, cm, 50)
 
@@ -539,7 +544,7 @@ func TestReconcileSweepClearsSuspectWhenBlobReturns(t *testing.T) {
 
 func TestArchivalFullLifecycle(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, vaultID, _ := archivalTestSetup(t, []system.CloudStorageTransition{
+	orch, _, cm, vaultID, _, clock := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", CloudStorageClass: "cold"},
 	})
 
@@ -563,7 +568,7 @@ func TestArchivalFullLifecycle(t *testing.T) {
 	}
 
 	// 3. Archival sweep with aged chunks.
-	orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	clock.Advance(48 * time.Hour)
 	orch.archivalSweepAll()
 
 	meta, _ = cm.Meta(chunkID)

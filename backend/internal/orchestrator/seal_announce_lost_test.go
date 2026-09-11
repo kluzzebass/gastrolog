@@ -17,6 +17,7 @@ package orchestrator
 import (
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 
 	"gastrolog/internal/chunk"
@@ -29,19 +30,42 @@ import (
 // failingCtlApplier refuses every command, standing in for a vault-ctl apply
 // that cannot commit — no leader, a forward that times out, an apply pump
 // blocked behind its own commit.
+//
+// Guarded: the reconcile tick that calls Apply runs on a scheduler
+// goroutine, so a test flipping the refusal races it.
 type failingCtlApplier struct {
-	fsm     *vaultctlfsm.FSM
+	fsm *vaultctlfsm.FSM
+
+	mu      sync.Mutex
 	failing bool
 	applied int
 }
 
 func (d *failingCtlApplier) Apply(data []byte) error {
+	d.mu.Lock()
 	if d.failing {
+		d.mu.Unlock()
 		return errApplyRefused
 	}
 	d.applied++
+	d.mu.Unlock()
+
 	d.fsm.Apply(&hraft.Log{Data: data})
 	return nil
+}
+
+// setFailing turns the refusal on or off.
+func (d *failingCtlApplier) setFailing(failing bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.failing = failing
+}
+
+// appliedCount reports how many commands were accepted.
+func (d *failingCtlApplier) appliedCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.applied
 }
 
 var errApplyRefused = errAsString("vault-ctl apply refused")
@@ -98,7 +122,7 @@ func TestLostBeginSealAnnounceLeavesChunkSealedLocallyButActiveInFSM(t *testing.
 	}
 
 	// Every announce from here on is refused.
-	applier.failing = true
+	applier.setFailing(true)
 
 	sealed, err := orch.SealActive(vaultID)
 	if err != nil {
@@ -149,15 +173,15 @@ func TestLostSealAnnounceIsReAnnouncedOnceApplyRecovers(t *testing.T) {
 	}
 	chunkID := orch.vaults[vaultID].Instance.Chunks.Active().ID
 
-	applier.failing = true
+	applier.setFailing(true)
 	if _, err := orch.SealActive(vaultID); err != nil {
 		t.Fatalf("SealActive: %v", err)
 	}
 	requireIdle(t, orch.scheduler, postSealDrainBudget)
 
 	// Apply works again — the transient is over.
-	applier.failing = false
-	appliedBefore := applier.applied
+	applier.setFailing(false)
+	appliedBefore := applier.appliedCount()
 
 	inst := orch.vaults[vaultID].Instance
 	if inst.Reconciler == nil {
@@ -171,7 +195,7 @@ func TestLostSealAnnounceIsReAnnouncedOnceApplyRecovers(t *testing.T) {
 		t.Errorf("FSM state after the transient cleared = %s, want sealed — "+
 			"the manifest must be driven back into agreement with the disk", got)
 	}
-	if applier.applied == appliedBefore {
+	if applier.appliedCount() == appliedBefore {
 		t.Error("nothing was re-announced; the divergence would be permanent")
 	}
 }
@@ -191,12 +215,12 @@ func TestReAnnouncedSealCarriesTheLocalMetadata(t *testing.T) {
 	}
 	chunkID := orch.vaults[vaultID].Instance.Chunks.Active().ID
 
-	applier.failing = true
+	applier.setFailing(true)
 	if _, err := orch.SealActive(vaultID); err != nil {
 		t.Fatalf("SealActive: %v", err)
 	}
 	requireIdle(t, orch.scheduler, postSealDrainBudget)
-	applier.failing = false
+	applier.setFailing(false)
 
 	local, err := orch.vaults[vaultID].Instance.Chunks.Meta(chunkID)
 	if err != nil {

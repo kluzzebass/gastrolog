@@ -14,6 +14,7 @@ package orchestrator
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 
 	"gastrolog/internal/glid"
@@ -63,7 +64,7 @@ func TestRefreshVaultDiskGuardsRegistersStorageFromConfig(t *testing.T) {
 	// it here so "volA" stays the literal fake-sampler key this test's
 	// assertions depend on.
 	orch.vaultsDir = ""
-	orch.setSystemLoader(testSystemLoaderWithRuntime{cfg: cfg, rt: rt})
+	orch.setSystemLoader(&testSystemLoaderWithRuntime{cfg: cfg, rt: rt})
 	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
 		if path == "volA" {
 			return 30 * gib, 100 * gib, nil // 30% free — below the storage's 40% floor
@@ -122,7 +123,7 @@ func TestRefreshVaultDiskGuardsPublishesPlacementsAndClass(t *testing.T) {
 	// it here so "volA" stays the literal fake-sampler key this test's
 	// assertions depend on.
 	orch.vaultsDir = ""
-	orch.setSystemLoader(testSystemLoaderWithRuntime{cfg: cfg, rt: rt})
+	orch.setSystemLoader(&testSystemLoaderWithRuntime{cfg: cfg, rt: rt})
 	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
 		if path == "volA" {
 			return 50 * gib, 100 * gib, nil
@@ -206,7 +207,7 @@ func TestRefreshVaultDiskGuardsPlacementsClearWhenVaultRemoved(t *testing.T) {
 	}
 
 	// The vault is deleted from config entirely.
-	loader.cfg = &system.Config{}
+	loader.Set(&system.Config{})
 	orch.refreshVaultDiskGuards(context.Background())
 
 	snaps = orch.diskGuard.storageSnapshots()
@@ -299,16 +300,28 @@ func (*noSuchVolumeError) Error() string { return "no such volume" }
 // refreshVaultDiskGuards reads both sys.Config (vaults, retention policies)
 // and sys.Runtime (NodeStorageConfigs), and this test needs to mutate the
 // latter BETWEEN refreshes to simulate a storage disappearing from config.
+// Set swaps the whole config; nothing edits the one already served, because
+// the orchestrator loads config from its scheduler goroutines.
 type testSystemLoaderWithRuntime struct {
+	mu  sync.RWMutex
 	cfg *system.Config
 	rt  system.Runtime
 }
 
-func (l testSystemLoaderWithRuntime) Load(_ context.Context) (*system.System, error) {
+func (l *testSystemLoaderWithRuntime) Load(_ context.Context) (*system.System, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	if l.cfg == nil {
 		return nil, nil
 	}
 	return &system.System{Config: *l.cfg, Runtime: l.rt}, nil
+}
+
+// Set replaces the config the loader serves.
+func (l *testSystemLoaderWithRuntime) Set(cfg *system.Config) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.cfg = cfg
 }
 
 // TestRefreshVaultDiskGuardsResolvesNodeDisplayName pins that
@@ -363,7 +376,7 @@ func TestRefreshVaultDiskGuardsResolvesNodeDisplayName(t *testing.T) {
 	// Path resolution tested separately; disable it here so "volA" stays
 	// literal.
 	orch.vaultsDir = ""
-	orch.setSystemLoader(testSystemLoaderWithRuntime{cfg: cfg, rt: rt})
+	orch.setSystemLoader(&testSystemLoaderWithRuntime{cfg: cfg, rt: rt})
 	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
 		if path == "volA" {
 			return 30 * gib, 100 * gib, nil // below the storage's 40% floor

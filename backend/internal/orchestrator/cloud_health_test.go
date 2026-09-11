@@ -773,16 +773,16 @@ func TestEvaluateCloudHealth_DegradedRecoveryTriggersCatchup(t *testing.T) {
 func TestEvaluateCloudHealth_SteadyStateRetriesStuckChunk(t *testing.T) {
 	t.Parallel()
 
-	fixedNow := time.Now()
-	clock := func() time.Time { return fixedNow }
+	clock := newTestClock(time.Now())
+	sealedAt := clock.Now()
 	chunkID := chunk.NewChunkID()
 	mock := newRegistrarUploaderMock([]chunk.ChunkMeta{
-		{ID: chunkID, Sealed: true, CloudBacked: false, WriteStart: fixedNow, WriteEnd: fixedNow},
+		{ID: chunkID, Sealed: true, CloudBacked: false, WriteStart: sealedAt, WriteEnd: sealedAt},
 	})
 	mock.alwaysFail = errors.New("cloud store unreachable")
 
 	vaultID := glid.New()
-	orch := newTestOrch(t, Config{LocalNodeID: "node1", Now: clock})
+	orch := newTestOrch(t, Config{LocalNodeID: "node1", Now: clock.Now})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
 		VaultID:             vaultID,
@@ -812,7 +812,7 @@ func TestEvaluateCloudHealth_SteadyStateRetriesStuckChunk(t *testing.T) {
 	}
 
 	// Advance past the backoff window → the next steady-state evaluation retries.
-	fixedNow = fixedNow.Add(unreadableBackoff(1) + time.Second)
+	clock.Advance(unreadableBackoff(1) + time.Second)
 	orch.evaluateCloudHealth()
 	waitBackfillJobDone(t, orch, jobName, mock, 2, 5*time.Second)
 	if got := mock.uploadCallCount(); got != 2 {
