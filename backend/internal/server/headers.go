@@ -5,15 +5,6 @@ import (
 	"strings"
 )
 
-// Google Fonts origins. The frontend stylesheet opens with an absolute
-// @import for the three Observatory typefaces, which Vite leaves in place, and
-// that stylesheet in turn pulls its woff2 files from the static host. Drop
-// either origin and the UI silently falls back to system fonts.
-const (
-	fontStylesheetOrigin = "https://fonts.googleapis.com"
-	fontFileOrigin       = "https://fonts.gstatic.com"
-)
-
 // contentSecurityPolicy governs the embedded frontend the binary serves.
 //
 // script-src without 'unsafe-inline' is the load-bearing part: it makes inline
@@ -25,12 +16,15 @@ const (
 // style-src does allow 'unsafe-inline': ECharts tooltips and Mermaid's rendered
 // SVG both carry style attributes in markup they insert themselves. img-src
 // allows data: for the SVG textures the stylesheet embeds.
+//
+// Every origin is 'self': the typefaces are served by this binary, so the
+// policy names no third party and the UI renders with no egress at all.
 var contentSecurityPolicy = strings.Join([]string{
 	"default-src 'self'",
 	"script-src 'self'",
-	"style-src 'self' 'unsafe-inline' " + fontStylesheetOrigin,
+	"style-src 'self' 'unsafe-inline'",
 	"img-src 'self' data:",
-	"font-src 'self' " + fontFileOrigin,
+	"font-src 'self'",
 	"connect-src 'self'",
 	"object-src 'none'",
 	"base-uri 'self'",
