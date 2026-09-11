@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/system/configfabric"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -32,7 +33,6 @@ import (
 	"gastrolog/internal/query"
 	"gastrolog/internal/server"
 	"gastrolog/internal/system"
-	sysmem "gastrolog/internal/system/memory"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -56,6 +56,7 @@ type multinodeTestNode struct {
 	orch    *orchestrator.Orchestrator
 	vaultID glid.GLID     // zero if no vault
 	vault   memtest.Vault // zero value if no vault
+	store   system.Store  // this node's own config store, one member of the harness fabric
 }
 
 // multiNodeHarness holds the cluster of test nodes and the coordinator's
@@ -74,6 +75,8 @@ type multiNodeHarness struct {
 	peerRouteStats    *mnPeerRouteStats
 	peerIngesterStats *mnPeerIngesterStats
 	remote            *directRemoteSearcher
+	fabric            *configfabric.Fabric
+	nodeIndex         map[string]int // node ID → fabric node index
 	peerVaultStats    *mnPeerVaultStats
 	peerStorageStats  *mnPeerStorageStats
 	// alerts is each node's alert.Collector; populated only with
@@ -111,6 +114,9 @@ type mnOption func(*mnConfig)
 type mnConfig struct {
 	// noVault is a set of node IDs that should have no vault.
 	noVault map[string]bool
+	// manualReplication holds config writes back from every node but the
+	// writer until the test delivers them, so it can act on a stale node.
+	manualReplication bool
 	// fileVault is a set of node IDs whose vault is file-backed: the on-disk
 	// chunk manager that serves sealed GLCBs, so tests can drive the same
 	// read path a production data node uses.
@@ -158,6 +164,13 @@ func WithoutVault(nodeIDs ...string) mnOption {
 			c.noVault[id] = true
 		}
 	}
+}
+
+// WithManualReplication makes config replication between nodes explicit:
+// after setup, a write on one node reaches the others only through
+// h.deliverAll or h.fabric.Deliver. Setup itself always converges.
+func WithManualReplication() mnOption {
+	return func(c *mnConfig) { c.manualReplication = true }
 }
 
 // WithFileVault gives the named nodes a file-backed vault instead of the
@@ -256,7 +269,16 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 
 	coordinatorID := nodeIDs[0]
 	nodes := make(map[string]multinodeTestNode, len(nodeIDs))
-	cfgStore := sysmem.NewStore()
+	// One config store per node, replicated through the production FSM and
+	// command encoding by the fabric. The coordinator's store is the one
+	// tests write through; in the default mode every write converges before
+	// it returns.
+	fabric := configfabric.New(len(nodeIDs))
+	storeFor := make(map[string]system.Store, len(nodeIDs))
+	for i, id := range nodeIDs {
+		storeFor[id] = fabric.Node(i).Store()
+	}
+	cfgStore := storeFor[coordinatorID]
 	ctx := context.Background()
 
 	// Per-node alert collectors, built BEFORE node creation so each
@@ -281,16 +303,19 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	// Create all nodes.
 	for _, id := range nodeIDs {
 		if cfg.noVault[id] {
-			nodes[id] = setupMNNodeNoVault(t, id, cfgStore, alertsByNode[id], cfg.diskGuardNodes[id])
+			node := setupMNNodeNoVault(t, id, storeFor[id], alertsByNode[id], cfg.diskGuardNodes[id])
+			node.store = storeFor[id]
+			nodes[id] = node
 		} else {
 			var node multinodeTestNode
 			vaultType := system.VaultTypeMemory
 			if cfg.fileVault[id] {
-				node = setupMNNodeFileVault(t, id, cfgStore, alertsByNode[id], cfg.diskGuardNodes[id])
+				node = setupMNNodeFileVault(t, id, storeFor[id], alertsByNode[id], cfg.diskGuardNodes[id])
 				vaultType = system.VaultTypeFile
 			} else {
-				node = setupMNNode(t, id, cfgStore, alertsByNode[id], cfg.diskGuardNodes[id])
+				node = setupMNNode(t, id, storeFor[id], alertsByNode[id], cfg.diskGuardNodes[id])
 			}
+			node.store = storeFor[id]
 			// Write VaultConfig directly with all storage fields, plus a
 			// synthetic placement for this node.
 			placements := []system.VaultPlacement{
@@ -337,10 +362,11 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	// stats collectors below) was built earlier, before node creation — see
 	// that block's comment.
 
-	routingFwd := newDirectUnaryForwarder(t, nodes, cfgStore, coordinatorID, vaultsDir)
+	routingFwd := newDirectUnaryForwarder(t, nodes, coordinatorID, vaultsDir)
 
 	coordNode := nodes[coordinatorID]
 	srvCfg := server.Config{
+		NoAuth:               true,
 		NodeID:               coordinatorID,
 		RemoteSearcher:       remoteSearcher,
 		RemoteIndexer:        remoteIndexer,
@@ -390,8 +416,14 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		}
 	})
 
+	if cfg.manualReplication {
+		fabric.SetMode(configfabric.Manual)
+	}
+
 	return &multiNodeHarness{
 		remote:            remoteSearcher,
+		fabric:            fabric,
+		nodeIndex:         nodeIndex(nodeIDs),
 		coordinator:       coordinatorID,
 		nodes:             nodes,
 		cfgStore:          cfgStore,
@@ -410,6 +442,50 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		routingFwd:        routingFwd,
 		remoteSearcher:    remoteSearcher,
 	}
+}
+
+// nodeIndex maps node IDs to their position in the fabric.
+func nodeIndex(ids []string) map[string]int {
+	out := make(map[string]int, len(ids))
+	for i, id := range ids {
+		out[id] = i
+	}
+	return out
+}
+
+// store returns a node's own config store.
+func (h *multiNodeHarness) store(t *testing.T, nodeID string) system.Store {
+	t.Helper()
+	n, ok := h.nodes[nodeID]
+	if !ok {
+		t.Fatalf("unknown node %q", nodeID)
+	}
+	return n.store
+}
+
+// deliverAll replicates every held-back config write to every node.
+func (h *multiNodeHarness) deliverAll() { h.fabric.DeliverAll() }
+
+// stallNode makes a node's config writes fail, standing in for a node that
+// cannot reach the leader and so cannot bring its own view current.
+func (h *multiNodeHarness) stallNode(t *testing.T, nodeID string) {
+	t.Helper()
+	h.fabric.Stall(h.fabricIndex(t, nodeID))
+}
+
+// resumeNode undoes stallNode.
+func (h *multiNodeHarness) resumeNode(t *testing.T, nodeID string) {
+	t.Helper()
+	h.fabric.Resume(h.fabricIndex(t, nodeID))
+}
+
+func (h *multiNodeHarness) fabricIndex(t *testing.T, nodeID string) int {
+	t.Helper()
+	i, ok := h.nodeIndex[nodeID]
+	if !ok {
+		t.Fatalf("unknown node %q; have %v", nodeID, h.nodeIDs())
+	}
+	return i
 }
 
 // mnOrchConfig builds the common orchestrator.Config shared by
@@ -1201,7 +1277,7 @@ type directUnaryForwarder struct {
 	handlers map[string]http.Handler // nodeID → Connect mux handler
 }
 
-func newDirectUnaryForwarder(t *testing.T, nodes map[string]multinodeTestNode, cfgStore system.Store, coordinatorID, vaultsDir string) *directUnaryForwarder {
+func newDirectUnaryForwarder(t *testing.T, nodes map[string]multinodeTestNode, coordinatorID, vaultsDir string) *directUnaryForwarder {
 	t.Helper()
 	handlers := make(map[string]http.Handler)
 	for id, node := range nodes {
@@ -1210,7 +1286,9 @@ func newDirectUnaryForwarder(t *testing.T, nodes map[string]multinodeTestNode, c
 		}
 		// BuildInternalHandler returns a mux with NoAuthInterceptor and
 		// NO routing interceptor — same as the real ForwardRPC dispatch path.
-		remoteSrv := server.New(node.orch, cfgStore, orchestrator.Factories{VaultsDir: vaultsDir}, nil, server.Config{
+		// The remote server reads its own node's config store, as in
+		// production.
+		remoteSrv := server.New(node.orch, node.store, orchestrator.Factories{VaultsDir: vaultsDir}, nil, server.Config{
 			NodeID: id,
 			NoAuth: true,
 		})
@@ -3254,8 +3332,8 @@ func TestMultiNode_PutVaultRejectsShapeChange(t *testing.T) {
 	}
 
 	// Verify the FSM still holds the original type — the rejected write
-	// must not have landed. (The in-process harness uses a single shared
-	// cfgStore across nodes, so one read is enough.)
+	// must not have landed. Replication is immediate in this harness, so
+	// the coordinator's store speaks for every node.
 	stored, gErr := h.cfgStore.GetVault(ctx, vaultID)
 	if gErr != nil {
 		t.Fatalf("GetVault: %v", gErr)
@@ -3513,9 +3591,8 @@ func TestMultiNode_LookupDeletePropagation(t *testing.T) {
 		t.Fatalf("DeleteLookup: %v", err)
 	}
 
-	// Verify the lookup is gone via the shared config store. In production,
-	// config is replicated via Raft to all nodes; in the test harness, all
-	// nodes share a single cfgStore so propagation is immediate.
+	// Verify the lookup is gone from the config store. In production, config
+	// is replicated via Raft; the harness fabric replicates immediately.
 	ss, err = h.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		t.Fatalf("LoadServerSettings after delete: %v", err)

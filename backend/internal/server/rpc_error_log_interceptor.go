@@ -2,7 +2,10 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"connectrpc.com/connect"
@@ -26,9 +29,9 @@ func (e *rpcErrorLogInterceptor) WrapUnary(next connect.UnaryFunc) connect.Unary
 	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 		resp, err := next(ctx, req)
 		if err != nil {
-			logClientRPCError(e.logger, req.Spec().Procedure, err)
+			return resp, logClientRPCError(e.logger, req.Spec().Procedure, err)
 		}
-		return resp, err
+		return resp, nil
 	}
 }
 
@@ -36,9 +39,9 @@ func (e *rpcErrorLogInterceptor) WrapStreamingHandler(next connect.StreamingHand
 	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
 		err := next(ctx, conn)
 		if err != nil {
-			logClientRPCError(e.logger, conn.Spec().Procedure, err)
+			return logClientRPCError(e.logger, conn.Spec().Procedure, err)
 		}
-		return err
+		return nil
 	}
 }
 
@@ -58,23 +61,57 @@ func (noopConnectInterceptor) WrapStreamingClient(next connect.StreamingClientFu
 	return next
 }
 
-func logClientRPCError(logger *slog.Logger, procedure string, err error) {
-	if logger == nil || err == nil {
-		return
+// logClientRPCError records the failure and returns what the caller should
+// see. Every code but Internal is a statement about the request, so it goes
+// back as written; Internal is a statement about this server, and its text
+// carries whatever the failing layer happened to say — paths, driver
+// messages, peer addresses — to a caller who may not be authenticated. Those
+// go back as a reference the operator can find in the log.
+func logClientRPCError(logger *slog.Logger, procedure string, err error) error {
+	if err == nil {
+		return nil
 	}
-	if ce, ok := errors.AsType[*connect.Error](err); ok {
+	ce, isConnect := errors.AsType[*connect.Error](err)
+	if isConnect && (ce.Code() == connect.CodeCanceled || ce.Code() == connect.CodeDeadlineExceeded) {
 		// Normal client disconnect / timeout; avoid log noise.
-		if ce.Code() == connect.CodeCanceled || ce.Code() == connect.CodeDeadlineExceeded {
-			return
+		return err
+	}
+	if isConnect && ce.Code() != connect.CodeInternal {
+		if logger != nil {
+			logger.Warn("rpc error response",
+				"procedure", procedure,
+				"code", ce.Code().String(),
+				"message", ce.Message(),
+			)
+		}
+		return err
+	}
+
+	ref := errorReference()
+	if logger != nil {
+		code := "non_connect"
+		if isConnect {
+			code = ce.Code().String()
 		}
 		logger.Warn("rpc error response",
 			"procedure", procedure,
-			"code", ce.Code().String(),
-			"message", ce.Message(),
+			"code", code,
+			"ref", ref,
+			"error", err,
 		)
-		return
 	}
-	logger.Warn("rpc error response", "procedure", procedure, "code", "non_connect", "error", err)
+	return connect.NewError(connect.CodeInternal,
+		fmt.Errorf("internal error (ref %s); the detail is in this node's log", ref))
+}
+
+// errorReference is a short handle shared by the client's error and the log
+// line describing it, so an operator handed the one can find the other.
+func errorReference() string {
+	var b [6]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "unreferenced"
+	}
+	return hex.EncodeToString(b[:])
 }
 
 var _ connect.Interceptor = (*rpcErrorLogInterceptor)(nil)

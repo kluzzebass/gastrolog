@@ -193,6 +193,10 @@ func (c RunConfig) advertisedClusterAddr() string {
 //
 //nolint:gocognit,gocyclo // composition root: wires every subsystem at
 func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
+	// Before anything creates a file. Everything this node writes is its
+	// own, and some of it is secret.
+	restrictFileCreation()
+
 	// Raft failure-detector timing must be installed before ANY group or
 	// transport exists — openConfigStore below already starts cluster-ctl.
 	// Partial operator input resolves against the shipped defaults so

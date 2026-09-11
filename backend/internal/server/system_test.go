@@ -121,7 +121,8 @@ func newConfigTestSetup(t *testing.T) (gastrologv1connect.SystemServiceClient, s
 	}
 
 	srv := server.New(orch, cfgStore, factories, nil, server.Config{
-		AfterConfigApply: testAfterConfigApply(t, orch, cfgStore, factories),
+		TrustContextClaims: true,
+		AfterConfigApply:   testAfterConfigApply(t, orch, cfgStore, factories),
 	})
 	handler := srv.Handler()
 
@@ -395,7 +396,7 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 	}
 
 	// Verify disabled in VaultInfo via VaultService.
-	handler := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{}).Handler()
+	handler := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{NoAuth: true}).Handler()
 	vaultClient := gastrologv1connect.NewVaultServiceClient(
 		&http.Client{Transport: &embeddedTransport{handler: handler}},
 		"http://embedded",
@@ -539,6 +540,7 @@ func newConfigTestSetupWithIngesters(t *testing.T) (gastrologv1connect.SystemSer
 	}
 
 	srv := server.New(orch, cfgStore, factories, nil, server.Config{
+		NoAuth:           true,
 		AfterConfigApply: testAfterConfigApply(t, orch, cfgStore, factories),
 	})
 	handler := srv.Handler()
@@ -838,6 +840,7 @@ func TestGetIngesterStatusRemote(t *testing.T) {
 	}}
 
 	srv := server.New(orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
+		NoAuth:            true,
 		NodeID:            "node-A",
 		PeerIngesterStats: peerStats,
 	})
@@ -889,6 +892,7 @@ func TestGetIngesterStatusLocal(t *testing.T) {
 	stats.Errors.Store(3)
 
 	srv := server.New(orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
+		NoAuth: true,
 		NodeID: "node-A",
 	})
 	httpClient := &http.Client{Transport: &embeddedTransport{handler: srv.Handler()}}
@@ -928,6 +932,7 @@ func TestIngesterAliveNoSetAlive(t *testing.T) {
 
 	// No SetIngesterAlive call and no peer stats: Running must be false.
 	srv := server.New(orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
+		NoAuth: true,
 		NodeID: "node-A",
 	})
 	httpClient := &http.Client{Transport: &embeddedTransport{handler: srv.Handler()}}
@@ -1101,7 +1106,7 @@ func TestGetIngesterDefaultsModes(t *testing.T) {
 		},
 	}
 
-	srv := server.New(orch, cfgStore, factories, nil, server.Config{})
+	srv := server.New(orch, cfgStore, factories, nil, server.Config{NoAuth: true})
 	handler := srv.Handler()
 	httpClient := &http.Client{Transport: &embeddedTransport{handler: handler}}
 	client := gastrologv1connect.NewSystemServiceClient(httpClient, "http://test")

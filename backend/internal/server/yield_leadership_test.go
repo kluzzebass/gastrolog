@@ -31,6 +31,7 @@ func yieldClient(t *testing.T, mc server.ClusterStatusProvider) gastrologv1conne
 		t.Fatal(err)
 	}
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{
+		NoAuth:  true,
 		Cluster: mc,
 	})
 	httpClient := &http.Client{Transport: &embeddedTransport{handler: srv.Handler()}}

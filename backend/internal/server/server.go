@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"gastrolog/internal/glid"
 	"log/slog"
@@ -108,6 +109,12 @@ type Config struct {
 
 	// NoAuth disables authentication. All requests are treated as admin.
 	NoAuth bool
+
+	// TrustContextClaims attaches no authenticator and serves whatever
+	// identity is already on the request context. Only correct where
+	// something upstream established that identity; on a listener that
+	// faces a network it publishes every RPC to every caller.
+	TrustContextClaims bool
 
 	// HomeDir is the gastrolog home directory path. Used for auto-downloaded
 	// lookup databases. Empty when running with in-memory system.
@@ -267,6 +274,7 @@ type Server struct {
 	tokens                     *auth.TokenService
 	certManager                CertManager
 	noAuth                     bool
+	trustContextClaims         bool
 	logger                     *slog.Logger
 	cluster                    ClusterStatusProvider
 	peerStats                  NodeStatsProvider
@@ -349,6 +357,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		tokens:                     tokens,
 		certManager:                cfg.CertManager,
 		noAuth:                     cfg.NoAuth,
+		trustContextClaims:         cfg.TrustContextClaims,
 		logger:                     compServer.Apply(logging.Default(cfg.Logger)),
 		cluster:                    cfg.Cluster,
 		peerStats:                  cfg.PeerStats,
@@ -657,19 +666,26 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		interceptors := []connect.Interceptor{newRPCErrorLogInterceptor(s.logger), authInterceptor}
 		interceptors = append(interceptors, s.routingInterceptor()...)
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(interceptors...))
-	default:
-		// No auth configured (tests without NoAuth flag). Still attach the
-		// RPC error logger; routing interceptor is appended only in cluster mode.
-		ri := s.routingInterceptor()
+	case s.trustContextClaims:
+		// Identity was established before the request reached this mux, so
+		// there is nothing to authenticate here.
 		interceptors := []connect.Interceptor{newRPCErrorLogInterceptor(s.logger)}
-		interceptors = append(interceptors, ri...)
+		interceptors = append(interceptors, s.routingInterceptor()...)
+		handlerOpts = append(handlerOpts, connect.WithInterceptors(interceptors...))
+	default:
+		// Built with neither a token service nor NoAuth: there is no way to
+		// tell callers apart, so every RPC is refused. Serving instead would
+		// publish the whole API to anyone who reaches the listener, and the
+		// only signal would be its absence.
+		interceptors := []connect.Interceptor{newRPCErrorLogInterceptor(s.logger), &auth.DenyAllInterceptor{}}
+		interceptors = append(interceptors, s.routingInterceptor()...)
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(interceptors...))
 	}
 
 	queryTimeout, maxFollowDuration, maxResultCount := s.loadQueryConfig()
 
 	lookupRegistry := lookup.Registry{
-		"rdns":      lookup.NewRDNS(),
+		"rdns":      lookup.NewRDNS(s.logger),
 		"useragent": lookup.NewUserAgent(),
 	}
 
@@ -875,13 +891,50 @@ func (s *Server) redirectMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		// This reflects the client-supplied Host header into the redirect
-		// target unvalidated: an open redirect. A correct fix needs a
-		// trusted-host decision (configured hostnames or TLS SANs) that
-		// this middleware doesn't have; out of scope here.
+		if !s.holdsCertificateFor(host) {
+			// The Host header is the client's, so redirecting to it sends
+			// the caller wherever they asked. Serve the request instead:
+			// a name this server cannot present a certificate for is not a
+			// name to bounce anyone to, and the browser would reject the
+			// TLS it arrived at anyway.
+			next.ServeHTTP(w, r)
+			return
+		}
 		httpsURL := "https://" + host + ":" + port + r.URL.RequestURI()
-		http.Redirect(w, r, httpsURL, http.StatusTemporaryRedirect) //nolint:gosec // G710: see comment above
+		//nolint:gosec // G710: host is only reached here after holdsCertificateFor
+		// accepted it, which taint analysis cannot see through.
+		http.Redirect(w, r, httpsURL, http.StatusTemporaryRedirect)
 	})
+}
+
+// holdsCertificateFor reports whether this server can present a certificate
+// valid for host. The certificates are the record of which names are
+// actually this server's, so they are what a redirect target is checked
+// against rather than a second list an operator would have to keep in sync.
+func (s *Server) holdsCertificateFor(host string) bool {
+	if s.certManager == nil {
+		return false
+	}
+	crt, err := s.certManager.GetCertificate(&tls.ClientHelloInfo{ServerName: host})
+	if err != nil || crt == nil {
+		// What the TLS layer would fall back to for an unmatched name.
+		crt, err = s.certManager.GetCertificate(&tls.ClientHelloInfo{})
+		if err != nil || crt == nil {
+			return false
+		}
+	}
+	leaf := crt.Leaf
+	if leaf == nil {
+		if len(crt.Certificate) == 0 {
+			return false
+		}
+		parsed, parseErr := x509.ParseCertificate(crt.Certificate[0])
+		if parseErr != nil {
+			return false
+		}
+		leaf = parsed
+	}
+	return leaf.VerifyHostname(host) == nil
 }
 
 // BuildInternalHandler returns an http.Handler backed by a Connect mux with
@@ -979,7 +1032,11 @@ func (s *Server) initiateShutdown(drain bool) {
 
 // Handler returns an http.Handler for the server.
 // This is useful for testing or embedding in another server.
+//
+// It is the same chain the listeners serve, middleware included. A test
+// that drove a thinner one could not see a security header that was never
+// added, a CORS rule that was reordered, or a rate limit that stopped
+// applying.
 func (s *Server) Handler() http.Handler {
-	mux := s.buildMux()
-	return s.trackingMiddleware(mux)
+	return s.wrapMiddleware(s.buildMux())
 }

@@ -47,6 +47,10 @@ auto_cluster_addr() {
 }
 
 # Pass through string env vars as flags.
+# The join token, the two bootstrap-token secrets and the initial admin
+# password are deliberately absent from the list below: the server reads
+# each from its own GASTROLOG_* variable. Putting one on the command line
+# would publish it to every process on the host through ps.
 [ -n "$GASTROLOG_LISTEN" ]       && args="$args --listen $GASTROLOG_LISTEN"
 if [ "$GASTROLOG_CLUSTER_ADDR" = "auto" ]; then
   GASTROLOG_CLUSTER_ADDR="$(auto_cluster_addr)"
@@ -55,7 +59,6 @@ fi
 [ -n "$GASTROLOG_CLUSTER_ADVERTISE" ] && args="$args --cluster-advertise $GASTROLOG_CLUSTER_ADVERTISE"
 [ -n "$GASTROLOG_NAME" ]              && args="$args --name $GASTROLOG_NAME"
 [ -n "$GASTROLOG_JOIN_ADDR" ]    && args="$args --join-addr $GASTROLOG_JOIN_ADDR"
-[ -n "$GASTROLOG_JOIN_TOKEN" ]   && args="$args --join-token $GASTROLOG_JOIN_TOKEN"
 [ -n "$GASTROLOG_PPROF" ]        && args="$args --pprof $GASTROLOG_PPROF"
 is_truthy "$GASTROLOG_PPROF_DEBUG" && args="$args --pprof-debug"
 [ -n "$GASTROLOG_PPROF_MUTEX_FRACTION" ] && args="$args --pprof-mutex-fraction $GASTROLOG_PPROF_MUTEX_FRACTION"
@@ -65,14 +68,11 @@ is_truthy "$GASTROLOG_PPROF_DEBUG" && args="$args --pprof-debug"
 # Non-interactive cluster bootstrap (gastrolog-o9z6o).
 [ -n "$GASTROLOG_WRITE_BOOTSTRAP_TOKEN" ]        && args="$args --write-bootstrap-token $GASTROLOG_WRITE_BOOTSTRAP_TOKEN"
 [ -n "$GASTROLOG_BOOTSTRAP_TOKEN_FILE" ]         && args="$args --bootstrap-token-file $GASTROLOG_BOOTSTRAP_TOKEN_FILE"
-[ -n "$GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET" ] && args="$args --bootstrap-token-serve-secret $GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET"
 [ -n "$GASTROLOG_BOOTSTRAP_TOKEN_URL" ]          && args="$args --bootstrap-token-url $GASTROLOG_BOOTSTRAP_TOKEN_URL"
-[ -n "$GASTROLOG_BOOTSTRAP_TOKEN_SECRET" ]       && args="$args --bootstrap-token-secret $GASTROLOG_BOOTSTRAP_TOKEN_SECRET"
 
 # Initial admin provisioning (gastrolog-3ot7r). Bootstrap node only.
 [ -n "$GASTROLOG_INITIAL_ADMIN_FILE" ]     && args="$args --initial-admin-file $GASTROLOG_INITIAL_ADMIN_FILE"
 [ -n "$GASTROLOG_INITIAL_ADMIN_USER" ]     && args="$args --initial-admin-user $GASTROLOG_INITIAL_ADMIN_USER"
-[ -n "$GASTROLOG_INITIAL_ADMIN_PASSWORD" ] && args="$args --initial-admin-password $GASTROLOG_INITIAL_ADMIN_PASSWORD"
 
 # Environment banner (gastrolog-4vr0l). Display-only UI metadata. The label
 # must not contain spaces — $args is word-split on exec; pick a single token

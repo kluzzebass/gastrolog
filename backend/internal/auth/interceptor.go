@@ -45,6 +45,34 @@ func (i *NoAuthInterceptor) WrapStreamingClient(next connect.StreamingClientFunc
 	return next
 }
 
+// DenyAllInterceptor rejects every request. It is what a server gets when
+// it was built with no way to authenticate anyone: refusing is the only
+// safe reading of that, since serving would publish every RPC to anyone
+// who can reach the listener.
+type DenyAllInterceptor struct{}
+
+var errNoAuthenticator = connect.NewError(connect.CodeUnauthenticated,
+	errors.New("server has no authenticator configured; refusing to serve"))
+
+// WrapUnary implements connect.Interceptor for unary RPCs.
+func (i *DenyAllInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(context.Context, connect.AnyRequest) (connect.AnyResponse, error) {
+		return nil, errNoAuthenticator
+	}
+}
+
+// WrapStreamingHandler implements connect.Interceptor for streaming RPCs.
+func (i *DenyAllInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return func(context.Context, connect.StreamingHandlerConn) error {
+		return errNoAuthenticator
+	}
+}
+
+// WrapStreamingClient is a no-op for server-side interceptors.
+func (i *DenyAllInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return next
+}
+
 // UserCounter provides user count for first-boot detection.
 // system.Store satisfies this interface.
 type UserCounter interface {

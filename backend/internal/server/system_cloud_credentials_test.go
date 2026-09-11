@@ -47,7 +47,8 @@ func newConfigTestSetupWithCloudTester(t *testing.T, tester server.CloudServiceT
 	}
 	factories := orchestrator.Factories{VaultsDir: t.TempDir()}
 	srv := server.New(orch, cfgStore, factories, nil, server.Config{
-		CloudTesters: map[string]server.CloudServiceTester{"file": tester},
+		TrustContextClaims: true,
+		CloudTesters:       map[string]server.CloudServiceTester{"file": tester},
 	})
 	httpClient := &http.Client{Transport: &embeddedTransport{handler: srv.Handler()}}
 	return gastrologv1connect.NewSystemServiceClient(httpClient, "http://embedded"), cfgStore, orch
@@ -63,7 +64,8 @@ func newConfigTestSetupWithLogger(t *testing.T, logger *slog.Logger) (gastrologv
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := server.New(orch, cfgStore, orchestrator.Factories{VaultsDir: t.TempDir()}, nil, server.Config{Logger: logger})
+	srv := server.New(orch, cfgStore, orchestrator.Factories{VaultsDir: t.TempDir()}, nil, server.Config{
+		TrustContextClaims: true, Logger: logger})
 	httpClient := &http.Client{Transport: &embeddedTransport{handler: srv.Handler()}}
 	return gastrologv1connect.NewSystemServiceClient(httpClient, "http://embedded"), cfgStore, orch
 }

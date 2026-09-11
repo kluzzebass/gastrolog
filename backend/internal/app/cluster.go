@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -228,6 +230,36 @@ func makeEnrollHandler(cfgStore system.Store, logger *slog.Logger) cluster.Enrol
 }
 
 // makeJoinRollback creates a rollback function that restores the old raft
+// raftBackupsKept is how many backed-up raft directories survive a reinit.
+// One is the directory the rollback would restore; anything older is a
+// previous reinit's, and each holds a full copy of this node's raft log and
+// stable state, replicated config and its secrets included.
+const raftBackupsKept = 1
+
+// pruneRaftBackups removes all but the newest raftBackupsKept backups of the
+// raft directory. Called right after a new backup is made, so the newest is
+// the one a rollback would restore. Failure to prune is logged and otherwise
+// ignored: leaving a stale directory behind must never fail a rejoin.
+func pruneRaftBackups(raftDir string, logger *slog.Logger) {
+	matches, err := filepath.Glob(raftDir + ".bak.*")
+	if err != nil {
+		logger.Warn("could not list old raft directory backups", "error", err)
+		return
+	}
+	if len(matches) <= raftBackupsKept {
+		return
+	}
+	// The suffix is a millisecond timestamp of fixed width for any plausible
+	// date, so lexical order is chronological.
+	sort.Strings(matches)
+	for _, dir := range matches[:len(matches)-raftBackupsKept] {
+		logger.Info("removing a superseded raft directory backup", "dir", dir)
+		if err := os.RemoveAll(dir); err != nil {
+			logger.Warn("could not remove a superseded raft directory backup", "dir", dir, "error", err)
+		}
+	}
+}
+
 // directory from backup and reopens the old config store.
 func makeJoinRollback(
 	proxy *system.StoreProxy,
@@ -371,6 +403,7 @@ func makeJoinClusterFunc(
 			proxy.ClearJoining()
 			return fmt.Errorf("rename raft dir: %w", err)
 		}
+		pruneRaftBackups(raftDir, logger)
 
 		rollback := makeJoinRollback(proxy, clusterSrv, clusterTLS, hd, nodeID, raftDir, backupDir, disp, logger)
 
@@ -482,6 +515,7 @@ func makeEvictionHandler(
 			_ = p.Signal(os.Interrupt)
 			return
 		}
+		pruneRaftBackups(raftDir, logger)
 
 		logger.Info("eviction reinit: preparing cluster server for reinit")
 		newTransport, err := clusterSrv.PrepareRejoin()

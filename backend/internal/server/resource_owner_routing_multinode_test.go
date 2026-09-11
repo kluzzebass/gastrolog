@@ -58,9 +58,10 @@ func (f *fakeTriggerable) Count() int {
 func mnSystemClientFor(t *testing.T, h *multiNodeHarness, nodeID string) gastrologv1connect.SystemServiceClient {
 	t.Helper()
 	node := h.Node(t, nodeID)
-	srv := server.New(node.orch, h.cfgStore, orchestrator.Factories{VaultsDir: t.TempDir()}, nil, server.Config{
+	srv := server.New(node.orch, h.store(t, nodeID), orchestrator.Factories{VaultsDir: t.TempDir()}, nil, server.Config{
+		NoAuth:           true,
 		NodeID:           nodeID,
-		RoutingForwarder: newDirectUnaryForwarder(t, h.nodes, h.cfgStore, nodeID, t.TempDir()),
+		RoutingForwarder: newDirectUnaryForwarder(t, h.nodes, nodeID, t.TempDir()),
 	})
 	httpClient := &http.Client{Transport: &embeddedTransport{handler: srv.Handler()}}
 	return gastrologv1connect.NewSystemServiceClient(httpClient, "http://embedded")

@@ -176,6 +176,12 @@ type Config struct {
 	OnUnlinkError func(seq int, err error)
 }
 
+// segmentFileMode keeps WAL segments readable only by the user the node
+// runs as. The enclosing directory is 0o750, but a directory's mode is not
+// the file's: a copy or a restore elsewhere carries the file's mode, not
+// the directory it came from.
+const segmentFileMode = 0o600
+
 func (c Config) withDefaults() Config {
 	if c.SegmentTargetSize <= 0 {
 		c.SegmentTargetSize = segmentTargetSize
@@ -806,7 +812,7 @@ func (w *WAL) rotateSegment() error {
 	seq := w.segSeq + 1
 	path := w.segmentPath(seq)
 	promotedSpare := path == w.sparePath
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644) //nolint:gosec // G304: path is constructed internally
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, segmentFileMode) //nolint:gosec // G304: path is constructed internally
 	if err != nil {
 		return fmt.Errorf("open segment %s: %w", path, err)
 	}
@@ -862,7 +868,7 @@ func (w *WAL) reconcileReserve(promotedSpare bool) {
 // rotation allocates nothing. Records the path in sparePath on success.
 func (w *WAL) ensureSpare() error {
 	sparePath := w.segmentPath(w.segSeq + 1)
-	f, err := os.OpenFile(sparePath, os.O_CREATE|os.O_RDWR, 0o644) //nolint:gosec // G304: path is constructed internally
+	f, err := os.OpenFile(sparePath, os.O_CREATE|os.O_RDWR, segmentFileMode) //nolint:gosec // G304: path is constructed internally
 	if err != nil {
 		return fmt.Errorf("create spare segment: %w", err)
 	}

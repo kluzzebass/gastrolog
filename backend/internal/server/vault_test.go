@@ -78,7 +78,7 @@ func newVaultTestSetup(t *testing.T, recordCount int) vaultTestClients {
 
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
-	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{NoAuth: true})
 	handler := srv.Handler()
 
 	httpClient := &http.Client{
@@ -331,7 +331,7 @@ func newFullVaultTestSetup(t *testing.T, recordCount int) fullVaultTestClients {
 		}
 	}
 
-	srv := server.New(orch, cfgStore, factories, nil, server.Config{})
+	srv := server.New(orch, cfgStore, factories, nil, server.Config{NoAuth: true})
 	handler := srv.Handler()
 
 	httpClient := &http.Client{

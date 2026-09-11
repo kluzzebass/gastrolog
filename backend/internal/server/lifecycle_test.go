@@ -67,7 +67,7 @@ func TestDrainWaitsForInFlightRequests(t *testing.T) {
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Create server
-	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{NoAuth: true})
 	handler := srv.Handler()
 
 	// Create client with embedded transport
@@ -153,7 +153,7 @@ func TestDrainRejectsNewRequests(t *testing.T) {
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Create server
-	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{NoAuth: true})
 	handler := srv.Handler()
 
 	// Create client with embedded transport
@@ -228,7 +228,7 @@ func TestShutdownWithoutDrain(t *testing.T) {
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Create server
-	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{NoAuth: true})
 	handler := srv.Handler()
 
 	// Create client with embedded transport
@@ -251,7 +251,7 @@ func TestHealth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{NoAuth: true})
 	handler := srv.Handler()
 
 	httpClient := &http.Client{
@@ -277,7 +277,7 @@ func TestProbeEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{NoAuth: true})
 	handler := srv.Handler()
 
 	httpClient := &http.Client{
@@ -349,6 +349,7 @@ func TestGetClusterStatus_ClusterAddressUsesAdvertised(t *testing.T) {
 
 	// Server's listen address is port-only (the bug condition).
 	srv := server.New(orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
+		NoAuth:         true,
 		NodeID:         "node-2-id",
 		ClusterAddress: ":4566",
 		Cluster:        mc,
@@ -409,7 +410,7 @@ func TestReadyz_localVaultReplicationNotReady(t *testing.T) {
 	}
 	defer orch.Stop()
 
-	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{NoAuth: true})
 	httpClient := &http.Client{
 		Transport: &embeddedTransport{handler: srv.Handler()},
 	}

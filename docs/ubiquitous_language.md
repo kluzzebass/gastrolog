@@ -835,6 +835,13 @@ Cross-node data movement. Three distinct mechanisms; do not confuse them.
   snapshot restore), waking waiters the moment the mutation is locally
   visible; never a poll. [`applywait/applywait.go`](../backend/internal/applywait/applywait.go).
 
+  The same barrier serves reads, via `Store.Barrier`: a miss on replicated
+  state is not proof of absence, because the node serving the request may
+  not have applied the write that created the entity. Config
+  read-modify-write confirms a miss behind the barrier before acting on
+  it — otherwise a credential merge stores an empty secret and a
+  duplicate-name check hands out a name the cluster already gave away.
+
 ### The verbs
 
 - **`fireAndForgetRemote`** — called from the ingest and append paths:

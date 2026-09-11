@@ -241,6 +241,10 @@ func (s *AuthServer) Login(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get user: %w", err))
 	}
 	if user == nil {
+		// Spend the same work a real verification costs. Answering an
+		// unknown username sooner than a wrong password tells an
+		// unauthenticated caller which usernames exist.
+		auth.VerifyAgainstDecoy(password)
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid credentials"))
 	}
 

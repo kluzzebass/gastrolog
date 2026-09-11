@@ -34,11 +34,8 @@ func (s *SystemServer) PutRotationPolicy(
 	}
 
 	// Reject duplicate names.
-	rotPolicies, err := s.sysStore.ListRotationPolicies(ctx)
-	if err != nil {
-		return nil, errInternal(err)
-	}
-	if connErr := checkNameConflict("rotation policy", id, req.Msg.Config.Name, rotPolicies, func(p system.RotationPolicyConfig) (glid.GLID, string) { return p.ID, p.Name }); connErr != nil {
+	if connErr := checkNameConflict(ctx, s.sysStore, "rotation policy", id, req.Msg.Config.Name, s.sysStore.ListRotationPolicies,
+		func(p system.RotationPolicyConfig) (glid.GLID, string) { return p.ID, p.Name }); connErr != nil {
 		return nil, connErr
 	}
 
@@ -132,11 +129,8 @@ func (s *SystemServer) PutRetentionPolicy(
 	}
 
 	// Reject duplicate names.
-	retPolicies, err := s.sysStore.ListRetentionPolicies(ctx)
-	if err != nil {
-		return nil, errInternal(err)
-	}
-	if connErr := checkNameConflict("retention policy", id, req.Msg.Config.Name, retPolicies, func(p system.RetentionPolicyConfig) (glid.GLID, string) { return p.ID, p.Name }); connErr != nil {
+	if connErr := checkNameConflict(ctx, s.sysStore, "retention policy", id, req.Msg.Config.Name, s.sysStore.ListRetentionPolicies,
+		func(p system.RetentionPolicyConfig) (glid.GLID, string) { return p.ID, p.Name }); connErr != nil {
 		return nil, connErr
 	}
 

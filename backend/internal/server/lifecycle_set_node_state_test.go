@@ -34,6 +34,7 @@ func setupSetNodeStateTest(t *testing.T, initialState system.NodeState) (gastrol
 		t.Fatalf("PutNode: %v", err)
 	}
 	srv := server.New(orch, store, orchestrator.Factories{}, nil, server.Config{
+		NoAuth: true,
 		NodeID: nodeID.String(),
 	})
 	httpClient := &http.Client{

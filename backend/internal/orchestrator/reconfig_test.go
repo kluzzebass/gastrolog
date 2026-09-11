@@ -4,6 +4,7 @@ import (
 	"context"
 	"gastrolog/internal/glid"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,15 +19,29 @@ import (
 )
 
 // fakeSystemLoader implements orchestrator.SystemLoader for tests.
+//
+// Set swaps the whole config; nothing edits the one already served. The
+// orchestrator loads config from its scheduler goroutines, so an in-place
+// edit races them.
 type fakeSystemLoader struct {
+	mu  sync.RWMutex
 	cfg *system.Config
 }
 
 func (f *fakeSystemLoader) Load(_ context.Context) (*system.System, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	if f.cfg == nil {
 		return nil, nil
 	}
 	return &system.System{Config: *f.cfg}, nil
+}
+
+// Set replaces the config the loader serves.
+func (f *fakeSystemLoader) Set(cfg *system.Config) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cfg = cfg
 }
 
 // memVaultCfg creates a VaultConfig for a memory-backed vault.
@@ -46,12 +61,12 @@ func TestReloadFilters(t *testing.T) {
 
 	// Explicit priorities so the prod route fires before the archive
 	// catch-all under first-match-wins.
-	loader.cfg = &system.Config{
+	loader.Set(&system.Config{
 		Routes: []system.RouteConfig{
 			{ID: glid.New(), Name: "prod", Priority: 10, Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "env=prod"}}}, Destinations: []glid.GLID{vaults.prod}, Enabled: true},
 			{ID: glid.New(), Name: "archive", Priority: 100, Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaults.archive}, Enabled: true},
 		},
-	}
+	})
 	if err := orch.ReloadFilters(context.Background()); err != nil {
 		t.Fatalf("ReloadFilters: %v", err)
 	}
@@ -75,12 +90,12 @@ func TestReloadFilters(t *testing.T) {
 
 	// Now flip prod's expression to env=staging — env=prod records will
 	// now fall through to archive.
-	loader.cfg = &system.Config{
+	loader.Set(&system.Config{
 		Routes: []system.RouteConfig{
 			{ID: glid.New(), Name: "prod", Priority: 10, Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "env=staging"}}}, Destinations: []glid.GLID{vaults.prod}, Enabled: true},
 			{ID: glid.New(), Name: "archive", Priority: 100, Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaults.archive}, Enabled: true},
 		},
-	}
+	})
 	if err := orch.ReloadFilters(context.Background()); err != nil {
 		t.Fatalf("ReloadFilters (2nd): %v", err)
 	}
@@ -109,11 +124,11 @@ func TestReloadFiltersInvalidExpression(t *testing.T) {
 	loader := &fakeSystemLoader{}
 	orch, vaults := newRoutedTestSetupWithLoader(t, loader)
 
-	loader.cfg = &system.Config{
+	loader.Set(&system.Config{
 		Routes: []system.RouteConfig{
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "(unclosed"}}}, Destinations: []glid.GLID{vaults.prod}, Enabled: true},
 		},
-	}
+	})
 	err := orch.ReloadFilters(context.Background())
 	if err == nil {
 		t.Fatal("expected error for invalid match expression")
@@ -128,12 +143,12 @@ func TestReloadFiltersIgnoresUnknownVaults(t *testing.T) {
 	nonexistentVaultID := glid.New()
 
 	// Include a vault that doesn't exist - should be ignored.
-	loader.cfg = &system.Config{
+	loader.Set(&system.Config{
 		Routes: []system.RouteConfig{
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "env=prod"}}}, Destinations: []glid.GLID{vaults.prod}, Enabled: true},
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{nonexistentVaultID}, Enabled: true},
 		},
-	}
+	})
 	if err := orch.ReloadFilters(context.Background()); err != nil {
 		t.Fatalf("ReloadFilters: %v", err)
 	}

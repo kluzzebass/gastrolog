@@ -61,7 +61,8 @@ func serverWithRemoteVault(t *testing.T) (*server.Server, *recordingForwarder, g
 		t.Fatal(err)
 	}
 	fwd := &recordingForwarder{}
-	srv := server.New(orch, cfgStore, orchestrator.Factories{VaultsDir: t.TempDir()}, nil, server.Config{NodeID: "node-local", RoutingForwarder: fwd})
+	srv := server.New(orch, cfgStore, orchestrator.Factories{VaultsDir: t.TempDir()}, nil, server.Config{
+		NoAuth: true, NodeID: "node-local", RoutingForwarder: fwd})
 	return srv, fwd, vaultID
 }
 

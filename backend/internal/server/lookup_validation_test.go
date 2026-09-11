@@ -221,3 +221,112 @@ func TestTestHTTPLookupUsesStoredPrivateFlag(t *testing.T) {
 		t.Fatalf("edited error = %q, want the destination policy's refusal", resp.Msg.GetError())
 	}
 }
+
+// The destination is only reachable because a saved lookup vouches for it,
+// so the request sent there is the saved one. Otherwise this procedure is a
+// way to put arbitrary headers in front of a host on the cluster's own
+// network that the caller could not otherwise address.
+func TestTestHTTPLookupUsesStoredHeadersForAPrivateDestination(t *testing.T) {
+	client, _, _ := newConfigTestSetupWithIngesters(t)
+	ctx := context.Background()
+
+	seen := make(chan http.Header, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"team":"platform"}`))
+	}))
+	defer srv.Close()
+
+	stored := &gastrologv1.HTTPLookupEntry{
+		Name:                     "probe",
+		UrlTemplate:              srv.URL + "/{value}",
+		Headers:                  map[string]string{"X-Saved": "yes"},
+		AllowPrivateDestinations: true,
+	}
+	if _, err := client.PutLookupSettings(ctx, connect.NewRequest(&gastrologv1.PutLookupSettingsRequest{
+		Lookup: &gastrologv1.PutLookupSettings{HttpLookups: []*gastrologv1.HTTPLookupEntry{stored}},
+	})); err != nil {
+		t.Fatalf("PutLookupSettings: %v", err)
+	}
+
+	// Same name and URL, so the saved opt-in applies — with headers the
+	// caller chose rather than the ones the operator saved.
+	resp, err := client.TestHTTPLookup(ctx, connect.NewRequest(&gastrologv1.TestHTTPLookupRequest{
+		Config: &gastrologv1.HTTPLookupEntry{
+			Name:        "probe",
+			UrlTemplate: srv.URL + "/{value}",
+			Headers: map[string]string{
+				"X-Saved":       "no",
+				"Authorization": "Bearer smuggled",
+			},
+		},
+		Values: map[string]string{"value": "x"},
+	}))
+	if err != nil {
+		t.Fatalf("TestHTTPLookup: %v", err)
+	}
+	if resp.Msg.GetError() != "" {
+		t.Fatalf("error = %q, want the stored opt-in to permit the fetch", resp.Msg.GetError())
+	}
+
+	select {
+	case h := <-seen:
+		if got := h.Get("Authorization"); got != "" {
+			t.Errorf("a caller-supplied header reached the private endpoint: Authorization=%q", got)
+		}
+		if got := h.Get("X-Saved"); got != "yes" {
+			t.Errorf("X-Saved = %q, want the stored value", got)
+		}
+	default:
+		t.Fatal("the endpoint was never reached, so the header assertion proves nothing")
+	}
+}
+
+// Substitution is total, not a merge: a saved entry with no headers means
+// the request carries none. A merge would let a caller add one header at a
+// time to a destination only the saved entry can reach.
+func TestTestHTTPLookupSubstitutesTheStoredHeaderSetEntirely(t *testing.T) {
+	client, _, _ := newConfigTestSetupWithIngesters(t)
+	ctx := context.Background()
+
+	seen := make(chan http.Header, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"team":"platform"}`))
+	}))
+	defer srv.Close()
+
+	stored := &gastrologv1.HTTPLookupEntry{
+		Name:                     "public-probe",
+		UrlTemplate:              srv.URL + "/{value}",
+		AllowPrivateDestinations: true,
+	}
+	if _, err := client.PutLookupSettings(ctx, connect.NewRequest(&gastrologv1.PutLookupSettingsRequest{
+		Lookup: &gastrologv1.PutLookupSettings{HttpLookups: []*gastrologv1.HTTPLookupEntry{stored}},
+	})); err != nil {
+		t.Fatalf("PutLookupSettings: %v", err)
+	}
+
+	if _, err := client.TestHTTPLookup(ctx, connect.NewRequest(&gastrologv1.TestHTTPLookupRequest{
+		Config: &gastrologv1.HTTPLookupEntry{
+			Name:        "public-probe",
+			UrlTemplate: srv.URL + "/{value}",
+			Headers:     map[string]string{"X-Wire": "yes"},
+		},
+		Values: map[string]string{"value": "x"},
+	})); err != nil {
+		t.Fatalf("TestHTTPLookup: %v", err)
+	}
+
+	select {
+	case h := <-seen:
+		if got := h.Get("X-Wire"); got != "" {
+			t.Errorf("X-Wire = %q reached a destination the stored entry vouches for; "+
+				"the stored entry carries no headers, so neither should the request", got)
+		}
+	default:
+		t.Fatal("the endpoint was never reached, so the header assertion proves nothing")
+	}
+}

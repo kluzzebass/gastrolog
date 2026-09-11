@@ -64,7 +64,7 @@ func newLookupQuerySetup(t *testing.T, srvURL string, numRecords int) gastrologv
 	}
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(glid.New(), v.CM, v.IM, v.QE))
 
-	srv := server.New(orch, cfgStore, orchestrator.Factories{}, nil, server.Config{})
+	srv := server.New(orch, cfgStore, orchestrator.Factories{}, nil, server.Config{NoAuth: true})
 	httpClient := &http.Client{Transport: &embeddedTransport{handler: srv.Handler()}}
 	return gastrologv1connect.NewQueryServiceClient(httpClient, "http://embedded")
 }

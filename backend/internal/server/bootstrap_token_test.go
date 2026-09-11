@@ -21,6 +21,7 @@ func newBootstrapTokenServer(t *testing.T, secret string, tokenFn func() (string
 		t.Fatal(err)
 	}
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{
+		NoAuth:                    true,
 		BootstrapTokenServeSecret: secret,
 		BootstrapTokenFn:          tokenFn,
 	})

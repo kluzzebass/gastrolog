@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+	"sync"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -47,6 +48,38 @@ func VerifyPassword(password, encoded string) (bool, error) {
 
 	candidate := argon2.IDKey([]byte(password), salt, time, memory, threads, keyLen)
 	return subtle.ConstantTimeCompare(hash, candidate) == 1, nil
+}
+
+// decoyHash is an argon2id hash of a value no password equals, generated
+// once at startup with the same parameters HashPassword uses.
+//
+// It exists so a login for an unknown user can do the same work as a login
+// for a known one. Skipping the verification when there is no user to verify
+// against answers a wrong username faster than a wrong password, which tells
+// an unauthenticated caller which usernames exist.
+var decoyHash = sync.OnceValue(func() string {
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		// Falling back to a fixed value costs nothing an attacker can use:
+		// the decoy's only job is to cost the same as a real verification.
+		secret = []byte("decoy password, matched by nothing")
+	}
+	encoded, err := HashPassword(string(secret))
+	if err != nil {
+		return ""
+	}
+	return encoded
+})
+
+// VerifyAgainstDecoy spends the work a password verification costs, against
+// a hash nothing matches. Call it where a real verification would otherwise
+// be skipped, so the answer takes the same time either way.
+func VerifyAgainstDecoy(password string) {
+	encoded := decoyHash()
+	if encoded == "" {
+		return
+	}
+	_, _ = VerifyPassword(password, encoded)
 }
 
 // parsePHC parses an argon2id PHC string format.

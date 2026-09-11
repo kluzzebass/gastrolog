@@ -12,6 +12,9 @@ on:
         default: "./..."
         required: false
 
+permissions:
+  contents: read
+
 jobs:
   race:
     runs-on: ubuntu-latest

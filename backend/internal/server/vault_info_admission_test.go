@@ -58,6 +58,7 @@ func admissionTestSetup(t *testing.T) (gastrologv1connect.SystemServiceClient, g
 	}
 
 	srv := server.New(orch, cfgStore, factories, nil, server.Config{
+		NoAuth:           true,
 		AfterConfigApply: testAfterConfigApply(t, orch, cfgStore, factories),
 	})
 	handler := srv.Handler()

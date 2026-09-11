@@ -42,6 +42,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -391,7 +392,7 @@ func (r *retentionRunner) tryLocalTransferCopy(targetID glid.GLID, id chunk.Chun
 	srcPath := chunking.ChunkGLCBPath(sourceRoot, id)
 	destPath := chunking.ChunkGLCBPath(destRoot, id)
 	if _, err := os.Stat(destPath); err != nil {
-		if err := localCopyAndPromoteGLCB(srcPath, destPath, entry); err != nil {
+		if err := localCopyAndPromoteGLCB(srcPath, destPath, entry, r.logger); err != nil {
 			r.logger.Debug("retention: local transfer copy deferred to cross-node catch-up",
 				"vault", r.vaultID, "target", targetID, "chunk", id, "error", err)
 			return
@@ -419,7 +420,7 @@ func (r *retentionRunner) tryLocalTransferCopy(targetID glid.GLID, id chunk.Chun
 // pulls) and verify-before-promotes it via the shared verifyAndPromoteGLCB
 // — identical integrity guarantee whether the bytes crossed the network or
 // just crossed vault directories on the same disk.
-func localCopyAndPromoteGLCB(srcPath, destPath string, e vaultctlfsm.ManifestEntry) error {
+func localCopyAndPromoteGLCB(srcPath, destPath string, e vaultctlfsm.ManifestEntry, logger *slog.Logger) error {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0o750); err != nil {
 		return err
 	}
@@ -446,7 +447,7 @@ func localCopyAndPromoteGLCB(srcPath, destPath string, e vaultctlfsm.ManifestEnt
 		_ = os.Remove(tmp)
 		return copyErr
 	}
-	return verifyAndPromoteGLCB(tmp, destPath, e)
+	return verifyAndPromoteGLCB(tmp, destPath, e, logger)
 }
 
 // waitForDestHolders blocks until the destination FSM reports at least

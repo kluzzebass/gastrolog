@@ -3,11 +3,13 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/system"
@@ -275,15 +277,16 @@ func (o *Orchestrator) pullGLCBFromNode(ctx context.Context, node string, vaultI
 		_ = os.Remove(tmp)
 		return pullErr
 	}
-	return verifyAndPromoteGLCB(tmp, glcbPath, e)
+	return verifyAndPromoteGLCB(tmp, glcbPath, e, o.logger)
 }
 
 // verifyAndPromoteGLCB checks a pulled blob against the cluster manifest
 // entry and renames it into place. A torn or wrong blob must never be
-// registered as a replica: the GLCB's own seal metadata must parse and its
-// record count must agree with the manifest. The temp file is consumed —
-// removed on any failure, renamed on success.
-func verifyAndPromoteGLCB(tmp, glcbPath string, e vaultctlfsm.ManifestEntry) error {
+// registered as a replica: the GLCB's own seal metadata must parse, its
+// record count must agree with the manifest, and its whole-blob digest must
+// match the one the manifest records. The temp file is consumed — removed on
+// any failure, renamed on success.
+func verifyAndPromoteGLCB(tmp, glcbPath string, e vaultctlfsm.ManifestEntry, logger *slog.Logger) error {
 	res, err := chunking.BuildResultFromExistingGLCB(tmp, e.SealedAt)
 	if err != nil {
 		_ = os.Remove(tmp)
@@ -293,7 +296,54 @@ func verifyAndPromoteGLCB(tmp, glcbPath string, e vaultctlfsm.ManifestEntry) err
 		_ = os.Remove(tmp)
 		return fmt.Errorf("pulled GLCB record count %d != manifest %d", res.RecordCount, e.RecordCount)
 	}
+	if err := verifyGLCBDigest(tmp, e, logger); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
 	return os.Rename(tmp, glcbPath)
+}
+
+// verifyGLCBDigest compares a pulled blob's whole-blob digest against the one
+// the manifest recorded when the chunk was uploaded.
+//
+// The record count agrees for any blob carrying the right number of records,
+// altered or not, so the digest is the only part of the check that binds the
+// bytes to what the cluster agreed they are. It is the peer's word otherwise.
+//
+// The digest is stamped at upload, so a chunk that has never been uploaded
+// has none. That is normal and says so at debug. A chunk the manifest calls
+// cloud-backed and yet carries no digest is not normal: something recorded
+// the upload without recording what it uploaded, and the pull proceeds
+// unverifiable, so it says so at warn.
+func verifyGLCBDigest(path string, e vaultctlfsm.ManifestEntry, logger *slog.Logger) error {
+	if e.Hash == ([32]byte{}) {
+		if e.CloudBacked {
+			logger.Warn("accepting a pulled GLCB unverified: the manifest calls this chunk cloud-backed but records no digest",
+				"chunk", e.ID)
+		} else {
+			logger.Debug("accepting a pulled GLCB without a digest check: the chunk has never been uploaded, so the manifest records no digest",
+				"chunk", e.ID)
+		}
+		return nil
+	}
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return fmt.Errorf("open pulled GLCB for digest verify: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat pulled GLCB for digest verify: %w", err)
+	}
+	toc, err := glcb.ReadTOC(f, info.Size())
+	if err != nil {
+		return fmt.Errorf("read pulled GLCB TOC for digest verify: %w", err)
+	}
+	if toc.BlobDigest != e.Hash {
+		return fmt.Errorf("pulled GLCB digest mismatch for %s: manifest=%x blob=%x",
+			e.ID, e.Hash[:8], toc.BlobDigest[:8])
+	}
+	return nil
 }
 
 // retentionMootsPull reports whether pulling a missing GLCB is pointless:

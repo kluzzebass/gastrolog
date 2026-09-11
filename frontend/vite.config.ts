@@ -77,6 +77,11 @@ export default defineConfig({
   build: {
     chunkSizeWarningLimit: 1500,
     reportCompressedSize: false,
+    // Fonts stay separate files. Inlined as a data: URI a small face would
+    // need `font-src data:` in the Content-Security-Policy, which is a
+    // standing allowance bought for two files; emitted as assets they are
+    // covered by 'self' like everything else.
+    assetsInlineLimit: (filePath) => (filePath.endsWith(".woff2") ? false : undefined),
   },
   server: {
     port: 3001,

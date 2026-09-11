@@ -65,6 +65,7 @@ func setupRemoveNodeTest(t *testing.T, rec *removeNodeRecorder) (gastrologv1conn
 	}
 	nodeID := glid.New().String()
 	srv := server.New(orch, sysmem.NewStore(), orchestrator.Factories{}, nil, server.Config{
+		NoAuth:         true,
 		NodeID:         nodeID,
 		RemoveNodeFunc: rec.fn,
 	})

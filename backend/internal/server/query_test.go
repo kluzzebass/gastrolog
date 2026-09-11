@@ -46,7 +46,7 @@ func newQueryTestSetup(t *testing.T, numRecords int) gastrologv1connect.QuerySer
 	defaultID := glid.New()
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
-	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{NoAuth: true})
 	handler := srv.Handler()
 
 	httpClient := &http.Client{
@@ -350,7 +350,7 @@ func TestGetFields(t *testing.T) {
 	defaultID := glid.New()
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
-	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{NoAuth: true})
 	handler := srv.Handler()
 
 	httpClient := &http.Client{
@@ -481,7 +481,7 @@ func TestGetFields_InvalidUTF8InRaw_Marshals(t *testing.T) {
 	defaultID := glid.New()
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
-	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{NoAuth: true})
 	handler := srv.Handler()
 
 	httpClient := &http.Client{

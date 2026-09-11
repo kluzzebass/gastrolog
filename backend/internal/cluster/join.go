@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 )
 
@@ -58,8 +59,26 @@ const (
 // logger may be nil, in which case retry attempts are silent. Callers
 // from app.go pass their slog instance so retries land in the same
 // log stream as the rest of cluster startup.
+// joinCredentials picks the transport for a join dial. Cluster TLS is
+// bootstrapped or loaded before any node joins, so a holder without material
+// means startup left it unloaded — the join is refused rather than retried
+// in plaintext against a peer that will not answer it anyway. A caller with
+// no holder at all runs without cluster TLS by construction.
+func joinCredentials(ctls *ClusterTLS) (credentials.TransportCredentials, error) {
+	if ctls == nil {
+		return insecure.NewCredentials(), nil
+	}
+	if ctls.State() == nil {
+		return nil, ErrClusterTLSUnloaded
+	}
+	return ctls.TransportCredentials(), nil
+}
+
 func JoinCluster(ctx context.Context, logger *slog.Logger, addr, nodeID, nodeAddr string, ctls *ClusterTLS, voter bool) error {
-	creds := ctls.TransportCredentials()
+	creds, err := joinCredentials(ctls)
+	if err != nil {
+		return fmt.Errorf("join %s: %w", addr, err)
+	}
 
 	backoff := joinInitialBackoff
 	attempt := 0

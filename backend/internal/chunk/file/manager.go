@@ -434,7 +434,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	if cfg.Dir == "" {
 		return nil, ErrMissingDir
 	}
-	cfg.FileMode = cmp.Or(cfg.FileMode, 0o644)
+	cfg.FileMode = cmp.Or(cfg.FileMode, DefaultFileMode)
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -3893,18 +3893,27 @@ func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCur
 
 // verifyDownloadedBlob compares the GLCB whole-blob digest read from the
 // just-downloaded tmp file's TOC footer against the FSM-recorded digest
-// for this chunk. Returns nil when verification is skipped (no verifier
-// configured, or no FSM record yet for this chunk). Returns an error on
-// genuine mismatch so the caller can discard the tmp and re-fetch.
+// for this chunk. Returns an error on mismatch so the caller can discard
+// the tmp and re-fetch.
+//
+// Two conditions leave nothing to compare against, and both are recorded
+// rather than passed over: the bytes are then trusted because they came
+// from the object store, which is a decision, not an absence of one.
 func (m *Manager) verifyDownloadedBlob(id chunk.ChunkID, path string) error {
 	if m.cfg.IntegrityVerifier == nil {
+		// Memory-mode and single-node vaults have no replicated manifest
+		// to hold a digest.
+		m.logger.Debug("caching a downloaded blob unverified: this vault has no integrity verifier",
+			"chunk", id)
 		return nil
 	}
 	expected, ok := m.cfg.IntegrityVerifier.ExpectedDigest(id)
 	if !ok {
-		// No FSM expectation on file (entry predates digest recording,
-		// or the upload's CmdUploadChunk hasn't applied locally yet).
-		// Skip; a later read will re-verify once the FSM catches up.
+		// The upload's CmdUploadChunk has not applied locally yet, so this
+		// node does not know what the leader stamped. A later read
+		// re-verifies once the FSM catches up.
+		m.logger.Warn("caching a downloaded blob unverified: no digest recorded for this chunk yet",
+			"chunk", id)
 		return nil
 	}
 	f, err := os.Open(filepath.Clean(path))

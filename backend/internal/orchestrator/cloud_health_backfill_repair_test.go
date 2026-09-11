@@ -223,8 +223,8 @@ func TestMarkBackfillFailureBacksOffExponentially(t *testing.T) {
 
 func TestBackfillDueRespectsBackoffWindow(t *testing.T) {
 	t.Parallel()
-	fixedNow := time.Now()
-	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: func() time.Time { return fixedNow }})
+	clock := newTestClock(time.Now())
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock.Now})
 	id := chunk.NewChunkID()
 
 	if !orch.backfillDue(id) {
@@ -236,7 +236,7 @@ func TestBackfillDueRespectsBackoffWindow(t *testing.T) {
 		t.Fatal("a freshly-failed chunk must not be due before its backoff window elapses")
 	}
 
-	fixedNow = fixedNow.Add(unreadableBackoff(1) + time.Second)
+	clock.Advance(unreadableBackoff(1) + time.Second)
 	if !orch.backfillDue(id) {
 		t.Fatal("chunk must become due once its backoff window elapses")
 	}
@@ -248,13 +248,14 @@ func TestBackfillDueRespectsBackoffWindow(t *testing.T) {
 // what stops the schedule/complete INFO pair from repeating every 5s.
 func TestBackfillCloudUploads_SkipsSchedulingDuringBackoff(t *testing.T) {
 	t.Parallel()
-	fixedNow := time.Now()
+	clock := newTestClock(time.Now())
+	sealedAt := clock.Now()
 	chunkID := chunk.NewChunkID()
 	vaultID := glid.New()
 	mock := newRegistrarUploaderMock([]chunk.ChunkMeta{
-		{ID: chunkID, Sealed: true, CloudBacked: false, WriteStart: fixedNow, WriteEnd: fixedNow},
+		{ID: chunkID, Sealed: true, CloudBacked: false, WriteStart: sealedAt, WriteEnd: sealedAt},
 	})
-	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: func() time.Time { return fixedNow }})
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock.Now})
 	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"), true)
 
 	vaultInst := &VaultInstance{
@@ -283,10 +284,9 @@ func TestBackfillCloudUploads_SkipsSchedulingDuringBackoff(t *testing.T) {
 
 func TestBackfillPersistentFailureRaisesAlarm(t *testing.T) {
 	t.Parallel()
-	clockNow := time.Now()
-	clock := func() time.Time { return clockNow }
-	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock})
-	ac := alert.NewWithClock(clock)
+	clock := newTestClock(time.Now())
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock.Now})
+	ac := alert.NewWithClock(clock.Now)
 	orch.alerts = ac
 
 	vaultID := glid.New()
@@ -304,7 +304,7 @@ func TestBackfillPersistentFailureRaisesAlarm(t *testing.T) {
 
 	// Advance past the catalog's DelayOn and re-raise (a later failure) —
 	// re-raises refresh detail but do not restart the suppression window.
-	clockNow = clockNow.Add(typ.DelayOn + time.Second)
+	clock.Advance(typ.DelayOn + time.Second)
 	orch.markBackfillFailure(vaultID, id, errors.New("boom again"), true)
 
 	alerts := ac.Standing()
@@ -333,10 +333,9 @@ func TestBackfillPersistentFailureRaisesAlarm(t *testing.T) {
 
 func TestClearBackfillFailureDropsStateAndAlarm(t *testing.T) {
 	t.Parallel()
-	clockNow := time.Now()
-	clock := func() time.Time { return clockNow }
-	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock})
-	ac := alert.NewWithClock(clock)
+	clock := newTestClock(time.Now())
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock.Now})
+	ac := alert.NewWithClock(clock.Now)
 	orch.alerts = ac
 
 	vaultID := glid.New()
@@ -344,7 +343,7 @@ func TestClearBackfillFailureDropsStateAndAlarm(t *testing.T) {
 	typ, _ := alert.TypeByID("cloud-backfill-stuck")
 
 	orch.markBackfillFailure(vaultID, id, errors.New("boom"), true)
-	clockNow = clockNow.Add(typ.DelayOn + time.Second)
+	clock.Advance(typ.DelayOn + time.Second)
 	orch.markBackfillFailure(vaultID, id, errors.New("boom again"), true)
 	if len(ac.Standing()) != 1 {
 		t.Fatal("setup: expected the alarm to be standing before clearing")
@@ -365,10 +364,9 @@ func TestClearBackfillFailureDropsStateAndAlarm(t *testing.T) {
 
 func TestPruneVanishedBackfillFailuresDropsDeletedChunkState(t *testing.T) {
 	t.Parallel()
-	clockNow := time.Now()
-	clock := func() time.Time { return clockNow }
-	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock})
-	ac := alert.NewWithClock(clock)
+	clock := newTestClock(time.Now())
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock.Now})
+	ac := alert.NewWithClock(clock.Now)
 	orch.alerts = ac
 
 	vaultID := glid.New()
@@ -379,7 +377,7 @@ func TestPruneVanishedBackfillFailuresDropsDeletedChunkState(t *testing.T) {
 	for _, id := range []chunk.ChunkID{stillThere, deleted} {
 		orch.markBackfillFailure(vaultID, id, errors.New("boom"), true)
 	}
-	clockNow = clockNow.Add(typ.DelayOn + time.Second)
+	clock.Advance(typ.DelayOn + time.Second)
 	for _, id := range []chunk.ChunkID{stillThere, deleted} {
 		orch.markBackfillFailure(vaultID, id, errors.New("boom again"), true)
 	}
@@ -499,10 +497,9 @@ func TestBackfillCloudUploads_GLCBAbsentBacksOffWithoutAlarm(t *testing.T) {
 // regardless of alarmEligible; only the alarm differs.
 func TestMarkBackfillFailureAlarmEligibleGatesAlarmNotBackoff(t *testing.T) {
 	t.Parallel()
-	clockNow := time.Now()
-	clock := func() time.Time { return clockNow }
-	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock})
-	ac := alert.NewWithClock(clock)
+	clock := newTestClock(time.Now())
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock.Now})
+	ac := alert.NewWithClock(clock.Now)
 	orch.alerts = ac
 
 	vaultID := glid.New()
@@ -510,7 +507,7 @@ func TestMarkBackfillFailureAlarmEligibleGatesAlarmNotBackoff(t *testing.T) {
 	typ, _ := alert.TypeByID("cloud-backfill-stuck")
 
 	orch.markBackfillFailure(vaultID, id, errors.New("no glcb"), false)
-	clockNow = clockNow.Add(typ.DelayOn + time.Second)
+	clock.Advance(typ.DelayOn + time.Second)
 	orch.markBackfillFailure(vaultID, id, errors.New("still no glcb"), false)
 
 	if alerts := ac.Standing(); len(alerts) != 0 {
@@ -534,7 +531,7 @@ func TestMarkBackfillFailureAlarmEligibleGatesAlarmNotBackoff(t *testing.T) {
 	// second alarm-eligible failure past that fresh window is what actually
 	// annunciates.
 	orch.markBackfillFailure(vaultID, id, errors.New("cloud store down"), true)
-	clockNow = clockNow.Add(typ.DelayOn + time.Second)
+	clock.Advance(typ.DelayOn + time.Second)
 	orch.markBackfillFailure(vaultID, id, errors.New("cloud store still down"), true)
 	if alerts := ac.Standing(); len(alerts) != 1 {
 		t.Fatalf("a failure that becomes alarm-eligible must raise the alarm once its own DelayOn elapses, got %d standing", len(alerts))
@@ -553,20 +550,20 @@ func TestMarkBackfillFailureAlarmEligibleGatesAlarmNotBackoff(t *testing.T) {
 // that point nothing else would ever remove the stranded state.
 func TestBackfillCloudUploads_CrossPathSuccessClearsEntryAndAlarm(t *testing.T) {
 	t.Parallel()
-	clockNow := time.Now()
-	clock := func() time.Time { return clockNow }
+	clock := newTestClock(time.Now())
+	sealedAt := clock.Now()
 	chunkID := chunk.NewChunkID()
 	vaultID := glid.New()
 	mock := newRegistrarUploaderMock([]chunk.ChunkMeta{
-		{ID: chunkID, Sealed: true, CloudBacked: false, WriteStart: clockNow, WriteEnd: clockNow},
+		{ID: chunkID, Sealed: true, CloudBacked: false, WriteStart: sealedAt, WriteEnd: sealedAt},
 	})
-	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock})
-	ac := alert.NewWithClock(clock)
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock.Now})
+	ac := alert.NewWithClock(clock.Now)
 	orch.alerts = ac
 
 	typ, _ := alert.TypeByID("cloud-backfill-stuck")
 	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"), true)
-	clockNow = clockNow.Add(typ.DelayOn + time.Second)
+	clock.Advance(typ.DelayOn + time.Second)
 	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom again"), true)
 	if len(ac.Standing()) != 1 {
 		t.Fatal("setup: expected the alarm to be standing before the cross-path success")
@@ -669,10 +666,9 @@ func TestBackfillCloudUploads_CrossPathSuccessClearsBuildLagEntry(t *testing.T) 
 // state.
 func TestEvaluateCloudHealth_PurgesBackfillFailuresForRemovedVault(t *testing.T) {
 	t.Parallel()
-	clockNow := time.Now()
-	clock := func() time.Time { return clockNow }
-	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock})
-	ac := alert.NewWithClock(clock)
+	clock := newTestClock(time.Now())
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock.Now})
+	ac := alert.NewWithClock(clock.Now)
 	orch.alerts = ac
 
 	vaultID := glid.New()
@@ -680,7 +676,7 @@ func TestEvaluateCloudHealth_PurgesBackfillFailuresForRemovedVault(t *testing.T)
 	typ, _ := alert.TypeByID("cloud-backfill-stuck")
 
 	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"), true)
-	clockNow = clockNow.Add(typ.DelayOn + time.Second)
+	clock.Advance(typ.DelayOn + time.Second)
 	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom again"), true)
 	if len(ac.Standing()) != 1 {
 		t.Fatal("setup: expected the alarm to be standing before the vault stops being visited")
@@ -708,10 +704,9 @@ func TestEvaluateCloudHealth_PurgesBackfillFailuresForRemovedVault(t *testing.T)
 // backfillCloudUploads is skipped for it just as if it were removed.
 func TestEvaluateCloudHealth_PurgesBackfillFailuresForNonLeaderVault(t *testing.T) {
 	t.Parallel()
-	clockNow := time.Now()
-	clock := func() time.Time { return clockNow }
-	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock})
-	ac := alert.NewWithClock(clock)
+	clock := newTestClock(time.Now())
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock.Now})
+	ac := alert.NewWithClock(clock.Now)
 	orch.alerts = ac
 
 	vaultID := glid.New()
@@ -719,7 +714,7 @@ func TestEvaluateCloudHealth_PurgesBackfillFailuresForNonLeaderVault(t *testing.
 	typ, _ := alert.TypeByID("cloud-backfill-stuck")
 
 	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"), true)
-	clockNow = clockNow.Add(typ.DelayOn + time.Second)
+	clock.Advance(typ.DelayOn + time.Second)
 	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom again"), true)
 	if len(ac.Standing()) != 1 {
 		t.Fatal("setup: expected the alarm to be standing before leadership moved away")
@@ -759,10 +754,9 @@ func TestEvaluateCloudHealth_PurgesBackfillFailuresForNonLeaderVault(t *testing.
 // evaluateCloudHealth sweep.
 func TestTeardownVaultPurgesBackfillFailures(t *testing.T) {
 	t.Parallel()
-	clockNow := time.Now()
-	clock := func() time.Time { return clockNow }
-	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock})
-	ac := alert.NewWithClock(clock)
+	clock := newTestClock(time.Now())
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock.Now})
+	ac := alert.NewWithClock(clock.Now)
 	orch.alerts = ac
 
 	vaultID := glid.New()
@@ -770,7 +764,7 @@ func TestTeardownVaultPurgesBackfillFailures(t *testing.T) {
 	typ, _ := alert.TypeByID("cloud-backfill-stuck")
 
 	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"), true)
-	clockNow = clockNow.Add(typ.DelayOn + time.Second)
+	clock.Advance(typ.DelayOn + time.Second)
 	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom again"), true)
 	if len(ac.Standing()) != 1 {
 		t.Fatal("setup: expected the alarm to be standing before teardown")

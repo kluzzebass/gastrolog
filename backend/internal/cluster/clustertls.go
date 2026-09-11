@@ -10,12 +10,12 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 
 	"gastrolog/internal/multiraft"
 
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // tlsFile is the on-disk format for persisted cluster TLS material.
@@ -97,13 +97,44 @@ func SaveFile(path string, certPEM, keyPEM, caCertPEM []byte) error {
 		return fmt.Errorf("marshal cluster TLS: %w", err)
 	}
 
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("write cluster TLS temp file: %w", err)
+	// A fixed temp name is a name an attacker can occupy first. os.CreateTemp
+	// picks an unpredictable one and creates it exclusively, so this node's
+	// private key cannot be written through a symlink someone planted.
+	dir, base := filepath.Split(path)
+	f, err := os.CreateTemp(dir, "."+base+".*")
+	if err != nil {
+		return fmt.Errorf("create cluster TLS temp file: %w", err)
+	}
+	tmp := f.Name()
+	if err := writeAndSync(f, data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("close cluster TLS temp file: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("rename cluster TLS file: %w", err)
+	}
+	return nil
+}
+
+// writeAndSync chmods to owner-only, writes, and fsyncs. CreateTemp already
+// makes the file 0o600; the chmod states it rather than relying on that, and
+// the sync means a crash right after enrollment cannot leave this node
+// without the identity it just recorded.
+func writeAndSync(f *os.File, data []byte) error {
+	if err := f.Chmod(0o600); err != nil {
+		return fmt.Errorf("chmod cluster TLS temp file: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("write cluster TLS temp file: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("sync cluster TLS temp file: %w", err)
 	}
 	return nil
 }
@@ -230,6 +261,12 @@ func (c *ClusterTLS) TransportCredentialsForServerName(serverName string) creden
 	return &laneDynamicCreds{ctls: c, serverName: serverName}
 }
 
+// ErrClusterTLSUnloaded is returned by a cluster-credential handshake
+// attempted before the node holds cluster TLS material. Dialling on is not
+// an option: the peer's raft lanes demand a client certificate, and a
+// plaintext connection to a TLS listener cannot complete either way.
+var ErrClusterTLSUnloaded = errors.New("cluster TLS not loaded")
+
 // laneDynamicCreds implements credentials.TransportCredentials with a fixed
 // TLS ServerName for lane-specific verification after SNI demux.
 type laneDynamicCreds struct {
@@ -238,15 +275,29 @@ type laneDynamicCreds struct {
 }
 
 func (d *laneDynamicCreds) ClientHandshake(ctx context.Context, authority string, rawConn net.Conn) (net.Conn, credentials.AuthInfo, error) {
-	return d.current().ClientHandshake(ctx, authority, rawConn)
+	creds, err := d.current()
+	if err != nil {
+		return nil, nil, err
+	}
+	return creds.ClientHandshake(ctx, authority, rawConn)
 }
 
 func (d *laneDynamicCreds) ServerHandshake(rawConn net.Conn) (net.Conn, credentials.AuthInfo, error) {
-	return d.current().ServerHandshake(rawConn)
+	creds, err := d.current()
+	if err != nil {
+		return nil, nil, err
+	}
+	return creds.ServerHandshake(rawConn)
 }
 
 func (d *laneDynamicCreds) Info() credentials.ProtocolInfo {
-	return d.current().Info()
+	if creds, err := d.current(); err == nil {
+		return creds.Info()
+	}
+	// These credentials are TLS or nothing. Reporting the protocol they
+	// will use keeps an inspecting caller from reading the unloaded window
+	// as a plaintext connection.
+	return credentials.ProtocolInfo{SecurityProtocol: "tls"}
 }
 
 func (d *laneDynamicCreds) Clone() credentials.TransportCredentials {
@@ -257,10 +308,16 @@ func (d *laneDynamicCreds) OverrideServerName(name string) error {
 	return nil
 }
 
-func (d *laneDynamicCreds) current() credentials.TransportCredentials {
+// current resolves the TLS material for this lane at handshake time.
+//
+// Unloaded state fails the handshake. A caller that genuinely runs without
+// cluster TLS asks for insecure credentials by name; these credentials
+// exist to carry cluster identity, and quietly handing back plaintext when
+// the identity is missing is a downgrade the operator never sees.
+func (d *laneDynamicCreds) current() (credentials.TransportCredentials, error) {
 	cfg := d.ctls.clientTLSConfigForServerName(d.serverName)
 	if cfg == nil {
-		return insecure.NewCredentials()
+		return nil, fmt.Errorf("%w (lane %s)", ErrClusterTLSUnloaded, d.serverName)
 	}
-	return credentials.NewTLS(cfg)
+	return credentials.NewTLS(cfg), nil
 }

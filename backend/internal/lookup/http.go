@@ -32,6 +32,11 @@ const (
 	// configured endpoint.
 	maxConcurrentFetches = 8
 
+	// maxJQResults caps what one response-path expression may emit. A jq
+	// program can generate without bound from a small input, and every
+	// value it emits is merged into a map held in memory.
+	maxJQResults = 1024
+
 	// maxHTTPTimeout caps how long one lookup may hold a request open. A
 	// per-record fetch that waits longer than this pins a goroutine and the
 	// query behind it for no useful enrichment.
@@ -146,16 +151,20 @@ func CompileJQ(expr string) (*gojq.Code, error) {
 	return code, nil
 }
 
-// jqSelect runs a compiled jq program against input and collects all non-error results.
-func jqSelect(code *gojq.Code, input any) []any {
-	return jqSelectN(code, input, 0)
+// jqSelect runs a compiled jq program against input and collects its
+// non-error results, bounded in both directions a jq program can run away:
+// the context cuts a program that will not finish, and maxJQResults caps a
+// program that emits without end. An expression can reach the engine from a
+// lookup configuration, so neither bound is theoretical.
+func jqSelect(ctx context.Context, code *gojq.Code, input any) []any {
+	return jqSelectN(ctx, code, input, maxJQResults)
 }
 
 // jqSelectN runs a compiled jq program and collects up to maxResults values.
 // maxResults <= 0 means unlimited.
-func jqSelectN(code *gojq.Code, input any, maxResults int) []any {
+func jqSelectN(ctx context.Context, code *gojq.Code, input any, maxResults int) []any {
 	var results []any
-	iter := code.Run(input)
+	iter := code.RunWithContext(ctx, input)
 	for {
 		v, ok := iter.Next()
 		if !ok {
@@ -403,7 +412,7 @@ func (h *HTTP) fetch(ctx context.Context, reqURL string) (map[string]string, err
 	// Evaluate each jq expression and merge results.
 	merged := make(map[string]string)
 	for _, hp := range h.responsePaths {
-		nodes := jqSelect(hp.parsed, raw)
+		nodes := jqSelect(ctx, hp.parsed, raw)
 		for _, node := range nodes {
 			mergeNode(merged, hp.raw, node)
 		}

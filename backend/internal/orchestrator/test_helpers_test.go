@@ -4,6 +4,7 @@ import (
 	"context"
 	"gastrolog/internal/glid"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -616,6 +617,13 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 
 	logger := newClusterLifecycleLogger(t)
 
+	// A fake FSM applier drives the receipt-protocol delete in-process:
+	// when any node proposes CmdRequestDelete via reconciler.deleteChunk,
+	// it fulfills the obligation on every expectedFrom node's own
+	// reconciler — the deterministic, timing-free equivalent of the real
+	// onRequestDelete to fulfillObligation fan-out.
+	recs := make(map[string]*VaultLifecycleReconciler, len(nodeIDs))
+
 	for _, nid := range nodeIDs {
 		nodeLogger := logger.With("node", nid)
 		orch := newTestOrch(t, Config{LocalNodeID: nid, Logger: nodeLogger})
@@ -653,6 +661,13 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 			instances[i] = vaultInst
 		}
 
+		// Attached before the vault is registered, as production does:
+		// once an instance is published the scheduler reads Reconciler
+		// from its own goroutines, and assigning it afterwards races them.
+		rec := NewVaultLifecycleReconciler(orch, vaultID, instances[0], nid, nodeLogger)
+		instances[0].Reconciler = rec
+		recs[nid] = rec
+
 		// Vaults are single-instance. Use the first instance as the
 		// vault's instance; vaultCount > 1 is unused.
 		vault := NewVault(vaultID, instances[0])
@@ -679,19 +694,6 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 		orchs[nid].SetChunkReplicator(&directChunkReplicator{nodes: remotes})
 	}
 
-	// Wire a lifecycle reconciler onto every instance plus a fake FSM
-	// applier that drives the receipt-protocol delete in-process. When any
-	// node proposes CmdRequestDelete via reconciler.deleteChunk, the fake
-	// applier fulfills the obligation on every expectedFrom node's own
-	// reconciler — the deterministic, timing-free equivalent of the real
-	// onRequestDelete → fulfillObligation fan-out.
-	recs := make(map[string]*VaultLifecycleReconciler, len(nodeIDs))
-	for _, nid := range nodeIDs {
-		inst := nodes[nid].instances[0]
-		rec := NewVaultLifecycleReconciler(orchs[nid], vaultID, inst, nid, logger.With("node", nid))
-		inst.Reconciler = rec
-		recs[nid] = rec
-	}
 	applyRequestDelete := func(chunkID chunk.ChunkID, reason string, expectedFrom []string) error {
 		for _, nid := range expectedFrom {
 			if rec, ok := recs[nid]; ok {
@@ -899,3 +901,22 @@ func requireIdle(t *testing.T, sched *Scheduler, budget time.Duration) {
 		t.Fatalf("scheduler still had one-time jobs pending after %s", budget)
 	}
 }
+
+// testClock is an advanceable time source safe to hand to the orchestrator.
+// A test that advances a captured time.Time races the goroutines the
+// orchestrator starts: a scheduled job reads the clock through the same
+// closure the test is writing, and the detector then fails every test that
+// happened to be running at the time, not just the one at fault.
+type testClock struct{ nanos atomic.Int64 }
+
+func newTestClock(at time.Time) *testClock {
+	c := &testClock{}
+	c.nanos.Store(at.UnixNano())
+	return c
+}
+
+// Now is the clock function to pass as Config.Now.
+func (c *testClock) Now() time.Time { return time.Unix(0, c.nanos.Load()) }
+
+// Advance moves the clock forward.
+func (c *testClock) Advance(d time.Duration) { c.nanos.Add(int64(d)) }

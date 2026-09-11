@@ -70,6 +70,11 @@ type Indexer struct {
 }
 
 // NewIndexer creates a KV indexer with default configuration.
+// indexFileMode keeps index files readable only by the user the node runs
+// as. The enclosing directory is 0o750, but a directory's mode is not the
+// file's: a copy or a restore elsewhere carries the file's own mode.
+const indexFileMode = 0o600
+
 func NewIndexer(dir string, manager chunk.ChunkManager, logger *slog.Logger) *Indexer {
 	return NewIndexerWithConfig(dir, manager, logger, Config{})
 }
@@ -413,7 +418,7 @@ func (idx *Indexer) writeIndex(chunkDir, fileName string, data []byte) error {
 	}
 	tmpName := filepath.Clean(tmpFile.Name())
 
-	if err := tmpFile.Chmod(0o644); err != nil {
+	if err := tmpFile.Chmod(indexFileMode); err != nil {
 		_ = tmpFile.Close()
 		_ = os.Remove(tmpName)
 		return fmt.Errorf("chmod: %w", err)

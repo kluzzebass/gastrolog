@@ -69,19 +69,26 @@ func TestContentSecurityPolicyForbidsInlineScript(t *testing.T) {
 	}
 }
 
-// The frontend stylesheet @imports the Observatory typefaces from Google
-// Fonts, which then serves the woff2 files from a second origin. A policy that
-// omits either one does not fail loudly — the UI just renders in system fonts.
-func TestContentSecurityPolicyAllowsTheWebfontOrigins(t *testing.T) {
+// The binary serves its own typefaces, so the policy names no origin but
+// this one. An allowance added back here would be a third party in the
+// runtime of a UI that no longer needs one, and the fonts would still load,
+// so nothing else would notice.
+func TestContentSecurityPolicyNamesNoExternalOrigin(t *testing.T) {
 	directives := cspDirectives(t, serveThroughSecurityHeaders(t).Get("Content-Security-Policy"))
 
-	if !strings.Contains(directives["style-src"], fontStylesheetOrigin) {
-		t.Errorf("style-src = %q, must allow %s or the font stylesheet is blocked",
-			directives["style-src"], fontStylesheetOrigin)
+	for name, value := range directives {
+		if strings.Contains(value, "//") {
+			t.Errorf("%s = %q names an external origin; the UI is served entirely by this binary",
+				name, value)
+		}
 	}
-	if !strings.Contains(directives["font-src"], fontFileOrigin) {
-		t.Errorf("font-src = %q, must allow %s or the woff2 files are blocked",
-			directives["font-src"], fontFileOrigin)
+	if got := directives["font-src"]; got != "'self'" {
+		t.Errorf("font-src = %q, want 'self' — the typefaces ship with the binary", got)
+	}
+	// A face small enough for the bundler to inline would need data: here,
+	// which is why the build is configured to keep fonts as files.
+	if strings.Contains(directives["font-src"], "data:") {
+		t.Error("font-src allows data:, so some face is being inlined rather than served as a file")
 	}
 }
 

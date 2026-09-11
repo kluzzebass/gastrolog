@@ -41,7 +41,7 @@ func TestChunkRequiredHoldersReportsUnresolvedOnEmptyLookup(t *testing.T) {
 
 	// Vault placed on two nodes: resolved with both members.
 	storageA, storageB := glid.New(), glid.New()
-	orch.setSystemLoader(testSystemLoaderWithRuntime{
+	orch.setSystemLoader(&testSystemLoaderWithRuntime{
 		cfg: &system.Config{
 			Vaults: []system.VaultConfig{{
 				ID:   vaultID,

@@ -43,6 +43,11 @@ type Indexer struct {
 	logger  *slog.Logger
 }
 
+// indexFileMode keeps index files readable only by the user the node runs
+// as. The enclosing directory is 0o750, but a directory's mode is not the
+// file's: a copy or a restore elsewhere carries the file's own mode.
+const indexFileMode = 0o600
+
 func NewIndexer(dir string, manager chunk.ChunkManager, logger *slog.Logger) *Indexer {
 	return &Indexer{
 		dir:     dir,
@@ -122,7 +127,7 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	}
 	tmpName := tmpFile.Name()
 
-	if err := tmpFile.Chmod(0o644); err != nil {
+	if err := tmpFile.Chmod(indexFileMode); err != nil {
 		_ = tmpFile.Close()
 		_ = os.Remove(tmpName)
 		return fmt.Errorf("chmod temp index: %w", err)
