@@ -103,8 +103,9 @@ func Bootstrap(ctx context.Context, store Store) error {
 	// (Raft snapshot or in-memory). It is NOT encrypted at rest. An attacker
 	// with read access to the config store can forge authentication tokens.
 	//
-	// Mitigations: restrict filesystem permissions on the config vault
-	// (e.g. 0600 / owner-only) and use full-disk encryption where possible.
+	// Mitigation: everything this node writes is owner-only, which the
+	// process umask enforces on the files libraries create as well as ours;
+	// pair that with full-disk encryption where the threat warrants it.
 	// Application-level encryption was considered but only shifts the problem
 	// to key management without meaningful security gain in this deployment model.
 	secret := make([]byte, 32)

@@ -2,19 +2,28 @@
 
 The `docker-entrypoint.sh` script wraps the `gastrolog` binary and
 translates a small set of environment variables into CLI flags. The
-binary itself takes only flags — the env-var convention exists so that
-container orchestrators (Docker, Podman, Kubernetes) can drive
-configuration via their native mechanisms (env, ConfigMap, Secret)
-without anyone having to replace the entrypoint or shadow the
-Dockerfile.
+env-var convention exists so that container orchestrators (Docker,
+Podman, Kubernetes) can drive configuration via their native mechanisms
+(env, ConfigMap, Secret) without anyone having to replace the entrypoint
+or shadow the Dockerfile.
+
+The binary takes flags for everything except the four secrets below,
+which it reads from the environment itself — a command line is readable
+by every other process on the host, so the entrypoint never puts a secret
+on one.
 
 If you're running `gastrolog` outside a container (e.g. via
-`go install`, a release binary, or systemd), use the flags directly —
-the env vars below are not consulted by the binary. See
+`go install`, a release binary, or systemd), use the flags directly; the
+four secret variables work there too. See
 [`docs/cluster_enrollment.md`](./cluster_enrollment.md) for the
 operator-facing flag reference.
 
 ## Mapping
+
+The four secrets are `GASTROLOG_JOIN_TOKEN`,
+`GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET`, `GASTROLOG_BOOTSTRAP_TOKEN_SECRET`
+and `GASTROLOG_INITIAL_ADMIN_PASSWORD`. Their flags still work and warn
+when used.
 
 | Env var | Flag | Type | Notes |
 |---|---|---|---|

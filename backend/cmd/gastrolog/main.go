@@ -143,19 +143,19 @@ func main() {
 					return v
 				}(),
 				JoinAddr:  mustString(cmd, "join-addr"),
-				JoinToken: mustString(cmd, "join-token"),
+				JoinToken: secretFlag(cmd, "join-token", "GASTROLOG_JOIN_TOKEN"),
 				NodeName:  mustString(cmd, "name"),
 				PprofAddr: mustString(cmd, "pprof"),
 
 				WriteBootstrapToken:       mustString(cmd, "write-bootstrap-token"),
 				BootstrapTokenFile:        mustString(cmd, "bootstrap-token-file"),
-				BootstrapTokenServeSecret: mustString(cmd, "bootstrap-token-serve-secret"),
+				BootstrapTokenServeSecret: secretFlag(cmd, "bootstrap-token-serve-secret", "GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET"),
 				BootstrapTokenURL:         mustString(cmd, "bootstrap-token-url"),
-				BootstrapTokenSecret:      mustString(cmd, "bootstrap-token-secret"),
+				BootstrapTokenSecret:      secretFlag(cmd, "bootstrap-token-secret", "GASTROLOG_BOOTSTRAP_TOKEN_SECRET"),
 
 				InitialAdminFile:     mustString(cmd, "initial-admin-file"),
 				InitialAdminUser:     mustString(cmd, "initial-admin-user"),
-				InitialAdminPassword: mustString(cmd, "initial-admin-password"),
+				InitialAdminPassword: secretFlag(cmd, "initial-admin-password", "GASTROLOG_INITIAL_ADMIN_PASSWORD"),
 
 				EnvironmentLabel:    mustString(cmd, "environment-label"),
 				EnvironmentColor:    mustString(cmd, "environment-color"),
@@ -184,21 +184,21 @@ func main() {
 	serverCmd.Flags().String("cluster-advertise", "", "address peers store and dial to reach this node (empty = use bind address); set to a stable DNS name in environments with rotating pod IPs (e.g. Kubernetes)")
 	serverCmd.Flags().Int("service-pool-max-per-peer", 0, "max parallel outbound service-lane gRPC connections per peer (0 = default 4)")
 	serverCmd.Flags().String("join-addr", "", "leader's cluster address to join an existing cluster")
-	serverCmd.Flags().String("join-token", "", "join token for cluster enrollment (from cluster-init node)")
+	serverCmd.Flags().String("join-token", "", "join token for cluster enrollment (from cluster-init node); prefer GASTROLOG_JOIN_TOKEN — a flag is visible to every process on the host")
 	serverCmd.Flags().String("name", "", "node name (default: random petname)")
 
 	// Non-interactive cluster bootstrap.
 	serverCmd.Flags().String("write-bootstrap-token", "", "bootstrap node only: atomically write the join token to this path (mode 0600) for joiners to read via --bootstrap-token-file")
 	serverCmd.Flags().String("bootstrap-token-file", "", "joiner only: read the join token from this path, polling with backoff until present (alternative to --join-token)")
-	serverCmd.Flags().String("bootstrap-token-serve-secret", "", "bootstrap node only: serve the join token at GET /cluster/bootstrap-token, gated on this secret (empty disables endpoint)")
+	serverCmd.Flags().String("bootstrap-token-serve-secret", "", "bootstrap node only: serve the join token at GET /cluster/bootstrap-token, gated on this secret (empty disables endpoint); prefer GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET — a flag is visible to every process on the host")
 	serverCmd.Flags().String("bootstrap-token-url", "", "joiner only: fetch the join token from this URL, polling with backoff (alternative to --join-token); pair with --bootstrap-token-secret")
-	serverCmd.Flags().String("bootstrap-token-secret", "", "joiner only: secret sent in the X-Bootstrap-Token-Secret header when fetching from --bootstrap-token-url")
+	serverCmd.Flags().String("bootstrap-token-secret", "", "joiner only: secret sent in the X-Bootstrap-Token-Secret header when fetching from --bootstrap-token-url; prefer GASTROLOG_BOOTSTRAP_TOKEN_SECRET — a flag is visible to every process on the host")
 
 	// Initial admin provisioning. Bootstrap node only; no-op once any user
 	// exists.
 	serverCmd.Flags().String("initial-admin-file", "", "bootstrap node only: read initial admin credentials from this file (JSON {\"username\":..., \"password\":...} or \"username:password\" line)")
 	serverCmd.Flags().String("initial-admin-user", "", "bootstrap node only: initial admin username (paired with --initial-admin-password); ignored if --initial-admin-file is set")
-	serverCmd.Flags().String("initial-admin-password", "", "bootstrap node only: initial admin password (paired with --initial-admin-user); ignored if --initial-admin-file is set")
+	serverCmd.Flags().String("initial-admin-password", "", "bootstrap node only: initial admin password (paired with --initial-admin-user); ignored if --initial-admin-file is set; prefer GASTROLOG_INITIAL_ADMIN_PASSWORD — a flag is visible to every process on the host")
 
 	// Environment banner. Displayed in the UI header so operators can tell
 	// at a glance which deployment they are looking at. Both are
@@ -276,6 +276,26 @@ func resolveSegmentHotPathFsync(cmd *cobra.Command) bool {
 		return mustBool(cmd, "segment-hot-path-fsync")
 	}
 	return envBoolDefaultTrue("GLOG_SEGMENT_HOT_PATH_FSYNC")
+}
+
+// secretFlag resolves a secret from its flag or its environment variable.
+//
+// A value passed as a literal flag is in this process's command line, which
+// every other process on the host can read out of ps or /proc. The
+// environment is not perfect either, but it is not world-readable, so it is
+// the way to pass one and a literal flag says so on the way past.
+func secretFlag(cmd *cobra.Command, flagName, envKey string) string {
+	if cmd.Flags().Changed(flagName) {
+		fmt.Fprintf(os.Stderr,
+			"warning: --%s puts a secret in this process's command line, where any "+
+				"other process on the host can read it; pass %s instead\n",
+			flagName, envKey)
+		return mustString(cmd, flagName)
+	}
+	if v := strings.TrimSpace(os.Getenv(envKey)); v != "" {
+		return v
+	}
+	return mustString(cmd, flagName)
 }
 
 // resolveDurationFlag resolves a duration setting: the CLI flag wins when

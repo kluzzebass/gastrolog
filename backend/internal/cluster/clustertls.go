@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 
 	"gastrolog/internal/multiraft"
@@ -96,13 +97,44 @@ func SaveFile(path string, certPEM, keyPEM, caCertPEM []byte) error {
 		return fmt.Errorf("marshal cluster TLS: %w", err)
 	}
 
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("write cluster TLS temp file: %w", err)
+	// A fixed temp name is a name an attacker can occupy first. os.CreateTemp
+	// picks an unpredictable one and creates it exclusively, so this node's
+	// private key cannot be written through a symlink someone planted.
+	dir, base := filepath.Split(path)
+	f, err := os.CreateTemp(dir, "."+base+".*")
+	if err != nil {
+		return fmt.Errorf("create cluster TLS temp file: %w", err)
+	}
+	tmp := f.Name()
+	if err := writeAndSync(f, data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("close cluster TLS temp file: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("rename cluster TLS file: %w", err)
+	}
+	return nil
+}
+
+// writeAndSync chmods to owner-only, writes, and fsyncs. CreateTemp already
+// makes the file 0o600; the chmod states it rather than relying on that, and
+// the sync means a crash right after enrollment cannot leave this node
+// without the identity it just recorded.
+func writeAndSync(f *os.File, data []byte) error {
+	if err := f.Chmod(0o600); err != nil {
+		return fmt.Errorf("chmod cluster TLS temp file: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("write cluster TLS temp file: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("sync cluster TLS temp file: %w", err)
 	}
 	return nil
 }
