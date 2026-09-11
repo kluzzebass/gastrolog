@@ -34,7 +34,7 @@ when used.
 | `GASTROLOG_NAME` | `--name` | string | Node name. Defaults to a random petname; set explicitly when stable identity matters (e.g. `gastrolog-0` from a StatefulSet ordinal). |
 | `GASTROLOG_JOIN_ADDR` | `--join-addr` | string | Bootstrap node's cluster address — set on joiners. Omit on the bootstrap node. |
 | `GASTROLOG_JOIN_TOKEN` | `--join-token` | string | Cluster join token — set on joiners. Pair with `GASTROLOG_JOIN_ADDR`. |
-| `GASTROLOG_NO_AUTH` | `--no-auth` | bool | Disable authentication. Truthy values: `1`, `true`, `yes`, `y`, `on` (case-insensitive). Anything else (including `false`, `0`, empty) is off. **Development only.** The node refuses to start unless the API listener binds loopback, and raises a standing `authentication-disabled` alarm while active. |
+| `GASTROLOG_NO_AUTH` | `--no-auth` | bool | Disable authentication. Truthy values: `1`, `true`, `yes`, `y`, `on` (case-insensitive). Anything else (including `false`, `0`, empty) is off. **Use only for testing.** |
 | `GASTROLOG_PPROF` | `--pprof` | string | pprof HTTP server address (e.g. `localhost:6060`). Empty/unset = disabled. Serves `/debug/pprof/{profile,trace,heap,goroutine,mutex,block}`. |
 | `GASTROLOG_PPROF_DEBUG` | `--pprof-debug` | bool | Enable mutex (1/5) and block (10ms) sampling for pprof. Dev/incident use only. |
 | `GASTROLOG_PPROF_MUTEX_FRACTION` | `--pprof-mutex-fraction` | int | Mutex contention sample rate (`0`=off, `1`=all, `5`=one in five). Overrides `--pprof-debug` default when set. |
