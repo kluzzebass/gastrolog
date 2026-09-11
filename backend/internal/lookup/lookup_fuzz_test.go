@@ -70,7 +70,7 @@ func FuzzRDNSLookupValues(f *testing.F) {
 	f.Add("\x00")
 	f.Add("192.168.1.1")
 
-	rdns := NewRDNS()
+	rdns := NewRDNS(nil)
 	// Use a very short timeout to avoid slow DNS lookups during fuzzing.
 	rdns.timeout = 1 // 1 nanosecond — will always timeout
 
