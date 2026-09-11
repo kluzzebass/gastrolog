@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Code, ConnectError } from "@connectrpc/connect";
+import { shouldReconnectAfter } from "./streamReconnect";
 import { systemClient, refreshAuth } from "../client";
 import { GetSystemResponse } from "../gen/gastrolog/v1/system_pb";
 import { getClusterCtlRaftIndex, clusterCtlRaftIndexScalarToBigInt } from "./useSystem";
@@ -53,6 +54,7 @@ export function useWatchSystem() {
         }
       } catch (err) {
         if (abort.signal.aborted) return;
+        if (!shouldReconnectAfter(err)) return;
         if (
           err instanceof ConnectError &&
           err.code === Code.Unauthenticated

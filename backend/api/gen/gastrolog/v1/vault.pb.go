@@ -4662,9 +4662,9 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x15RetryUnreadableChunks\x12*.gastrolog.v1.RetryUnreadableChunksRequest\x1a+.gastrolog.v1.RetryUnreadableChunksResponse\"\x04\x80\xb5\x18\x03\x12[\n" +
 	"\fArchiveChunk\x12!.gastrolog.v1.ArchiveChunkRequest\x1a\".gastrolog.v1.ArchiveChunkResponse\"\x04\x80\xb5\x18\x03\x12[\n" +
 	"\fRestoreChunk\x12!.gastrolog.v1.RestoreChunkRequest\x1a\".gastrolog.v1.RestoreChunkResponse\"\x04\x80\xb5\x18\x03\x12Z\n" +
-	"\vWatchChunks\x12 .gastrolog.v1.WatchChunksRequest\x1a!.gastrolog.v1.WatchChunksResponse\"\x04\x80\xb5\x18\x020\x01\x12g\n" +
+	"\vWatchChunks\x12 .gastrolog.v1.WatchChunksRequest\x1a!.gastrolog.v1.WatchChunksResponse\"\x04\x80\xb5\x18\x030\x01\x12g\n" +
 	"\x10RepatriateOrphan\x12%.gastrolog.v1.RepatriateOrphanRequest\x1a&.gastrolog.v1.RepatriateOrphanResponse\"\x04\x80\xb5\x18\x03\x12m\n" +
-	"\x12GetPipelineBacklog\x12'.gastrolog.v1.GetPipelineBacklogRequest\x1a(.gastrolog.v1.GetPipelineBacklogResponse\"\x04\x80\xb5\x18\x02B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\x12GetPipelineBacklog\x12'.gastrolog.v1.GetPipelineBacklogRequest\x1a(.gastrolog.v1.GetPipelineBacklogResponse\"\x04\x80\xb5\x18\x03B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_vault_proto_rawDescOnce sync.Once

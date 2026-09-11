@@ -215,3 +215,78 @@ func (b *bearerToken) WrapStreamingClient(next connect.StreamingClientFunc) conn
 func (b *bearerToken) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
 	return next
 }
+
+// Watching data and asking for it are the same disclosure, so they carry the
+// same level. A stream declared below its fetching counterpart hands a caller
+// by subscription what they are refused by request, and nothing else notices:
+// the stream works, it just works for the wrong people.
+//
+// Pairs are listed rather than derived, because the relationship is semantic —
+// only a reader can say which fetch a given stream mirrors. WatchSystem is
+// deliberately absent: it carries a Raft index, not the config GetSystem is
+// gated for, so it is not this kind of pair.
+func TestStreamsDoNotDiscloseBelowTheirFetchingCounterpart(t *testing.T) {
+	t.Parallel()
+	levels := procedureLevels()
+
+	// Guard the guard: the comparison below is numeric, so it only means
+	// anything while a stricter level sorts above a looser one.
+	if !(apiv1.AuthLevel_AUTH_LEVEL_ADMIN > apiv1.AuthLevel_AUTH_LEVEL_AUTHENTICATED) {
+		t.Fatal("AuthLevel no longer orders admin above authenticated; the comparison below proves nothing")
+	}
+
+	pairs := []struct {
+		stream string // the streaming or derived read
+		fetch  string // the request that returns the same data
+		why    string
+	}{
+		{
+			"/gastrolog.v1.SystemService/WatchIngesterStatus",
+			"/gastrolog.v1.SystemService/GetIngesterStatus",
+			"streams the ingest counters and error totals the fetch returns",
+		},
+		{
+			"/gastrolog.v1.VaultService/WatchChunks",
+			"/gastrolog.v1.VaultService/ListChunks",
+			"streams ChunkMeta, which is what the listing is gated for",
+		},
+		{
+			"/gastrolog.v1.VaultService/GetPipelineBacklog",
+			"/gastrolog.v1.VaultService/ListChunks",
+			"reports the same per-vault chunk pipeline state",
+		},
+		{
+			"/gastrolog.v1.SystemService/PreviewCSVLookup",
+			"/gastrolog.v1.SystemService/ListManagedFiles",
+			"returns sample rows out of an admin-uploaded managed file",
+		},
+		{
+			"/gastrolog.v1.SystemService/PreviewJSONLookup",
+			"/gastrolog.v1.SystemService/ListManagedFiles",
+			"returns sample rows out of an admin-uploaded managed file",
+		},
+		{
+			"/gastrolog.v1.SystemService/PreviewYAMLLookup",
+			"/gastrolog.v1.SystemService/ListManagedFiles",
+			"returns sample rows out of an admin-uploaded managed file",
+		},
+	}
+
+	for _, p := range pairs {
+		streamLevel, ok := levels[p.stream]
+		if !ok {
+			t.Errorf("%s declares no auth level", p.stream)
+			continue
+		}
+		fetchLevel, ok := levels[p.fetch]
+		if !ok {
+			t.Errorf("%s declares no auth level", p.fetch)
+			continue
+		}
+		if streamLevel < fetchLevel {
+			t.Errorf("%s is %v while %s is %v: it %s, so a caller refused the fetch "+
+				"can still subscribe to it",
+				p.stream, streamLevel, p.fetch, fetchLevel, p.why)
+		}
+	}
+}

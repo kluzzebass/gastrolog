@@ -102,7 +102,7 @@ service VaultService {
   // is carried in the stream itself. Same pattern as WatchConfig.
   // See gastrolog-1jijm.
   rpc WatchChunks(WatchChunksRequest) returns (stream WatchChunksResponse) {
-    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+    option (auth_level) = AUTH_LEVEL_ADMIN;
   }
 
   // RepatriateOrphan re-introduces a sealed local chunk into the
@@ -121,7 +121,7 @@ service VaultService {
   // pre-head) so operators can see chunking pipeline depth in the
   // inspector without shell access.
   rpc GetPipelineBacklog(GetPipelineBacklogRequest) returns (GetPipelineBacklogResponse) {
-    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+    option (auth_level) = AUTH_LEVEL_ADMIN;
   }
 }
 
