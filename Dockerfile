@@ -7,7 +7,7 @@ COPY frontend/ .
 RUN bun run build
 
 # Stage 2: Build backend (with embedded frontend)
-FROM golang:1.26 AS backend
+FROM golang:1.27 AS backend
 WORKDIR /src/backend
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
