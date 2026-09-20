@@ -1,4 +1,5 @@
 import { createContext, useContext, useId, useState } from "react";
+import { useReadOnly } from "../../hooks/useReadOnly";
 import { useThemeClass } from "../../hooks/useThemeClass";
 
 const FormFieldIdContext = createContext<string | undefined>(undefined);
@@ -57,6 +58,8 @@ export function ExampleValues({
   dark: boolean;
 }>) {
   const c = useThemeClass(dark);
+  const readOnly = useReadOnly();
+  if (readOnly) return null;
   if (!examples?.length || value) return null;
   return (
     <div
@@ -119,6 +122,7 @@ export function TextInput({
 }: Readonly<TextInputProps>) {
   const id = useFormFieldId();
   const c = useThemeClass(dark);
+  const readOnly = useReadOnly();
   let stateClasses: string;
   if (error) {
     stateClasses = c(
@@ -143,6 +147,7 @@ export function TextInput({
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        readOnly={readOnly}
         placeholder={placeholder}
         disabled={disabled}
         title={title}
@@ -175,6 +180,7 @@ export function SelectInput({
 }: Readonly<SelectInputProps>) {
   const id = useFormFieldId();
   const c = useThemeClass(dark);
+  const readOnly = useReadOnly();
   const stateClasses = highlighted
     ? c(
         "bg-ink-surface border-copper-dim text-text-bright",
@@ -189,7 +195,7 @@ export function SelectInput({
       id={id}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      disabled={disabled}
+      disabled={disabled || readOnly}
       className={`px-2.5 py-1.5 text-[0.85em] border rounded focus:outline-none transition-colors ${stateClasses} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
     >
       {options.map((o) => (
@@ -222,12 +228,14 @@ export function NumberInput({
 }: Readonly<NumberInputProps>) {
   const id = useFormFieldId();
   const c = useThemeClass(dark);
+  const readOnly = useReadOnly();
   return (
     <>
       <input
         id={id}
         type="text"
         inputMode="numeric"
+        readOnly={readOnly}
         value={value}
         onChange={(e) => {
           const v = e.target.value;
@@ -269,6 +277,7 @@ export function SpinnerInput({
 }: Readonly<SpinnerInputProps>) {
   const id = useFormFieldId();
   const c = useThemeClass(dark);
+  const readOnly = useReadOnly();
   const n = parseInt(value, 10) || min;
 
   const step = (dir: 1 | -1) => {
@@ -290,7 +299,7 @@ export function SpinnerInput({
         type="button"
         className={`${btnClass} rounded-l border-r-0`}
         onClick={() => step(-1)}
-        disabled={disabled || n <= min}
+        disabled={disabled || readOnly || n <= min}
         aria-label="Decrease"
       >
         {"\u25C0"}
@@ -299,6 +308,7 @@ export function SpinnerInput({
         id={id}
         type="text"
         inputMode="numeric"
+        readOnly={readOnly}
         value={value}
         onChange={(e) => {
           const v = e.target.value;
@@ -320,7 +330,7 @@ export function SpinnerInput({
         type="button"
         className={`${btnClass} rounded-r border-l-0`}
         onClick={() => step(1)}
-        disabled={disabled || (max !== undefined && n >= max)}
+        disabled={disabled || readOnly || (max !== undefined && n >= max)}
         aria-label="Increase"
       >
         {"\u25B6"}
@@ -350,11 +360,13 @@ export function TextArea({
 }: Readonly<TextAreaProps>) {
   const id = useFormFieldId();
   const c = useThemeClass(dark);
+  const readOnly = useReadOnly();
   return (
     <textarea
       id={id}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      readOnly={readOnly}
       placeholder={placeholder}
       disabled={disabled}
       rows={rows}
@@ -374,6 +386,7 @@ interface ParamsEditorProps {
 
 export function ParamsEditor({ params, onChange, dark }: Readonly<ParamsEditorProps>) {
   const c = useThemeClass(dark);
+  const readOnly = useReadOnly();
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
 
@@ -415,6 +428,7 @@ export function ParamsEditor({ params, onChange, dark }: Readonly<ParamsEditorPr
             )}`}
           />
           <button
+            hidden={readOnly}
             onClick={() => handleRemove(key)}
             className={`px-3 py-1 text-[0.8em] rounded border transition-colors ${c(
               "border-ink-border text-text-muted hover:text-severity-error hover:border-severity-error hover:bg-ink-hover",

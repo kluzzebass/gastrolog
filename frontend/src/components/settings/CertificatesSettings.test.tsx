@@ -7,6 +7,7 @@ import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 const mocks = installMockClients();
 
 import { CertificatesSettings } from "./CertificatesSettings";
+import { renderWritable } from "../../testing/renderWritable";
 
 /** Create a distinct 16-byte Uint8Array test ID from a small number. */
 function testId(n: number): Uint8Array<ArrayBuffer> {
@@ -40,7 +41,7 @@ describe("CertificatesSettings", () => {
     qc.setQueryData(["certificates"], { certificates: [] });
     qc.setQueryData(["settings"], { tls: { defaultCert: "" } });
 
-    const { getByText } = render(<CertificatesSettings dark />, {
+    const { getByText } = renderWritable(<CertificatesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -52,7 +53,7 @@ describe("CertificatesSettings", () => {
     qc.setQueryData(["certificates"], sampleCerts);
     qc.setQueryData(["settings"], sampleSettings);
 
-    const { getByText } = render(<CertificatesSettings dark />, {
+    const { getByText } = renderWritable(<CertificatesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -65,7 +66,7 @@ describe("CertificatesSettings", () => {
     qc.setQueryData(["certificates"], sampleCerts);
     qc.setQueryData(["settings"], sampleSettings);
 
-    const { getByText } = render(<CertificatesSettings dark />, {
+    const { getByText } = renderWritable(<CertificatesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -77,7 +78,7 @@ describe("CertificatesSettings", () => {
     qc.setQueryData(["certificates"], { certificates: [] });
     qc.setQueryData(["settings"], { tls: { defaultCert: "" } });
 
-    const { getByText } = render(<CertificatesSettings dark />, {
+    const { getByText } = renderWritable(<CertificatesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -90,7 +91,7 @@ describe("CertificatesSettings", () => {
     qc.setQueryData(["certificates"], sampleCerts);
     qc.setQueryData(["settings"], sampleSettings);
 
-    const { getByText, queryByText } = render(<CertificatesSettings dark />, {
+    const { getByText, queryByText } = renderWritable(<CertificatesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -105,7 +106,7 @@ describe("CertificatesSettings", () => {
     qc.setQueryData(["certificates"], { certificates: [] });
     qc.setQueryData(["settings"], { tls: { defaultCert: "" } });
 
-    const { getByText } = render(<CertificatesSettings dark />, {
+    const { getByText } = renderWritable(<CertificatesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -119,7 +120,7 @@ describe("CertificatesSettings", () => {
     qc.setQueryData(["certificates"], { certificates: [] });
     qc.setQueryData(["settings"], { tls: { defaultCert: "" } });
 
-    const { getByText } = render(<CertificatesSettings dark />, {
+    const { getByText } = renderWritable(<CertificatesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -141,7 +142,7 @@ describe("CertificatesSettings", () => {
     qc.setQueryData(["certificates"], sampleCerts);
     qc.setQueryData(["settings"], sampleSettings);
 
-    const { getByText } = render(<CertificatesSettings dark />, {
+    const { getByText } = renderWritable(<CertificatesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -159,7 +160,7 @@ describe("CertificatesSettings", () => {
     qc.setQueryData(["certificates"], sampleCerts);
     qc.setQueryData(["settings"], sampleSettings);
 
-    const { getByText } = render(<CertificatesSettings dark />, {
+    const { getByText } = renderWritable(<CertificatesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -172,7 +173,7 @@ describe("CertificatesSettings", () => {
     qc.setQueryData(["certificates"], { certificates: [] });
     qc.setQueryData(["settings"], { tls: { defaultCert: "" } });
 
-    const { getByText } = render(<CertificatesSettings dark />, {
+    const { getByText } = renderWritable(<CertificatesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 

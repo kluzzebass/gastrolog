@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useReadOnly } from "../../hooks/useReadOnly";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { ExpandableCard } from "./ExpandableCard";
 
@@ -35,6 +36,12 @@ export function SettingsCard({
 }: Readonly<SettingsCardProps>) {
   const c = useThemeClass(dark);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const readOnly = useReadOnly();
+
+  // The whole strip exists to modify this entity: the footer holds Save and
+  // Discard, the left side holds Delete. A caller who cannot write is shown
+  // the card's contents and none of that.
+  const showActions = !readOnly && (onDelete || footer);
 
   return (
     <ExpandableCard
@@ -48,7 +55,7 @@ export function SettingsCard({
       headerRight={headerRight}
     >
       {children}
-      {(onDelete || footer) && (
+      {showActions && (
         <div className="flex items-center justify-between pt-3 mt-3">
           <div>
             {onDelete && !confirmDelete && (

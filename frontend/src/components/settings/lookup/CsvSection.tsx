@@ -12,6 +12,7 @@ import { PreviewTable } from "./PreviewTable";
 import { FileDropZone } from "../FileDropZone";
 import { type CSVLookupDraft, type LookupSectionProps, emptyCsvDraft, csvLookupEqual } from "./types";
 import type { CSVLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
+import { useReadOnly } from "../../../hooks/useReadOnly";
 
 function serializeCsvLookups(lookups: CSVLookupDraft[]) {
   return lookups
@@ -53,6 +54,7 @@ function CsvFileFields({
   inputId: string;
   onFileSelected: (fileId: string) => void;
 }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const preview = usePreviewCSVLookup();
 
@@ -177,6 +179,7 @@ function CsvFileFields({
                   >
                     <input
                       type="checkbox"
+                      disabled={readOnly}
                       checked={checked}
                       onChange={() => toggleValueColumn(col)}
                       className="accent-copper"

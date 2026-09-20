@@ -12,6 +12,7 @@ import { FileDropZone } from "../FileDropZone";
 import { type JSONFileLookupDraft, type LookupSectionProps, emptyJsonDraft } from "./types";
 import type { JSONFileLookupEntry, YAMLFileLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 import { PreviewTable, parseTabularResult } from "./PreviewTable";
+import { useReadOnly } from "../../../hooks/useReadOnly";
 
 // FileLookupFormat tags which structured format a section instance serves.
 // Drives preview hook, file-picker extension, type badge, and payload key.
@@ -190,6 +191,7 @@ export function FileLookupAddForm({
   namePlaceholder: string;
   spec: FormatSpec;
 }) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const putConfig = usePutLookupSettings();
   const [draft, setDraft] = useState<JSONFileLookupDraft>(() => emptyJsonDraft());
@@ -284,6 +286,7 @@ export function FileLookupAddForm({
                   >
                     <input
                       type="checkbox"
+                      disabled={readOnly}
                       checked={checked}
                       onChange={() => toggleValueColumn(col)}
                       className="accent-copper"
@@ -319,6 +322,7 @@ function FileLookupCardBody({
   onUpdate: (i: number, patch: Partial<JSONFileLookupDraft>) => void;
   spec: FormatSpec;
 }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const [tableColumns, setTableColumns] = useState<string[]>([]);
 
@@ -392,6 +396,7 @@ function FileLookupCardBody({
                   >
                     <input
                       type="checkbox"
+                      disabled={readOnly}
                       checked={checked}
                       onChange={() => toggleValueColumn(col)}
                       className="accent-copper"

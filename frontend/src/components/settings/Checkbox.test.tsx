@@ -2,17 +2,18 @@ import { describe, expect, test, mock } from "bun:test";
 import React from "react";
 import { render, fireEvent } from "@testing-library/react";
 import { Checkbox } from "./Checkbox";
+import { renderWritable } from "../../testing/renderWritable";
 
 describe("Checkbox", () => {
   test("renders unchecked (no checkmark SVG)", () => {
-    const { container } = render(
+    const { container } = renderWritable(
       <Checkbox checked={false} onChange={() => {}} dark={true} />,
     );
     expect(container.querySelector("svg")).toBeNull();
   });
 
   test("renders checked with checkmark SVG", () => {
-    const { container } = render(
+    const { container } = renderWritable(
       <Checkbox checked={true} onChange={() => {}} dark={true} />,
     );
     expect(container.querySelector("svg")).not.toBeNull();
@@ -20,7 +21,7 @@ describe("Checkbox", () => {
 
   test("calls onChange with toggled value on click", () => {
     const onChange = mock(() => {});
-    const { container } = render(
+    const { container } = renderWritable(
       <Checkbox checked={false} onChange={onChange} dark={true} />,
     );
     fireEvent.click(container.querySelector('[role="checkbox"]')!);
@@ -29,7 +30,7 @@ describe("Checkbox", () => {
 
   test("calls onChange with false when checked", () => {
     const onChange = mock(() => {});
-    const { container } = render(
+    const { container } = renderWritable(
       <Checkbox checked={true} onChange={onChange} dark={true} />,
     );
     fireEvent.click(container.querySelector('[role="checkbox"]')!);
@@ -37,21 +38,21 @@ describe("Checkbox", () => {
   });
 
   test("renders label when provided", () => {
-    const { getByText } = render(
+    const { getByText } = renderWritable(
       <Checkbox checked={false} onChange={() => {}} dark={true} label="Enable feature" />,
     );
     expect(getByText("Enable feature")).toBeTruthy();
   });
 
   test("does not render label when omitted", () => {
-    const { queryByText } = render(
+    const { queryByText } = renderWritable(
       <Checkbox checked={false} onChange={() => {}} dark={true} />,
     );
     expect(queryByText("Enable feature")).toBeNull();
   });
 
   test("checked state sets aria-checked to true", () => {
-    const { container } = render(
+    const { container } = renderWritable(
       <Checkbox checked={true} onChange={() => {}} dark={true} />,
     );
     expect(container.querySelector('[aria-checked="true"]')).toBeTruthy();

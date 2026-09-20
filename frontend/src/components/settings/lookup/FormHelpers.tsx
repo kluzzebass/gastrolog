@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import type { LookupParamDraft } from "./types";
+import { useReadOnly } from "../../../hooks/useReadOnly";
 
 export function StringListEditor({
   values,
@@ -13,6 +14,7 @@ export function StringListEditor({
   placeholder: string;
   dark: boolean;
 }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const [draft, setDraft] = useState("");
 
@@ -28,6 +30,7 @@ export function StringListEditor({
         <div key={i} className="flex gap-1.5 items-center">
           <input
             type="text"
+            readOnly={readOnly}
             value={v}
             onChange={(e) => {
               const next = [...values];
@@ -53,6 +56,7 @@ export function StringListEditor({
       <div className="flex gap-1.5 items-center">
         <input
           type="text"
+          readOnly={readOnly}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={placeholder}

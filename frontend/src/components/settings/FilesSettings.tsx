@@ -14,6 +14,7 @@ import { ExpandableCard } from "./ExpandableCard";
 import { MaxMindCard } from "./lookup/MaxMindCard";
 import { handleDragOver, handleDragEnter, handleDragLeave } from "./CertificateForms";
 import type { ManagedFileInfo } from "../../api/gen/gastrolog/v1/system_pb";
+import { useReadOnly } from "../../hooks/useReadOnly";
 
 interface FileGroup {
   name: string;
@@ -43,6 +44,7 @@ function groupByName(files: ManagedFileInfo[]): FileGroup[] {
 }
 
 export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const { data, isLoading } = useConfig();
   const { data: settings } = useSettings();
@@ -127,6 +129,7 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
         <input
           id="managed-file-upload"
           type="file"
+          disabled={readOnly}
           className="hidden"
           onChange={handleFileInput}
         />

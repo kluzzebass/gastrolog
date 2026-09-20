@@ -2,10 +2,11 @@ import { describe, expect, test, mock } from "bun:test";
 import React from "react";
 import { render, fireEvent } from "@testing-library/react";
 import { SettingsCard } from "./SettingsCard";
+import { renderWritable } from "../../testing/renderWritable";
 
 describe("SettingsCard", () => {
   test("renders id and children when expanded", () => {
-    const { getByText } = render(
+    const { getByText } = renderWritable(
       <SettingsCard id="my-store" dark={true} expanded={true}>
         <p>card content</p>
       </SettingsCard>,
@@ -15,7 +16,7 @@ describe("SettingsCard", () => {
   });
 
   test("renders footer", () => {
-    const { getByText } = render(
+    const { getByText } = renderWritable(
       <SettingsCard id="my-store" dark={true} expanded={true} footer={<button>Save</button>}>
         <p>content</p>
       </SettingsCard>,
@@ -25,7 +26,7 @@ describe("SettingsCard", () => {
 
   test("delete button shows initially, then confirm flow", () => {
     const onDelete = mock(() => {});
-    const { getByText } = render(
+    const { getByText } = renderWritable(
       <SettingsCard id="my-store" dark={true} expanded={true} onDelete={onDelete}>
         <p>content</p>
       </SettingsCard>,
@@ -42,7 +43,7 @@ describe("SettingsCard", () => {
 
   test("confirming delete calls onDelete", () => {
     const onDelete = mock(() => {});
-    const { getByText } = render(
+    const { getByText } = renderWritable(
       <SettingsCard id="my-store" dark={true} expanded={true} onDelete={onDelete}>
         <p>content</p>
       </SettingsCard>,
@@ -54,7 +55,7 @@ describe("SettingsCard", () => {
   });
 
   test("cancelling delete goes back to delete button", () => {
-    const { getByText, queryByText } = render(
+    const { getByText, queryByText } = renderWritable(
       <SettingsCard id="my-store" dark={true} expanded={true} onDelete={() => {}}>
         <p>content</p>
       </SettingsCard>,
@@ -69,7 +70,7 @@ describe("SettingsCard", () => {
   });
 
   test("custom deleteLabel", () => {
-    const { getByText } = render(
+    const { getByText } = renderWritable(
       <SettingsCard id="my-store" dark={true} expanded={true} onDelete={() => {}} deleteLabel="Remove">
         <p>content</p>
       </SettingsCard>,
@@ -78,7 +79,7 @@ describe("SettingsCard", () => {
   });
 
   test("no delete or footer hides action bar", () => {
-    const { queryByText } = render(
+    const { queryByText } = renderWritable(
       <SettingsCard id="my-store" dark={true} expanded={true}>
         <p>content</p>
       </SettingsCard>,

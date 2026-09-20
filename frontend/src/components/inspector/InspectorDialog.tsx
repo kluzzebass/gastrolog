@@ -1,3 +1,4 @@
+import { ReadOnlyProvider } from "../../hooks/useReadOnly";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useConfig } from "../../api/hooks/useSystem";
 import { useVaults, useStorages, useNodeRegistry } from "../../api/hooks";
@@ -17,6 +18,7 @@ export type EntityType = "vaults" | "storages" | "ingesters" | "routes" | "jobs"
 
 interface InspectorDialogProps {
   dark: boolean;
+  isAdmin: boolean;
   inspectorParam: string;
   onNavigate: (param: string) => void;
   onClose: () => void;
@@ -90,6 +92,7 @@ const entityNavItems: EntityNavItem[] = [
 
 export function InspectorDialog({
   dark,
+  isAdmin,
   inspectorParam,
   onNavigate,
   onClose,
@@ -139,6 +142,10 @@ export function InspectorDialog({
 
   return (
     <Dialog onClose={onClose} ariaLabel="Inspector" dark={dark}>
+      {/* The inspector's actions — seal, reindex, pause and the rest — are
+          admin-only on the backend, as are several of the reads behind these
+          panes. A non-admin sees what it can read and no controls. */}
+      <ReadOnlyProvider readOnly={!isAdmin}>
       <div className="flex h-full overflow-hidden">
         {/* ---- Left nav pane ---- */}
         <nav
@@ -256,6 +263,7 @@ export function InspectorDialog({
           )}
         </div>
       </div>
+      </ReadOnlyProvider>
     </Dialog>
   );
 }

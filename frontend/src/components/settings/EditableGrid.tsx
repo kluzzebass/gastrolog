@@ -31,6 +31,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { IconButton } from "./Buttons";
+import { useReadOnly } from "../../hooks/useReadOnly";
 
 export interface EditableGridProps {
   dark: boolean;
@@ -126,6 +127,7 @@ interface SortableRowProps {
 function SortableRow({
   id, dark, row, columns, keyColumnIndex, keyError, inputClass, inputErrorClass, inputsDisabled, onDelete, onAddRow, onCellChange, borderClass,
 }: Readonly<SortableRowProps>) {
+  const readOnly = useReadOnly();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
 
   return (
@@ -154,6 +156,7 @@ function SortableRow({
             )}
             <input
               type="text"
+              readOnly={readOnly}
               value={row[col] ?? ""}
               onChange={(e) => onCellChange(col, e.target.value)}
               onPointerDown={(e) => e.stopPropagation()}

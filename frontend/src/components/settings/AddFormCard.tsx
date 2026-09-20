@@ -1,3 +1,4 @@
+import { useReadOnly } from "../../hooks/useReadOnly";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { Button } from "./Buttons";
 
@@ -20,7 +21,11 @@ export function AddFormCard({
   typeBadge,
   children,
 }: Readonly<AddFormCardProps>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
+  // Every hook runs first: an early return above them changes the hook order
+  // between renders the moment write access flips.
+  if (readOnly) return null;
   return (
     <div
       className={`border rounded-lg p-4 ${c("border-copper/40 bg-ink-surface", "border-copper/40 bg-light-surface")}`}

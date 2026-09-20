@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ReadOnlyProvider } from "../../hooks/useReadOnly";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { Dialog } from "../Dialog";
 import {
@@ -125,6 +126,9 @@ export function SettingsDialog({
 
   return (
     <Dialog onClose={onClose} ariaLabel="Settings" dark={dark}>
+      {/* Every config write is admin-only, so a non-admin sees the settings
+          it can read and none of the controls that would change them. */}
+      <ReadOnlyProvider readOnly={!isAdmin}>
       <div className="flex h-full overflow-hidden">
         <nav
           className={`min-w-fit shrink-0 border-r overflow-y-auto app-scroll p-3 ${c("border-ink-border", "border-light-border")}`}
@@ -181,6 +185,7 @@ export function SettingsDialog({
           {tab === "logLevels" && <LogLevelsSettings dark={dark} />}
         </div>
       </div>
+      </ReadOnlyProvider>
     </Dialog>
   );
 }

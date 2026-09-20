@@ -24,6 +24,7 @@ import { FormField, TextInput, SelectInput } from "./FormField";
 import { Button } from "./Buttons";
 import { EyeIcon, EyeOffIcon } from "../icons";
 import { extractMessage } from "../../utils/errors";
+import { useReadOnly } from "../../hooks/useReadOnly";
 
 const roleOptions = [
   { value: "admin", label: "Admin" },
@@ -315,11 +316,13 @@ function PasswordInput({
   placeholder?: string;
   dark: boolean;
 }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   return (
     <div className="relative">
       <input
         type={show ? "text" : "password"}
+        readOnly={readOnly}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
