@@ -43,6 +43,7 @@ export function StringListEditor({
             )}`}
           />
           <button
+            disabled={readOnly}
             onClick={() => onChange(values.filter((_, j) => j !== i))}
             className={`px-2 py-1.5 text-[0.8em] rounded border transition-colors ${c(
               "border-ink-border text-text-muted hover:text-severity-error hover:border-severity-error hover:bg-ink-hover",
@@ -67,6 +68,7 @@ export function StringListEditor({
           )}`}
         />
         <button
+          disabled={readOnly}
           onClick={handleAdd}
           className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
             "border-ink-border text-text-muted hover:text-copper hover:border-copper-dim hover:bg-ink-hover",
@@ -89,6 +91,7 @@ export function ParameterListEditor({
   onChange: (v: LookupParamDraft[]) => void;
   dark: boolean;
 }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
 
   const swap = (a: number, b: number) => {
@@ -103,7 +106,7 @@ export function ParameterListEditor({
         <div key={i} className="flex gap-1.5 items-center">
           <div className="flex flex-col gap-0.5">
             <button
-              disabled={i === 0}
+              disabled={i === 0 || readOnly}
               onClick={() => swap(i, i - 1)}
               className={`px-1 py-0 text-[0.7em] leading-none rounded transition-colors disabled:opacity-20 ${c(
                 "text-text-muted hover:text-copper",
@@ -113,7 +116,7 @@ export function ParameterListEditor({
               ▲
             </button>
             <button
-              disabled={i === values.length - 1}
+              disabled={i === values.length - 1 || readOnly}
               onClick={() => swap(i, i + 1)}
               className={`px-1 py-0 text-[0.7em] leading-none rounded transition-colors disabled:opacity-20 ${c(
                 "text-text-muted hover:text-copper",
@@ -152,6 +155,7 @@ export function ParameterListEditor({
             )}`}
           />
           <button
+            disabled={readOnly}
             onClick={() => onChange(values.filter((_, j) => j !== i))}
             className={`px-2 py-1.5 text-[0.8em] rounded border transition-colors ${c(
               "border-ink-border text-text-muted hover:text-severity-error hover:border-severity-error hover:bg-ink-hover",
@@ -163,6 +167,7 @@ export function ParameterListEditor({
         </div>
       ))}
       <button
+        disabled={readOnly}
         onClick={() => onChange([...values, { name: "", description: "" }])}
         className={`self-start px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
           "border-ink-border text-text-muted hover:text-copper hover:border-copper-dim hover:bg-ink-hover",

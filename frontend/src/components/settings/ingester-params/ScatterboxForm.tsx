@@ -4,6 +4,7 @@ import { FormField, TextInput, NumberInput } from "../FormField";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { systemClient } from "../../../api/client";
 import type { SubFormProps } from "./types";
+import { useReadOnly } from "../../../hooks/useReadOnly";
 
 interface ScatterboxFormProps extends SubFormProps {
   ingesterId?: string;
@@ -16,6 +17,7 @@ export function ScatterboxForm({
   defaults: d,
   ingesterId,
 }: Readonly<ScatterboxFormProps>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const set = (key: string, value: string) =>
     onChange({ ...params, [key]: value });
@@ -85,7 +87,7 @@ export function ScatterboxForm({
           <button
             type="button"
             onClick={handleTrigger}
-            disabled={triggerState !== "idle"}
+            disabled={triggerState !== "idle" || readOnly}
             className={`self-start px-3 py-1.5 text-[0.8em] font-medium rounded transition-colors ${stateClasses}`}
           >
             {label}

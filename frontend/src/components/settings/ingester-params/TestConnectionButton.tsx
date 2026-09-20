@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTestIngester } from "../../../api/hooks/useIngesters";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { isIngesterParamsValid } from "./validation";
+import { useReadOnly } from "../../../hooks/useReadOnly";
 
 export function TestConnectionButton({
   type,
@@ -12,6 +13,7 @@ export function TestConnectionButton({
   params: Record<string, string>;
   dark: boolean;
 }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const testIngester = useTestIngester();
   const valid = isIngesterParamsValid(type, params);
@@ -24,7 +26,7 @@ export function TestConnectionButton({
     <div className="flex items-center gap-3">
       <button
         type="button"
-        disabled={testIngester.isPending || !valid}
+        disabled={testIngester.isPending || !valid || readOnly}
         onClick={() => {
           setTestResult(null);
           testIngester.mutate(

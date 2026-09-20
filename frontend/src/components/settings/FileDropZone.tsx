@@ -149,6 +149,7 @@ export function FileDropZone({
             </span>
           ) : (filteredPickable.map((f) => (
               <button
+                disabled={readOnly}
                 key={encode(f.id)}
                 onClick={() => onFileSelected?.(encode(f.id))}
                 className={`flex items-center gap-2 px-2 py-1.5 rounded text-left text-[0.8em] transition-colors ${c(

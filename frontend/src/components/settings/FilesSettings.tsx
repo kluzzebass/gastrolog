@@ -160,6 +160,7 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
 
       {!maxmindVisible && (
         <button
+          disabled={readOnly}
           onClick={() => setMaxmindVisible(true)}
           className={`w-full rounded-lg border border-dashed px-4 py-3 text-[0.8em] transition-colors ${c(
             "border-ink-border text-text-muted hover:border-copper-dim hover:text-text-muted",
@@ -230,6 +231,7 @@ function VersionRow({
   dark: boolean;
   onDelete: () => void;
 }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -256,6 +258,7 @@ function VersionRow({
 
       {!confirmDelete ? (
         <button
+          disabled={readOnly}
           onClick={() => setConfirmDelete(true)}
           className={`shrink-0 px-2 py-1 rounded text-[0.85em] transition-colors ${c(
             "text-text-muted hover:text-severity-error hover:bg-ink-hover",
@@ -267,12 +270,14 @@ function VersionRow({
       ) : (
         <div className="shrink-0 flex items-center gap-1">
           <button
+            disabled={readOnly}
             onClick={() => { onDelete(); setConfirmDelete(false); }}
             className="px-2 py-1 rounded text-[0.85em] bg-severity-error/15 text-severity-error hover:bg-severity-error/25 transition-colors"
           >
             Yes
           </button>
           <button
+            disabled={readOnly}
             onClick={() => setConfirmDelete(false)}
             className={`px-2 py-1 rounded text-[0.85em] transition-colors ${c(
               "text-text-muted hover:bg-ink-hover",

@@ -41,6 +41,7 @@ function FilePreviewPanel({ dark, fileId, query, keyColumn, onColumnsAvailable, 
   onColumnsAvailable?: (columns: string[]) => void;
   spec: FormatSpec;
 }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const preview = spec.usePreview();
   const [data, setData] = useState(preview.data);
@@ -93,7 +94,7 @@ function FilePreviewPanel({ dark, fileId, query, keyColumn, onColumnsAvailable, 
               onColumnsAvailable?.([]);
             }
           }).catch(() => {})}
-          disabled={preview.isPending}
+          disabled={preview.isPending || readOnly}
           className={`text-[0.7em] px-2 py-0.5 rounded transition-colors ${c(
             "text-text-muted hover:text-copper hover:bg-ink-hover",
             "text-light-text-muted hover:text-copper hover:bg-light-hover",

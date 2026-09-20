@@ -120,7 +120,7 @@ function CsvFileFields({
             </span>
             <button
               onClick={() => preview.mutate({ fileId })}
-              disabled={preview.isPending}
+              disabled={preview.isPending || readOnly}
               className={`text-[0.7em] px-2 py-0.5 rounded transition-colors ${c(
                 "text-text-muted hover:text-copper hover:bg-ink-hover",
                 "text-light-text-muted hover:text-copper hover:bg-light-hover",

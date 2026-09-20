@@ -16,6 +16,7 @@ import { useToast } from "../Toast";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
 import { Button } from "./Buttons";
+import { useReadOnly } from "../../hooks/useReadOnly";
 
 interface Props {
   dark: boolean;
@@ -34,6 +35,7 @@ const LEVEL_OPTIONS = [
 ];
 
 export function LogLevelsSettings({ dark }: Props) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const { addToast } = useToast();
   const { data: config } = useConfig();
@@ -228,6 +230,7 @@ export function LogLevelsSettings({ dark }: Props) {
                     highlighted={isHighlighted}
                   />
                   <button
+                    disabled={readOnly}
                     type="button"
                     onClick={() => removeRule(idx)}
                     className={`px-2 py-1 rounded ${c("text-text-muted hover:text-copper hover:bg-ink-hover", "text-light-text-muted hover:text-copper hover:bg-light-hover")}`}
@@ -348,6 +351,7 @@ function FragmentRow({
   onPathClick: (path: string) => void;
   onSourceHover: (target: string | null) => void;
 }) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const linkCls = alreadyRuled
     ? c("text-copper-dim cursor-default", "text-copper-dim cursor-default")
@@ -369,7 +373,7 @@ function FragmentRow({
       <button
         type="button"
         onClick={() => { if (!alreadyRuled) onPathClick(info.path); }}
-        disabled={alreadyRuled}
+        disabled={alreadyRuled || readOnly}
         title={alreadyRuled ? "rule already exists for this path" : "click to add a rule for this path"}
         className={`${pathCls} break-all text-left ${linkCls}`}
       >

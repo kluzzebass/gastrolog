@@ -569,8 +569,10 @@ export function EditableGrid({
 
         {/* Always-visible Add row button. Per-row `+` only handles mid-list
             insertion; this handles the empty-state and end-of-list cases. */}
+        {!readOnly && (
         <div className={`border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
           <button
+            disabled={readOnly}
             onClick={addRow}
             className={`w-full px-2 py-1.5 text-[0.8em] font-mono text-left cursor-pointer ${c(
               "text-text-muted hover:text-copper hover:bg-ink-hover",
@@ -580,6 +582,7 @@ export function EditableGrid({
             + Add row
           </button>
         </div>
+        )}
 
         {/* Row drag ghost — renders via portal to document.body */}
         <DragOverlay dropAnimation={{ duration: 200, easing: "ease" }}>
