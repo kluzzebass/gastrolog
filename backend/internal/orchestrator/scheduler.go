@@ -595,7 +595,7 @@ func (s *Scheduler) RunOnceIfAbsent(name string, taskFn any, args ...any) (bool,
 // is outstanding" beside the scheduler's own job map: a separate inflight map
 // released by the job body would be a second owner of the same fact, and
 // cancelling the jobs with RemoveJobsByPrefix would strand its entries. See
-// the single-source-of-truth rule in CLAUDE.md.
+// the single-source-of-truth rule in AGENTS.md.
 //
 // The claim is a lease on outstanding work, released when the job leaves the
 // registry — on completion (completeOneTimeJob) or on cancellation

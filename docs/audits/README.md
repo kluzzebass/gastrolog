@@ -36,7 +36,7 @@ Repo-root [`frontend/`](../../frontend/), [`deploy/`](../../deploy/), [`scripts/
 
 Phases follow the eight **bounded contexts** in [`docs/ubiquitous_language.md`](../ubiquitous_language.md), plus dedicated passes for CLI/API, shared libraries, cross-cutting import graph, and synthesis — so no package is “assumed covered” by a neighbor.
 
-Canonical references used during review: [`CLAUDE.md`](../../CLAUDE.md) (cluster-first, `raftwal` priority), [`docs/query_execution.md`](../query_execution.md), [`docs/vault-control-plane-architecture.md`](../vault-control-plane-architecture.md), [`backend/internal/raftwal/README.md`](../../backend/internal/raftwal/README.md).
+Canonical references used during review: [`AGENTS.md`](../../AGENTS.md) (cluster-first, `raftwal` priority), [`docs/query_execution.md`](../query_execution.md), [`docs/vault-control-plane-architecture.md`](../vault-control-plane-architecture.md), [`backend/internal/raftwal/README.md`](../../backend/internal/raftwal/README.md).
 
 ---
 

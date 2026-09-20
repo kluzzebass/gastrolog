@@ -19,7 +19,7 @@ failed=0
 
 # Tracker IDs must not enter the codebase.
 #
-# CLAUDE.md: source files are not historical documents. A comment citing a
+# AGENTS.md: source files are not historical documents. A comment citing a
 # ticket is a dangling pointer — issues close, tombstone and get superseded —
 # and it outsources the comment's job to something the reader must look up.
 #
@@ -66,12 +66,12 @@ fi
 # than whole files: a blobstore adapter may call Azure's SetTier and still not
 # describe our own behaviour as tiered.
 #
-# Scanned beyond source: CLAUDE.md and the CI workflows, because both taught
-# the word back. CLAUDE.md said "Two test tiers, not one" — in the file every
+# Scanned beyond source: AGENTS.md and the CI workflows, because both taught
+# the word back. AGENTS.md said "Two test tiers, not one" — in the file every
 # agent reads first — and the CI step was named "Test (fast tier)", so every
 # red build printed it. docs/ is deliberately NOT scanned: ubiquitous_language.md
 # has to spell the banned word out to ban it.
-TIER_PATHS="$SRC_PATHS CLAUDE.md .github/workflows"
+TIER_PATHS="$SRC_PATHS AGENTS.md .github/workflows"
 if true; then
   printf "Checking for banned 'tier' vocabulary... "
   TIER=$(git grep -inE 'tier' -- $TIER_PATHS 2>/dev/null \

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Stop hook: catches ownership-dodging and session-quitting phrases that
-# violate CLAUDE.md golden rules. When triggered, blocks the assistant from
+# violate AGENTS.md golden rules. When triggered, blocks the assistant from
 # stopping and forces it to go back and do the work properly.
 #
 # The assistant's message has already been shown to the user by the time this
@@ -29,7 +29,7 @@ fi
 # Ordered by severity — first match wins.
 VIOLATIONS=(
   # Ownership dodging (the #1 problem: dismissing failures as not-my-fault)
-  "pre-existing|NOTHING IS PRE-EXISTING (CLAUDE.md golden rule). All builds and tests are green upstream. If something fails, YOUR work caused it. Investigate and fix it. Never dismiss a failure as pre-existing."
+  "pre-existing|NOTHING IS PRE-EXISTING (AGENTS.md golden rule). All builds and tests are green upstream. If something fails, YOUR work caused it. Investigate and fix it. Never dismiss a failure as pre-existing."
   "not from my changes|NOTHING IS PRE-EXISTING. You own every change. Investigate the failure."
   "not my change|NOTHING IS PRE-EXISTING. You own every change. Investigate the failure."
   "not caused by my|NOTHING IS PRE-EXISTING. You own every change. Investigate the failure."
@@ -42,13 +42,13 @@ VIOLATIONS=(
   "existing bug|NOTHING IS PRE-EXISTING. Investigate and fix."
 
   # Known limitation dodging
-  "known limitation|NO KNOWN LIMITATIONS (CLAUDE.md golden rule). Investigate whether it is fixable. Either fix it or explain the specific technical reason it cannot be fixed right now."
+  "known limitation|NO KNOWN LIMITATIONS (AGENTS.md golden rule). Investigate whether it is fixable. Either fix it or explain the specific technical reason it cannot be fixed right now."
   "known issue|NO KNOWN LIMITATIONS. Explain the specific technical reason or fix it."
   "future work|NO KNOWN LIMITATIONS. Fix it now or describe exactly what the fix requires — not as a TODO, as a technical explanation."
   "left as an exercise|NO KNOWN LIMITATIONS. Do the work."
 
   # Session-length quitting
-  "session length|Sessions are unlimited (CLAUDE.md rule). If work remains, do the work. Continue."
+  "session length|Sessions are unlimited (AGENTS.md rule). If work remains, do the work. Continue."
   "session depth|Sessions are unlimited. Continue working."
   "given the length of this|Sessions are unlimited. Continue working."
   "continue in a new session|Sessions are unlimited. There is no reason to defer to a new session. Continue."

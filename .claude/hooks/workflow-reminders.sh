@@ -4,7 +4,7 @@
 # Gate strategy: the global allow-list no longer includes dcat:*, git merge:*,
 # or git push:* — those now require the permission prompt (the real gate).
 # This hook adds advisory reminders for workflow discipline.
-# Rules sourced from CLAUDE.md.
+# Rules sourced from AGENTS.md.
 
 command=$(jq -r '.tool_input.command // ""' 2>/dev/null)
 

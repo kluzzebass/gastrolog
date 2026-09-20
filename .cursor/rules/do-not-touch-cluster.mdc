@@ -16,4 +16,4 @@ Unless the user **explicitly** tells you to in that conversation — not implied
 
 **Allowed:** in-process `go test` (orchestrator reliability harness, etc.), code changes, telling the user what they can run when ready.
 
-See [`MEMORY.md`](../../MEMORY.md) and [`CLAUDE.md`](../../CLAUDE.md).
+See [`MEMORY.md`](../../MEMORY.md) and [`AGENTS.md`](../../AGENTS.md).

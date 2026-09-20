@@ -105,7 +105,7 @@ type Reader interface {
 // TOC, not via Entry.IngestIdxOffset/Size. The FSM-replicated offsets are
 // a replication/verification copy (snapshot restore, digest checks), not
 // the local read path; there is exactly one authoritative source per
-// access mode, never two synced copies (see CLAUDE.md "Single Source of
+// access mode, never two synced copies (see AGENTS.md "Single Source of
 // Truth"). Whether rank/pos reads later collapse onto one FSM-grounded
 // section reader is a question for the GLCB codec abstraction, not for
 // this interface.

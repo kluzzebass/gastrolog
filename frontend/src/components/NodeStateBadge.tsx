@@ -15,7 +15,7 @@ interface StateView {
 }
 
 // Live and Unspecified intentionally return null below — the steady
-// state should not add visual noise (CLAUDE.md "Quiet until needed").
+// state should not add visual noise (AGENTS.md "Quiet until needed").
 // Maintenance gets `info` rather than `muted` so operator intent is
 // visible without competing with the warn tone reserved for problems.
 const viewByState: Partial<Record<NodeState, StateView>> = {
