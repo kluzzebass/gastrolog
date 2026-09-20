@@ -29,7 +29,7 @@ The foundation most other epics depend on. The model: each vault owns one storag
 **Contradictions / risks:**
 
 - **1.8 + replication timing**: The retention-route handoff streams records into the destination vault, where they're appended through the destination's normal write path with full replication. If the destination's followers are slow or unreachable, append latency rises and back-pressure flows up the route chain — but no source data is dropped. The trade-off lives in the destination's RF + ack policy, not in a separate handoff protocol.
-- **1.6 + "no cluster-wide authority" principle**: Per-vault leaders reintroduce the concept of a node "owning" a responsibility. CLAUDE.md states "no node has cluster-wide authority." The distinction is that vault leaders are per-vault (fine-grained, dynamic, redistributable), not per-node. But the tension should be acknowledged — this is a deliberate, scoped exception to the general principle.
+- **1.6 + "no cluster-wide authority" principle**: Per-vault leaders reintroduce the concept of a node "owning" a responsibility. AGENTS.md states "no node has cluster-wide authority." The distinction is that vault leaders are per-vault (fine-grained, dynamic, redistributable), not per-node. But the tension should be acknowledged — this is a deliberate, scoped exception to the general principle.
 - **1.4 active chunk locality**: A cloud-backed vault's active chunk lives on the leader's local disk. If the leader dies before sealing, the active chunk is lost (same risk as a memory vault). For cloud-backed vaults this is less obvious since the expectation is "my data is in S3." The active-chunk window is the only at-risk slice; sealed chunks are durable in the cloud.
 
 ---
@@ -245,7 +245,7 @@ The vision mentions per-tenant encryption, field-level encryption, and BYOK in s
 
 ### Conflict 1: Encryption at rest vs. mmap
 
-The performance pillar depends on mmap for zero-copy reads of sealed chunks on local SSD. Encryption at rest is incompatible with mmap — you can't memory-map an encrypted file and read plaintext records from it. Decrypting requires reading into heap memory, which is the exact pattern GastroLog's architecture forbids (see CLAUDE.md: "NEVER use os.ReadFile to slurp entire files into heap memory").
+The performance pillar depends on mmap for zero-copy reads of sealed chunks on local SSD. Encryption at rest is incompatible with mmap — you can't memory-map an encrypted file and read plaintext records from it. Decrypting requires reading into heap memory, which is the exact pattern GastroLog's architecture forbids (see AGENTS.md: "NEVER use os.ReadFile to slurp entire files into heap memory").
 
 **How others handle it:**
 

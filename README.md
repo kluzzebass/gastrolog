@@ -246,7 +246,7 @@ backend/      Go, Connect RPC server
   internal/   Core packages (chunk, index, query, querylang, ingester, server, config, cluster)
 ```
 
-See the `CLAUDE.md` files in each directory for detailed guidance.
+See `AGENTS.md` for detailed guidance.
 
 ## License
 
