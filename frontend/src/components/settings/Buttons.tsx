@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useReadOnly } from "../../hooks/useReadOnly";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useClickOutside } from "../../hooks/useClickOutside";
 
@@ -25,6 +26,7 @@ export function Button({
   children,
   className: extra,
 }: Readonly<ButtonProps>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
 
   let variantClass: string;
@@ -48,6 +50,10 @@ export function Button({
       break;
   }
 
+  // Every button in a settings or inspector panel is an action: save,
+  // discard, add, remove, test, rotate. A caller who cannot act is shown
+  // none of them rather than a row of controls that refuse.
+  if (readOnly) return null;
   return (
     <button
       onClick={onClick}
@@ -87,12 +93,17 @@ export function IconButton({
   disabled,
   onPointerDown,
 }: Readonly<IconButtonProps>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const glyph = intent === "add" ? "+" : "×";
   const hoverClass = intent === "add"
     ? c("text-text-muted hover:text-copper", "text-light-text-muted hover:text-copper")
     : c("text-text-muted hover:text-severity-error", "text-light-text-muted hover:text-severity-error");
 
+  // Every button in a settings or inspector panel is an action: save,
+  // discard, add, remove, test, rotate. A caller who cannot act is shown
+  // none of them rather than a row of controls that refuse.
+  if (readOnly) return null;
   return (
     <button
       onClick={onClick}
@@ -129,8 +140,13 @@ export function DropdownButton({
   const c = useThemeClass(dark);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const readOnly = useReadOnly();
   useClickOutside(ref, () => setOpen(false));
 
+  // Every button in a settings or inspector panel is an action: save,
+  // discard, add, remove, test, rotate. A caller who cannot act is shown
+  // none of them rather than a row of controls that refuse.
+  if (readOnly) return null;
   return (
     <div ref={ref} className="relative">
       <Button onClick={() => setOpen((prev) => !prev)} dark={dark}>

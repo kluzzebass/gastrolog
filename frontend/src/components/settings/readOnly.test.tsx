@@ -8,6 +8,7 @@ import { Checkbox } from "./Checkbox";
 import { FormField, SelectInput, TextArea, TextInput } from "./FormField";
 import { SettingsCard } from "./SettingsCard";
 import { AddFormCard } from "./AddFormCard";
+import { Button, DropdownButton, IconButton } from "./Buttons";
 
 // Every config write is admin-only, so a caller who cannot write must not be
 // shown a form that invites one. What they must still be able to do is read:
@@ -131,5 +132,51 @@ describe("the default is read-only", () => {
       <TextInput value="x" onChange={() => {}} dark={true} />,
     );
     expect(container.querySelector("input")?.readOnly).toBe(true);
+  });
+});
+
+// The footer was only half of it: a panel can carry its own add and remove
+// controls in the body, and those change a draft that read-only can never
+// save. Offering them is worse than useless — it looks like the page works.
+describe("read-only settings: in-body controls go too", () => {
+  test("a button inside a panel body is not rendered", () => {
+    const { queryByText } = readOnly(
+      <SettingsCard id="rules" dark={true} expanded>
+        <Button onClick={() => {}} dark={true} variant="ghost">
+          + Add rule
+        </Button>
+      </SettingsCard>,
+    );
+    expect(queryByText("+ Add rule")).toBeNull();
+  });
+
+  test("a row's remove control is not rendered", () => {
+    const { container } = readOnly(
+      <IconButton intent="remove" onClick={() => {}} dark={true} title="Remove" />,
+    );
+    expect(container.textContent).toBe("");
+  });
+
+  test("the add-a-thing dropdown is not rendered", () => {
+    const { container } = readOnly(
+      <DropdownButton
+        label="Add storage"
+        items={[{ label: "File", value: "file" }]}
+        onSelect={() => {}}
+        dark={true}
+      />,
+    );
+    expect(container.textContent).toBe("");
+  });
+
+  test("write access brings them all back", () => {
+    const { queryByText } = renderWritable(
+      <SettingsCard id="rules" dark={true} expanded>
+        <Button onClick={() => {}} dark={true} variant="ghost">
+          + Add rule
+        </Button>
+      </SettingsCard>,
+    );
+    expect(queryByText("+ Add rule")).not.toBeNull();
   });
 });

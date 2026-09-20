@@ -6,6 +6,7 @@ import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 const mocks = installMockClients();
 
 import { ServiceSettings } from "./ServiceSettings";
+import { renderWritable } from "../../testing/renderWritable";
 
 function testId(n: number): Uint8Array {
   const bytes = new Uint8Array(16);
@@ -45,7 +46,7 @@ describe("ServiceSettings", () => {
     qc.setQueryData(["settings"], sampleSettings);
     qc.setQueryData(["certificates"], { certificates: [] });
 
-    const { getByText } = render(<ServiceSettings dark />, {
+    const { getByText } = renderWritable(<ServiceSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -62,7 +63,7 @@ describe("ServiceSettings", () => {
     qc.setQueryData(["settings"], sampleSettings);
     qc.setQueryData(["certificates"], { certificates: [] });
 
-    const { getByText } = render(<ServiceSettings dark />, {
+    const { getByText } = renderWritable(<ServiceSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -76,7 +77,7 @@ describe("ServiceSettings", () => {
     qc.setQueryData(["settings"], sampleSettings);
     qc.setQueryData(["certificates"], { certificates: [] });
 
-    const { getByDisplayValue } = render(<ServiceSettings dark />, {
+    const { getByDisplayValue } = renderWritable(<ServiceSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -89,7 +90,7 @@ describe("ServiceSettings", () => {
     qc.setQueryData(["settings"], sampleSettings);
     qc.setQueryData(["certificates"], { certificates: [] });
 
-    const { getByText } = render(<ServiceSettings dark />, {
+    const { getByText } = renderWritable(<ServiceSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -108,7 +109,7 @@ describe("ServiceSettings", () => {
     qc.setQueryData(["settings"], sampleSettings);
     qc.setQueryData(["certificates"], { certificates: [] });
 
-    const { getByText } = render(<ServiceSettings dark />, {
+    const { getByText } = renderWritable(<ServiceSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -121,7 +122,7 @@ describe("ServiceSettings", () => {
     qc.setQueryData(["settings"], sampleSettings);
     qc.setQueryData(["certificates"], { certificates: [] });
 
-    const { getByText } = render(<ServiceSettings dark />, {
+    const { getByText } = renderWritable(<ServiceSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -138,7 +139,7 @@ describe("ServiceSettings", () => {
       certificates: [{ id: testId(1), name: "my-cert" }],
     });
 
-    const { getByText } = render(<ServiceSettings dark />, {
+    const { getByText } = renderWritable(<ServiceSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -152,7 +153,7 @@ describe("ServiceSettings", () => {
     qc.setQueryData(["settings"], sampleSettings);
     qc.setQueryData(["certificates"], { certificates: [] });
 
-    const { getByText } = render(<ServiceSettings dark />, {
+    const { getByText } = renderWritable(<ServiceSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -165,7 +166,7 @@ describe("ServiceSettings", () => {
     qc.setQueryData(["settings"], sampleSettings);
     qc.setQueryData(["certificates"], { certificates: [] });
 
-    const { getAllByText } = render(<ServiceSettings dark noAuth />, {
+    const { getAllByText } = renderWritable(<ServiceSettings dark noAuth />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -178,7 +179,7 @@ describe("ServiceSettings", () => {
     qc.setQueryData(["settings"], sampleSettings);
     qc.setQueryData(["certificates"], { certificates: [] });
 
-    const { getByText, getByDisplayValue } = render(<ServiceSettings dark />, {
+    const { getByText, getByDisplayValue } = renderWritable(<ServiceSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 

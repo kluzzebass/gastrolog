@@ -2,23 +2,24 @@ import { describe, expect, test, mock } from "bun:test";
 import React from "react";
 import { render, fireEvent } from "@testing-library/react";
 import { Button, IconButton } from "./Buttons";
+import { renderWritable } from "../../testing/renderWritable";
 
 describe("PrimaryButton", () => {
   test("renders children", () => {
-    const { getByText } = render(<Button onClick={() => {}}>Save</Button>);
+    const { getByText } = renderWritable(<Button onClick={() => {}}>Save</Button>);
     expect(getByText("Save")).toBeTruthy();
   });
 
   test("calls onClick when clicked", () => {
     const onClick = mock(() => {});
-    const { getByText } = render(<Button onClick={onClick}>Save</Button>);
+    const { getByText } = renderWritable(<Button onClick={onClick}>Save</Button>);
     fireEvent.click(getByText("Save"));
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
   test("respects disabled prop", () => {
     const onClick = mock(() => {});
-    const { getByText } = render(
+    const { getByText } = renderWritable(
       <Button onClick={onClick} disabled>Save</Button>,
     );
     const btn = getByText("Save");
@@ -28,14 +29,14 @@ describe("PrimaryButton", () => {
   });
 
   test("renders as a button element", () => {
-    const { getByText } = render(<Button onClick={() => {}}>Save</Button>);
+    const { getByText } = renderWritable(<Button onClick={() => {}}>Save</Button>);
     expect(getByText("Save").tagName).toBe("BUTTON");
   });
 });
 
 describe("GhostButton", () => {
   test("renders children", () => {
-    const { getByText } = render(
+    const { getByText } = renderWritable(
       <Button variant="ghost" onClick={() => {}} dark={true}>Cancel</Button>,
     );
     expect(getByText("Cancel")).toBeTruthy();
@@ -43,7 +44,7 @@ describe("GhostButton", () => {
 
   test("calls onClick when clicked", () => {
     const onClick = mock(() => {});
-    const { getByText } = render(
+    const { getByText } = renderWritable(
       <Button variant="ghost" onClick={onClick} dark={true}>Cancel</Button>,
     );
     fireEvent.click(getByText("Cancel"));
@@ -51,10 +52,10 @@ describe("GhostButton", () => {
   });
 
   test("bordered variant differs from non-bordered", () => {
-    const { getByText: g1 } = render(
+    const { getByText: g1 } = renderWritable(
       <Button variant="ghost" onClick={() => {}} dark={true} bordered>Bordered</Button>,
     );
-    const { getByText: g2 } = render(
+    const { getByText: g2 } = renderWritable(
       <Button variant="ghost" onClick={() => {}} dark={true}>Plain</Button>,
     );
     // Bordered and non-bordered should produce different class lists
@@ -62,7 +63,7 @@ describe("GhostButton", () => {
   });
 
   test("applies extra className", () => {
-    const { getByText } = render(
+    const { getByText } = renderWritable(
       <Button variant="ghost" onClick={() => {}} dark={true} className="ml-2">Cancel</Button>,
     );
     expect(getByText("Cancel").className).toContain("ml-2");
@@ -71,21 +72,21 @@ describe("GhostButton", () => {
 
 describe("IconButton", () => {
   test("renders + glyph for add intent", () => {
-    const { getByText } = render(
+    const { getByText } = renderWritable(
       <IconButton intent="add" onClick={() => {}} title="Add row" />,
     );
     expect(getByText("+")).toBeTruthy();
   });
 
   test("renders × glyph for remove intent", () => {
-    const { getByText } = render(
+    const { getByText } = renderWritable(
       <IconButton intent="remove" onClick={() => {}} title="Delete row" />,
     );
     expect(getByText("×")).toBeTruthy();
   });
 
   test("sets title attribute", () => {
-    const { getByTitle } = render(
+    const { getByTitle } = renderWritable(
       <IconButton intent="add" onClick={() => {}} title="Add row" />,
     );
     expect(getByTitle("Add row")).toBeTruthy();
@@ -93,7 +94,7 @@ describe("IconButton", () => {
 
   test("fires onClick", () => {
     const onClick = mock(() => {});
-    const { getByTitle } = render(
+    const { getByTitle } = renderWritable(
       <IconButton intent="add" onClick={onClick} title="Add row" />,
     );
     fireEvent.click(getByTitle("Add row"));
@@ -102,7 +103,7 @@ describe("IconButton", () => {
 
   test("respects disabled prop", () => {
     const onClick = mock(() => {});
-    const { getByTitle } = render(
+    const { getByTitle } = renderWritable(
       <IconButton intent="add" onClick={onClick} title="Add row" disabled />,
     );
     const btn = getByTitle("Add row");
@@ -112,7 +113,7 @@ describe("IconButton", () => {
   });
 
   test("applies cursor-pointer and shared sizing classes", () => {
-    const { getByTitle } = render(
+    const { getByTitle } = renderWritable(
       <IconButton intent="add" onClick={() => {}} title="Add row" />,
     );
     const cls = getByTitle("Add row").className;
@@ -124,7 +125,7 @@ describe("IconButton", () => {
 
   test("forwards onPointerDown (used by drag rows to stop propagation)", () => {
     const onPointerDown = mock(() => {});
-    const { getByTitle } = render(
+    const { getByTitle } = renderWritable(
       <IconButton intent="remove" onClick={() => {}} title="Delete row" onPointerDown={onPointerDown} />,
     );
     fireEvent.pointerDown(getByTitle("Delete row"));

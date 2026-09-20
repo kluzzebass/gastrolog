@@ -1,3 +1,4 @@
+import { useReadOnly } from "../../hooks/useReadOnly";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { Button, DropdownButton } from "./Buttons";
@@ -38,6 +39,7 @@ export function SettingsSection({
   disabled,
 }: Readonly<SettingsSectionProps>) {
   const c = useThemeClass(dark);
+  const readOnly = useReadOnly();
 
   if (isLoading) {
     return <LoadingPlaceholder dark={dark} />;
@@ -45,7 +47,9 @@ export function SettingsSection({
 
   return (
     <div>
-      {addLabel && (
+      {/* The buttons inside already hide themselves; the row they sit in has
+          to go too, or a read-only section keeps its empty header space. */}
+      {addLabel && !readOnly && (
         <div className="flex items-center justify-end mb-5">
           {(() => {
             if (adding) return <Button onClick={onToggleAdd}>Cancel</Button>;

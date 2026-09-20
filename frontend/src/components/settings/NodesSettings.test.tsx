@@ -7,6 +7,7 @@ const mocks = installMockClients();
 
 import { NodesSettings } from "./NodesSettings";
 import { ClusterNodeRole, ClusterNodeSuffrage } from "../../api/gen/gastrolog/v1/lifecycle_pb";
+import { renderWritable } from "../../testing/renderWritable";
 
 /** Create a distinct 16-byte Uint8Array test ID from a small number. */
 function testId(n: number): Uint8Array<ArrayBuffer> {
@@ -80,7 +81,7 @@ describe("NodesSettings", () => {
     qc.setQueryData(["system"], sampleConfig);
     qc.setQueryData(["clusterStatus"], { clusterEnabled: false, nodes: [] });
 
-    const { getByText } = render(<NodesSettings dark />, {
+    const { getByText } = renderWritable(<NodesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -92,7 +93,7 @@ describe("NodesSettings", () => {
     const qc = createTestQueryClient();
     seedQueries(qc);
 
-    const { getByText } = render(<NodesSettings dark />, {
+    const { getByText } = renderWritable(<NodesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -106,7 +107,7 @@ describe("NodesSettings", () => {
     const qc = createTestQueryClient();
     seedQueries(qc);
 
-    const { getByText } = render(<NodesSettings dark />, {
+    const { getByText } = renderWritable(<NodesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -117,7 +118,7 @@ describe("NodesSettings", () => {
     const qc = createTestQueryClient();
     seedQueries(qc);
 
-    const { getByText, getByDisplayValue } = render(<NodesSettings dark />, {
+    const { getByText, getByDisplayValue } = renderWritable(<NodesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -134,7 +135,7 @@ describe("NodesSettings", () => {
     };
     seedQueries(qc, { cluster: singleVoter });
 
-    const { getByText } = render(<NodesSettings dark />, {
+    const { getByText } = renderWritable(<NodesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -146,7 +147,7 @@ describe("NodesSettings", () => {
     const qc = createTestQueryClient();
     seedQueries(qc);
 
-    const { getAllByText } = render(<NodesSettings dark />, {
+    const { getAllByText } = renderWritable(<NodesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -160,7 +161,7 @@ describe("NodesSettings", () => {
     const qc = createTestQueryClient();
     seedQueries(qc);
 
-    const { getByText, getAllByText } = render(<NodesSettings dark />, {
+    const { getByText, getAllByText } = renderWritable(<NodesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -175,7 +176,7 @@ describe("NodesSettings", () => {
     const qc = createTestQueryClient();
     seedQueries(qc);
 
-    const { getByText, getAllByText } = render(<NodesSettings dark />, {
+    const { getByText, getAllByText } = renderWritable(<NodesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -192,7 +193,7 @@ describe("NodesSettings", () => {
     const qc = createTestQueryClient();
     seedQueries(qc);
 
-    const { getByText, getAllByText } = render(<NodesSettings dark />, {
+    const { getByText, getAllByText } = renderWritable(<NodesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -216,7 +217,7 @@ describe("NodesSettings", () => {
       },
     });
 
-    const { getByText } = render(<NodesSettings dark />, {
+    const { getByText } = renderWritable(<NodesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -235,7 +236,7 @@ describe("NodesSettings", () => {
       },
     });
 
-    const { getByText, queryByText } = render(<NodesSettings dark />, {
+    const { getByText, queryByText } = renderWritable(<NodesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -249,7 +250,7 @@ describe("NodesSettings", () => {
     qc.setQueryData(["system"], { ...sampleConfig, nodeConfigs: [] });
     qc.setQueryData(["clusterStatus"], { clusterEnabled: false, nodes: [] });
 
-    const { getByText } = render(<NodesSettings dark />, {
+    const { getByText } = renderWritable(<NodesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
