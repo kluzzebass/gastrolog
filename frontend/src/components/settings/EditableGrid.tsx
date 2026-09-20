@@ -31,6 +31,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { IconButton } from "./Buttons";
+import { useReadOnly } from "../../hooks/useReadOnly";
 
 export interface EditableGridProps {
   dark: boolean;
@@ -126,6 +127,7 @@ interface SortableRowProps {
 function SortableRow({
   id, dark, row, columns, keyColumnIndex, keyError, inputClass, inputErrorClass, inputsDisabled, onDelete, onAddRow, onCellChange, borderClass,
 }: Readonly<SortableRowProps>) {
+  const readOnly = useReadOnly();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
 
   return (
@@ -154,6 +156,7 @@ function SortableRow({
             )}
             <input
               type="text"
+              readOnly={readOnly}
               value={row[col] ?? ""}
               onChange={(e) => onCellChange(col, e.target.value)}
               onPointerDown={(e) => e.stopPropagation()}
@@ -566,8 +569,10 @@ export function EditableGrid({
 
         {/* Always-visible Add row button. Per-row `+` only handles mid-list
             insertion; this handles the empty-state and end-of-list cases. */}
+        {!readOnly && (
         <div className={`border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
           <button
+            disabled={readOnly}
             onClick={addRow}
             className={`w-full px-2 py-1.5 text-[0.8em] font-mono text-left cursor-pointer ${c(
               "text-text-muted hover:text-copper hover:bg-ink-hover",
@@ -577,6 +582,7 @@ export function EditableGrid({
             + Add row
           </button>
         </div>
+        )}
 
         {/* Row drag ghost — renders via portal to document.body */}
         <DragOverlay dropAnimation={{ duration: 200, easing: "ease" }}>

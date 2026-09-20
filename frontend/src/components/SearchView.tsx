@@ -20,6 +20,9 @@ import { QueryBar } from "./QueryBar";
 
 export function SearchView() {
   const sv = useSearchView();
+  // Every config write is admin-only. --no-auth makes everyone an admin, which
+  // is the point of that flag.
+  const isAdmin = sv.currentUser?.role === "admin" || getToken() === "no-auth";
 
   return (
     <HelpProvider onOpen={sv.openHelp}>
@@ -171,7 +174,7 @@ export function SearchView() {
               onTabChange={(tab) => sv.navigate({ search: (prev) => ({ ...prev, settings: tab }) })}
               onClose={() => sv.navigate({ search: (prev) => ({ ...prev, settings: undefined }) })}
               onOpenInspector={(param) => sv.navigate({ search: (prev) => ({ ...prev, settings: undefined, inspector: param }) })}
-              isAdmin={sv.currentUser?.role === "admin" || getToken() === "no-auth"}
+              isAdmin={isAdmin}
               noAuth={getToken() === "no-auth"}
             />
           )}
@@ -179,6 +182,7 @@ export function SearchView() {
           {sv.inspectorParam && (
             <InspectorDialog
               dark={sv.dark}
+              isAdmin={isAdmin}
               inspectorParam={sv.inspectorParam}
               onNavigate={(p) => { sessionStorage.setItem("inspector-last", p); sv.navigate({ search: (prev) => ({ ...prev, inspector: p }) }); }}
               onClose={() => sv.navigate({ search: (prev) => ({ ...prev, inspector: undefined }) })}

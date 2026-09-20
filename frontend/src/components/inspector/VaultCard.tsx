@@ -26,6 +26,7 @@ import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { CrossLinkBadge } from "./CrossLinkBadge";
 import { PipelineBacklogView } from "./PipelineBacklogView";
 import { VaultStageCountersSection } from "./VaultStageCounters";
+import { useReadOnly } from "../../hooks/useReadOnly";
 
 // chunkEndInstant returns the ingest/write end for display, omitting unset or
 // sentinel epoch timestamps that proto encodes for zero-value Go times.
@@ -541,6 +542,7 @@ function ValidateVaultButton({
   vaultId: string;
   dark: boolean;
 }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const validate = useValidateVault();
   const { addToast } = useToast();
@@ -552,7 +554,7 @@ function ValidateVaultButton({
         "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
         "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
       )}`}
-      disabled={validate.isPending}
+      disabled={validate.isPending || readOnly}
       onClick={async () => {
         try {
           const result = await validate.mutateAsync(vaultId);
@@ -1228,6 +1230,7 @@ function ChunkDetail({
 }
 
 function ArchiveButton({ vaultId, chunkId, dark }: Readonly<{ vaultId: string; chunkId: string; dark: boolean }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const archive = useArchiveChunk();
   const { addToast } = useToast();
@@ -1243,7 +1246,7 @@ function ArchiveButton({ vaultId, chunkId, dark }: Readonly<{ vaultId: string; c
           },
         );
       }}
-      disabled={archive.isPending}
+      disabled={archive.isPending || readOnly}
       title="Archive chunk to offline storage"
       className={`px-2 py-0.5 text-[0.8em] rounded border transition-colors ${c(
         "border-ink-border text-text-muted hover:text-copper hover:border-copper/40 hover:bg-ink-hover",
@@ -1256,6 +1259,7 @@ function ArchiveButton({ vaultId, chunkId, dark }: Readonly<{ vaultId: string; c
 }
 
 function RestoreButton({ vaultId, chunkId, dark }: Readonly<{ vaultId: string; chunkId: string; dark: boolean }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const restore = useRestoreChunk();
   const { addToast } = useToast();
@@ -1271,7 +1275,7 @@ function RestoreButton({ vaultId, chunkId, dark }: Readonly<{ vaultId: string; c
           },
         );
       }}
-      disabled={restore.isPending}
+      disabled={restore.isPending || readOnly}
       title="Restore chunk from offline storage"
       className={`px-2 py-0.5 text-[0.8em] rounded border transition-colors ${c(
         "border-ink-border text-severity-warn hover:text-copper hover:border-copper/40 hover:bg-ink-hover",

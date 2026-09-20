@@ -9862,10 +9862,10 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x11DeleteManagedFile\x12&.gastrolog.v1.DeleteManagedFileRequest\x1a'.gastrolog.v1.DeleteManagedFileResponse\"\x04\x80\xb5\x18\x03\x12g\n" +
 	"\x10TestCloudService\x12%.gastrolog.v1.TestCloudServiceRequest\x1a&.gastrolog.v1.TestCloudServiceResponse\"\x04\x80\xb5\x18\x03\x12a\n" +
 	"\x0eTestHTTPLookup\x12#.gastrolog.v1.TestHTTPLookupRequest\x1a$.gastrolog.v1.TestHTTPLookupResponse\"\x04\x80\xb5\x18\x03\x12g\n" +
-	"\x10PreviewCSVLookup\x12%.gastrolog.v1.PreviewCSVLookupRequest\x1a&.gastrolog.v1.PreviewCSVLookupResponse\"\x04\x80\xb5\x18\x02\x12j\n" +
-	"\x11PreviewJSONLookup\x12&.gastrolog.v1.PreviewJSONLookupRequest\x1a'.gastrolog.v1.PreviewJSONLookupResponse\"\x04\x80\xb5\x18\x02\x12j\n" +
-	"\x11PreviewYAMLLookup\x12&.gastrolog.v1.PreviewYAMLLookupRequest\x1a'.gastrolog.v1.PreviewYAMLLookupResponse\"\x04\x80\xb5\x18\x02\x12r\n" +
-	"\x13WatchIngesterStatus\x12(.gastrolog.v1.WatchIngesterStatusRequest\x1a).gastrolog.v1.WatchIngesterStatusResponse\"\x04\x80\xb5\x18\x020\x01\x12d\n" +
+	"\x10PreviewCSVLookup\x12%.gastrolog.v1.PreviewCSVLookupRequest\x1a&.gastrolog.v1.PreviewCSVLookupResponse\"\x04\x80\xb5\x18\x03\x12j\n" +
+	"\x11PreviewJSONLookup\x12&.gastrolog.v1.PreviewJSONLookupRequest\x1a'.gastrolog.v1.PreviewJSONLookupResponse\"\x04\x80\xb5\x18\x03\x12j\n" +
+	"\x11PreviewYAMLLookup\x12&.gastrolog.v1.PreviewYAMLLookupRequest\x1a'.gastrolog.v1.PreviewYAMLLookupResponse\"\x04\x80\xb5\x18\x03\x12r\n" +
+	"\x13WatchIngesterStatus\x12(.gastrolog.v1.WatchIngesterStatusRequest\x1a).gastrolog.v1.WatchIngesterStatusResponse\"\x04\x80\xb5\x18\x030\x01\x12d\n" +
 	"\x0fPutCloudService\x12$.gastrolog.v1.PutCloudServiceRequest\x1a%.gastrolog.v1.PutCloudServiceResponse\"\x04\x80\xb5\x18\x03\x12m\n" +
 	"\x12DeleteCloudService\x12'.gastrolog.v1.DeleteCloudServiceRequest\x1a(.gastrolog.v1.DeleteCloudServiceResponse\"\x04\x80\xb5\x18\x03\x12s\n" +
 	"\x14SetNodeStorageConfig\x12).gastrolog.v1.SetNodeStorageConfigRequest\x1a*.gastrolog.v1.SetNodeStorageConfigResponse\"\x04\x80\xb5\x18\x03\x12[\n" +

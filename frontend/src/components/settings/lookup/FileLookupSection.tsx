@@ -12,6 +12,7 @@ import { FileDropZone } from "../FileDropZone";
 import { type JSONFileLookupDraft, type LookupSectionProps, emptyJsonDraft } from "./types";
 import type { JSONFileLookupEntry, YAMLFileLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 import { PreviewTable, parseTabularResult } from "./PreviewTable";
+import { useReadOnly } from "../../../hooks/useReadOnly";
 
 // FileLookupFormat tags which structured format a section instance serves.
 // Drives preview hook, file-picker extension, type badge, and payload key.
@@ -40,6 +41,7 @@ function FilePreviewPanel({ dark, fileId, query, keyColumn, onColumnsAvailable, 
   onColumnsAvailable?: (columns: string[]) => void;
   spec: FormatSpec;
 }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const preview = spec.usePreview();
   const [data, setData] = useState(preview.data);
@@ -92,7 +94,7 @@ function FilePreviewPanel({ dark, fileId, query, keyColumn, onColumnsAvailable, 
               onColumnsAvailable?.([]);
             }
           }).catch(() => {})}
-          disabled={preview.isPending}
+          disabled={preview.isPending || readOnly}
           className={`text-[0.7em] px-2 py-0.5 rounded transition-colors ${c(
             "text-text-muted hover:text-copper hover:bg-ink-hover",
             "text-light-text-muted hover:text-copper hover:bg-light-hover",
@@ -190,6 +192,7 @@ export function FileLookupAddForm({
   namePlaceholder: string;
   spec: FormatSpec;
 }) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const putConfig = usePutLookupSettings();
   const [draft, setDraft] = useState<JSONFileLookupDraft>(() => emptyJsonDraft());
@@ -284,6 +287,7 @@ export function FileLookupAddForm({
                   >
                     <input
                       type="checkbox"
+                      disabled={readOnly}
                       checked={checked}
                       onChange={() => toggleValueColumn(col)}
                       className="accent-copper"
@@ -319,6 +323,7 @@ function FileLookupCardBody({
   onUpdate: (i: number, patch: Partial<JSONFileLookupDraft>) => void;
   spec: FormatSpec;
 }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const [tableColumns, setTableColumns] = useState<string[]>([]);
 
@@ -392,6 +397,7 @@ function FileLookupCardBody({
                   >
                     <input
                       type="checkbox"
+                      disabled={readOnly}
                       checked={checked}
                       onChange={() => toggleValueColumn(col)}
                       className="accent-copper"

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import React from "react";
 import { render } from "@testing-library/react";
 import { CloudServiceFields, type CloudServiceFieldValues } from "./CloudServiceFields";
+import { renderWritable } from "../../testing/renderWritable";
 
 function values(patch: Partial<CloudServiceFieldValues>): CloudServiceFieldValues {
   return {
@@ -50,7 +51,7 @@ function endpointInput(container: HTMLElement): HTMLInputElement {
 
 describe("CloudServiceFields credential state", () => {
   test("a configured service says the empty fields keep the stored credentials", () => {
-    const { container } = render(
+    const { container } = renderWritable(
       <CloudServiceFields
         values={values({ credentialsConfigured: true })}
         onChange={() => {}}
@@ -62,7 +63,7 @@ describe("CloudServiceFields credential state", () => {
   });
 
   test("credential inputs render empty — no masked stand-in implying a value", () => {
-    const { container } = render(
+    const { container } = renderWritable(
       <CloudServiceFields
         values={values({ credentialsConfigured: true })}
         onChange={() => {}}
@@ -78,7 +79,7 @@ describe("CloudServiceFields credential state", () => {
 
   test("choosing removal discards anything typed, so 'remove' removes", () => {
     const patches: Array<Partial<CloudServiceFieldValues>> = [];
-    const { container } = render(
+    const { container } = renderWritable(
       <CloudServiceFields
         values={values({ credentialsConfigured: true, secretKey: "typed-but-abandoned" })}
         onChange={(p) => patches.push(p)}
@@ -101,7 +102,7 @@ describe("CloudServiceFields credential state", () => {
   });
 
   test("credential inputs are disabled once removal is chosen", () => {
-    const { container } = render(
+    const { container } = renderWritable(
       <CloudServiceFields
         values={values({ credentialsConfigured: true, clearCredentials: true })}
         onChange={() => {}}
@@ -113,7 +114,7 @@ describe("CloudServiceFields credential state", () => {
   });
 
   test("an unconfigured s3 service names the fallback credential chain", () => {
-    const { container } = render(
+    const { container } = renderWritable(
       <CloudServiceFields
         values={values({ credentialsConfigured: false })}
         onChange={() => {}}
@@ -125,7 +126,7 @@ describe("CloudServiceFields credential state", () => {
   });
 
   test("an unconfigured azure service says the connection string is required", () => {
-    const { container } = render(
+    const { container } = renderWritable(
       <CloudServiceFields
         values={values({ provider: "azure", credentialsConfigured: false })}
         onChange={() => {}}
@@ -136,7 +137,7 @@ describe("CloudServiceFields credential state", () => {
   });
 
   test("an unconfigured gcs service names Application Default Credentials", () => {
-    const { container } = render(
+    const { container } = renderWritable(
       <CloudServiceFields
         values={values({ provider: "gcs", credentialsConfigured: false })}
         onChange={() => {}}
@@ -149,7 +150,7 @@ describe("CloudServiceFields credential state", () => {
 
 describe("CloudServiceFields endpoint validation", () => {
   test("scheme-less endpoint shows the inline error state", () => {
-    const { container } = render(
+    const { container } = renderWritable(
       <CloudServiceFields
         values={values({ endpoint: "minio.local:9000" })}
         onChange={() => {}}
@@ -163,7 +164,7 @@ describe("CloudServiceFields endpoint validation", () => {
   });
 
   test("https:// endpoint shows no error state", () => {
-    const { container } = render(
+    const { container } = renderWritable(
       <CloudServiceFields
         values={values({ endpoint: "https://minio.local:9000" })}
         onChange={() => {}}
@@ -176,7 +177,7 @@ describe("CloudServiceFields endpoint validation", () => {
   });
 
   test("empty endpoint shows no error state (optional for AWS S3)", () => {
-    const { container } = render(
+    const { container } = renderWritable(
       <CloudServiceFields
         values={values({ endpoint: "" })}
         onChange={() => {}}
@@ -196,7 +197,7 @@ describe("CloudServiceFields endpoint field per provider", () => {
   }
 
   test("renders for gcs", () => {
-    const { container } = render(
+    const { container } = renderWritable(
       <CloudServiceFields
         values={values({ provider: "gcs" })}
         onChange={() => {}}
@@ -208,7 +209,7 @@ describe("CloudServiceFields endpoint field per provider", () => {
   });
 
   test("does not render for azure", () => {
-    const { container } = render(
+    const { container } = renderWritable(
       <CloudServiceFields
         values={values({ provider: "azure" })}
         onChange={() => {}}
@@ -219,7 +220,7 @@ describe("CloudServiceFields endpoint field per provider", () => {
   });
 
   test("gcs scheme-less endpoint shows the inline error state", () => {
-    const { container } = render(
+    const { container } = renderWritable(
       <CloudServiceFields
         values={values({ provider: "gcs", endpoint: "gcs-emulator.local:4443" })}
         onChange={() => {}}
@@ -233,7 +234,7 @@ describe("CloudServiceFields endpoint field per provider", () => {
   });
 
   test("gcs https:// endpoint shows no error state", () => {
-    const { container } = render(
+    const { container } = renderWritable(
       <CloudServiceFields
         values={values({ provider: "gcs", endpoint: "https://gcs-emulator.local:4443" })}
         onChange={() => {}}
@@ -246,7 +247,7 @@ describe("CloudServiceFields endpoint field per provider", () => {
   });
 
   test("gcs empty endpoint shows no error state (default Google endpoint)", () => {
-    const { container } = render(
+    const { container } = renderWritable(
       <CloudServiceFields
         values={values({ provider: "gcs", endpoint: "" })}
         onChange={() => {}}

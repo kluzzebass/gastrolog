@@ -3,6 +3,7 @@ import { endpointSchemeError } from "../../utils/endpointScheme";
 import { FormField, TextInput, TextArea, SelectInput, NumberInput } from "./FormField";
 import { Checkbox } from "./Checkbox";
 import { Button } from "./Buttons";
+import { useReadOnly } from "../../hooks/useReadOnly";
 
 interface CloudStorageTransitionEdit {
   after: string; // duration (e.g. "30s", "7d", "2w")
@@ -297,6 +298,7 @@ function ArchivalSection({
   onChange: (patch: Partial<CloudServiceFieldValues>) => void;
   dark: boolean;
 }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const isS3 = values.provider === "s3";
   const isAzure = values.provider === "azure";
@@ -384,6 +386,7 @@ function ArchivalSection({
               </div>
               <button
                 onClick={() => removeTransition(i)}
+                hidden={readOnly}
                 className={`px-2 py-1 text-[0.75em] rounded transition-colors ${c(
                   "text-text-muted hover:text-severity-error hover:bg-ink-hover",
                   "text-light-text-muted hover:text-severity-error hover:bg-light-hover",

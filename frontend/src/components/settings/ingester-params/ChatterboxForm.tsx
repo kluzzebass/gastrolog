@@ -2,6 +2,7 @@ import { FormField, TextInput, NumberInput } from "../FormField";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { Checkbox } from "../Checkbox";
 import type { SubFormProps } from "./types";
+import { useReadOnly } from "../../../hooks/useReadOnly";
 import {
   ALL_FORMATS,
   parseFormats,
@@ -16,6 +17,7 @@ export function ChatterboxForm({
   dark,
   defaults: d,
 }: Readonly<SubFormProps>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const set = (key: string, value: string) =>
     onChange({ ...params, [key]: value });
@@ -118,6 +120,7 @@ export function ChatterboxForm({
                   <div className="flex items-center gap-1.5 shrink-0">
                     <input
                       type="text"
+                      readOnly={readOnly}
                       inputMode="numeric"
                       value={weight}
                       onChange={(e) => {

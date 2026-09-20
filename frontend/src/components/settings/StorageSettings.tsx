@@ -22,6 +22,7 @@ import { Button } from "./Buttons";
 import { NodeSelect } from "./NodeSelect";
 import { useTestCloudService } from "../../api/hooks/useVaults";
 import { endpointBlocked } from "../../utils/endpointScheme";
+import { useReadOnly } from "../../hooks/useReadOnly";
 
 // ─── Cloud Storage Add Form ──────────────────────────────────
 
@@ -490,6 +491,7 @@ function TestCloudButton({
   values: { bucket: string; region: string; endpoint: string; accessKey: string; secretKey: string; container: string; connectionString: string; credentialsJson: string };
   dark: boolean;
 }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const testCloud = useTestCloudService();
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -505,7 +507,7 @@ function TestCloudButton({
     <div className="flex items-center gap-3">
       <button
         type="button"
-        disabled={testCloud.isPending || !hasRequired || endpointBlocked(provider, values.endpoint)}
+        disabled={testCloud.isPending || !hasRequired || endpointBlocked(provider, values.endpoint) || readOnly}
         onClick={() => {
           setResult(null);
           testCloud.mutate(

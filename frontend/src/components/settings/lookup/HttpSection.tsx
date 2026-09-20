@@ -11,6 +11,7 @@ import { AddFormCard } from "../AddFormCard";
 import { StringListEditor, ParameterListEditor } from "./FormHelpers";
 import { type HTTPLookupDraft, type LookupSectionProps, emptyHttpDraft, httpLookupEqual } from "./types";
 import type { HTTPLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
+import { useReadOnly } from "../../../hooks/useReadOnly";
 
 function serializeHttpLookups(lookups: HTTPLookupDraft[]) {
   return lookups
@@ -109,6 +110,7 @@ export function HttpCards({
   onDelete: (i: number) => void;
   onRevert: (i: number) => void;
 }) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const { isDirty, save, handleDelete, putConfig } = useLookupCrud({
     lookups, savedLookups, serialize: serializeHttpLookups, equal: httpLookupEqual,
@@ -189,6 +191,7 @@ export function HttpCards({
                         </span>
                         <input
                           type="text"
+                          readOnly={readOnly}
                           value={testValues[i]?.[p.name] ?? ""}
                           onChange={(e) => setTestValues((prev) => ({ ...prev, [i]: { ...prev[i], [p.name]: e.target.value } }))}
                           placeholder={p.description || p.name}

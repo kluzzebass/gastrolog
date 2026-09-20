@@ -20,6 +20,7 @@ import {
 import { IngesterStep, type IngesterData } from "./IngesterStep";
 import { ReviewStep } from "./ReviewStep";
 import { extractMessage } from "../../utils/errors";
+import { ReadOnlyProvider } from "../../hooks/useReadOnly";
 
 const STEPS = ["Welcome", "Vault", "Rotation", "Retention", "Ingester", "Review"] as const;
 
@@ -235,6 +236,10 @@ export function SetupWizard() {
   };
 
   return (
+    // First boot: this wizard exists to create the first admin, so it is a
+    // write surface by definition. Write access defaults to off, so it says
+    // so rather than rendering its buttons into nothing.
+    <ReadOnlyProvider readOnly={false}>
     <div className="flex-1 flex items-center justify-center overflow-auto p-4">
       <div
         className={`w-full max-w-xl mx-auto rounded-lg border shadow-lg overflow-hidden ${c(
@@ -374,5 +379,6 @@ export function SetupWizard() {
         </div>
       </div>
     </div>
+    </ReadOnlyProvider>
   );
 }

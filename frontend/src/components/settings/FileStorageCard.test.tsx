@@ -3,6 +3,7 @@ import { render, fireEvent } from "@testing-library/react";
 import { FileStorageCard } from "./FileStorageCard";
 import { FileStorage } from "../../api/gen/gastrolog/v1/storage_pb";
 import { encode } from "../../api/glid";
+import { renderWritable } from "../../testing/renderWritable";
 
 // Disk Free Warn/Floor are edited on the storage surface (FileStorageCard,
 // rendered from StorageSettings), not on the vault. Pins the round-trip:
@@ -24,7 +25,7 @@ describe("FileStorageCard", () => {
       path: "storage/nvme-fast",
       storageClass: 1,
     });
-    render(
+    renderWritable(
       <FileStorageCard
         fs={fs}
         nodeName="node-1"
@@ -53,7 +54,7 @@ describe("FileStorageCard", () => {
       diskFreeWarn: "10%",
       diskFreeFloor: "3GB",
     });
-    const { getByDisplayValue } = render(
+    const { getByDisplayValue } = renderWritable(
       <FileStorageCard
         fs={fs}
         nodeName="node-1"
@@ -82,7 +83,7 @@ describe("FileStorageCard", () => {
       storageClass: 2,
     });
     const onSave = mock(async (_storageId: string, _edit: { diskFreeFloor: string; diskFreeWarn: string }) => {});
-    const { getByText } = render(
+    const { getByText } = renderWritable(
       <FileStorageCard
         fs={fs}
         nodeName="node-1"
@@ -124,7 +125,7 @@ describe("FileStorageCard", () => {
     });
 
     test("omitted when onOpenInspector is not provided", () => {
-      const { queryByTitle } = render(
+      const { queryByTitle } = renderWritable(
         <FileStorageCard
           fs={fs}
           nodeName="node-1"
@@ -141,7 +142,7 @@ describe("FileStorageCard", () => {
 
     test("navigates to the storage's entity card, named the same way ID fallback does elsewhere", () => {
       const onOpenInspector = mock((_param: string) => {});
-      const { getByTitle } = render(
+      const { getByTitle } = renderWritable(
         <FileStorageCard
           fs={fs}
           nodeName="node-1"
@@ -164,7 +165,7 @@ describe("FileStorageCard", () => {
     test("falls back to the encoded id when the storage has no name", () => {
       const unnamed = new FileStorage({ id: testId(5), path: "storage/unnamed", storageClass: 1 });
       const onOpenInspector = mock((_param: string) => {});
-      const { getByTitle } = render(
+      const { getByTitle } = renderWritable(
         <FileStorageCard
           fs={unnamed}
           nodeName="node-1"

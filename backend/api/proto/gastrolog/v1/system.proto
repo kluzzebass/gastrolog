@@ -236,24 +236,24 @@ service SystemService {
 
   // PreviewCSVLookup reads a managed CSV file and returns column headers, sample rows, and total row count.
   rpc PreviewCSVLookup(PreviewCSVLookupRequest) returns (PreviewCSVLookupResponse) {
-    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+    option (auth_level) = AUTH_LEVEL_ADMIN;
   }
 
   // PreviewJSONLookup reads a managed JSON file and returns pretty-printed content for structure inspection.
   rpc PreviewJSONLookup(PreviewJSONLookupRequest) returns (PreviewJSONLookupResponse) {
-    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+    option (auth_level) = AUTH_LEVEL_ADMIN;
   }
 
   // PreviewYAMLLookup reads a managed YAML file and returns pretty-printed content for structure inspection.
   rpc PreviewYAMLLookup(PreviewYAMLLookupRequest) returns (PreviewYAMLLookupResponse) {
-    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+    option (auth_level) = AUTH_LEVEL_ADMIN;
   }
 
   // WatchIngesterStatus streams a single ingester's status whenever underlying state changes
   // (config edits, alive-state transitions, or broadcast stats updates). Event-driven replacement
   // for polling GetIngesterStatus. Initial snapshot sent on subscribe.
   rpc WatchIngesterStatus(WatchIngesterStatusRequest) returns (stream WatchIngesterStatusResponse) {
-    option (auth_level) = AUTH_LEVEL_AUTHENTICATED;
+    option (auth_level) = AUTH_LEVEL_ADMIN;
   }
 
   // Cloud services

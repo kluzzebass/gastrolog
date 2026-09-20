@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Code, ConnectError } from "@connectrpc/connect";
+import { shouldReconnectAfter } from "./streamReconnect";
 import { vaultClient, refreshAuth } from "../client";
 import { Timestamp } from "@bufbuild/protobuf";
 import {
@@ -59,6 +60,7 @@ export function useWatchChunks() {
         }
       } catch (err) {
         if (abort.signal.aborted) return;
+        if (!shouldReconnectAfter(err)) return;
         if (
           err instanceof ConnectError &&
           err.code === Code.Unauthenticated

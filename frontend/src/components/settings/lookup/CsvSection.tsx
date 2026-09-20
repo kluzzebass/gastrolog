@@ -12,6 +12,7 @@ import { PreviewTable } from "./PreviewTable";
 import { FileDropZone } from "../FileDropZone";
 import { type CSVLookupDraft, type LookupSectionProps, emptyCsvDraft, csvLookupEqual } from "./types";
 import type { CSVLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
+import { useReadOnly } from "../../../hooks/useReadOnly";
 
 function serializeCsvLookups(lookups: CSVLookupDraft[]) {
   return lookups
@@ -53,6 +54,7 @@ function CsvFileFields({
   inputId: string;
   onFileSelected: (fileId: string) => void;
 }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const preview = usePreviewCSVLookup();
 
@@ -118,7 +120,7 @@ function CsvFileFields({
             </span>
             <button
               onClick={() => preview.mutate({ fileId })}
-              disabled={preview.isPending}
+              disabled={preview.isPending || readOnly}
               className={`text-[0.7em] px-2 py-0.5 rounded transition-colors ${c(
                 "text-text-muted hover:text-copper hover:bg-ink-hover",
                 "text-light-text-muted hover:text-copper hover:bg-light-hover",
@@ -177,6 +179,7 @@ function CsvFileFields({
                   >
                     <input
                       type="checkbox"
+                      disabled={readOnly}
                       checked={checked}
                       onChange={() => toggleValueColumn(col)}
                       className="accent-copper"

@@ -6,6 +6,7 @@ import { formatBytes } from "../../utils/units";
 import { handleDragOver, handleDragEnter, handleDragLeave } from "./CertificateForms";
 import type { ManagedFileInfo } from "../../api/gen/gastrolog/v1/system_pb";
 import type { useUploadManagedFile } from "../../api/hooks/useUploadManagedFile";
+import { useReadOnly } from "../../hooks/useReadOnly";
 
 export function FileDropZone({
   dark,
@@ -28,6 +29,7 @@ export function FileDropZone({
   addToast: (msg: string, type: "info" | "error") => void;
   onFileSelected?: (fileId: string) => void;
 }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const [dragging, setDragging] = useState(false);
   const [pendingFile, setPendingFile] = useState<{ name: string; size: number } | null>(null);
@@ -114,6 +116,7 @@ export function FileDropZone({
         <input
           id={inputId}
           type="file"
+          disabled={readOnly}
           accept={accept}
           className="hidden"
           onChange={handleFileInput}
@@ -146,6 +149,7 @@ export function FileDropZone({
             </span>
           ) : (filteredPickable.map((f) => (
               <button
+                disabled={readOnly}
                 key={encode(f.id)}
                 onClick={() => onFileSelected?.(encode(f.id))}
                 className={`flex items-center gap-2 px-2 py-1.5 rounded text-left text-[0.8em] transition-colors ${c(

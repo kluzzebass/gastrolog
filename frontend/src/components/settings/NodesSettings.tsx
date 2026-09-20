@@ -23,6 +23,7 @@ import { FormField, TextInput } from "./FormField";
 import { Button } from "./Buttons";
 import { sortByName } from "../../lib/sort";
 import { middleTruncate } from "../../utils/middleTruncate";
+import { useReadOnly } from "../../hooks/useReadOnly";
 
 function roleName(role: ClusterNodeRole): string {
   switch (role) {
@@ -268,6 +269,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
 }
 
 function JoinClusterCard({ dark }: Readonly<{ dark: boolean }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const { addToast } = useToast();
   const joinCluster = useJoinCluster();
@@ -329,7 +331,7 @@ function JoinClusterCard({ dark }: Readonly<{ dark: boolean }>) {
             type="checkbox"
             checked={confirmed}
             onChange={(e) => setConfirmed(e.target.checked)}
-            disabled={joinCluster.isPending}
+            disabled={joinCluster.isPending || readOnly}
             className="mt-0.5"
           />
           <span>

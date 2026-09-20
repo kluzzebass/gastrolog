@@ -11,6 +11,7 @@ import { AddFormCard } from "../AddFormCard";
 import { FileDropZone } from "../FileDropZone";
 import { type MMDBLookupDraft, type LookupSectionProps, mmdbDbTypes, mmdbDefaultName, emptyMmdbDraft, mmdbLookupEqual } from "./types";
 import type { MMDBLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
+import { useReadOnly } from "../../../hooks/useReadOnly";
 
 function serializeMmdbLookups(lookups: MMDBLookupDraft[]) {
   return lookups
@@ -177,6 +178,7 @@ export function MmdbCards({
 }
 
 function MmdbDbTypeRadio({ dark, value, onChange, name }: Readonly<{ dark: boolean; value: string; onChange: (v: string) => void; name: string }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   return (
     <FormField label="Database Type" dark={dark}>
@@ -185,6 +187,7 @@ function MmdbDbTypeRadio({ dark, value, onChange, name }: Readonly<{ dark: boole
           <label key={t.value} className="flex items-center gap-1.5 cursor-pointer">
             <input
               type="radio"
+              disabled={readOnly}
               name={name}
               value={t.value}
               checked={value === t.value}

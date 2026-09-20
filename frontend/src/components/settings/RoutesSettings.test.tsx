@@ -6,6 +6,7 @@ import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 const mocks = installMockClients();
 
 import { RoutesSettings } from "./RoutesSettings";
+import { renderWritable } from "../../testing/renderWritable";
 
 /** Create a distinct 16-byte Uint8Array test ID from a small number. */
 function testId(n: number): Uint8Array<ArrayBuffer> {
@@ -63,7 +64,7 @@ describe("RoutesSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], { routes: [], vaults: [], ingesters: [], nodeConfigs: [] });
 
-    const { getByText } = render(<RoutesSettings dark />, {
+    const { getByText } = renderWritable(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -74,7 +75,7 @@ describe("RoutesSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getByText } = render(<RoutesSettings dark />, {
+    const { getByText } = renderWritable(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -103,7 +104,7 @@ describe("RoutesSettings", () => {
       ],
     });
 
-    const { getByText, queryByText } = render(<RoutesSettings dark />, {
+    const { getByText, queryByText } = renderWritable(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -118,7 +119,7 @@ describe("RoutesSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getByText, getAllByText } = render(<RoutesSettings dark />, {
+    const { getByText, getAllByText } = renderWritable(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -132,7 +133,7 @@ describe("RoutesSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getByText } = render(<RoutesSettings dark />, {
+    const { getByText } = renderWritable(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -143,7 +144,7 @@ describe("RoutesSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getAllByText } = render(<RoutesSettings dark />, {
+    const { getAllByText } = renderWritable(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -155,7 +156,7 @@ describe("RoutesSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getByText } = render(<RoutesSettings dark />, {
+    const { getByText } = renderWritable(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -173,7 +174,7 @@ describe("RoutesSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getByText } = render(<RoutesSettings dark />, {
+    const { getByText } = renderWritable(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -187,7 +188,7 @@ describe("RoutesSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getByText } = render(<RoutesSettings dark />, {
+    const { getByText } = renderWritable(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -205,7 +206,7 @@ describe("RoutesSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], { routes: [], vaults: [{ id: testId(20), name: "vault-alpha" }], ingesters: [], nodeConfigs: [] });
 
-    const { getByText } = render(<RoutesSettings dark />, {
+    const { getByText } = renderWritable(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 

@@ -12,6 +12,7 @@ import { ExpandableCard } from "./ExpandableCard";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { extractMessage } from "../../utils/errors";
 import type { GetSettingsResponse } from "../../api/gen/gastrolog/v1/system_pb";
+import { useReadOnly } from "../../hooks/useReadOnly";
 
 // ── Form reducer ─────────────────────────────────────────────────────
 
@@ -118,6 +119,7 @@ function parseDurationSeconds(s: string): number | null {
 
 // eslint-disable-next-line sonarjs/cognitive-complexity -- inherently complex settings form with many fields, cards, and dirty tracking
 export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: boolean }>) {
+  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const { data, isLoading } = useSettings();
   const { data: certData } = useCertificates();
@@ -518,6 +520,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                       >
                         <input
                           type="text"
+                          readOnly={readOnly}
                           inputMode="numeric"
                           value={s.httpsPort}
                           onChange={(e) => dispatch({ type: "set", field: "httpsPort", value: e.target.value })}

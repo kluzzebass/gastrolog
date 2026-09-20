@@ -8,6 +8,7 @@ const mocks = installMockClients();
 
 import { VaultsSettings } from "./VaultsSettings";
 import { VaultConfig, VaultType } from "../../api/gen/gastrolog/v1/system_pb";
+import { renderWritable } from "../../testing/renderWritable";
 
 /** Create a distinct 16-byte Uint8Array test ID from a small number. */
 function testId(n: number): Uint8Array<ArrayBuffer> {
@@ -64,7 +65,7 @@ describe("VaultsSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], { ...sampleConfig, vaults: [] });
 
-    const { getByText } = render(<VaultsSettings dark />, {
+    const { getByText } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -75,7 +76,7 @@ describe("VaultsSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getByText } = render(<VaultsSettings dark />, {
+    const { getByText } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -89,7 +90,7 @@ describe("VaultsSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getByText } = render(<VaultsSettings dark />, {
+    const { getByText } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -101,7 +102,7 @@ describe("VaultsSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getByText, getByDisplayValue } = render(<VaultsSettings dark />, {
+    const { getByText, getByDisplayValue } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -121,7 +122,7 @@ describe("VaultsSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getByText } = render(<VaultsSettings dark />, {
+    const { getByText } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -135,7 +136,7 @@ describe("VaultsSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getByText } = render(<VaultsSettings dark />, {
+    const { getByText } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -152,7 +153,7 @@ describe("VaultsSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getByText } = render(<VaultsSettings dark />, {
+    const { getByText } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -169,7 +170,7 @@ describe("VaultsSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getByText } = render(<VaultsSettings dark />, {
+    const { getByText } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -187,7 +188,7 @@ describe("VaultsSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], { ...sampleConfig, vaults: [] });
 
-    const { getByText } = render(<VaultsSettings dark />, {
+    const { getByText } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -204,7 +205,7 @@ describe("VaultsSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], { ...sampleConfig, vaults: [] });
 
-    const { getByText } = render(<VaultsSettings dark />, {
+    const { getByText } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -221,7 +222,7 @@ describe("VaultsSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], { ...sampleConfig, vaults: [] });
 
-    const { getByText, getByLabelText } = render(<VaultsSettings dark />, {
+    const { getByText, getByLabelText } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -247,7 +248,7 @@ describe("VaultsSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getByText, getByLabelText, queryByLabelText } = render(<VaultsSettings dark />, {
+    const { getByText, getByLabelText, queryByLabelText } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -272,7 +273,7 @@ describe("VaultsSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getByText, getByLabelText } = render(<VaultsSettings dark />, {
+    const { getByText, getByLabelText } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -348,7 +349,7 @@ describe("vault edit save", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], oneVaultConfig);
 
-    const { getByText, container } = render(<VaultsSettings dark />, {
+    const { getByText, container } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -388,7 +389,7 @@ describe("vault edit save", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], oneVaultConfig);
 
-    const { getByText } = render(<VaultsSettings dark />, {
+    const { getByText } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
