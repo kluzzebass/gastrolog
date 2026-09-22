@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,7 +22,9 @@ import (
 	"gastrolog/internal/home"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
+
 	"gastrolog/internal/system/raftfsm"
+	"golang.org/x/time/rate"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -198,9 +201,25 @@ func loadExistingClusterTLS(existing *system.ClusterTLS, ctls *cluster.ClusterTL
 	return nil
 }
 
+// enrollAttemptsPerSecond and enrollBurst bound how fast the join token can
+// be offered. Enrolment happens a handful of times in a cluster's life and is
+// retried with backoff, so a low ceiling costs an operator nothing while
+// denying an attacker the volume that makes guessing or log-flooding
+// worthwhile.
+const (
+	enrollAttemptsPerSecond = 1
+	enrollBurst             = 5
+)
+
 // makeEnrollHandler creates the Enroll RPC handler for the cluster server.
 func makeEnrollHandler(cfgStore system.Store, logger *slog.Logger) cluster.EnrollHandler {
+	limiter := rate.NewLimiter(enrollAttemptsPerSecond, enrollBurst)
 	return func(ctx context.Context, req *gastrologv1.EnrollRequest) (*gastrologv1.EnrollResponse, error) {
+		if !limiter.Allow() {
+			logger.Warn("enroll: refused, attempts are arriving faster than a joining node produces them",
+				"node_id", req.GetNodeId())
+			return nil, errors.New("enrollment rate exceeded")
+		}
 		cfg, err := cfgStore.Load(ctx)
 		if err != nil || cfg == nil || cfg.Runtime.ClusterTLS == nil {
 			logger.Error("enroll: read cluster TLS", "error", err)
@@ -212,7 +231,9 @@ func makeEnrollHandler(cfgStore system.Store, logger *slog.Logger) cluster.Enrol
 		if err != nil {
 			return nil, fmt.Errorf("parse stored join token: %w", err)
 		}
-		if req.GetTokenSecret() != storedSecret {
+		// Constant-time: a byte-by-byte comparison tells a caller how much of
+		// the secret it has guessed from how long the answer took.
+		if subtle.ConstantTimeCompare([]byte(req.GetTokenSecret()), []byte(storedSecret)) != 1 {
 			logger.Warn("enroll: invalid token secret", "node_id", req.GetNodeId())
 			return nil, errors.New("invalid join token")
 		}
