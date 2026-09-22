@@ -13,21 +13,27 @@ import (
 	"gastrolog/internal/system/raftfsm"
 	"gastrolog/internal/system/raftstore"
 
-	"github.com/Jille/raftadmin/proto"
 	hraft "github.com/hashicorp/raft"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 )
 
-func sharedTestClusterTLS(t *testing.T) *cluster.ClusterTLS {
+// testClusterCA is the trust root a set of test nodes share. Each node then
+// gets its own certificate under it, which is the arrangement a real cluster
+// has: one CA, one identity per node.
+func testClusterCA(t *testing.T) tlsutil.CAKeyPair {
 	t.Helper()
 	ca, err := tlsutil.GenerateCA()
 	if err != nil {
 		t.Fatalf("GenerateCA: %v", err)
 	}
-	cert, err := tlsutil.GenerateClusterCert(ca.CertPEM, ca.KeyPEM, cluster.LaneSANs)
+	return ca
+}
+
+func nodeClusterTLS(t *testing.T, ca tlsutil.CAKeyPair, nodeID string) *cluster.ClusterTLS {
+	t.Helper()
+	cert, err := tlsutil.GenerateNodeCert(ca.CertPEM, ca.KeyPEM, nodeID, cluster.LaneSANs)
 	if err != nil {
-		t.Fatalf("GenerateClusterCert: %v", err)
+		t.Fatalf("GenerateNodeCert: %v", err)
 	}
 	ctls := cluster.NewClusterTLS()
 	if err := ctls.Load(cert.CertPEM, cert.KeyPEM, ca.CertPEM); err != nil {
@@ -36,8 +42,9 @@ func sharedTestClusterTLS(t *testing.T) *cluster.ClusterTLS {
 	return ctls
 }
 
-func newTLSClusterNode(t *testing.T, nodeID string, ctls *cluster.ClusterTLS, bootstrap bool) *testNode {
+func newTLSClusterNode(t *testing.T, nodeID string, ca tlsutil.CAKeyPair, bootstrap bool) *testNode {
 	t.Helper()
+	ctls := nodeClusterTLS(t, ca, nodeID)
 
 	srv, err := cluster.New(cluster.Config{
 		ClusterAddr: "127.0.0.1:0",
@@ -95,27 +102,10 @@ func newTLSClusterNode(t *testing.T, nodeID string, ctls *cluster.ClusterTLS, bo
 	return &testNode{srv: srv, raft: r, store: store, fsm: fsm}
 }
 
-func addVoterTLS(t *testing.T, ctls *cluster.ClusterTLS, leaderAddr, voterID, voterAddr string) {
+func addVoterTLS(t *testing.T, leader *cluster.Server, voterID, voterAddr string) {
 	t.Helper()
-	conn, err := grpc.NewClient(leaderAddr, grpc.WithTransportCredentials(ctls.TransportCredentials()))
-	if err != nil {
-		t.Fatalf("dial leader for AddVoter: %v", err)
-	}
-	defer conn.Close()
-
-	client := proto.NewRaftAdminClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	resp, err := client.AddVoter(ctx, &proto.AddVoterRequest{
-		Id:      voterID,
-		Address: voterAddr,
-	})
-	if err != nil {
-		t.Fatalf("AddVoter: %v", err)
-	}
-	if _, err := client.Await(ctx, resp); err != nil {
-		t.Fatalf("Await AddVoter: %v", err)
+	if err := leader.AddVoter(voterID, voterAddr, 5*time.Second); err != nil {
+		t.Fatalf("add voter %s: %v", voterID, err)
 	}
 }
 
@@ -147,22 +137,22 @@ func TestFourNodeClusterElectionWithTLSLaneIsolation(t *testing.T) {
 		t.Skip("skipping multi-node TLS cluster test in short mode")
 	}
 
-	ctls := sharedTestClusterTLS(t)
+	ca := testClusterCA(t)
 
-	node1 := newTLSClusterNode(t, "node-1", ctls, true)
+	node1 := newTLSClusterNode(t, "node-1", ca, true)
 	t.Cleanup(node1.close)
 	waitLeader(t, node1.raft, 10*time.Second)
 
-	node2 := newTLSClusterNode(t, "node-2", ctls, false)
+	node2 := newTLSClusterNode(t, "node-2", ca, false)
 	t.Cleanup(node2.close)
-	node3 := newTLSClusterNode(t, "node-3", ctls, false)
+	node3 := newTLSClusterNode(t, "node-3", ca, false)
 	t.Cleanup(node3.close)
-	node4 := newTLSClusterNode(t, "node-4", ctls, false)
+	node4 := newTLSClusterNode(t, "node-4", ca, false)
 	t.Cleanup(node4.close)
 
-	addVoterTLS(t, ctls, node1.srv.Addr(), "node-2", node2.srv.Addr())
-	addVoterTLS(t, ctls, node1.srv.Addr(), "node-3", node3.srv.Addr())
-	addVoterTLS(t, ctls, node1.srv.Addr(), "node-4", node4.srv.Addr())
+	addVoterTLS(t, node1.srv, "node-2", node2.srv.Addr())
+	addVoterTLS(t, node1.srv, "node-3", node3.srv.Addr())
+	addVoterTLS(t, node1.srv, "node-4", node4.srv.Addr())
 
 	nodes := []*testNode{node1, node2, node3, node4}
 	waitAnyLeader(t, nodes, 15*time.Second)

@@ -13,7 +13,7 @@ func TestClusterTLSLoadAndState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateCA: %v", err)
 	}
-	cert, err := tlsutil.GenerateClusterCert(ca.CertPEM, ca.KeyPEM, nil)
+	cert, err := tlsutil.GenerateNodeCert(ca.CertPEM, ca.KeyPEM, "test-node", nil)
 	if err != nil {
 		t.Fatalf("GenerateClusterCert: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestClusterTLSLoadAndState(t *testing.T) {
 func TestClusterTLSServerConfig(t *testing.T) {
 	t.Parallel()
 	ca, _ := tlsutil.GenerateCA()
-	cert, _ := tlsutil.GenerateClusterCert(ca.CertPEM, ca.KeyPEM, nil)
+	cert, _ := tlsutil.GenerateNodeCert(ca.CertPEM, ca.KeyPEM, "test-node", nil)
 
 	ctls := cluster.NewClusterTLS()
 	if err := ctls.Load(cert.CertPEM, cert.KeyPEM, ca.CertPEM); err != nil {
@@ -68,7 +68,7 @@ func TestClusterTLSServerConfig(t *testing.T) {
 func TestClusterTLSClientConfig(t *testing.T) {
 	t.Parallel()
 	ca, _ := tlsutil.GenerateCA()
-	cert, _ := tlsutil.GenerateClusterCert(ca.CertPEM, ca.KeyPEM, nil)
+	cert, _ := tlsutil.GenerateNodeCert(ca.CertPEM, ca.KeyPEM, "test-node", nil)
 
 	ctls := cluster.NewClusterTLS()
 	if err := ctls.Load(cert.CertPEM, cert.KeyPEM, ca.CertPEM); err != nil {
@@ -90,10 +90,10 @@ func TestClusterTLSClientConfig(t *testing.T) {
 func TestClusterTLSAtomicReload(t *testing.T) {
 	t.Parallel()
 	ca1, _ := tlsutil.GenerateCA()
-	cert1, _ := tlsutil.GenerateClusterCert(ca1.CertPEM, ca1.KeyPEM, nil)
+	cert1, _ := tlsutil.GenerateNodeCert(ca1.CertPEM, ca1.KeyPEM, "test-node", nil)
 
 	ca2, _ := tlsutil.GenerateCA()
-	cert2, _ := tlsutil.GenerateClusterCert(ca2.CertPEM, ca2.KeyPEM, nil)
+	cert2, _ := tlsutil.GenerateNodeCert(ca2.CertPEM, ca2.KeyPEM, "test-node", nil)
 
 	ctls := cluster.NewClusterTLS()
 

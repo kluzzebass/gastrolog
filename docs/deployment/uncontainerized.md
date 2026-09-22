@@ -83,14 +83,15 @@ gastrolog server \
   --home /var/lib/gastrolog \
   --listen :4564 \
   --cluster-addr hostA:4566 \
-  --initial-admin-file /etc/gastrolog/admin-creds \
-  --write-bootstrap-token /var/lib/gastrolog/cluster-token
+  --initial-admin-file /etc/gastrolog/admin-creds
 ```
 
-Distribute the join token (after the bootstrap node writes it):
+Mint a join token on any node already in the cluster, immediately
+before starting the joiner. Tokens expire, so mint one when you are
+about to use it rather than keeping one around:
 
 ```sh
-scp hostA:/var/lib/gastrolog/cluster-token hostB:/var/lib/gastrolog/cluster-token
+gastrolog cluster join-token
 ```
 
 Then on each joiner:
@@ -102,11 +103,16 @@ gastrolog server \
   --listen :4564 \
   --cluster-addr hostB:4566 \
   --join-addr hostA:4566 \
-  --bootstrap-token-file /var/lib/gastrolog/cluster-token
+  --join-token <token>
 ```
 
-The joiner polls the file with backoff until it appears, then
-enrolls and joins the cluster.
+`--join-addr` is any node already in the cluster, not a specific one:
+the node reached serves the join wherever it sits in the configuration.
+
+For unattended joins, have an existing node serve tokens with
+`--bootstrap-token-serve-secret` and point joiners at it with
+`--bootstrap-token-url` and `--bootstrap-token-secret`; it mints a fresh
+token per request, so a joiner started much later still gets a live one.
 
 ## systemd unit example
 
@@ -157,8 +163,8 @@ non-container deployments:
 | `--cluster-addr <addr>` | Cluster gRPC listen address. Default: `:4566`. **Set to a routable address (`hostname:4566`) for multi-host clusters.** |
 | `--name <name>` | Stable node name. Default: random petname. |
 | `--join-addr <addr>` / `--join-token <token>` | Cluster enrollment for joiners. |
-| `--write-bootstrap-token <path>` | Bootstrap node only: write the token for joiners to pick up. |
-| `--bootstrap-token-file <path>` | Joiner only: read the token from this path with polling. |
+| `--bootstrap-token-serve-secret <secret>` | Serve minted join tokens at `GET /cluster/bootstrap-token`, gated on this secret. |
+| `--bootstrap-token-url <url>` / `--bootstrap-token-secret <secret>` | Joiner only: fetch a minted token from that endpoint instead of passing `--join-token`. |
 | `--initial-admin-file <path>` | Bootstrap node only: provision admin credentials from a file. |
 | `--no-auth` | Disable authentication. Testing only. |
 

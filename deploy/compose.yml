@@ -69,12 +69,15 @@ services:
     environment:
       GASTROLOG_NAME: gastrolog-0
       GASTROLOG_CLUSTER_ADDR: gastrolog-0:4566
-      GASTROLOG_WRITE_BOOTSTRAP_TOKEN: /shared/token
+      # Join tokens expire, so they are minted per request rather than
+      # dropped on a shared volume at bootstrap. This node serves
+      # GET /cluster/bootstrap-token gated on the shared secret below;
+      # joiners fetch one at their own startup, however much later that is.
+      GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET: "rotate-this-secret-please"
       GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
     ports:
       - "4564:4564"
     volumes:
-      - cluster-token:/shared
       - gastrolog-0-config:/config
       - gastrolog-0-vaults:/vaults
 
@@ -89,12 +92,12 @@ services:
       GASTROLOG_NAME: gastrolog-1
       GASTROLOG_CLUSTER_ADDR: gastrolog-1:4566
       GASTROLOG_JOIN_ADDR: gastrolog-0:4566
-      GASTROLOG_BOOTSTRAP_TOKEN_FILE: /shared/token
+      GASTROLOG_BOOTSTRAP_TOKEN_URL: http://gastrolog-0:4564/cluster/bootstrap-token
+      GASTROLOG_BOOTSTRAP_TOKEN_SECRET: "rotate-this-secret-please"
       GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
     ports:
       - "4574:4564"
     volumes:
-      - cluster-token:/shared
       - gastrolog-1-config:/config
       - gastrolog-1-vaults:/vaults
 
@@ -109,12 +112,12 @@ services:
       GASTROLOG_NAME: gastrolog-2
       GASTROLOG_CLUSTER_ADDR: gastrolog-2:4566
       GASTROLOG_JOIN_ADDR: gastrolog-0:4566
-      GASTROLOG_BOOTSTRAP_TOKEN_FILE: /shared/token
+      GASTROLOG_BOOTSTRAP_TOKEN_URL: http://gastrolog-0:4564/cluster/bootstrap-token
+      GASTROLOG_BOOTSTRAP_TOKEN_SECRET: "rotate-this-secret-please"
       GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
     ports:
       - "4584:4564"
     volumes:
-      - cluster-token:/shared
       - gastrolog-2-config:/config
       - gastrolog-2-vaults:/vaults
 
@@ -247,7 +250,6 @@ services:
       - /tmp/gastrolog-deploy/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
 
 volumes:
-  cluster-token:
   gastrolog-0-config:
   gastrolog-0-vaults:
   gastrolog-1-config:

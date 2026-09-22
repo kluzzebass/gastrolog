@@ -109,11 +109,10 @@ The HTTP endpoint path (`gastrolog-o9z6o`) is the natural K8s fit:
 backoff. The shared secret in the K8s Secret authenticates the
 request.
 
-If you want the file-based path on a K8s with `ReadWriteMany`
-support (Rook/Ceph, AWS EFS, Azure Files, NFS), you can adapt the
-manifest by adding a shared PVC mounted into all pods at `/shared`
-and switching to `GASTROLOG_WRITE_BOOTSTRAP_TOKEN` /
-`GASTROLOG_BOOTSTRAP_TOKEN_FILE` env vars.
+There is no file-based alternative. Tokens expire, and one written to a
+shared volume at bootstrap would be read by pods that start arbitrarily
+later, so it would have to stay valid for every join the cluster ever
+sees. The endpoint mints a fresh token per request instead.
 
 ### How the cluster forms
 

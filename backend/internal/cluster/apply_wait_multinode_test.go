@@ -26,7 +26,7 @@ func fourNodeCluster(t *testing.T) []*testNode {
 	for _, id := range []string{"node-2", "node-3", "node-4"} {
 		n := newTestNode(t, id, false)
 		t.Cleanup(n.close)
-		addVoter(t, node1.srv.Addr(), id, n.srv.Addr())
+		addVoter(t, node1.srv, id, n.srv.Addr())
 		nodes = append(nodes, n)
 	}
 

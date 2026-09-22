@@ -14,7 +14,7 @@ func TestRaftLanePerGroupSNIClientTLS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateCA: %v", err)
 	}
-	cert, err := tlsutil.GenerateClusterCert(ca.CertPEM, ca.KeyPEM, nil)
+	cert, err := tlsutil.GenerateNodeCert(ca.CertPEM, ca.KeyPEM, "test-node", nil)
 	if err != nil {
 		t.Fatalf("GenerateClusterCert: %v", err)
 	}

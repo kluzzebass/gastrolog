@@ -159,7 +159,7 @@ expression pattern.
 
 ## Cluster / node settings
 
-`config cluster join` (`--leader`, `--join-token`) and `config node` are
+`config cluster join` (`--member`, `--join-token`) and `config node` are
 identity/topology, not resource defaults. **N/A** for this audit. No knob
 found that claims a finite shared resource when unset.
 

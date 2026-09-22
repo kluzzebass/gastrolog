@@ -328,11 +328,6 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
   localNodeId = new Uint8Array(0);
 
   /**
-   * @generated from field: string join_token = 7;
-   */
-  joinToken = "";
-
-  /**
    * @generated from field: string cluster_address = 8;
    */
   clusterAddress = "";
@@ -351,7 +346,6 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
     { no: 4, name: "nodes", kind: "message", T: ClusterNode, repeated: true },
     { no: 5, name: "local_stats", kind: "message", T: RaftStats },
     { no: 6, name: "local_node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 7, name: "join_token", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 8, name: "cluster_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -369,6 +363,91 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
 
   static equals(a: GetClusterStatusResponse | PlainMessage<GetClusterStatusResponse> | undefined, b: GetClusterStatusResponse | PlainMessage<GetClusterStatusResponse> | undefined): boolean {
     return proto3.util.equals(GetClusterStatusResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.CreateJoinTokenRequest
+ */
+export class CreateJoinTokenRequest extends Message<CreateJoinTokenRequest> {
+  /**
+   * How long the token stays usable. Zero uses the cluster default.
+   *
+   * @generated from field: int64 ttl_seconds = 1;
+   */
+  ttlSeconds = protoInt64.zero;
+
+  constructor(data?: PartialMessage<CreateJoinTokenRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.CreateJoinTokenRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "ttl_seconds", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CreateJoinTokenRequest {
+    return new CreateJoinTokenRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CreateJoinTokenRequest {
+    return new CreateJoinTokenRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CreateJoinTokenRequest {
+    return new CreateJoinTokenRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CreateJoinTokenRequest | PlainMessage<CreateJoinTokenRequest> | undefined, b: CreateJoinTokenRequest | PlainMessage<CreateJoinTokenRequest> | undefined): boolean {
+    return proto3.util.equals(CreateJoinTokenRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.CreateJoinTokenResponse
+ */
+export class CreateJoinTokenResponse extends Message<CreateJoinTokenResponse> {
+  /**
+   * @generated from field: string join_token = 1;
+   */
+  joinToken = "";
+
+  /**
+   * When the token stops being accepted, so a caller can say so rather than
+   * making the operator work it out from the token.
+   *
+   * @generated from field: int64 expires_at_unix = 2;
+   */
+  expiresAtUnix = protoInt64.zero;
+
+  constructor(data?: PartialMessage<CreateJoinTokenResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.CreateJoinTokenResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "join_token", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "expires_at_unix", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CreateJoinTokenResponse {
+    return new CreateJoinTokenResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CreateJoinTokenResponse {
+    return new CreateJoinTokenResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CreateJoinTokenResponse {
+    return new CreateJoinTokenResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CreateJoinTokenResponse | PlainMessage<CreateJoinTokenResponse> | undefined, b: CreateJoinTokenResponse | PlainMessage<CreateJoinTokenResponse> | undefined): boolean {
+    return proto3.util.equals(CreateJoinTokenResponse, a, b);
   }
 }
 
@@ -766,11 +845,13 @@ export class SetNodeStateResponse extends Message<SetNodeStateResponse> {
  */
 export class JoinClusterRequest extends Message<JoinClusterRequest> {
   /**
-   * cluster address of the leader to join (e.g., "10.0.0.1:4566")
+   * Cluster address of any member of the cluster to join (e.g.
+   * "10.0.0.1:4566"). The member serves the request wherever it sits in the
+   * configuration, so the caller does not have to know which node leads.
    *
-   * @generated from field: string leader_address = 1;
+   * @generated from field: string member_address = 1;
    */
-  leaderAddress = "";
+  memberAddress = "";
 
   /**
    * join token from the leader's cluster status
@@ -787,7 +868,7 @@ export class JoinClusterRequest extends Message<JoinClusterRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.JoinClusterRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "leader_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "member_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "join_token", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 

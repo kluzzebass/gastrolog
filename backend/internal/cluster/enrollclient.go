@@ -11,27 +11,40 @@ import (
 	"fmt"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/cluster/tlsutil"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
 
-// EnrollResult holds the TLS material returned by a successful enrollment.
+// EnrollResult holds the TLS material a node ends enrollment with: the
+// cluster's trust root, the certificate the cluster issued for this node, and
+// the private key that node generated for itself and never sent anywhere.
 type EnrollResult struct {
-	CACertPEM      []byte
-	ClusterCertPEM []byte
-	ClusterKeyPEM  []byte
+	CACertPEM   []byte
+	NodeCertPEM []byte
+	NodeKeyPEM  []byte
 }
 
-// Enroll connects to the leader's cluster port and enrolls this node.
+// Enroll connects to a cluster member's cluster port and enrolls this node.
 // The joinToken format is "<hex-secret>:<hex-sha256(CA DER)>".
 //
 // The client uses InsecureSkipVerify with a custom VerifyConnection
 // callback that checks the CA fingerprint from the token (TOFU model).
-func Enroll(ctx context.Context, leaderAddr, tokenSecret, caHash, nodeID, nodeAddr string) (*EnrollResult, error) {
+//
+// A key pair is generated here and only the certificate request is sent, so
+// what comes back is a certificate for a key the cluster has never seen. The
+// node ID in the request is a request: the member decides what the
+// certificate says.
+func Enroll(ctx context.Context, memberAddr, tokenSecret, caHash, nodeID, nodeAddr string) (*EnrollResult, error) {
 	expectedHash, err := hex.DecodeString(caHash)
 	if err != nil {
 		return nil, fmt.Errorf("decode CA hash from token: %w", err)
+	}
+
+	csrPEM, keyPEM, err := tlsutil.GenerateCSR(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("generate certificate request: %w", err)
 	}
 
 	// TOFU TLS config: skip normal verification, verify CA fingerprint manually.
@@ -46,11 +59,11 @@ func Enroll(ctx context.Context, leaderAddr, tokenSecret, caHash, nodeID, nodeAd
 		MinVersion: tls.VersionTLS13,
 	}
 
-	conn, err := grpc.NewClient(leaderAddr,
+	conn, err := grpc.NewClient(memberAddr,
 		grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("dial leader %s: %w", leaderAddr, err)
+		return nil, fmt.Errorf("dial cluster member %s: %w", memberAddr, err)
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -58,6 +71,7 @@ func Enroll(ctx context.Context, leaderAddr, tokenSecret, caHash, nodeID, nodeAd
 		TokenSecret: tokenSecret,
 		NodeId:      []byte(nodeID),
 		NodeAddr:    nodeAddr,
+		CsrPem:      csrPEM,
 	}
 	resp := &gastrologv1.EnrollResponse{}
 
@@ -66,9 +80,9 @@ func Enroll(ctx context.Context, leaderAddr, tokenSecret, caHash, nodeID, nodeAd
 	}
 
 	return &EnrollResult{
-		CACertPEM:      resp.GetCaCertPem(),
-		ClusterCertPEM: resp.GetClusterCertPem(),
-		ClusterKeyPEM:  resp.GetClusterKeyPem(),
+		CACertPEM:   resp.GetCaCertPem(),
+		NodeCertPEM: resp.GetNodeCertPem(),
+		NodeKeyPEM:  keyPEM,
 	}, nil
 }
 

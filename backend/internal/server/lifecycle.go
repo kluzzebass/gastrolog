@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/cluster"
+	"gastrolog/internal/cluster/tlsutil"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
@@ -57,7 +59,7 @@ type LifecycleServer struct {
 	peerStats         NodeStatsProvider
 	localStats        func() *apiv1.NodeStats
 	clusterRouteRates func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)
-	joinClusterFn     func(ctx context.Context, leaderAddr, joinToken string) error
+	joinClusterFn     func(ctx context.Context, memberAddr, joinToken string) error
 	removeNodeFn      cluster.RemoveNodeFunc
 	setNodeSuffrageFn func(ctx context.Context, nodeID string, voter bool) error
 	statsSignal       *notify.Signal         // fired by stats collector on each broadcast tick
@@ -90,7 +92,7 @@ func NewLifecycleServer(orch *orchestrator.Orchestrator, shutdown func(drain boo
 
 // SetJoinClusterFunc sets the callback for the JoinCluster RPC.
 // Must be called before the server starts serving.
-func (s *LifecycleServer) SetJoinClusterFunc(fn func(ctx context.Context, leaderAddr, joinToken string) error) {
+func (s *LifecycleServer) SetJoinClusterFunc(fn func(ctx context.Context, memberAddr, joinToken string) error) {
 	s.joinClusterFn = fn
 }
 
@@ -292,12 +294,39 @@ func (s *LifecycleServer) GetClusterStatus(
 		ClusterAddress: clusterAddr,
 	}
 
-	// Expose join token from the replicated config (available on all nodes).
-	if sys, err := s.cfgStore.Load(ctx); err == nil && sys != nil && sys.Runtime.ClusterTLS != nil {
-		resp.JoinToken = sys.Runtime.ClusterTLS.JoinToken
+	return connect.NewResponse(resp), nil
+}
+
+// CreateJoinToken mints a join token from the cluster's key.
+//
+// It reads the key out of replicated state, so any node can answer — the same
+// property that lets any node serve enrolment. The token is returned once and
+// not stored: the cluster keeps only what signs it.
+func (s *LifecycleServer) CreateJoinToken(ctx context.Context, req *connect.Request[apiv1.CreateJoinTokenRequest]) (*connect.Response[apiv1.CreateJoinTokenResponse], error) {
+	sys, err := s.cfgStore.Load(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("read cluster TLS: %w", err))
+	}
+	if sys == nil || sys.Runtime.ClusterTLS == nil || sys.Runtime.ClusterTLS.JoinTokenKey == "" {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("cluster TLS is not initialized; this node is not part of a cluster"))
+	}
+	key, err := hex.DecodeString(sys.Runtime.ClusterTLS.JoinTokenKey)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("decode join token key: %w", err))
 	}
 
-	return connect.NewResponse(resp), nil
+	ttl := tlsutil.DefaultJoinTokenTTL
+	if secs := req.Msg.GetTtlSeconds(); secs > 0 {
+		ttl = time.Duration(secs) * time.Second
+	}
+	token, err := tlsutil.MintJoinToken(key, []byte(sys.Runtime.ClusterTLS.CACertPEM), ttl)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("mint join token: %w", err))
+	}
+	return connect.NewResponse(&apiv1.CreateJoinTokenResponse{
+		JoinToken:     token,
+		ExpiresAtUnix: time.Now().Add(ttl).Unix(),
+	}), nil
 }
 
 // SetNodeSuffrage promotes or demotes a node's voting status.
@@ -396,16 +425,16 @@ func (s *LifecycleServer) JoinCluster(
 	if s.joinClusterFn == nil {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("runtime cluster join not available"))
 	}
-	leaderAddr := req.Msg.LeaderAddress
-	if leaderAddr == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("leader_address is required"))
+	memberAddr := req.Msg.MemberAddress
+	if memberAddr == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("member_address is required"))
 	}
 	joinToken := req.Msg.JoinToken
 	if joinToken == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("join_token is required"))
 	}
 
-	if err := s.joinClusterFn(ctx, leaderAddr, joinToken); err != nil {
+	if err := s.joinClusterFn(ctx, memberAddr, joinToken); err != nil {
 		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.JoinClusterResponse{}), nil

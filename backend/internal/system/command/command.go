@@ -829,11 +829,9 @@ func NewPutClusterTLS(tls system.ClusterTLS) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_PutClusterTls{
 			PutClusterTls: &gastrologv1.PutClusterTLSCommand{
-				CaCertPem:      []byte(tls.CACertPEM),
-				CaKeyPem:       []byte(tls.CAKeyPEM),
-				ClusterCertPem: []byte(tls.ClusterCertPEM),
-				ClusterKeyPem:  []byte(tls.ClusterKeyPEM),
-				JoinToken:      tls.JoinToken,
+				CaCertPem:    []byte(tls.CACertPEM),
+				CaKeyPem:     []byte(tls.CAKeyPEM),
+				JoinTokenKey: tls.JoinTokenKey,
 			},
 		},
 	}
@@ -842,11 +840,9 @@ func NewPutClusterTLS(tls system.ClusterTLS) *gastrologv1.SystemCommand {
 // ExtractPutClusterTLS converts a PutClusterTLSCommand back to a ClusterTLS.
 func ExtractPutClusterTLS(cmd *gastrologv1.PutClusterTLSCommand) system.ClusterTLS {
 	return system.ClusterTLS{
-		CACertPEM:      string(cmd.GetCaCertPem()),
-		CAKeyPEM:       string(cmd.GetCaKeyPem()),
-		ClusterCertPEM: string(cmd.GetClusterCertPem()),
-		ClusterKeyPEM:  string(cmd.GetClusterKeyPem()),
-		JoinToken:      cmd.GetJoinToken(),
+		CACertPEM:    string(cmd.GetCaCertPem()),
+		CAKeyPEM:     string(cmd.GetCaKeyPem()),
+		JoinTokenKey: cmd.GetJoinTokenKey(),
 	}
 }
 

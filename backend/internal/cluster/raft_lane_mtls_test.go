@@ -70,8 +70,9 @@ func TestRaftLaneRejectsUncredentialedDial(t *testing.T) {
 		t.Skip("skipping TLS raft lane test: starts a raft node")
 	}
 
-	ctls := sharedTestClusterTLS(t)
-	node := newTLSClusterNode(t, "node-1", ctls, true)
+	ca := testClusterCA(t)
+	ctls := nodeClusterTLS(t, ca, "node-1")
+	node := newTLSClusterNode(t, "node-1", ca, true)
 	t.Cleanup(node.close)
 	caPool := ctls.State().CAPool
 
@@ -101,7 +102,7 @@ func TestRaftLaneRejectsUncredentialedDial(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GenerateCA: %v", err)
 		}
-		foreignCert, err := tlsutil.GenerateClusterCert(foreignCA.CertPEM, foreignCA.KeyPEM, cluster.LaneSANs)
+		foreignCert, err := tlsutil.GenerateNodeCert(foreignCA.CertPEM, foreignCA.KeyPEM, "test-node", cluster.LaneSANs)
 		if err != nil {
 			t.Fatalf("GenerateClusterCert: %v", err)
 		}
@@ -127,8 +128,8 @@ func TestServiceLaneStaysReachableWithoutClientCert(t *testing.T) {
 		t.Skip("skipping TLS service lane test: starts a raft node")
 	}
 
-	ctls := sharedTestClusterTLS(t)
-	node := newTLSClusterNode(t, "node-1", ctls, true)
+	ca := testClusterCA(t)
+	node := newTLSClusterNode(t, "node-1", ca, true)
 	t.Cleanup(node.close)
 
 	enrolled := make(chan struct{}, 1)

@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
-	"crypto/subtle"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -41,7 +43,7 @@ func setupCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd ho
 
 	clusterTLS := cluster.NewClusterTLS()
 
-	// Joining flow: enroll with the leader before creating the cluster server.
+	// Joining flow: enroll with a member before creating the cluster server.
 	// cfg.JoinToken may have been populated from a file or HTTP source by
 	// resolveJoinTokenFromSources before we got here, so the literal-token
 	// check still does the right thing.
@@ -78,14 +80,16 @@ func setupCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd ho
 	return clusterSrv, clusterTLS, nil
 }
 
-// enrollInCluster performs the Enroll RPC to obtain TLS material from the leader.
+// enrollInCluster performs the Enroll RPC to obtain TLS material. Any member
+// can answer it: the material is read from replicated state, so nothing here
+// needs the leader.
 func enrollInCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd home.Dir, nodeID string) (*cluster.ClusterTLS, error) {
 	tokenSecret, caHash, err := tlsutil.ParseJoinToken(cfg.JoinToken)
 	if err != nil {
 		return nil, fmt.Errorf("parse join token: %w", err)
 	}
 
-	logger.Info("enrolling with cluster leader", "leader_addr", cfg.JoinAddr)
+	logger.Info("enrolling with cluster member", "member_addr", cfg.JoinAddr)
 	enrollCtx, enrollCancel := context.WithTimeout(ctx, 30*time.Second)
 	result, err := cluster.Enroll(enrollCtx, cfg.JoinAddr, tokenSecret, caHash, nodeID, cfg.advertisedClusterAddr())
 	enrollCancel()
@@ -94,10 +98,10 @@ func enrollInCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd
 	}
 
 	clusterTLS := cluster.NewClusterTLS()
-	if err := clusterTLS.Load(result.ClusterCertPEM, result.ClusterKeyPEM, result.CACertPEM); err != nil {
+	if err := clusterTLS.Load(result.NodeCertPEM, result.NodeKeyPEM, result.CACertPEM); err != nil {
 		return nil, fmt.Errorf("load enrolled TLS material: %w", err)
 	}
-	if err := cluster.SaveFile(hd.ClusterTLSPath(), result.ClusterCertPEM, result.ClusterKeyPEM, result.CACertPEM); err != nil {
+	if err := cluster.SaveFile(hd.ClusterTLSPath(), result.NodeCertPEM, result.NodeKeyPEM, result.CACertPEM); err != nil {
 		return nil, fmt.Errorf(errFmtSaveClusterTLS, err)
 	}
 	logger.Info("cluster enrollment successful, TLS loaded and saved")
@@ -105,53 +109,55 @@ func enrollInCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd
 }
 
 // startClusterServices bootstraps TLS if needed and starts the cluster gRPC server.
-func startClusterServices(ctx context.Context, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, cfgStore system.Store, hd home.Dir, logger *slog.Logger, writeBootstrapTokenPath string) error {
+func startClusterServices(ctx context.Context, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, cfgStore system.Store, hd home.Dir, nodeID string, logger *slog.Logger) error {
 	if clusterSrv == nil {
 		return nil
 	}
 
 	if clusterTLS.State() == nil {
-		if err := bootstrapClusterTLS(ctx, cfgStore, clusterTLS, hd.ClusterTLSPath(), logger, writeBootstrapTokenPath); err != nil {
+		if err := bootstrapClusterTLS(ctx, cfgStore, clusterTLS, nodeID, hd.ClusterTLSPath(), logger); err != nil {
 			return fmt.Errorf("bootstrap cluster TLS: %w", err)
 		}
 	}
 
-	clusterSrv.SetEnrollHandler(makeEnrollHandler(cfgStore, logger))
+	clusterSrv.SetEnrollHandler(makeEnrollHandler(cfgStore, clusterSrv, logger))
 	return clusterSrv.Start()
 }
 
-// bootstrapClusterTLS generates CA, cluster cert, and join token. When
-// writeBootstrapTokenPath is non-empty, the token is also written
-// atomically to that path with mode 0600 so an orchestrator-launched
-// joiner can pick it up via --bootstrap-token-file.
-func bootstrapClusterTLS(ctx context.Context, cfgStore system.Store, ctls *cluster.ClusterTLS, tlsFilePath string, logger *slog.Logger, writeBootstrapTokenPath string) error {
+// bootstrapClusterTLS generates the cluster CA, this node's own certificate,
+// and the key the cluster mints join tokens with. No token is produced here:
+// tokens expire, so one is minted when someone asks for it rather than at a
+// moment nobody is joining.
+func bootstrapClusterTLS(ctx context.Context, cfgStore system.Store, ctls *cluster.ClusterTLS, nodeID, tlsFilePath string, logger *slog.Logger) error {
 	existingCfg, err := cfgStore.Load(ctx)
 	if err != nil {
 		return fmt.Errorf("check existing cluster TLS: %w", err)
 	}
 	if existingCfg != nil && existingCfg.Runtime.ClusterTLS != nil {
-		return loadExistingClusterTLS(existingCfg.Runtime.ClusterTLS, ctls, tlsFilePath, logger, writeBootstrapTokenPath)
+		return issueOwnCertFromClusterCA(existingCfg.Runtime.ClusterTLS, ctls, nodeID, tlsFilePath, logger)
 	}
 
 	ca, err := tlsutil.GenerateCA()
 	if err != nil {
 		return fmt.Errorf("generate CA: %w", err)
 	}
-	cert, err := tlsutil.GenerateClusterCert(ca.CertPEM, ca.KeyPEM, cluster.LaneSANs)
+	cert, err := tlsutil.GenerateNodeCert(ca.CertPEM, ca.KeyPEM, nodeID, cluster.LaneSANs)
 	if err != nil {
-		return fmt.Errorf("generate cluster cert: %w", err)
+		return fmt.Errorf("generate node cert: %w", err)
 	}
-	token, err := tlsutil.GenerateJoinToken(ca.CertPEM)
+	tokenKey, err := tlsutil.GenerateJoinTokenKey()
 	if err != nil {
-		return fmt.Errorf("generate join token: %w", err)
+		return fmt.Errorf("generate join token key: %w", err)
 	}
 
+	// Only the CA and the token are replicated. This node's own certificate
+	// and key stay on its disk: replicating them would put one private key in
+	// every node's state again, which is the thing per-node certificates
+	// exist to stop.
 	if err := cfgStore.PutClusterTLS(ctx, system.ClusterTLS{
-		CACertPEM:      string(ca.CertPEM),
-		CAKeyPEM:       string(ca.KeyPEM),
-		ClusterCertPEM: string(cert.CertPEM),
-		ClusterKeyPEM:  string(cert.KeyPEM),
-		JoinToken:      token,
+		CACertPEM:    string(ca.CertPEM),
+		CAKeyPEM:     string(ca.KeyPEM),
+		JoinTokenKey: hex.EncodeToString(tokenKey),
 	}); err != nil {
 		return fmt.Errorf("store cluster TLS: %w", err)
 	}
@@ -164,41 +170,50 @@ func bootstrapClusterTLS(ctx context.Context, cfgStore system.Store, ctls *clust
 		return fmt.Errorf(errFmtSaveClusterTLS, err)
 	}
 
-	logger.Info("cluster TLS bootstrapped")
-	logger.Info("cluster join token (use --join-token to join)", "token", token)
-
-	if writeBootstrapTokenPath != "" {
-		if err := writeBootstrapTokenAtomic(writeBootstrapTokenPath, token); err != nil {
-			return fmt.Errorf("write bootstrap token: %w", err)
-		}
-		logger.Info("bootstrap token written to file", "path", writeBootstrapTokenPath)
-	}
+	// Nothing secret is logged. Everything a node logs is ingested by the self
+	// ingester, which makes it durable and searchable by anyone who can read a
+	// vault, so a credential written here outlives the boot that printed it.
+	// The CA hash is public — it is derivable from any handshake — and is
+	// enough to confirm which cluster this is.
+	logger.Info("cluster TLS bootstrapped", "ca_hash", caHashOf(ca.CertPEM))
+	logger.Info("mint a join token with `gastrolog cluster join-token`")
 
 	return nil
 }
 
 // loadExistingClusterTLS handles the restart path: cluster TLS material
-// already exists in the store from a prior run, so reuse it instead of
-// regenerating. Also writes the join token to the configured path if
-// requested. Separate from bootstrapClusterTLS's generate path to keep both
-// branches flat per the project's nestif lint rule.
-func loadExistingClusterTLS(existing *system.ClusterTLS, ctls *cluster.ClusterTLS, tlsFilePath string, logger *slog.Logger, writeBootstrapTokenPath string) error {
-	if err := ctls.Load([]byte(existing.ClusterCertPEM), []byte(existing.ClusterKeyPEM), []byte(existing.CACertPEM)); err != nil {
-		return fmt.Errorf("load existing cluster TLS: %w", err)
+// already exists in the store from a prior run, but this node has no
+// certificate file to load. It issues itself one from the replicated CA:
+// a node holding the cluster's own state is a member by construction, and
+// every member holds the CA key so that any of them can enrol a joiner.
+// Separate from bootstrapClusterTLS's generate path to keep both branches
+// flat per the project's nestif lint rule.
+func issueOwnCertFromClusterCA(existing *system.ClusterTLS, ctls *cluster.ClusterTLS, nodeID, tlsFilePath string, logger *slog.Logger) error {
+	cert, err := tlsutil.GenerateNodeCert([]byte(existing.CACertPEM), []byte(existing.CAKeyPEM), nodeID, cluster.LaneSANs)
+	if err != nil {
+		return fmt.Errorf("issue node cert from cluster CA: %w", err)
 	}
-	if err := cluster.SaveFile(tlsFilePath, []byte(existing.ClusterCertPEM), []byte(existing.ClusterKeyPEM), []byte(existing.CACertPEM)); err != nil {
+	if err := ctls.Load(cert.CertPEM, cert.KeyPEM, []byte(existing.CACertPEM)); err != nil {
+		return fmt.Errorf("load issued cluster TLS: %w", err)
+	}
+	if err := cluster.SaveFile(tlsFilePath, cert.CertPEM, cert.KeyPEM, []byte(existing.CACertPEM)); err != nil {
 		return fmt.Errorf(errFmtSaveClusterTLS, err)
 	}
-	logger.Info("cluster TLS loaded from existing config")
-	_, caHash, _ := tlsutil.ParseJoinToken(existing.JoinToken)
-	logger.Info("cluster join token", "token", existing.JoinToken, "ca_hash", caHash)
-	if writeBootstrapTokenPath != "" {
-		if err := writeBootstrapTokenAtomic(writeBootstrapTokenPath, existing.JoinToken); err != nil {
-			return fmt.Errorf("write bootstrap token: %w", err)
-		}
-		logger.Info("bootstrap token written to file", "path", writeBootstrapTokenPath)
-	}
+	logger.Info("node certificate issued from the cluster CA in local state",
+		"node_id", nodeID, "ca_hash", caHashOf([]byte(existing.CACertPEM)))
 	return nil
+}
+
+// caHashOf is the public half of a join token: the fingerprint a joiner pins
+// the answering node against. Safe to log, and the only thing that identifies
+// a cluster without also admitting a node to it.
+func caHashOf(caCertPEM []byte) string {
+	block, _ := pem.Decode(caCertPEM)
+	if block == nil {
+		return ""
+	}
+	sum := sha256.Sum256(block.Bytes)
+	return hex.EncodeToString(sum[:])
 }
 
 // enrollAttemptsPerSecond and enrollBurst bound how fast the join token can
@@ -212,7 +227,14 @@ const (
 )
 
 // makeEnrollHandler creates the Enroll RPC handler for the cluster server.
-func makeEnrollHandler(cfgStore system.Store, logger *slog.Logger) cluster.EnrollHandler {
+//
+// The handler issues the joiner a certificate naming the node ID it asked
+// for, signed by the cluster CA that every member holds. What it will not do
+// is name a node the configuration already has: the ID the joiner sends is
+// unverified at this point, so honouring it for a current member would hand
+// a token holder that member's identity. A node that genuinely lost its disk
+// is removed and re-added rather than silently re-issued.
+func makeEnrollHandler(cfgStore system.Store, clusterSrv *cluster.Server, logger *slog.Logger) cluster.EnrollHandler {
 	limiter := rate.NewLimiter(enrollAttemptsPerSecond, enrollBurst)
 	return func(ctx context.Context, req *gastrologv1.EnrollRequest) (*gastrologv1.EnrollResponse, error) {
 		if !limiter.Allow() {
@@ -227,27 +249,66 @@ func makeEnrollHandler(cfgStore system.Store, logger *slog.Logger) cluster.Enrol
 		}
 		tls := cfg.Runtime.ClusterTLS
 
-		storedSecret, _, err := tlsutil.ParseJoinToken(tls.JoinToken)
+		tokenKey, err := hex.DecodeString(tls.JoinTokenKey)
 		if err != nil {
-			return nil, fmt.Errorf("parse stored join token: %w", err)
+			return nil, fmt.Errorf("decode join token key: %w", err)
 		}
-		// Constant-time: a byte-by-byte comparison tells a caller how much of
-		// the secret it has guessed from how long the answer took.
-		if subtle.ConstantTimeCompare([]byte(req.GetTokenSecret()), []byte(storedSecret)) != 1 {
-			logger.Warn("enroll: invalid token secret", "node_id", req.GetNodeId())
+		// The signature is checked in constant time and the expiry after it,
+		// inside VerifyJoinToken. An expired token is logged as such because
+		// it is the one failure with an obvious operator remedy — mint
+		// another — but the caller is told the same thing either way.
+		if err := tlsutil.VerifyJoinToken(tokenKey, req.GetTokenSecret(), time.Now()); err != nil {
+			if errors.Is(err, tlsutil.ErrJoinTokenExpired) {
+				logger.Warn("enroll: join token expired", "node_id", req.GetNodeId())
+			} else {
+				logger.Warn("enroll: invalid join token", "node_id", req.GetNodeId())
+			}
 			return nil, errors.New("invalid join token")
 		}
 
-		logger.Info("enroll: token verified, returning TLS material",
-			"node_id", req.GetNodeId(),
+		nodeID := string(req.GetNodeId())
+		if nodeID == "" {
+			return nil, errors.New("enrollment needs a node ID to name the certificate")
+		}
+		if inConfiguration(clusterSrv, nodeID) {
+			logger.Warn("enroll: refused, a node with this ID is already in the cluster",
+				"node_id", nodeID, "node_addr", req.GetNodeAddr())
+			return nil, errors.New("a node with this ID is already in the cluster; remove it before enrolling a replacement")
+		}
+
+		certPEM, err := tlsutil.SignCSR([]byte(tls.CACertPEM), []byte(tls.CAKeyPEM), req.GetCsrPem(), nodeID, cluster.LaneSANs)
+		if err != nil {
+			logger.Warn("enroll: refused, certificate request not usable", "node_id", nodeID, "error", err)
+			return nil, fmt.Errorf("sign certificate request: %w", err)
+		}
+
+		logger.Info("enroll: token verified, certificate issued",
+			"node_id", nodeID,
 			"node_addr", req.GetNodeAddr())
 
 		return &gastrologv1.EnrollResponse{
-			CaCertPem:      []byte(tls.CACertPEM),
-			ClusterCertPem: []byte(tls.ClusterCertPEM),
-			ClusterKeyPem:  []byte(tls.ClusterKeyPEM),
+			CaCertPem:   []byte(tls.CACertPEM),
+			NodeCertPem: certPEM,
 		}, nil
 	}
+}
+
+// inConfiguration reports whether the Raft configuration already has a node
+// with this ID, at any address.
+func inConfiguration(clusterSrv *cluster.Server, nodeID string) bool {
+	if clusterSrv == nil {
+		return false
+	}
+	servers, err := clusterSrv.Servers()
+	if err != nil {
+		return false
+	}
+	for _, srv := range servers {
+		if srv.ID == nodeID {
+			return true
+		}
+	}
+	return false
 }
 
 // makeJoinRollback creates a rollback function that restores the old raft
@@ -311,7 +372,7 @@ func makeJoinRollback(
 		clusterSrv.SetApplyFn(func(ctx context.Context, data []byte) (uint64, error) {
 			return oldStore.raftStore.ApplyRaw(data)
 		})
-		clusterSrv.SetEnrollHandler(makeEnrollHandler(proxy, logger))
+		clusterSrv.SetEnrollHandler(makeEnrollHandler(proxy, clusterSrv, logger))
 		if err := clusterSrv.Start(); err != nil {
 			logger.Error("rollback: restart cluster server failed", "error", err)
 		}
@@ -337,7 +398,7 @@ func restartClusterWithStore(store *raftClusterCtlStore, proxy *system.StoreProx
 	clusterSrv.SetApplyFn(func(ctx context.Context, data []byte) (uint64, error) {
 		return store.raftStore.ApplyRaw(data)
 	})
-	clusterSrv.SetEnrollHandler(makeEnrollHandler(proxy, logger))
+	clusterSrv.SetEnrollHandler(makeEnrollHandler(proxy, clusterSrv, logger))
 	if err := clusterSrv.Start(); err != nil {
 		return fmt.Errorf("restart cluster server: %w", err)
 	}
@@ -373,9 +434,9 @@ func makeJoinClusterFunc(
 	orch *orchestrator.Orchestrator,
 	disp *configDispatcher,
 	logger *slog.Logger,
-) func(ctx context.Context, leaderAddr, joinToken string) error {
-	return func(ctx context.Context, leaderAddr, joinToken string) error {
-		logger.Info("runtime cluster join starting", "leader_addr", leaderAddr)
+) func(ctx context.Context, memberAddr, joinToken string) error {
+	return func(ctx context.Context, memberAddr, joinToken string) error {
+		logger.Info("runtime cluster join starting", "member_addr", memberAddr)
 
 		rcs, err := validateSingleNodeCluster(proxy, clusterSrv, nodeID)
 		if err != nil {
@@ -388,20 +449,20 @@ func makeJoinClusterFunc(
 			return fmt.Errorf("parse join token: %w", err)
 		}
 
-		// 2. Enroll with remote leader
-		logger.Info("enrolling with remote leader", "leader_addr", leaderAddr)
+		// 2. Enroll with the remote member
+		logger.Info("enrolling with remote member", "member_addr", memberAddr)
 		enrollCtx, enrollCancel := context.WithTimeout(ctx, 30*time.Second)
-		result, err := cluster.Enroll(enrollCtx, leaderAddr, tokenSecret, caHash, nodeID, clusterAddr)
+		result, err := cluster.Enroll(enrollCtx, memberAddr, tokenSecret, caHash, nodeID, clusterAddr)
 		enrollCancel()
 		if err != nil {
 			return fmt.Errorf("cluster enrollment: %w", err)
 		}
 
 		// 3. Hot-swap TLS
-		if err := clusterTLS.Load(result.ClusterCertPEM, result.ClusterKeyPEM, result.CACertPEM); err != nil {
+		if err := clusterTLS.Load(result.NodeCertPEM, result.NodeKeyPEM, result.CACertPEM); err != nil {
 			return fmt.Errorf("load enrolled TLS material: %w", err)
 		}
-		if err := cluster.SaveFile(hd.ClusterTLSPath(), result.ClusterCertPEM, result.ClusterKeyPEM, result.CACertPEM); err != nil {
+		if err := cluster.SaveFile(hd.ClusterTLSPath(), result.NodeCertPEM, result.NodeKeyPEM, result.CACertPEM); err != nil {
 			return fmt.Errorf("save cluster TLS: %w", err)
 		}
 		logger.Info("TLS material swapped")
@@ -439,7 +500,7 @@ func makeJoinClusterFunc(
 		// 8. Open new raft system store
 		logger.Info("opening new raft system store")
 		newStore, err := openRaftClusterCtlStore(raftStoreOpts{
-			Home: hd, NodeID: nodeID, JoinAddr: leaderAddr,
+			Home: hd, NodeID: nodeID, JoinAddr: memberAddr,
 			ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
 			Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},
 			transport: newTransport,
@@ -467,9 +528,9 @@ func makeJoinClusterFunc(
 		// its own local state, so the safe shape is to enter as a
 		// learner and let the cluster-ctl promoter upgrade to voter once
 		// caught up.
-		logger.Info("requesting cluster membership (as learner)", "leader_addr", leaderAddr)
+		logger.Info("requesting cluster membership (as learner)", "member_addr", memberAddr)
 		joinCtx, joinCancel := context.WithTimeout(ctx, 30*time.Second)
-		err = cluster.JoinCluster(joinCtx, logger, leaderAddr, nodeID, clusterAddr, clusterTLS, false)
+		err = cluster.JoinCluster(joinCtx, logger, memberAddr, nodeID, clusterAddr, clusterTLS, false)
 		joinCancel()
 		if err != nil {
 			return fmt.Errorf("join cluster: %w", err)
@@ -683,7 +744,7 @@ func makeRemoveNodeFunc(
 		}
 
 		if leaderID == "" {
-			return errors.New("no leader available")
+			return cluster.ErrNoLeader
 		}
 		peerConns := clusterSrv.PeerConns()
 		if peerConns == nil {
@@ -1010,40 +1071,95 @@ func rfRefusalError(targetNodeID string, degraded []degradedVault) error {
 		targetNodeID, ErrWouldDropBelowRF, len(degraded), strings.Join(parts, ", "))
 }
 
-// makeSetNodeSuffrageFunc creates the callback for the SetNodeSuffrage RPC.
+// suffrageOp is the configuration change a suffrage request resolves to.
+type suffrageOp string
+
+const (
+	opAddVoter    suffrageOp = "add-voter"
+	opAddNonvoter suffrageOp = "add-nonvoter"
+	opDemoteVoter suffrageOp = "demote-voter"
+)
+
+// resolveSuffrageOp decides which configuration change a request means.
+// admitting says the target is not in the configuration yet.
+//
+// The two inputs are not independent: "no vote" means an addition for a node
+// being admitted and a demotion for one already in the configuration, and
+// demoting a node the configuration has never heard of would leave a joiner
+// outside it. Adding a voter covers both promoting a member and re-adding a
+// restarting one at its current address.
+func resolveSuffrageOp(admitting, voter bool) suffrageOp {
+	switch {
+	case voter:
+		return opAddVoter
+	case admitting:
+		return opAddNonvoter
+	default:
+		return opDemoteVoter
+	}
+}
+
+// makeSetNodeSuffrageFunc creates the callback for the SetNodeSuffrage RPC,
+// and registers the two cluster-lane handlers that reach the same machinery
+// from elsewhere: a follower proxying a suffrage change here because this
+// node leads, and a node asking to be admitted.
 func makeSetNodeSuffrageFunc(
 	clusterSrv *cluster.Server,
 	nodeID string,
 	scheduler *orchestrator.Scheduler,
 	logger *slog.Logger,
 ) func(ctx context.Context, targetNodeID string, voter bool) error {
-	suffrageOnLeader := func(_ context.Context, targetNodeID string, voter bool) error {
-		nodeAddr, err := lookupNodeAddr(clusterSrv, targetNodeID)
+	// A supplied nodeAddr means the target is not in the configuration yet
+	// and the caller is the only one that knows where it is; without one the
+	// target is a current member, and the configuration is the authority on
+	// its address.
+	suffrageOnLeader := func(_ context.Context, targetNodeID, nodeAddr string, voter bool) error {
+		admitting := nodeAddr != ""
+		if !admitting {
+			var err error
+			nodeAddr, err = lookupNodeAddr(clusterSrv, targetNodeID)
+			if err != nil {
+				return err
+			}
+		}
+		op := resolveSuffrageOp(admitting, voter)
+		logger.Info("applying suffrage change", "node_id", targetNodeID, "node_addr", nodeAddr, "op", op)
+		const timeout = 10 * time.Second
+		var err error
+		switch op {
+		case opAddVoter:
+			err = clusterSrv.AddVoter(targetNodeID, nodeAddr, timeout)
+		case opAddNonvoter:
+			err = clusterSrv.AddNonvoter(targetNodeID, nodeAddr, timeout)
+		case opDemoteVoter:
+			err = clusterSrv.DemoteVoter(targetNodeID, timeout)
+		}
 		if err != nil {
+			logger.Error("suffrage change failed", "node_id", targetNodeID, "op", op, "error", err)
 			return err
 		}
-		const timeout = 10 * time.Second
-		if voter {
-			logger.Info("promoting node to voter", "node_id", targetNodeID)
-			if err := clusterSrv.AddVoter(targetNodeID, nodeAddr, timeout); err != nil {
-				logger.Error("suffrage change failed", "node_id", targetNodeID, "voter", voter, "error", err)
-				return err
-			}
-			logger.Info("node promoted to voter", "node_id", targetNodeID)
-		} else {
-			logger.Info("demoting node to nonvoter", "node_id", targetNodeID)
-			if err := clusterSrv.DemoteVoter(targetNodeID, timeout); err != nil {
-				logger.Error("suffrage change failed", "node_id", targetNodeID, "voter", voter, "error", err)
-				return err
-			}
-			logger.Info("node demoted to nonvoter", "node_id", targetNodeID)
-		}
+		logger.Info("suffrage change applied", "node_id", targetNodeID, "op", op)
 		return nil
 	}
 
-	clusterSrv.SetNodeSuffrageFn(func(ctx context.Context, nodeID, nodeAddr string, voter bool) error {
-		return suffrageOnLeader(ctx, nodeID, voter)
-	})
+	clusterSrv.SetNodeSuffrageFn(suffrageOnLeader)
+
+	// changeSuffrage puts the change where it can actually happen. Every
+	// caller reaches the cluster through it and none of them has to know
+	// which node leads, which is what lets a joiner address any member.
+	changeSuffrage := func(ctx context.Context, targetNodeID, nodeAddr string, voter bool) error {
+		_, leaderID := clusterSrv.LeaderInfo()
+		if leaderID == nodeID {
+			return suffrageOnLeader(ctx, targetNodeID, nodeAddr, voter)
+		}
+		if leaderID == "" {
+			return cluster.ErrNoLeader
+		}
+		logger.Info("forwarding suffrage change to leader", "leader_id", leaderID, "target_node_id", targetNodeID, "voter", voter)
+		return forwardSuffrage(clusterSrv, leaderID, targetNodeID, nodeAddr, voter)
+	}
+
+	clusterSrv.SetMembershipHandler(changeSuffrage)
 
 	var demotingSelf atomic.Bool
 
@@ -1060,15 +1176,7 @@ func makeSetNodeSuffrageFunc(
 			return nil
 		}
 
-		if leaderID == nodeID {
-			return suffrageOnLeader(ctx, targetNodeID, voter)
-		}
-
-		if leaderID == "" {
-			return errors.New("no leader available")
-		}
-		logger.Info("forwarding suffrage change to leader", "leader_id", leaderID, "target_node_id", targetNodeID, "voter", voter)
-		return forwardSuffrage(clusterSrv, leaderID, targetNodeID, voter)
+		return changeSuffrage(ctx, targetNodeID, "", voter)
 	}
 }
 
@@ -1087,14 +1195,17 @@ func lookupNodeAddr(clusterSrv *cluster.Server, targetNodeID string) (string, er
 }
 
 // forwardSuffrage forwards a suffrage change to the current leader via cluster gRPC.
-func forwardSuffrage(clusterSrv *cluster.Server, leaderID, targetNodeID string, voter bool) error {
+func forwardSuffrage(clusterSrv *cluster.Server, leaderID, targetNodeID, nodeAddr string, voter bool) error {
 	peerConns := clusterSrv.PeerConns()
 	if peerConns == nil {
 		return errors.New("peer connections not available")
 	}
-	nodeAddr, err := lookupNodeAddr(clusterSrv, targetNodeID)
-	if err != nil {
-		return err
+	if nodeAddr == "" {
+		var err error
+		nodeAddr, err = lookupNodeAddr(clusterSrv, targetNodeID)
+		if err != nil {
+			return err
+		}
 	}
 	req := &gastrologv1.ForwardSetNodeSuffrageRequest{
 		NodeId:   []byte(targetNodeID),
@@ -1152,7 +1263,7 @@ func submitSelfDemotion(
 					newLeaderID = id
 				}
 			}
-			if err := forwardSuffrage(clusterSrv, newLeaderID, nodeID, false); err != nil {
+			if err := forwardSuffrage(clusterSrv, newLeaderID, nodeID, "", false); err != nil {
 				lastErr = err
 				logger.Warn("forward demotion attempt failed", "attempt", attempt+1, "error", err)
 				continue

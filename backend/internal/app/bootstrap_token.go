@@ -2,16 +2,17 @@ package app
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"gastrolog/internal/cluster/tlsutil"
 	"gastrolog/internal/system"
 )
 
@@ -63,84 +64,6 @@ const (
 	// joiners with arbitrary bytes.
 	maxBootstrapTokenBytes = 1024
 )
-
-// writeBootstrapTokenAtomic writes the token to path with a write-rename
-// so a concurrent reader never sees a half-written file. mode 0600 is
-// applied via the temp file before rename, so the final file inherits it.
-//
-// The parent directory is created if missing; this lets operators point
-// the flag at e.g. /shared/cluster/token without pre-creating the
-// directory in init containers.
-func writeBootstrapTokenAtomic(path, token string) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return fmt.Errorf("create token dir: %w", err)
-	}
-	tmp, err := os.CreateTemp(dir, ".bootstrap-token-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp token file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpPath) }
-
-	if err := tmp.Chmod(bootstrapTokenFileMode); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return fmt.Errorf("chmod temp token file: %w", err)
-	}
-	if _, err := tmp.WriteString(token); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return fmt.Errorf("write temp token file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return fmt.Errorf("close temp token file: %w", err)
-	}
-	// path is operator-supplied via --write-bootstrap-token; the rename
-	// target IS the configured destination, by design.
-	if err := os.Rename(tmpPath, path); err != nil {
-		cleanup()
-		return fmt.Errorf("rename temp token file: %w", err)
-	}
-	return nil
-}
-
-// readBootstrapTokenWithRetry reads the token from path, polling with
-// exponential backoff until the file appears or ctx is cancelled. The
-// timeout (set by the caller via ctx) bounds total wait time.
-//
-// Files are expected to contain only the token (whitespace trimmed).
-// Empty files are treated as "not yet written" and trigger another
-// poll, since an atomic-write race is impossible (writeBootstrapTokenAtomic
-// only renames after a complete write) but a manually-created empty
-// file is the operator's signal "still working on it."
-func readBootstrapTokenWithRetry(ctx context.Context, path string, logger *slog.Logger) (string, error) {
-	backoff := bootstrapTokenInitialBackoff
-	logger.Info("waiting for bootstrap token file", "path", path)
-	for {
-		token, err := readTokenFile(path)
-		if err == nil && token != "" {
-			logger.Info("bootstrap token loaded from file", "path", path)
-			return token, nil
-		}
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			// File exists but unreadable — surface immediately rather
-			// than hammering the FS in an infinite loop.
-			return "", fmt.Errorf("read bootstrap token file: %w", err)
-		}
-
-		select {
-		case <-ctx.Done():
-			return "", fmt.Errorf("bootstrap token file %q never appeared: %w", path, ctx.Err())
-		case <-time.After(backoff):
-		}
-		backoff *= 2
-		if backoff > bootstrapTokenMaxBackoff {
-			backoff = bootstrapTokenMaxBackoff
-		}
-	}
-}
 
 // readTokenFile reads up to maxBootstrapTokenBytes from path and
 // returns the trimmed contents. Distinguishes "not present" from
@@ -236,11 +159,15 @@ func fetchTokenOnce(ctx context.Context, client *http.Client, url, secret string
 	}
 }
 
-// makeBootstrapTokenFn returns a closure that loads the cluster's
-// current join token from the config store. The HTTP endpoint at
-// /cluster/bootstrap-token calls this on each authorized request,
-// so a token rotated by the operator (e.g. via cluster TLS reissue)
-// is picked up without restarting the server.
+// makeBootstrapTokenFn returns a closure that mints a join token from the
+// cluster's key. The HTTP endpoint at /cluster/bootstrap-token calls this on
+// each authorized request, so a joiner fetching one at its own startup always
+// gets a token whose window has not started closing yet.
+//
+// Minting per request is what makes expiry workable. A standing token would
+// have to outlive every join that will ever happen, which is the same as not
+// expiring; one minted at the moment of asking only has to survive the next
+// few seconds.
 func makeBootstrapTokenFn(cfgStore system.Store) func() (string, error) {
 	return func() (string, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -249,20 +176,27 @@ func makeBootstrapTokenFn(cfgStore system.Store) func() (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("load config: %w", err)
 		}
-		if sys == nil || sys.Runtime.ClusterTLS == nil {
+		if sys == nil || sys.Runtime.ClusterTLS == nil || sys.Runtime.ClusterTLS.JoinTokenKey == "" {
 			return "", errors.New("cluster TLS not initialized")
 		}
-		return sys.Runtime.ClusterTLS.JoinToken, nil
+		key, err := hex.DecodeString(sys.Runtime.ClusterTLS.JoinTokenKey)
+		if err != nil {
+			return "", fmt.Errorf("decode join token key: %w", err)
+		}
+		return tlsutil.MintJoinToken(key, []byte(sys.Runtime.ClusterTLS.CACertPEM), tlsutil.DefaultJoinTokenTTL)
 	}
 }
 
 // resolveJoinTokenFromSources populates cfg.JoinToken when the operator
 // supplied a delivery path instead of the literal token. Precedence:
 //  1. cfg.JoinToken (literal) — wins if set
-//  2. cfg.BootstrapTokenFile — file-based
-//  3. cfg.BootstrapTokenURL  — endpoint-based
+//  2. cfg.BootstrapTokenURL  — endpoint-based
 //
-// At most one of (file, URL) should be set; if both are, file wins.
+// There is deliberately no file-drop path. A token written to a shared volume
+// at bootstrap is read by joiners that start arbitrarily later, so it would
+// have to outlive every join the cluster will ever see — which is the same as
+// not expiring. The endpoint mints one per request instead, so a joiner always
+// gets a fresh one however long after bootstrap it starts.
 //
 // Returns nil with cfg unmodified when no source applies (single-node
 // or attended bootstrap with the literal flag).
@@ -270,22 +204,14 @@ func resolveJoinTokenFromSources(ctx context.Context, cfg *RunConfig, logger *sl
 	if cfg.JoinToken != "" {
 		return nil
 	}
-	if cfg.BootstrapTokenFile == "" && cfg.BootstrapTokenURL == "" {
+	if cfg.BootstrapTokenURL == "" {
 		return nil
 	}
 	if cfg.JoinAddr == "" {
-		return errors.New("bootstrap-token-file or bootstrap-token-url set without --join-addr")
+		return errors.New("bootstrap-token-url set without --join-addr")
 	}
 	timeoutCtx, cancel := context.WithTimeout(ctx, bootstrapTokenDefaultTimeout)
 	defer cancel()
-	if cfg.BootstrapTokenFile != "" {
-		token, err := readBootstrapTokenWithRetry(timeoutCtx, cfg.BootstrapTokenFile, logger)
-		if err != nil {
-			return err
-		}
-		cfg.JoinToken = token
-		return nil
-	}
 	token, err := fetchBootstrapTokenWithRetry(timeoutCtx, cfg.BootstrapTokenURL, cfg.BootstrapTokenSecret, logger)
 	if err != nil {
 		return err

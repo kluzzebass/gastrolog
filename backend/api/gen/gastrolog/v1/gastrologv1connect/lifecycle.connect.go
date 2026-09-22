@@ -41,6 +41,9 @@ const (
 	// LifecycleServiceGetClusterStatusProcedure is the fully-qualified name of the LifecycleService's
 	// GetClusterStatus RPC.
 	LifecycleServiceGetClusterStatusProcedure = "/gastrolog.v1.LifecycleService/GetClusterStatus"
+	// LifecycleServiceCreateJoinTokenProcedure is the fully-qualified name of the LifecycleService's
+	// CreateJoinToken RPC.
+	LifecycleServiceCreateJoinTokenProcedure = "/gastrolog.v1.LifecycleService/CreateJoinToken"
 	// LifecycleServiceSetNodeSuffrageProcedure is the fully-qualified name of the LifecycleService's
 	// SetNodeSuffrage RPC.
 	LifecycleServiceSetNodeSuffrageProcedure = "/gastrolog.v1.LifecycleService/SetNodeSuffrage"
@@ -69,6 +72,10 @@ type LifecycleServiceClient interface {
 	Shutdown(context.Context, *connect.Request[v1.ShutdownRequest]) (*connect.Response[v1.ShutdownResponse], error)
 	// GetClusterStatus returns the current cluster topology and Raft state.
 	GetClusterStatus(context.Context, *connect.Request[v1.GetClusterStatusRequest]) (*connect.Response[v1.GetClusterStatusResponse], error)
+	// CreateJoinToken mints a join token for admitting a new node. Tokens
+	// expire, so this is an action rather than a field of cluster status:
+	// there is no standing token to read, and one is issued when asked for.
+	CreateJoinToken(context.Context, *connect.Request[v1.CreateJoinTokenRequest]) (*connect.Response[v1.CreateJoinTokenResponse], error)
 	// SetNodeSuffrage promotes or demotes a node's voting status.
 	SetNodeSuffrage(context.Context, *connect.Request[v1.SetNodeSuffrageRequest]) (*connect.Response[v1.SetNodeSuffrageResponse], error)
 	// SetNodeState transitions a node between lifecycle states (Live,
@@ -124,6 +131,12 @@ func NewLifecycleServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithSchema(lifecycleServiceMethods.ByName("GetClusterStatus")),
 			connect.WithClientOptions(opts...),
 		),
+		createJoinToken: connect.NewClient[v1.CreateJoinTokenRequest, v1.CreateJoinTokenResponse](
+			httpClient,
+			baseURL+LifecycleServiceCreateJoinTokenProcedure,
+			connect.WithSchema(lifecycleServiceMethods.ByName("CreateJoinToken")),
+			connect.WithClientOptions(opts...),
+		),
 		setNodeSuffrage: connect.NewClient[v1.SetNodeSuffrageRequest, v1.SetNodeSuffrageResponse](
 			httpClient,
 			baseURL+LifecycleServiceSetNodeSuffrageProcedure,
@@ -168,6 +181,7 @@ type lifecycleServiceClient struct {
 	health            *connect.Client[v1.HealthRequest, v1.HealthResponse]
 	shutdown          *connect.Client[v1.ShutdownRequest, v1.ShutdownResponse]
 	getClusterStatus  *connect.Client[v1.GetClusterStatusRequest, v1.GetClusterStatusResponse]
+	createJoinToken   *connect.Client[v1.CreateJoinTokenRequest, v1.CreateJoinTokenResponse]
 	setNodeSuffrage   *connect.Client[v1.SetNodeSuffrageRequest, v1.SetNodeSuffrageResponse]
 	setNodeState      *connect.Client[v1.SetNodeStateRequest, v1.SetNodeStateResponse]
 	joinCluster       *connect.Client[v1.JoinClusterRequest, v1.JoinClusterResponse]
@@ -189,6 +203,11 @@ func (c *lifecycleServiceClient) Shutdown(ctx context.Context, req *connect.Requ
 // GetClusterStatus calls gastrolog.v1.LifecycleService.GetClusterStatus.
 func (c *lifecycleServiceClient) GetClusterStatus(ctx context.Context, req *connect.Request[v1.GetClusterStatusRequest]) (*connect.Response[v1.GetClusterStatusResponse], error) {
 	return c.getClusterStatus.CallUnary(ctx, req)
+}
+
+// CreateJoinToken calls gastrolog.v1.LifecycleService.CreateJoinToken.
+func (c *lifecycleServiceClient) CreateJoinToken(ctx context.Context, req *connect.Request[v1.CreateJoinTokenRequest]) (*connect.Response[v1.CreateJoinTokenResponse], error) {
+	return c.createJoinToken.CallUnary(ctx, req)
 }
 
 // SetNodeSuffrage calls gastrolog.v1.LifecycleService.SetNodeSuffrage.
@@ -229,6 +248,10 @@ type LifecycleServiceHandler interface {
 	Shutdown(context.Context, *connect.Request[v1.ShutdownRequest]) (*connect.Response[v1.ShutdownResponse], error)
 	// GetClusterStatus returns the current cluster topology and Raft state.
 	GetClusterStatus(context.Context, *connect.Request[v1.GetClusterStatusRequest]) (*connect.Response[v1.GetClusterStatusResponse], error)
+	// CreateJoinToken mints a join token for admitting a new node. Tokens
+	// expire, so this is an action rather than a field of cluster status:
+	// there is no standing token to read, and one is issued when asked for.
+	CreateJoinToken(context.Context, *connect.Request[v1.CreateJoinTokenRequest]) (*connect.Response[v1.CreateJoinTokenResponse], error)
 	// SetNodeSuffrage promotes or demotes a node's voting status.
 	SetNodeSuffrage(context.Context, *connect.Request[v1.SetNodeSuffrageRequest]) (*connect.Response[v1.SetNodeSuffrageResponse], error)
 	// SetNodeState transitions a node between lifecycle states (Live,
@@ -280,6 +303,12 @@ func NewLifecycleServiceHandler(svc LifecycleServiceHandler, opts ...connect.Han
 		connect.WithSchema(lifecycleServiceMethods.ByName("GetClusterStatus")),
 		connect.WithHandlerOptions(opts...),
 	)
+	lifecycleServiceCreateJoinTokenHandler := connect.NewUnaryHandler(
+		LifecycleServiceCreateJoinTokenProcedure,
+		svc.CreateJoinToken,
+		connect.WithSchema(lifecycleServiceMethods.ByName("CreateJoinToken")),
+		connect.WithHandlerOptions(opts...),
+	)
 	lifecycleServiceSetNodeSuffrageHandler := connect.NewUnaryHandler(
 		LifecycleServiceSetNodeSuffrageProcedure,
 		svc.SetNodeSuffrage,
@@ -324,6 +353,8 @@ func NewLifecycleServiceHandler(svc LifecycleServiceHandler, opts ...connect.Han
 			lifecycleServiceShutdownHandler.ServeHTTP(w, r)
 		case LifecycleServiceGetClusterStatusProcedure:
 			lifecycleServiceGetClusterStatusHandler.ServeHTTP(w, r)
+		case LifecycleServiceCreateJoinTokenProcedure:
+			lifecycleServiceCreateJoinTokenHandler.ServeHTTP(w, r)
 		case LifecycleServiceSetNodeSuffrageProcedure:
 			lifecycleServiceSetNodeSuffrageHandler.ServeHTTP(w, r)
 		case LifecycleServiceSetNodeStateProcedure:
@@ -355,6 +386,10 @@ func (UnimplementedLifecycleServiceHandler) Shutdown(context.Context, *connect.R
 
 func (UnimplementedLifecycleServiceHandler) GetClusterStatus(context.Context, *connect.Request[v1.GetClusterStatusRequest]) (*connect.Response[v1.GetClusterStatusResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.GetClusterStatus is not implemented"))
+}
+
+func (UnimplementedLifecycleServiceHandler) CreateJoinToken(context.Context, *connect.Request[v1.CreateJoinTokenRequest]) (*connect.Response[v1.CreateJoinTokenResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.CreateJoinToken is not implemented"))
 }
 
 func (UnimplementedLifecycleServiceHandler) SetNodeSuffrage(context.Context, *connect.Request[v1.SetNodeSuffrageRequest]) (*connect.Response[v1.SetNodeSuffrageResponse], error) {

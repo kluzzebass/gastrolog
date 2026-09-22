@@ -2,97 +2,14 @@ package app
 
 import (
 	"context"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 )
-
-func TestWriteBootstrapTokenAtomic_CreatesDirAndChmods(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "nested", "deeper", "token")
-	if err := writeBootstrapTokenAtomic(path, "abc123"); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
-	if got := info.Mode().Perm(); got != bootstrapTokenFileMode {
-		t.Errorf("file mode = %o, want %o", got, bootstrapTokenFileMode)
-	}
-	got, err := readTokenFile(path)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if got != "abc123" {
-		t.Errorf("contents = %q, want %q", got, "abc123")
-	}
-}
-
-func TestWriteBootstrapTokenAtomic_OverwritesExisting(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "token")
-	if err := writeBootstrapTokenAtomic(path, "first"); err != nil {
-		t.Fatalf("write 1: %v", err)
-	}
-	if err := writeBootstrapTokenAtomic(path, "second"); err != nil {
-		t.Fatalf("write 2: %v", err)
-	}
-	got, err := readTokenFile(path)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if got != "second" {
-		t.Errorf("contents after overwrite = %q, want %q", got, "second")
-	}
-}
-
-func TestReadBootstrapTokenWithRetry_PollsUntilPresent(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "token")
-
-	// Write the file from another goroutine after a short delay so the
-	// reader has to poll at least once.
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		_ = writeBootstrapTokenAtomic(path, "delivered")
-	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	got, err := readBootstrapTokenWithRetry(ctx, path, slog.Default())
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if got != "delivered" {
-		t.Errorf("token = %q, want %q", got, "delivered")
-	}
-}
-
-func TestReadBootstrapTokenWithRetry_TimesOut(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "never-exists")
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	_, err := readBootstrapTokenWithRetry(ctx, path, slog.Default())
-	if err == nil {
-		t.Fatal("expected timeout error, got nil")
-	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("error = %v, want context.DeadlineExceeded", err)
-	}
-}
 
 func TestFetchBootstrapTokenWithRetry_HappyPath(t *testing.T) {
 	t.Parallel()
@@ -168,34 +85,15 @@ func TestFetchBootstrapTokenWithRetry_RetriesTransient(t *testing.T) {
 func TestResolveJoinTokenFromSources_LiteralWins(t *testing.T) {
 	t.Parallel()
 	cfg := RunConfig{
-		JoinAddr:           "leader:4566",
-		JoinToken:          "literal",
-		BootstrapTokenFile: "/should-be-ignored",
+		JoinAddr:          "member:4566",
+		JoinToken:         "literal",
+		BootstrapTokenURL: "http://should-be-ignored/cluster/bootstrap-token",
 	}
 	if err := resolveJoinTokenFromSources(context.Background(), &cfg, slog.Default()); err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	if cfg.JoinToken != "literal" {
 		t.Errorf("JoinToken = %q, want literal", cfg.JoinToken)
-	}
-}
-
-func TestResolveJoinTokenFromSources_FromFile(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "token")
-	if err := writeBootstrapTokenAtomic(path, "from-file"); err != nil {
-		t.Fatal(err)
-	}
-	cfg := RunConfig{
-		JoinAddr:           "leader:4566",
-		BootstrapTokenFile: path,
-	}
-	if err := resolveJoinTokenFromSources(context.Background(), &cfg, slog.Default()); err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if cfg.JoinToken != "from-file" {
-		t.Errorf("JoinToken = %q, want from-file", cfg.JoinToken)
 	}
 }
 
@@ -207,16 +105,5 @@ func TestResolveJoinTokenFromSources_NoSourceNoOp(t *testing.T) {
 	}
 	if cfg.JoinToken != "" {
 		t.Errorf("JoinToken = %q, want empty", cfg.JoinToken)
-	}
-}
-
-func TestResolveJoinTokenFromSources_FileWithoutJoinAddrErrs(t *testing.T) {
-	t.Parallel()
-	cfg := RunConfig{
-		BootstrapTokenFile: "/some/path",
-	}
-	err := resolveJoinTokenFromSources(context.Background(), &cfg, slog.Default())
-	if err == nil {
-		t.Fatal("expected error for token source without --join-addr, got nil")
 	}
 }
