@@ -112,15 +112,21 @@ func newRaftContactCluster(t *testing.T, n int, raftTTL time.Duration) []*raftCo
 		cfg.LogOutput = io.Discard
 
 		store := hraft.NewInmemStore()
-		r, err := hraft.NewRaft(cfg, &noopFSM{}, store, store, hraft.NewInmemSnapshotStore(),
-			node.transport.GroupTransport(raftContactGroup))
+		snaps := hraft.NewInmemSnapshotStore()
+		trans := node.transport.GroupTransport(raftContactGroup)
+		// Bootstrap writes the stores before NewRaft runs. The listener is
+		// already reachable over TCP, so a vote request from a node started
+		// earlier in this loop would otherwise persist a term first, and the
+		// bootstrap after it would refuse the store as no longer new.
+		if err := hraft.BootstrapCluster(cfg, store, store, snaps, trans,
+			hraft.Configuration{Servers: members}); err != nil {
+			t.Fatalf("BootstrapCluster %s: %v", node.id, err)
+		}
+		r, err := hraft.NewRaft(cfg, &noopFSM{}, store, store, snaps, trans)
 		if err != nil {
 			t.Fatalf("NewRaft %s: %v", node.id, err)
 		}
 		node.raft = r
-		if err := r.BootstrapCluster(hraft.Configuration{Servers: members}).Error(); err != nil {
-			t.Fatalf("BootstrapCluster %s: %v", node.id, err)
-		}
 	}
 
 	t.Cleanup(func() {

@@ -315,6 +315,12 @@ func newRaftCluster(t *testing.T, nodeCount int) *raftCluster {
 // startRaft builds a raft instance on n's current WAL-backed store and FSM.
 // bootstrap is for a cluster with no persisted state; a restarted node reads
 // its configuration back from its own log and snapshots.
+//
+// Bootstrap writes the stores before NewRaft runs. NewRaft consumes the
+// transport the moment it returns, and every transport is already wired to
+// its peers — so a vote request from a node that started earlier would
+// persist a term here first, and a bootstrap after that refuses the store
+// as no longer new.
 func (c *raftCluster) startRaft(n *raftNode, bootstrap bool) {
 	c.t.Helper()
 	snaps, err := hraft.NewFileSnapshotStore(n.snapDir, 2, io.Discard)
@@ -322,16 +328,17 @@ func (c *raftCluster) startRaft(n *raftNode, bootstrap bool) {
 		c.t.Fatalf("%s: snapshot store: %v", n.id, err)
 	}
 	n.snaps = snaps
-	r, err := hraft.NewRaft(raftTestConfig(n.id), n.fsm, n.gs, n.gs, snaps, n.trans)
+	conf := raftTestConfig(n.id)
+	if bootstrap {
+		if err := hraft.BootstrapCluster(conf, n.gs, n.gs, snaps, n.trans, c.boot); err != nil {
+			c.t.Fatalf("%s: bootstrap: %v", n.id, err)
+		}
+	}
+	r, err := hraft.NewRaft(conf, n.fsm, n.gs, n.gs, snaps, n.trans)
 	if err != nil {
 		c.t.Fatalf("%s: new raft: %v", n.id, err)
 	}
 	n.raft = r
-	if bootstrap {
-		if err := r.BootstrapCluster(c.boot).Error(); err != nil {
-			c.t.Fatalf("%s: bootstrap: %v", n.id, err)
-		}
-	}
 }
 
 // leader resolves the current leader through VerifyLeader futures: a follower
