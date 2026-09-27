@@ -226,6 +226,12 @@ func TestRun_StopsOnContextCancel(t *testing.T) {
 	}
 }
 
+// TestRun_ConcurrentIngesters verifies two ingesters sharing one output
+// channel each deliver messages carrying their own identity. The test waits
+// for the outcome instead of running inside a wall-clock window: bounding
+// the experiment by time makes a busy machine indistinguishable from broken
+// code, and counting messages without their source would let one ingester
+// satisfy a test named for two.
 func TestRun_ConcurrentIngesters(t *testing.T) {
 	t.Parallel()
 	params := map[string]string{
@@ -233,16 +239,17 @@ func TestRun_ConcurrentIngesters(t *testing.T) {
 		"maxInterval": "5ms",
 	}
 
-	r1, err := NewIngester(glid.New(), params, nil)
+	id1, id2 := glid.New(), glid.New()
+	r1, err := NewIngester(id1, params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester(r1) failed: %v", err)
 	}
-	r2, err := NewIngester(glid.New(), params, nil)
+	r2, err := NewIngester(id2, params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester(r2) failed: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	out := make(chan ingestion.IngesterMessage, 100)
@@ -250,17 +257,27 @@ func TestRun_ConcurrentIngesters(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Go(func() { _ = r1.Run(ctx, out) })
 	wg.Go(func() { _ = r2.Run(ctx, out) })
+
+	// Read until both ingesters have been heard from, however long the
+	// scheduler takes to get them going. The deadline is a failsafe for a
+	// hung ingester, not the measurement.
+	want := map[string]bool{id1.String(): true, id2.String(): true}
+	seen := map[string]bool{}
+	failsafe := time.After(30 * time.Second)
+	for len(seen) < len(want) {
+		select {
+		case msg := <-out:
+			if !want[msg.IngesterID] {
+				t.Fatalf("message from unknown ingester %q", msg.IngesterID)
+			}
+			seen[msg.IngesterID] = true
+		case <-failsafe:
+			t.Fatalf("heard from %d of %d ingesters before the failsafe deadline", len(seen), len(want))
+		}
+	}
+
+	cancel()
 	wg.Wait()
-	close(out)
-
-	count := 0
-	for range out {
-		count++
-	}
-
-	if count < 2 {
-		t.Errorf("expected at least 2 messages from concurrent ingesters, got %d", count)
-	}
 }
 
 func TestRun_ReturnsNilOnCancel(t *testing.T) {
