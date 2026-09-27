@@ -21,6 +21,7 @@ import (
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/record"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+	"gastrolog/internal/waittest"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -164,18 +165,6 @@ func allRoute(t *testing.T, vaultID glid.GLID) *routing.Table {
 	return routing.NewTable([]*routing.Route{route})
 }
 
-func waitFor(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
-}
-
 func batch(n int, raw string) []ingestion.IngesterMessage {
 	msgs := make([]ingestion.IngesterMessage, n)
 	for i := range msgs {
@@ -266,7 +255,7 @@ func TestSupervisorOriginIngestToPublish(t *testing.T) {
 		t.Fatalf("ReconcileIngesters: %v", err)
 	}
 
-	waitFor(t, "published segment", func() bool { return pub.count() >= 1 })
+	waittest.For(t, "published segment", func() bool { return pub.count() >= 1 })
 }
 
 // TestSupervisorFullVaultHome registers a vault as both Origin and Home on one
@@ -327,7 +316,7 @@ func TestSupervisorFullVaultHome(t *testing.T) {
 		t.Fatalf("ReconcileIngesters: %v", err)
 	}
 
-	waitFor(t, "published segment", func() bool { return rec.count() >= 1 })
+	waittest.For(t, "published segment", func() bool { return rec.count() >= 1 })
 
 	// Drive a collection pass via the orchestrator seam: the segment published by
 	// the origin half is rolled from the log, pulled back through ServePull,
@@ -336,7 +325,7 @@ func TestSupervisorFullVaultHome(t *testing.T) {
 	if err := sup.CollectOnce(context.Background(), vaultID); err != nil {
 		t.Fatalf("CollectOnce: %v", err)
 	}
-	waitFor(t, "holder receipt", func() bool { return receipts.count() >= 1 })
+	waittest.For(t, "holder receipt", func() bool { return receipts.count() >= 1 })
 }
 
 // TestSupervisorReconcilePlacementFlap simulates a placement change moving a vault
