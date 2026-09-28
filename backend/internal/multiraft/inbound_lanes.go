@@ -15,9 +15,10 @@ type InboundLaneRegistry struct {
 }
 
 type inboundLaneListener struct {
-	ch     chan net.Conn
-	closed chan struct{}
-	addr   net.Addr
+	ch        chan net.Conn
+	closed    chan struct{}
+	closeOnce sync.Once
+	addr      net.Addr
 }
 
 // NewInboundLaneRegistry creates a registry for per-group raft listeners.
@@ -62,7 +63,10 @@ func (r *InboundLaneRegistry) Deliver(groupID string, conn net.Conn) bool {
 	}
 }
 
-// Remove closes and drops the listener for groupID.
+// Remove closes and drops the listener for groupID. The listener may
+// already have closed itself — a group's gRPC server closes its listener on
+// stop, and DestroyGroup then removes the lane — so this goes through the
+// listener's guarded Close rather than closing the channel directly.
 func (r *InboundLaneRegistry) Remove(groupID string) {
 	r.mu.Lock()
 	l, ok := r.lanes[groupID]
@@ -71,7 +75,7 @@ func (r *InboundLaneRegistry) Remove(groupID string) {
 	}
 	r.mu.Unlock()
 	if ok {
-		close(l.closed)
+		_ = l.Close()
 	}
 }
 
@@ -82,7 +86,7 @@ func (r *InboundLaneRegistry) Close() {
 	r.lanes = make(map[string]*inboundLaneListener)
 	r.mu.Unlock()
 	for _, l := range lanes {
-		close(l.closed)
+		_ = l.Close()
 	}
 }
 
@@ -98,14 +102,17 @@ func (l *inboundLaneListener) Accept() (net.Conn, error) {
 	}
 }
 
+// Close is safe to call from every shutdown path concurrently: the group's
+// gRPC server closes its listener on stop, and the registry closes it again
+// on Remove. A select-default guard here is check-then-act — two concurrent
+// closers can both pass it — so the close funnels through a Once.
 func (l *inboundLaneListener) Close() error {
-	select {
-	case <-l.closed:
-		return net.ErrClosed
-	default:
+	err := net.ErrClosed
+	l.closeOnce.Do(func() {
 		close(l.closed)
-		return nil
-	}
+		err = nil
+	})
+	return err
 }
 
 func (l *inboundLaneListener) Addr() net.Addr { return l.addr }
