@@ -332,14 +332,6 @@ func copyOpenChunkManifest(m *OpenChunkManifest) *OpenChunkManifest {
 	return &cp
 }
 
-func openChunkSegmentRefEqual(a, b OpenChunkSegmentRef) bool {
-	return a.SegmentID == b.SegmentID &&
-		a.FirstRecordNumber == b.FirstRecordNumber &&
-		a.LastRecordNumber == b.LastRecordNumber &&
-		a.SliceBytes == b.SliceBytes &&
-		a.RefAddedAt.Equal(b.RefAddedAt)
-}
-
 func (f *FSM) applyOpenChunkManifest(c *gastrologv1.OpenChunkManifestCommand) error {
 	id := chunkIDFromProto(c.GetChunkId())
 	if id == chunk.ChunkID(glid.Nil) {
@@ -392,6 +384,17 @@ func (f *FSM) applyAddOpenChunkSegmentRef(c *gastrologv1.AddOpenChunkSegmentRefC
 	if f.completedSegments[segID] == nil {
 		return fmt.Errorf("%w: %s", ErrSegmentReleased, segID)
 	}
+	// Racing proposers re-propose the same slice — forward retries, and
+	// planner passes working from stale snapshots (whose RefAddedAt stamps
+	// differ). A duplicate that lands counts the records twice: the rotation
+	// total inflates, the tail displaces into the next chunk, and the build
+	// composes the same records into one or two chunks. Ignoring is safe:
+	// the resume cursor advanced when the original landed, so the next pass
+	// proposes any still-uncovered tail. Deterministic — every node sees
+	// identical manifests at this log index.
+	if f.segmentRangeReferencedLocked(segID, c.GetFirstRecordNumber(), c.GetLastRecordNumber()) {
+		return nil
+	}
 	ref := OpenChunkSegmentRef{
 		SegmentID:         segID,
 		FirstRecordNumber: c.GetFirstRecordNumber(),
@@ -399,11 +402,6 @@ func (f *FSM) applyAddOpenChunkSegmentRef(c *gastrologv1.AddOpenChunkSegmentRefC
 		SliceBytes:        c.GetSliceBytes(),
 		RefAddedAt:        time.Unix(0, c.GetRefAddedAtNanos()),
 		Bounds:            boundsFromAddRefCommand(c),
-	}
-	if n := len(f.openChunk.Refs); n > 0 {
-		if openChunkSegmentRefEqual(f.openChunk.Refs[n-1], ref) {
-			return nil
-		}
 	}
 	f.openChunk.Refs = append(f.openChunk.Refs, ref)
 	f.openChunk.TotalRecords += count
@@ -646,6 +644,25 @@ func (f *FSM) segmentReferencedInManifestLocked(segmentID glid.GLID) bool {
 		}
 		for _, ref := range m.Refs {
 			if ref.SegmentID == segmentID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// segmentRangeReferencedLocked reports whether any manifest ref — the open
+// chunk's or a pending sealed one's — already covers part of segID's record
+// range [first, last]. Segment identity alone is not enough: one segment
+// legitimately attaches in several slices, so only an overlapping range marks
+// a re-proposal. Caller MUST hold f.mu.
+func (f *FSM) segmentRangeReferencedLocked(segID glid.GLID, first, last uint32) bool {
+	for _, m := range append([]*OpenChunkManifest{f.openChunk}, f.sealedManifests...) {
+		if m == nil {
+			continue
+		}
+		for _, ref := range m.Refs {
+			if ref.SegmentID == segID && first <= ref.LastRecordNumber && ref.FirstRecordNumber <= last {
 				return true
 			}
 		}
