@@ -96,7 +96,12 @@ func (h *orchRelHarness) waitSealedRecords(v vaultSpec, nodeID string, wantRecor
 			total += e.RecordCount
 		}
 		return fmt.Sprintf("sealed_records=%d sealed_chunks=%d", total, len(entries)), total == wantRecords
-	}, func() { h.dumpPipelineState(v) })
+	}, func() {
+		h.dumpPipelineState(v)
+		// An overshoot (total > want) is a duplicated record inside a sealed
+		// chunk, not slowness; the bodies say which record and which chunks.
+		h.dumpGLCBBodies(v, nil, h.sealedPipelineChunks(v, nodeID))
+	})
 	return entries
 }
 
@@ -396,16 +401,65 @@ func TestOrchPipeline_ClusterIngestToSealedGLCB(t *testing.T) {
 	for _, raw := range got {
 		counts[string(raw)]++
 	}
+	broken := false
 	for body, n := range counts {
 		if !bodies[body] {
 			t.Errorf("query returned unexpected record %q (x%d)", body, n)
+			broken = true
 		} else if n != 1 {
 			t.Errorf("query returned record %q %d times, want once", body, n)
+			broken = true
 		}
 		delete(bodies, body)
 	}
 	for body := range bodies {
 		t.Errorf("query missing ingested record %q", body)
+		broken = true
+	}
+	if broken {
+		// Attribute every record body to the chunks that physically contain
+		// it, per home. This separates the two readings of the failure: a
+		// body in two chunks (or in one chunk twice) is storage-side
+		// duplication all homes share; a body in exactly one chunk that the
+		// query returned twice is a query-side double-read; a body in no
+		// chunk at all was accepted and is not durable anywhere the query
+		// looks.
+		h.dumpGLCBBodies(v, homeIdxs, entries)
+	}
+}
+
+// dumpGLCBBodies logs, for every home and every sealed chunk, the record
+// bodies the GLCB physically contains.
+func (h *orchRelHarness) dumpGLCBBodies(v vaultSpec, homeIdxs []int, entries []vaultctlfsm.ManifestEntry) {
+	h.t.Helper()
+	if homeIdxs == nil {
+		// All nodes: a node without the GLCB logs an open error and moves on,
+		// which doubles as a record of where the chunk is absent.
+		homeIdxs = make([]int, len(h.nodeIDs))
+		for i := range h.nodeIDs {
+			homeIdxs[i] = i
+		}
+	}
+	for _, idx := range homeIdxs {
+		nodeID := h.nodeIDs[idx]
+		for _, e := range entries {
+			path := h.pipelineGLCBPath(nodeID, v, e.ID)
+			cur, err := chunking.OpenGLCBCursor(path, e.ID)
+			if err != nil {
+				h.t.Logf("dump %s chunk %s: open GLCB: %v", h.nodes[nodeID].label, e.ID, err)
+				continue
+			}
+			var bodies []string
+			for {
+				rec, _, err := cur.Next()
+				if err != nil {
+					break
+				}
+				bodies = append(bodies, string(rec.Raw))
+			}
+			_ = cur.Close()
+			h.t.Logf("dump %s chunk %s (%d records): %v", h.nodes[nodeID].label, e.ID, len(bodies), bodies)
+		}
 	}
 }
 
