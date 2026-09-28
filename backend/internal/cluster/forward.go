@@ -16,6 +16,8 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
+	hraft "github.com/hashicorp/raft"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -780,6 +782,16 @@ func (s *Server) forwardVaultApply(ctx context.Context, req *gastrologv1.Forward
 	}
 	appliedIndex, err := s.groupApplyFn(ctx, string(req.GetGroupId()), req.GetCommand())
 	if err != nil {
+		// A node that stopped leading refuses before appending anything, so
+		// the caller can safely re-resolve and try the leader's successor.
+		// FailedPrecondition is what carries that across the wire; Internal
+		// would be indistinguishable from the command itself failing.
+		// ErrLeadershipLost stays Internal: it means leadership fell mid
+		// apply and the entry may still commit, so a blind retry risks a
+		// double apply.
+		if errors.Is(err, hraft.ErrNotLeader) || errors.Is(err, hraft.ErrLeadershipTransferInProgress) {
+			return nil, status.Errorf(codes.FailedPrecondition, "vault apply: %v", err)
+		}
 		return nil, status.Errorf(codes.Internal, "vault apply: %v", err)
 	}
 	return &gastrologv1.ForwardVaultApplyResponse{AppliedIndex: appliedIndex}, nil
