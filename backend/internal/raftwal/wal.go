@@ -42,6 +42,7 @@ const (
 	entryDeleteRange  entryType = 4 // LogStore.DeleteRange(min, max)
 	entryGroupReg     entryType = 5 // group name → numeric ID registration
 	entryLogBatch     entryType = 6 // atomic batch of raft.Log entries (one StoreLogs call)
+	entryGroupDrop    entryType = 7 // group decommission: masks and forgets everything earlier for the group
 )
 
 const (
@@ -223,6 +224,14 @@ type WAL struct {
 	// replay. Guarded by stateMu.
 	quarantined map[int]struct{}
 
+	// drops maps each dropped group to its live entryGroupDrop record. The
+	// drop must stay physically later than every record it masks for as
+	// long as any of them can replay; oldest-first reclamation makes that
+	// structural, so a drop is never carried by a scavenge and evaporates
+	// when its own segment becomes the oldest (evaporateDrops). Guarded by
+	// stateMu.
+	drops map[uint32]logLoc
+
 	// Active segment. seg, segPath and segSize are writer-only. segSeq is
 	// written under stateMu (via registerSegment) because oldestSealedSegment
 	// reads it under stateMu too; the writer itself reads its own prior
@@ -378,6 +387,7 @@ func Open(dir string, cfgs ...Config) (*WAL, error) {
 		cfg:         cfg,
 		groups:      make(map[uint32]*groupState),
 		groupIDs:    make(map[string]uint32),
+		drops:       make(map[uint32]logLoc),
 		nextGID:     1,
 		segLive:     make(map[int]int64),
 		quarantined: make(map[int]struct{}),
@@ -437,6 +447,26 @@ func (w *WAL) GroupStore(name string) *GroupStore {
 	}
 
 	return &GroupStore{wal: w, groupID: gid}
+}
+
+// DropGroup removes a group from the WAL: its log index, stable keys and
+// registration stop being live, their bytes are released for reclamation,
+// and a later GroupStore call for the same name registers a fresh group.
+// Durable — the drop record masks everything earlier for the group on
+// replay — and idempotent: dropping an unknown name is a no-op.
+//
+// The group's raft MUST be shut down before dropping. Replay auto-creates
+// state for unknown group IDs by necessity, so a write racing the drop
+// through a stale GroupStore handle would half-resurrect the group under
+// its dead ID.
+func (w *WAL) DropGroup(name string) error {
+	w.stateMu.RLock()
+	gid, ok := w.groupIDs[name]
+	w.stateMu.RUnlock()
+	if !ok {
+		return nil
+	}
+	return w.submit(writeOp{groupID: gid, typ: entryGroupDrop, payload: []byte(name)})
 }
 
 // Close flushes pending writes and closes the WAL. Safe to call multiple times.
@@ -599,7 +629,7 @@ func (w *WAL) flushBatch(batch []writeOp) {
 	}
 	segSeqBefore := w.segSeq
 
-	applied, writeErr, sawDeleteRange := w.appendBatchToSegment(batch)
+	applied, writeErr, sawReclaimable := w.appendBatchToSegment(batch)
 
 	if len(applied) > 0 {
 		w.stateMu.Lock()
@@ -614,12 +644,12 @@ func (w *WAL) flushBatch(batch []writeOp) {
 
 	w.notifyBatchWaiters(batch, syncErr)
 
-	if syncErr == nil && writeErr == nil && (sawDeleteRange || w.segSeq != segSeqBefore) {
+	if syncErr == nil && writeErr == nil && (sawReclaimable || w.segSeq != segSeqBefore) {
 		w.reclaimPass()
 	}
 }
 
-func (w *WAL) appendBatchToSegment(batch []writeOp) (applied []appliedRecord, writeErr error, sawDeleteRange bool) {
+func (w *WAL) appendBatchToSegment(batch []writeOp) (applied []appliedRecord, writeErr error, sawReclaimable bool) {
 	for i := range batch {
 		if writeErr != nil {
 			if batch[i].done != nil {
@@ -649,11 +679,11 @@ func (w *WAL) appendBatchToSegment(batch []writeOp) (applied []appliedRecord, wr
 			continue
 		}
 		applied = append(applied, rec)
-		if batch[i].typ == entryDeleteRange {
-			sawDeleteRange = true
+		if batch[i].typ == entryDeleteRange || batch[i].typ == entryGroupDrop {
+			sawReclaimable = true
 		}
 	}
-	return applied, writeErr, sawDeleteRange
+	return applied, writeErr, sawReclaimable
 }
 
 func (w *WAL) notifyBatchWaiters(batch []writeOp, syncErr error) {
@@ -744,6 +774,25 @@ func (w *WAL) applyToMemory(groupID uint32, typ entryType, payload []byte, seg i
 		}
 		gs.regName = name
 		gs.regLoc = loc
+		w.segLive[loc.seg] += int64(loc.length)
+
+	case entryGroupDrop:
+		for _, l := range gs.logs {
+			w.segLive[l.seg] -= int64(l.length)
+		}
+		for _, sv := range gs.stable {
+			w.segLive[sv.loc.seg] -= int64(sv.loc.length)
+		}
+		if gs.regName != "" {
+			w.segLive[gs.regLoc.seg] -= int64(gs.regLoc.length)
+		}
+		delete(w.groups, groupID)
+		// Guarded so a same-name registration under a fresh ID can never be
+		// unmapped by this group's drop.
+		if cur, ok := w.groupIDs[string(payload)]; ok && cur == groupID {
+			delete(w.groupIDs, string(payload))
+		}
+		w.drops[groupID] = loc
 		w.segLive[loc.seg] += int64(loc.length)
 	}
 }
@@ -1400,6 +1449,9 @@ func (w *WAL) recomputeSegLive() map[int]int64 {
 			out[gs.regLoc.seg] += int64(gs.regLoc.length)
 		}
 	}
+	for _, loc := range w.drops {
+		out[loc.seg] += int64(loc.length)
+	}
 	return out
 }
 
@@ -1422,6 +1474,11 @@ func (w *WAL) liveRefsForSegment(seq int) int {
 			refs++
 		}
 	}
+	for _, loc := range w.drops {
+		if loc.seg == seq {
+			refs++
+		}
+	}
 	return refs
 }
 
@@ -1440,6 +1497,9 @@ func (w *WAL) liveRefsBySegment() map[int]int {
 		if gs.regName != "" {
 			refs[gs.regLoc.seg]++
 		}
+	}
+	for _, loc := range w.drops {
+		refs[loc.seg]++
 	}
 	return refs
 }

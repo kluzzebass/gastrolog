@@ -320,6 +320,27 @@ func (m *GroupManager) DestroyGroup(groupID string) error {
 	return nil
 }
 
+// DecommissionGroup permanently retires a group: shuts it down like
+// DestroyGroup, then drops its state from the shared WAL so nothing pins its
+// registration, stable keys, or log entries there. Only for a group that is
+// being deleted cluster-wide — a decommissioned group that rejoined its
+// peers would vote from blank state. The WAL drop happens even when the
+// group is not running here: a node can hold WAL state for a group it never
+// started this boot.
+func (m *GroupManager) DecommissionGroup(groupID string) error {
+	err := m.DestroyGroup(groupID)
+	if errors.Is(err, ErrGroupNotFound) {
+		err = nil
+	}
+	if m.wal == nil {
+		return err
+	}
+	if dropErr := m.wal.DropGroup(groupID); dropErr != nil && err == nil {
+		err = dropErr
+	}
+	return err
+}
+
 // AddMember adds a node to a group. Automatically selects voter or nonvoter
 // based on the resulting group size:
 //   - 2-member: nonvoter (leader is sole voter, always has quorum)

@@ -389,6 +389,13 @@ one segmented file set, one batch-writer goroutine.
   original is unlinked.
 - **Drained** — a WAL segment with zero live payload bytes: the in-memory
   index holds no reference into it, so unlinking it loses no live state.
+- **Group drop** — the WAL record that decommissions a Raft group
+  (`DropGroup`): it releases the group's live bytes and masks everything
+  earlier for the group on replay. The drop record is a tombstone that
+  evaporates when its own segment becomes the oldest — by then nothing it
+  masks can replay. Dropping is for a group deleted cluster-wide;
+  a group merely stopping on a node (vault reassignment) keeps its WAL
+  state and recovers it when it restarts.
 
 ### Placement & membership
 

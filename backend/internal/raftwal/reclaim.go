@@ -230,7 +230,14 @@ func (w *WAL) scavengeOldest(events *reclaimEvents) {
 	if err != nil {
 		return // victim unreadable right now; a later pass retries
 	}
+	evaporated := w.evaporateDrops(victim)
 	if len(records) == 0 {
+		if evaporated {
+			// The victim held only drop tombstones; releasing them may
+			// have drained it.
+			w.unlinkOldestDrained(0, start, events)
+			return
+		}
 		// The counter claims live bytes, the scan finds no reference: drift
 		// in the opposite direction to the drained-but-referenced case.
 		// Nothing can drain the segment, so quarantine it rather than let
@@ -246,6 +253,26 @@ func (w *WAL) scavengeOldest(events *reclaimEvents) {
 	}
 	scavenged := w.swapScavenged(victim, records, locs)
 	w.unlinkOldestDrained(scavenged, start, events)
+}
+
+// evaporateDrops releases the drop tombstones recorded in victim. The victim
+// is the oldest sealed segment, so every record its drops mask is already
+// unlinked and replay can no longer resurrect those groups — a drop is never
+// carried, it just stops counting. Crash-safe at any point: the record stays
+// on disk until the segment is unlinked, and replay rebuilds the drops map
+// from whatever is physically present.
+func (w *WAL) evaporateDrops(victim int) bool {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	evaporated := false
+	for gid, loc := range w.drops {
+		if loc.seg == victim {
+			w.segLive[victim] -= int64(loc.length)
+			delete(w.drops, gid)
+			evaporated = true
+		}
+	}
+	return evaporated
 }
 
 // collectScavenge gathers the victim segment's live records: group

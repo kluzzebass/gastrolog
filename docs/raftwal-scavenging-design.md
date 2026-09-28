@@ -182,9 +182,16 @@ terms in the implementation PR; "WAL compaction" is retired.
 The on-disk format is unchanged — scavenging reuses existing record types
 (formats stay V1; no migration concerns regardless).
 
-Out of scope: group deregistration. A removed vault's group pins its
-registration and stable keys forever (they scavenge forward indefinitely).
-Pre-existing gap, filed as gastrolog-3zkxa6.
+Group deregistration rides on the same discipline: `DropGroup` appends a
+group-drop record (`entryGroupDrop`) that masks everything earlier for the
+group — its live bytes are released, it is never carried by a scavenge, and
+replay applies the drop in physical order so nothing resurrects. The
+tombstone stays live only until its own segment becomes the oldest;
+everything it masks is gone by then, so the scavenge pass evaporates it
+instead of carrying it. Vault deletion decommissions the vault's
+control-plane group this way on every node; a vault merely reassigned away
+from a node stops its group without dropping, so the state recovers when
+the group re-ensures.
 
 ### 7. Acceptance criteria (restated for this shape)
 
