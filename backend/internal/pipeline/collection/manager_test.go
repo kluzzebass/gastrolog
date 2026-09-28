@@ -85,6 +85,20 @@ func (r *recordingReceipts) CommitHolderReceipts(_ context.Context, _ glid.GLID,
 	return nil
 }
 
+// waitReceipts blocks until r has recorded want receipts. The failsafe stands
+// in for a wedged pass, not for the measurement: a slow machine finishes
+// late instead of failing.
+func waitReceipts(t *testing.T, r *recordingReceipts, want int) {
+	t.Helper()
+	failsafe := time.Now().Add(30 * time.Second)
+	for r.count() < want {
+		if time.Now().After(failsafe) {
+			t.Fatalf("receipts = %d, want %d before the failsafe deadline", r.count(), want)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func (r *recordingReceipts) count() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -421,7 +435,15 @@ func TestCollectOnceWaitersShareWorkerPass(t *testing.T) {
 	go func() {
 		_ = mgr.Run(ctx)
 	}()
-	time.Sleep(150 * time.Millisecond) // initial pass collects seg1
+
+	// The measured window can only start once the initial pass is fully done
+	// with seg1. Its receipt is the pass's final act, so waiting for it rules
+	// out a pull planned against the old assignment starting late — on a
+	// starved scheduler that pull lands inside the window and reads as a
+	// coalescing failure that never happened. It also proves the worker is
+	// running, so the CollectOnce calls below exercise the coalescing path
+	// rather than each falling back to a direct pass.
+	waitReceipts(t, receipts, 1)
 
 	log.setAssigned(collection.AssignedSegment{VaultID: vaultID, SegmentID: seg2})
 	slow.pulls.Store(0)

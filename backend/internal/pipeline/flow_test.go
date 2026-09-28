@@ -440,16 +440,30 @@ func (h *harness) runIngester(t *testing.T, ing ingestion.Ingester) {
 	})
 }
 
-func (h *harness) waitSyncs(t *testing.T, want uint32) {
+// waitDurableRecords blocks until want records for the harness vault have
+// survived a group commit, per segmentation's own durable counter. Records
+// cross ingestion, digestion and routing before they reach the writer, so
+// when they land is the machine's business; counting fsyncs instead would
+// also break the moment the harness stopped forcing one commit per record.
+// The failsafe stands in for a wedged pipeline, not for the measurement.
+func (h *harness) waitDurableRecords(t *testing.T, want uint64) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if h.syncs.Load() >= want {
+	failsafe := time.Now().Add(30 * time.Second)
+	for {
+		var durable uint64
+		for _, st := range h.seg.AppendStats() {
+			if st.VaultID == h.vaultID {
+				durable = st.RecordsDurable
+			}
+		}
+		if durable >= want {
 			return
+		}
+		if time.Now().After(failsafe) {
+			t.Fatalf("records durable = %d, want >= %d before the failsafe deadline", durable, want)
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatalf("fsync count = %d, want >= %d", h.syncs.Load(), want)
 }
 
 func (h *harness) waitPublished(t *testing.T, want int) {
@@ -679,7 +693,7 @@ func TestPipelineIngestToSegment(t *testing.T) {
 		{Raw: []byte("second line"), Attrs: map[string]string{"env": "prod"}},
 	}})
 
-	h.waitSyncs(t, 2)
+	h.waitDurableRecords(t, 2)
 
 	stats := h.route.Stats()
 	if stats.Matched != 2 || stats.Unmatched != 0 {
@@ -741,7 +755,7 @@ func TestPipelineIngestToDistribution(t *testing.T) {
 	}
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
-	h.waitSyncs(t, 8)
+	h.waitDurableRecords(t, 8)
 	h.waitPublished(t, 1)
 
 	meta := h.pub.first()
@@ -799,7 +813,7 @@ func TestPipelineIngestToDistributionLocalHolder(t *testing.T) {
 	}
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
-	h.waitSyncs(t, 8)
+	h.waitDurableRecords(t, 8)
 	h.waitLocalHeadPromoted(t, 1, 1)
 
 	// Local holders copy into head/; completed/ stays for peer pull until release.
@@ -843,7 +857,7 @@ func TestPipelineFullPath(t *testing.T) {
 	}
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
-	h.waitSyncs(t, 8)
+	h.waitDurableRecords(t, 8)
 	published := h.waitCollectedMatchesPublish(t)
 
 	meta := published[0]
@@ -969,7 +983,7 @@ func TestPipelineOpenChunkQueryBeforeSeal(t *testing.T) {
 	}
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
-	h.waitSyncs(t, 8)
+	h.waitDurableRecords(t, 8)
 	published := h.waitCollectedMatchesPublish(t)
 
 	var totalRecords uint32
@@ -1048,7 +1062,7 @@ func TestPipelineRemotePullFailureThenRecovery(t *testing.T) {
 	}
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
-	h.waitSyncs(t, 8)
+	h.waitDurableRecords(t, 8)
 	published := h.waitCollectedMatchesPublish(t)
 	headPath := paths.HeadSegment(h.homeRoot, published[0].SegmentID)
 	if _, err := os.Stat(headPath); err != nil {
@@ -1083,7 +1097,7 @@ func TestPipelineRemoteHomeFollowerBuildsGLCBWithoutSealing(t *testing.T) {
 	}
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
-	h.waitSyncs(t, 8)
+	h.waitDurableRecords(t, 8)
 	published := h.waitCollectedMatchesPublish(t)
 
 	meta := published[0]
@@ -1139,7 +1153,7 @@ func TestPipelineRemoteHomePlannerRequiresLocalHead(t *testing.T) {
 	}
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
-	h.waitSyncs(t, 8)
+	h.waitDurableRecords(t, 8)
 	if err := h.chunk.PlanOnce(h.ctx, h.vaultID); err != nil {
 		t.Fatal(err)
 	}
@@ -1239,11 +1253,9 @@ func TestPipelineFanOutTwoVaults(t *testing.T) {
 		cancel()
 	}()
 
-	var syncs atomic.Uint32
 	segMgr, _ := segmentation.New(segmentation.Config{
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Millisecond,
-		OnSync:          func() { syncs.Add(1) },
 	})
 	inA, err := segMgr.RegisterVault(vaultA, rootA, segmentation.VaultConfig{})
 	if err != nil {
@@ -1299,12 +1311,23 @@ func TestPipelineFanOutTwoVaults(t *testing.T) {
 	}
 	defer func() { _ = ingestMgr.Stop() }()
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && syncs.Load() < 2 {
+	// One record fans out to both vaults; wait until each vault's writer
+	// reports it durable. The failsafe stands in for a wedged pipeline.
+	failsafe := time.Now().Add(30 * time.Second)
+	for {
+		durable := 0
+		for _, st := range segMgr.AppendStats() {
+			if st.RecordsDurable >= 1 {
+				durable++
+			}
+		}
+		if durable == 2 {
+			break
+		}
+		if time.Now().After(failsafe) {
+			t.Fatalf("vaults with durable records = %d, want 2 before the failsafe deadline", durable)
+		}
 		time.Sleep(time.Millisecond)
-	}
-	if syncs.Load() < 2 {
-		t.Fatalf("fsync count = %d, want 2 (one per vault)", syncs.Load())
 	}
 
 	for _, root := range []string{rootA, rootB} {

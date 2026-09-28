@@ -1,12 +1,9 @@
 package cluster
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"time"
 
-	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/applywait"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/raftutil"
@@ -84,22 +81,10 @@ func (f *VaultCtlChunkApplyForwarder) Apply(data []byte) error {
 }
 
 func (f *VaultCtlChunkApplyForwarder) forwardToLeader(data []byte) error {
-	_, leaderID := f.raft.LeaderWithID()
-	if leaderID == "" {
-		return ErrNoRaftLeader
+	appliedIndex, err := forwardVaultApplyResolving(f.raft, f.peers, PurposeChunkApply,
+		f.vaultCtlGroupID, data, f.timeout, ErrNoRaftLeader)
+	if err != nil {
+		return err
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), f.timeout)
-	defer cancel()
-
-	req := &gastrologv1.ForwardVaultApplyRequest{
-		GroupId: []byte(f.vaultCtlGroupID),
-		Command: data,
-	}
-	resp := &gastrologv1.ForwardVaultApplyResponse{}
-	if err := f.peers.InvokeService(ctx, string(leaderID), PurposeChunkApply,
-		"/gastrolog.v1.ClusterService/ForwardVaultApply", req, resp); err != nil {
-		return fmt.Errorf("forward vault-ctl chunk apply RPC to %s: %w", leaderID, err)
-	}
-	return waitForGroupApply(f.applyWait, f.vaultCtlGroupID, resp.GetAppliedIndex(), f.timeout)
+	return waitForGroupApply(f.applyWait, f.vaultCtlGroupID, appliedIndex, f.timeout)
 }
