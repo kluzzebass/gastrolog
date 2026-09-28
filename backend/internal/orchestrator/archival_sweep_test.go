@@ -342,6 +342,16 @@ func (g *gatedSystemLoader) releaseAll() {
 	g.releaseOnce.Do(func() { close(g.release) })
 }
 
+// removeCronJobs unregisters every cron-scheduled job on the orchestrator's
+// scheduler, leaving one-time jobs untouched.
+func removeCronJobs(orch *Orchestrator) {
+	for _, info := range orch.Scheduler().ListJobs() {
+		if info.Schedule != "" && info.Schedule != "once" {
+			orch.Scheduler().RemoveJob(info.Name)
+		}
+	}
+}
+
 // TestTriggerArchivalSweepConcurrentTriggersClaimOnce is the unhappy-path
 // half of the coalescing contract. TriggerArchivalSweep fires from the config
 // dispatcher on NotifyCloudServicePut, so two operator edits (or one edit
@@ -356,6 +366,16 @@ func TestTriggerArchivalSweepConcurrentTriggersClaimOnce(t *testing.T) {
 		{After: "1d", CloudStorageClass: "GLACIER"},
 	})
 	_ = ingestSealUpload(t, cm, 10)
+
+	// The gate below intercepts EVERY loader call on this orchestrator, and
+	// the test profile compresses each sweep cron to a per-second cadence —
+	// the retention sweep loads system config first thing on every tick. A
+	// sweep tick (or a straggling one-time job from the upload above)
+	// landing inside the gated window reads as a failed coalesce. Remove the
+	// crons and drain the one-time queue so the loader sees only the
+	// archival evaluations this test fires.
+	removeCronJobs(orch)
+	requireIdle(t, orch.Scheduler(), 5*time.Second)
 
 	gate := &gatedSystemLoader{
 		inner:   orch.systemLoader(),
