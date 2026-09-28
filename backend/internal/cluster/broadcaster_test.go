@@ -12,6 +12,7 @@ import (
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/waittest"
 
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
@@ -390,20 +391,20 @@ func TestSend_ErrorSuppressionAndRecovery(t *testing.T) {
 	// First send: fails. failed[flap] = true. Send is async, so poll
 	// for the state transition.
 	b.Send(context.Background(), testMsg())
-	waitFor(t, time.Second, func() bool {
+	waittest.For(t, "peer marked failed after error", func() bool {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		return b.failed["flap"]
-	}, "peer not marked failed after error")
+	})
 
 	// Recover: next send succeeds, failed flag clears.
 	shouldFail.Store(false)
 	b.Send(context.Background(), testMsg())
-	waitFor(t, time.Second, func() bool {
+	waittest.For(t, "peer cleared after successful send", func() bool {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		return !b.failed["flap"]
-	}, "peer should be cleared after successful send")
+	})
 }
 
 func TestBroadcaster_DeleteClearsFailureSuppression(t *testing.T) {
@@ -415,11 +416,11 @@ func TestBroadcaster_DeleteClearsFailureSuppression(t *testing.T) {
 	b := newBroadcaster(fp, quietLogger(), time.Second)
 
 	b.Send(context.Background(), testMsg())
-	waitFor(t, time.Second, func() bool {
+	waittest.For(t, "peer marked failed before Delete", func() bool {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		return b.failed["going-away"]
-	}, "peer not marked failed before Delete")
+	})
 
 	b.Delete("going-away")
 
@@ -432,20 +433,6 @@ func TestBroadcaster_DeleteClearsFailureSuppression(t *testing.T) {
 
 	// Idempotent.
 	b.Delete("never-seen")
-}
-
-// waitFor polls cond every 10ms until it returns true or the deadline
-// expires. Useful for async assertions after fire-and-forget calls.
-func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal(msg)
 }
 
 // TestSend_ParallelFanoutRunsConcurrently is a timing test: when every peer
@@ -480,16 +467,16 @@ func TestSend_ParallelFanoutRunsConcurrently(t *testing.T) {
 
 	// Send is fire-and-forget. Wait for the background goroutines to all
 	// hit the handler concurrently, then verify max concurrency ≥ 2.
-	waitFor(t, 2*time.Second, func() bool {
+	waittest.For(t, "two handlers running concurrently", func() bool {
 		return atomic.LoadInt32(&maxConcurrent) >= 2
-	}, "peers did not run concurrently")
+	})
 
 	if got := atomic.LoadInt32(&maxConcurrent); got < 2 {
 		t.Errorf("expected ≥2 concurrent handlers, got max=%d", got)
 	}
 
 	// Wait for handlers to complete so the test cleanly tears down.
-	waitFor(t, 3*handlerBlock, func() bool {
+	waittest.For(t, "handlers to drain", func() bool {
 		return atomic.LoadInt32(&concurrent) == 0
-	}, "handlers did not complete")
+	})
 }
