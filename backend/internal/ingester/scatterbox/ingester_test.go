@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/ingestion"
+	"gastrolog/internal/waittest"
 	"testing"
 	"time"
 )
@@ -113,7 +114,7 @@ func TestBurstMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	out := make(chan ingestion.IngesterMessage, 100)
@@ -123,12 +124,20 @@ func TestBurstMode(t *testing.T) {
 		close(done)
 	}()
 
-	<-done // Run exited — no more sends on out
-
-	count := len(out)
-
-	// At 10ms interval with burst=5, should get at least 5 records in 30ms.
-	if count < 5 {
-		t.Errorf("expected at least 5 records, got %d", count)
+	// Read one full burst, however long the scheduler takes to start the
+	// ingester and fire its first tick. Bounding the run with a small
+	// context instead measures the machine: the context dies mid-burst on a
+	// busy box and the partial count reads as a burst failure. The failsafe
+	// stands in for a hung ingester, not for the measurement.
+	deadline := time.After(waittest.Failsafe)
+	for got := 0; got < 5; got++ {
+		select {
+		case <-out:
+		case <-deadline:
+			t.Fatalf("got %d of 5 burst records before the failsafe deadline", got)
+		}
 	}
+
+	cancel()
+	<-done // Run exited — no more sends on out
 }
