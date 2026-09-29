@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 
 	"gastrolog/internal/glid"
@@ -46,7 +47,7 @@ func TestClearStaleIngesterAlive_RemovesStaleLocalEntry(t *testing.T) {
 	}
 
 	// Sweep runs at startup.
-	clearStaleIngesterAlive(ctx, store, orch, localNode, silentLogger())
+	clearStaleIngesterAlive(ctx, store, orch.ListIngesters(), localNode, silentLogger())
 
 	alive, err := store.GetIngesterAlive(ctx, ingID)
 	if err != nil {
@@ -86,7 +87,7 @@ func TestClearStaleIngesterAlive_PreservesOtherNodesEntries(t *testing.T) {
 		t.Fatalf("seed C: %v", err)
 	}
 
-	clearStaleIngesterAlive(ctx, store, orch, localNode, silentLogger())
+	clearStaleIngesterAlive(ctx, store, orch.ListIngesters(), localNode, silentLogger())
 
 	alive, err := store.GetIngesterAlive(ctx, ingID)
 	if err != nil {
@@ -123,7 +124,7 @@ func TestClearStaleIngesterAlive_LeavesRunningIngesterAlone(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	clearStaleIngesterAlive(ctx, store, orch, localNode, silentLogger())
+	clearStaleIngesterAlive(ctx, store, orch.ListIngesters(), localNode, silentLogger())
 
 	alive, err := store.GetIngesterAlive(ctx, ingID)
 	if err != nil {
@@ -139,4 +140,41 @@ type noopRunner struct{}
 func (noopRunner) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	<-ctx.Done()
 	return nil
+}
+
+// countingStore counts SetIngesterAlive proposals. The cleanup runs on every
+// convergence sweep tick, so a clean cluster must cost zero store writes —
+// unconditional clears would put N raft proposals per node on every tick.
+type countingStore struct {
+	system.Store
+	writes atomic.Int32
+}
+
+func (c *countingStore) SetIngesterAlive(ctx context.Context, id glid.GLID, node string, alive bool) error {
+	c.writes.Add(1)
+	return c.Store.SetIngesterAlive(ctx, id, node, alive)
+}
+
+func TestClearStaleIngesterAlive_SteadyStateWritesNothing(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := &countingStore{Store: sysmem.NewStore()}
+
+	const localNode = "node-A"
+	for range 3 {
+		ingID := glid.New()
+		if err := store.PutIngester(ctx, system.IngesterConfig{
+			ID: ingID, Name: ingID.String(), Type: "chatterbox", Enabled: true,
+			NodeIDs: []string{"node-B"},
+		}); err != nil {
+			t.Fatalf("PutIngester: %v", err)
+		}
+	}
+
+	// No alive entry names this node, so nothing is stale here.
+	clearStaleIngesterAlive(ctx, store, nil, localNode, silentLogger())
+
+	if n := store.writes.Load(); n != 0 {
+		t.Fatalf("steady-state sweep proposed %d SetIngesterAlive writes, want 0", n)
+	}
 }

@@ -13,6 +13,7 @@ import (
 	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 )
 
 const (
@@ -278,5 +279,48 @@ func TestReportIngesterDivergence_ClearsAfterRebuildUnderSaturation(t *testing.T
 	d.reportIngesterDivergence(ctx, logger)
 	if n := countMessages(capture, divergenceLogMsg); n != 1 {
 		t.Fatalf("sweep must not report divergence on a running ingester after a rebuild under saturation (got %d divergence lines)", n)
+	}
+}
+
+// The stale-alive cleanup lives in the convergence sweep, never on the
+// startup path: a clear is a cluster-wide store write, and a restarting node
+// whose store cannot yet accept proposals must still become ready instead of
+// stalling behind per-write timeouts until the liveness probe kills it. This
+// pins the sweep as the cleanup's home — one tick clears a stale entry.
+func TestIngesterReconcileSweepClearsStaleAlive(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := sysmem.NewStore()
+
+	ingID := glid.New()
+	if err := store.PutIngester(ctx, system.IngesterConfig{
+		ID: ingID, Name: "x", Type: "chatterbox", Enabled: true,
+		NodeIDs: []string{"node-B"},
+	}); err != nil {
+		t.Fatalf("PutIngester: %v", err)
+	}
+	// Stale entry from a previous life of this node ("local" per fixture).
+	if err := store.SetIngesterAlive(ctx, ingID, "local", true); err != nil {
+		t.Fatalf("seed SetIngesterAlive: %v", err)
+	}
+
+	h := &captureHandler{}
+	d := newTestDispatcher(&mockOrch{}, store, h)
+	sched := &fakeScheduler{}
+	if err := startIngesterReconcileSweep(ctx, sched, d, slog.New(h)); err != nil {
+		t.Fatalf("startIngesterReconcileSweep: %v", err)
+	}
+	task, ok := sched.addJobTaskFn.(func())
+	if !ok {
+		t.Fatalf("sweep registered a %T task, want func()", sched.addJobTaskFn)
+	}
+	task()
+
+	alive, err := store.GetIngesterAlive(ctx, ingID)
+	if err != nil {
+		t.Fatalf("GetIngesterAlive: %v", err)
+	}
+	if _, present := alive["local"]; present {
+		t.Fatalf("sweep tick left the stale alive entry standing: %v", alive)
 	}
 }
