@@ -293,7 +293,7 @@ func (o *Orchestrator) removeVaultJobs(_ glid.GLID, vault *Vault) {
 // pipeline routing table and Origin registrations are reconciled separately by
 // ReloadFilters when the deletion lands in config.
 func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
-	o.destroyVaultControlPlaneRaftGroup(id)
+	o.decommissionVaultControlPlaneRaftGroup(id)
 
 	// Cancel pending post-seal/compress/index jobs to prevent use-after-close.
 	vaultPrefix := id.String()
@@ -674,7 +674,9 @@ func (o *Orchestrator) UnregisterVault(id glid.GLID) error {
 
 	// Stop vault control-plane Raft before closing chunk managers — same
 	// ordering as teardownVault. Otherwise trailing apply callbacks can
-	// touch a closed Manager.
+	// touch a closed Manager. Stop only, never decommission: the vault is
+	// being reassigned, not deleted, and its group must recover its WAL
+	// state when it re-ensures.
 	o.destroyVaultControlPlaneRaftGroup(id)
 
 	if err := vault.Close(); err != nil {
@@ -1063,7 +1065,9 @@ func applyRotationPolicy(cm chunk.ChunkManager, policies []system.RotationPolicy
 	return nil
 }
 
-// vaultRaftCallbacks holds the callbacks returned by ensureVaultCtlMetadata.
+// destroyVaultControlPlaneRaftGroup stops the local control-plane Raft group
+// without touching its durable state — for a vault leaving this node while
+// it lives on elsewhere (reassignment), where the group re-ensures later.
 func (o *Orchestrator) destroyVaultControlPlaneRaftGroup(vaultID glid.GLID) {
 	if o.vaultCtlLeaders != nil {
 		o.vaultCtlLeaders.Stop(vaultID)
@@ -1074,6 +1078,24 @@ func (o *Orchestrator) destroyVaultControlPlaneRaftGroup(vaultID glid.GLID) {
 	gid := raftgroup.VaultControlPlaneGroupID(vaultID)
 	if err := o.groupMgr.DestroyGroup(gid); err != nil && !errors.Is(err, raftgroup.ErrGroupNotFound) {
 		o.logger.Debug("destroy vault control-plane raft group",
+			"vault", vaultID, "error", err)
+	}
+}
+
+// decommissionVaultControlPlaneRaftGroup permanently retires a deleted
+// vault's control-plane group: stops it and drops its state from the shared
+// WAL. Vault deletion reaches every node (the delete notification fans out),
+// so the WAL forgets the group cluster-wide.
+func (o *Orchestrator) decommissionVaultControlPlaneRaftGroup(vaultID glid.GLID) {
+	if o.vaultCtlLeaders != nil {
+		o.vaultCtlLeaders.Stop(vaultID)
+	}
+	if o.groupMgr == nil {
+		return
+	}
+	gid := raftgroup.VaultControlPlaneGroupID(vaultID)
+	if err := o.groupMgr.DecommissionGroup(gid); err != nil {
+		o.logger.Warn("decommission vault control-plane raft group",
 			"vault", vaultID, "error", err)
 	}
 }
