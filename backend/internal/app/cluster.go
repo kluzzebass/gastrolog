@@ -234,7 +234,14 @@ const (
 // unverified at this point, so honouring it for a current member would hand
 // a token holder that member's identity. A node that genuinely lost its disk
 // is removed and re-added rather than silently re-issued.
-func makeEnrollHandler(cfgStore system.Store, clusterSrv *cluster.Server, logger *slog.Logger) cluster.EnrollHandler {
+// memberLister is the slice of *cluster.Server enrollment needs: the current
+// Raft configuration, so a joiner cannot be issued a current member's
+// identity. An interface so the refusal is testable without a live raft.
+type memberLister interface {
+	Servers() ([]cluster.RaftServer, error)
+}
+
+func makeEnrollHandler(cfgStore system.Store, clusterSrv memberLister, logger *slog.Logger) cluster.EnrollHandler {
 	limiter := rate.NewLimiter(enrollAttemptsPerSecond, enrollBurst)
 	return func(ctx context.Context, req *gastrologv1.EnrollRequest) (*gastrologv1.EnrollResponse, error) {
 		if !limiter.Allow() {
@@ -295,7 +302,7 @@ func makeEnrollHandler(cfgStore system.Store, clusterSrv *cluster.Server, logger
 
 // inConfiguration reports whether the Raft configuration already has a node
 // with this ID, at any address.
-func inConfiguration(clusterSrv *cluster.Server, nodeID string) bool {
+func inConfiguration(clusterSrv memberLister, nodeID string) bool {
 	if clusterSrv == nil {
 		return false
 	}

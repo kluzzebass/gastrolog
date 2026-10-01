@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/cluster/tlsutil"
 	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
@@ -22,6 +23,14 @@ import (
 // enrollFixture builds a store holding a real cluster CA and returns the
 // handler plus the join secret a legitimate joiner would present.
 func enrollFixture(t *testing.T) (handler func(context.Context, *gastrologv1.EnrollRequest) (*gastrologv1.EnrollResponse, error), secret string) {
+	t.Helper()
+	// A nil member lister stands for a node with no readable configuration.
+	return enrollFixtureMembers(t, nil)
+}
+
+// enrollFixtureMembers is enrollFixture over a given Raft configuration, for
+// the refusals that depend on current membership.
+func enrollFixtureMembers(t *testing.T, members memberLister) (handler func(context.Context, *gastrologv1.EnrollRequest) (*gastrologv1.EnrollResponse, error), secret string) {
 	t.Helper()
 	ca, err := tlsutil.GenerateCA()
 	if err != nil {
@@ -48,9 +57,7 @@ func enrollFixture(t *testing.T) (handler func(context.Context, *gastrologv1.Enr
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// A nil cluster server stands for a node with no readable configuration;
-	// the ID-already-taken refusal is exercised against inConfiguration.
-	return makeEnrollHandler(store, nil, slog.New(slog.DiscardHandler)), secret
+	return makeEnrollHandler(store, members, slog.New(slog.DiscardHandler)), secret
 }
 
 // csrFor produces what a joiner sends: a request for nodeID, signed by a key
@@ -224,5 +231,49 @@ func TestEnrollBurstAdmitsALegitimateJoiner(t *testing.T) {
 		CsrPem:      csrFor(t, "node-2"),
 	}); err != nil {
 		t.Fatalf("the first joiner was refused: %v", err)
+	}
+}
+
+// fakeMembers is a memberLister over a fixed configuration.
+type fakeMembers []string
+
+func (f fakeMembers) Servers() ([]cluster.RaftServer, error) {
+	out := make([]cluster.RaftServer, len(f))
+	for i, id := range f {
+		out[i] = cluster.RaftServer{ID: id}
+	}
+	return out, nil
+}
+
+// The node ID on an enrollment is unverified, so honouring it for a current
+// member would hand a token holder that member's identity — a valid token
+// plus a member's ID must yield a refusal, not a certificate.
+func TestEnrollRefusesACurrentMembersID(t *testing.T) {
+	t.Parallel()
+	h, secret := enrollFixtureMembers(t, fakeMembers{"member-1", "member-2"})
+
+	_, err := h(context.Background(), &gastrologv1.EnrollRequest{
+		TokenSecret: secret,
+		NodeId:      []byte("member-1"),
+		NodeAddr:    "attacker:4566",
+		CsrPem:      csrFor(t, "member-1"),
+	})
+	if err == nil {
+		t.Fatal("a valid token was issued a CURRENT member's certificate")
+	}
+
+	// The same request for a fresh ID is served — the guard refuses the
+	// identity, not the token.
+	resp, err := h(context.Background(), &gastrologv1.EnrollRequest{
+		TokenSecret: secret,
+		NodeId:      []byte("member-3"),
+		NodeAddr:    "joiner:4566",
+		CsrPem:      csrFor(t, "member-3"),
+	})
+	if err != nil {
+		t.Fatalf("a fresh ID was refused: %v", err)
+	}
+	if len(resp.GetNodeCertPem()) == 0 {
+		t.Fatal("fresh enrollment returned no certificate")
 	}
 }

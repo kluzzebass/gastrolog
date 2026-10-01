@@ -166,6 +166,7 @@ Every feature must have tests across ALL of these dimensions:
 - **Multi-node**: cluster behavior with 4+ nodes, file-backed vaults, real transferrers
 - **Happy path**: feature works as designed
 - **Unhappy path**: failures, errors, races, partial operations, recovery, disk full, corrupt data
+- **Adversarial path**: callers that are hostile rather than unlucky. The unhappy path is honest participants meeting misfortune; the adversarial path is a caller pursuing a capability the system must deny — a stolen credential, a forged or expired token, a request naming someone else's identity, an authority a certificate does not convey. The test asserts the denial itself (the attacker's goal unachieved, not merely an error returned) and is premise-checked: disable the guard and the test must fail. A security-sensitive feature is not done until every capability it denies has such a test — the guard that exists but is never driven is exactly the one that quietly stops existing.
 - **Edge cases**: boundary conditions, concurrent access, restart survival, empty inputs
 
 Single-node happy-path tests are NOT sufficient. A feature is not done until all dimensions are covered. This applies to every new feature, every bug fix, every refactor that changes behavior.
