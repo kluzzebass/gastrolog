@@ -9,6 +9,7 @@ import (
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/cluster/tlsutil"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -55,6 +56,18 @@ func (s *Server) requestMembership(ctx context.Context, req *gastrologv1.Request
 	nodeID := string(req.GetNodeId())
 	if nodeID == "" || req.GetNodeAddr() == "" {
 		return nil, status.Error(codes.InvalidArgument, "node id and address are required")
+	}
+	// A caller may request membership only for the node its certificate
+	// names. Without this binding, any certificate holder could name a
+	// CURRENT member's ID at its own address and the add would re-address
+	// the victim — its traffic routed to the caller. Bound, the only node
+	// that can move an identity is the one holding its key, which a node
+	// legitimately does when it comes back on a new address.
+	if leaf, err := verifiedPeerLeaf(ctx); err == nil {
+		if certID := tlsutil.NodeIDFromCert(leaf); certID != nodeID {
+			return nil, status.Errorf(codes.PermissionDenied,
+				"certificate names node %s; membership may only be requested for it, not %s", certID, nodeID)
+		}
 	}
 	if err := s.membershipHandler(ctx, nodeID, req.GetNodeAddr(), req.GetVoter()); err != nil {
 		// A cluster mid-election has no leader to forward to yet. Saying

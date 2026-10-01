@@ -15,6 +15,7 @@ import (
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/cluster/tlsutil"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -25,12 +26,16 @@ import (
 // startMember stands up a cluster listener with the same TLS and
 // interceptors a real node serves with, answering RequestMembership from h.
 // It returns the address to dial and the TLS a joiner would hold after
-// enrolling — both sides share the material, which is what the cluster does
-// today.
-func startMember(t *testing.T, h MembershipHandler) (addr string, joinerTLS *ClusterTLS) {
+// enrolling as joinerID: a certificate naming that node, chained to the
+// member's CA — which is exactly what enrollment issues.
+func startMember(t *testing.T, h MembershipHandler, joinerID string) (addr string, joinerTLS *ClusterTLS) {
 	t.Helper()
-	ctls := loadedClusterTLS(t)
-	srv := &Server{cfg: Config{TLS: ctls}, membershipHandler: h}
+	ca, err := tlsutil.GenerateCA()
+	if err != nil {
+		t.Fatalf("GenerateCA: %v", err)
+	}
+	memberTLS := nodeTLSNamed(t, ca, "member-node")
+	srv := &Server{cfg: Config{TLS: memberTLS}, membershipHandler: h}
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -43,7 +48,22 @@ func startMember(t *testing.T, h MembershipHandler) (addr string, joinerTLS *Clu
 		gsrv.Stop()
 		_ = lis.Close()
 	})
-	return lis.Addr().String(), ctls
+	return lis.Addr().String(), nodeTLSNamed(t, ca, joinerID)
+}
+
+// nodeTLSNamed issues a certificate naming nodeID from the given CA — the
+// per-node material enrollment hands out.
+func nodeTLSNamed(t *testing.T, ca tlsutil.CAKeyPair, nodeID string) *ClusterTLS {
+	t.Helper()
+	cert, err := tlsutil.GenerateNodeCert(ca.CertPEM, ca.KeyPEM, nodeID, LaneSANs)
+	if err != nil {
+		t.Fatalf("GenerateNodeCert(%s): %v", nodeID, err)
+	}
+	ctls := NewClusterTLS()
+	if err := ctls.Load(cert.CertPEM, cert.KeyPEM, ca.CertPEM); err != nil {
+		t.Fatalf("Load TLS for %s: %v", nodeID, err)
+	}
+	return ctls
 }
 
 // The joiner was handed one address and has no idea which node leads. Whether
@@ -59,7 +79,7 @@ func TestJoinClusterSucceedsAgainstAMemberThatDoesNotLead(t *testing.T) {
 		}
 		served.Store(true)
 		return nil
-	})
+	}, "node-2")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -82,7 +102,7 @@ func TestJoinClusterWaitsOutAnElection(t *testing.T) {
 			return ErrNoLeader
 		}
 		return nil
-	})
+	}, "node-2")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -103,7 +123,7 @@ func TestJoinClusterStopsOnARefusal(t *testing.T) {
 	addr, joinerTLS := startMember(t, func(context.Context, string, string, bool) error {
 		attempts.Add(1)
 		return errors.New("node id already in the configuration at another address")
-	})
+	}, "node-2")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -125,7 +145,7 @@ func TestRequestMembershipRefusesACallerWithoutTheClusterCertificate(t *testing.
 	addr, ctls := startMember(t, func(context.Context, string, string, bool) error {
 		t.Error("a caller with no cluster certificate reached the configuration")
 		return nil
-	})
+	}, "attacker")
 
 	// Trusts the cluster CA, as a token holder does, but presents nothing.
 	caOnly := ctls.ClientTLSConfig().Clone()
@@ -152,7 +172,7 @@ func TestRequestMembershipRefusesACallerWithoutTheClusterCertificate(t *testing.
 func TestEnrollStaysReachableWithoutAClusterCertificate(t *testing.T) {
 	t.Parallel()
 
-	addr, _ := startMember(t, nil)
+	addr, _ := startMember(t, nil, "node-2")
 
 	// A joiner has no CA to verify against before it parses the token, so it
 	// connects without verification and pins afterwards; skipping straight to
@@ -179,4 +199,30 @@ func TestEnrollStaysReachableWithoutAClusterCertificate(t *testing.T) {
 // enrolment client pins the certificate itself afterwards.
 func insecureTLSCreds() credentials.TransportCredentials {
 	return credentials.NewTLS(&tls.Config{InsecureSkipVerify: true}) //nolint:gosec // G402: a joiner has no CA yet; the enrolment client pins the presented chain instead
+}
+
+// A certificate is authority to ask membership for the node it names and no
+// other. Without the binding, any certificate holder could name a current
+// member's ID at its own address, and the add would re-address the victim —
+// its traffic routed to the caller. Bound, the only node that can move an
+// identity is the one holding its key, which is also what lets a node
+// legitimately come back on a new address.
+func TestRequestMembershipRefusesAnIDTheCertificateDoesNotName(t *testing.T) {
+	t.Parallel()
+
+	addr, joinerTLS := startMember(t, func(_ context.Context, nodeID, _ string, _ bool) error {
+		t.Errorf("a caller certified as node-2 changed membership for %q", nodeID)
+		return nil
+	}, "node-2")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := JoinCluster(ctx, nil, addr, "node-victim", "attacker:4566", joinerTLS, true)
+	if err == nil {
+		t.Fatal("membership for another node's ID was accepted")
+	}
+	if status.Code(errors.Unwrap(err)) != codes.PermissionDenied && status.Code(err) != codes.PermissionDenied {
+		// JoinCluster wraps; accept either shape but insist on the code.
+		t.Fatalf("refusal carries code %v (%v), want PermissionDenied", status.Code(err), err)
+	}
 }
