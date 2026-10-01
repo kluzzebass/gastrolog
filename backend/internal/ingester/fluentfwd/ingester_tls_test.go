@@ -9,6 +9,7 @@ import (
 	"gastrolog/internal/ingester/ingesttls"
 	"gastrolog/internal/ingester/ingesttls/tlstest"
 	"gastrolog/internal/pipeline/ingestion"
+	"gastrolog/internal/waittest"
 )
 
 // The listener serves TLS when configured, with the certificate resolved
@@ -37,17 +38,10 @@ func TestFluentForwardServesTLS(t *testing.T) {
 	go ing.Run(t.Context(), out)
 
 	var conn *tls.Conn
-	deadline := time.Now().Add(3 * time.Second)
-	for {
+	waittest.For(t, "fluentfwd TLS listener answers", func() bool {
 		conn, err = tls.Dial("tcp", addr, &tls.Config{RootCAs: ca.Pool(t), MinVersion: tls.VersionTLS12})
-		if err == nil || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if err != nil {
-		t.Fatalf("TLS dial: %v", err)
-	}
+		return err == nil
+	})
 	if cn := conn.ConnectionState().PeerCertificates[0].Subject.CommonName; cn != "fluentfwd-srv" {
 		t.Fatalf("listener served certificate %q, want the named one", cn)
 	}

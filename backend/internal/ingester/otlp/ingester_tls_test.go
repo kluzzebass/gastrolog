@@ -4,11 +4,11 @@ import (
 	"crypto/tls"
 	"net"
 	"testing"
-	"time"
 
 	"gastrolog/internal/ingester/ingesttls"
 	"gastrolog/internal/ingester/ingesttls/tlstest"
 	"gastrolog/internal/pipeline/ingestion"
+	"gastrolog/internal/waittest"
 )
 
 // One TLS config covers both OTLP listeners: the HTTP port and the gRPC
@@ -39,17 +39,10 @@ func TestOTLPServesTLSOnBothPorts(t *testing.T) {
 
 	for _, addr := range []string{httpAddr, grpcAddr} {
 		var conn *tls.Conn
-		deadline := time.Now().Add(3 * time.Second)
-		for {
+		waittest.For(t, "otlp TLS listener answers", func() bool {
 			conn, err = tls.Dial("tcp", addr, &tls.Config{RootCAs: ca.Pool(t), MinVersion: tls.VersionTLS12})
-			if err == nil || time.Now().After(deadline) {
-				break
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		if err != nil {
-			t.Fatalf("TLS dial %s: %v", addr, err)
-		}
+			return err == nil
+		})
 		if cn := conn.ConnectionState().PeerCertificates[0].Subject.CommonName; cn != "otlp-srv" {
 			t.Fatalf("%s served certificate %q, want the named one", addr, cn)
 		}

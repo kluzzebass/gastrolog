@@ -12,6 +12,7 @@ import (
 	"gastrolog/internal/ingester/ingesttls"
 	"gastrolog/internal/ingester/ingesttls/tlstest"
 	"gastrolog/internal/pipeline/ingestion"
+	"gastrolog/internal/waittest"
 )
 
 // The push listener serves HTTPS when configured, end to end: a TLS client
@@ -30,13 +31,7 @@ func TestHTTPServesTLS(t *testing.T) {
 	out := make(chan ingestion.IngesterMessage, 10)
 	r := New(Config{ID: "t", Addr: "127.0.0.1:0", TLSConfig: tlsCfg})
 	go r.Run(t.Context(), out)
-	deadline := time.Now().Add(3 * time.Second)
-	for r.Addr() == nil && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if r.Addr() == nil {
-		t.Fatal("listener never bound")
-	}
+	waittest.For(t, "http TLS listener bound", func() bool { return r.Addr() != nil })
 	addr := r.Addr().String()
 
 	client := &gohttp.Client{Transport: &gohttp.Transport{
