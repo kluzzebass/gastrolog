@@ -9,7 +9,7 @@ import (
 
 func FuzzNewFactory(f *testing.F) {
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
-	factory := NewFactory()
+	factory := NewFactory(nil)
 	id := glid.New()
 
 	// Seed: valid params.

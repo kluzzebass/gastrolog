@@ -626,7 +626,7 @@ func TestOTLPGRPCBackpressure(t *testing.T) {
 
 func TestOTLPFactory(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	// Default addrs.
 	ing, err := factory(glid.New(), nil, nil)

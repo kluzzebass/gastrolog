@@ -535,7 +535,7 @@ func newConfigTestSetupWithIngesters(t *testing.T) (gastrologv1connect.SystemSer
 			"file":   indexfile.NewFactory(),
 		},
 		IngesterTypes: map[string]orchestrator.IngesterRegistration{
-			"syslog": {Factory: syslog.NewFactory(), Defaults: syslog.ParamDefaults, ListenAddrs: syslog.ListenAddrs},
+			"syslog": {Factory: syslog.NewFactory(nil), Defaults: syslog.ParamDefaults, ListenAddrs: syslog.ListenAddrs},
 		},
 	}
 
@@ -1100,7 +1100,7 @@ func TestGetIngesterDefaultsModes(t *testing.T) {
 			"memory": indexmem.NewFactory(),
 		},
 		IngesterTypes: map[string]orchestrator.IngesterRegistration{
-			"syslog": {Factory: syslog.NewFactory(), Defaults: syslog.ParamDefaults, ListenAddrs: syslog.ListenAddrs},
+			"syslog": {Factory: syslog.NewFactory(nil), Defaults: syslog.ParamDefaults, ListenAddrs: syslog.ListenAddrs},
 			"tail":   {Factory: tail.NewFactory(), Defaults: tail.ParamDefaults},
 			"kafka":  {Factory: nil, Defaults: nil, SingletonSupported: true}, // non-listener with singleton support
 		},

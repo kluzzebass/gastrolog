@@ -3,7 +3,9 @@ package otlp
 import (
 	"cmp"
 	"fmt"
+	"gastrolog/internal/cert"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/ingester/ingesttls"
 	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 )
@@ -17,7 +19,8 @@ func ParamDefaults() map[string]string {
 }
 
 // NewFactory returns an IngesterFactory for OTLP ingesters.
-func NewFactory() ingestion.IngesterFactory {
+// The cert manager resolves TLS certificate names.
+func NewFactory(certMgr *cert.Manager) ingestion.IngesterFactory {
 	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 		httpAddr := cmp.Or(params["http_addr"], ":4318")
 		grpcAddr := cmp.Or(params["grpc_addr"], ":4317")
@@ -38,11 +41,16 @@ func NewFactory() ingestion.IngesterFactory {
 			}
 		}
 
+		tlsCfg, err := ingesttls.Server("otlp", params, certMgr)
+		if err != nil {
+			return nil, err
+		}
 		return New(Config{
-			ID:       id.String(),
-			HTTPAddr: httpAddr,
-			GRPCAddr: grpcAddr,
-			Logger:   logger,
+			ID:        id.String(),
+			HTTPAddr:  httpAddr,
+			GRPCAddr:  grpcAddr,
+			TLSConfig: tlsCfg,
+			Logger:    logger,
 		}), nil
 	}
 }

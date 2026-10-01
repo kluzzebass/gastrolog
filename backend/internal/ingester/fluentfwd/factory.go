@@ -3,7 +3,9 @@ package fluentfwd
 import (
 	"cmp"
 	"fmt"
+	"gastrolog/internal/cert"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/ingester/ingesttls"
 	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 )
@@ -16,7 +18,8 @@ func ParamDefaults() map[string]string {
 }
 
 // NewFactory returns an IngesterFactory for Fluent Forward ingesters.
-func NewFactory() ingestion.IngesterFactory {
+// The cert manager resolves TLS certificate names.
+func NewFactory(certMgr *cert.Manager) ingestion.IngesterFactory {
 	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 		addr := cmp.Or(params["addr"], ":24224")
 
@@ -34,10 +37,15 @@ func NewFactory() ingestion.IngesterFactory {
 			}
 		}
 
+		tlsCfg, err := ingesttls.Server("fluentfwd", params, certMgr)
+		if err != nil {
+			return nil, err
+		}
 		return New(Config{
-			ID:     id.String(),
-			Addr:   addr,
-			Logger: logger,
+			ID:        id.String(),
+			Addr:      addr,
+			TLSConfig: tlsCfg,
+			Logger:    logger,
 		}), nil
 	}
 }

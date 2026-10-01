@@ -1764,14 +1764,14 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore sys
 			func(ctx context.Context, params map[string]string) (string, error) {
 				return ingestdocker.TestConnection(ctx, params, cfgStore)
 			}),
-		"fluentfwd": listen(ingestfluentfwd.NewFactory(), ingestfluentfwd.ParamDefaults, ingestfluentfwd.ListenAddrs),
-		"http":      listen(ingesthttp.NewFactory(), ingesthttp.ParamDefaults, ingesthttp.ListenAddrs),
+		"fluentfwd": listen(ingestfluentfwd.NewFactory(certMgr), ingestfluentfwd.ParamDefaults, ingestfluentfwd.ListenAddrs),
+		"http":      listen(ingesthttp.NewFactory(certMgr), ingesthttp.ParamDefaults, ingesthttp.ListenAddrs),
 		"kafka":     regHA(ingestkafka.NewFactory(), ingestkafka.ParamDefaults, ingestkafka.TestConnection),
 		"mqtt":      regHA(ingestmqtt.NewFactory(), ingestmqtt.ParamDefaults, ingestmqtt.TestConnection),
 		"metrics":   reg(ingestmetrics.NewFactory(metricsStatsAdapter{orch: orch}), ingestmetrics.ParamDefaults, nil),
-		"otlp":      listen(ingestotlp.NewFactory(), ingestotlp.ParamDefaults, ingestotlp.ListenAddrs),
+		"otlp":      listen(ingestotlp.NewFactory(certMgr), ingestotlp.ParamDefaults, ingestotlp.ListenAddrs),
 		"relp":      listen(ingestrelp.NewFactory(certMgr), ingestrelp.ParamDefaults, ingestrelp.ListenAddrs),
-		"syslog":    listen(ingestsyslog.NewFactory(), ingestsyslog.ParamDefaults, ingestsyslog.ListenAddrs),
+		"syslog":    listen(ingestsyslog.NewFactory(certMgr), ingestsyslog.ParamDefaults, ingestsyslog.ListenAddrs),
 		"tail":      reg(ingesttail.NewFactory(), ingesttail.ParamDefaults, nil),
 	}
 	if slogCh != nil {

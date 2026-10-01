@@ -367,7 +367,7 @@ func TestSyslogBothUDPAndTCP(t *testing.T) {
 }
 
 func TestSyslogFactoryMissingAddr(t *testing.T) {
-	factory := NewFactory()
+	factory := NewFactory(nil)
 	id := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 
 	// No udp_addr or tcp_addr → must error.

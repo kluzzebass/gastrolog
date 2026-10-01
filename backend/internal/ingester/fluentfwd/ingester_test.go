@@ -516,7 +516,7 @@ func TestEventTimeInvalidLength(t *testing.T) {
 
 func TestFluentFwdFactory(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	// Default addr.
 	ing, err := factory(glid.New(), nil, nil)
