@@ -1,4 +1,4 @@
-package relp
+package ingesttls
 
 import (
 	"crypto/ecdsa"
@@ -38,7 +38,7 @@ func TestBuildCNVerifier(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			verify := buildCNVerifier(tc.pattern)
+			verify := cnVerifier("relp", tc.pattern)
 			err := verify(tls.ConnectionState{PeerCertificates: tc.certs})
 			if tc.wantErr && err == nil {
 				t.Fatalf("expected the CN check to reject, got nil")
@@ -52,13 +52,13 @@ func TestBuildCNVerifier(t *testing.T) {
 
 // testCA holds a self-signed CA usable to mint server and client leaf certs
 // for mTLS tests.
-type testCA struct {
+type resumeCA struct {
 	cert *x509.Certificate
 	key  *ecdsa.PrivateKey
 	pool *x509.CertPool
 }
 
-func newTestCA(t *testing.T) *testCA {
+func newResumeCA(t *testing.T) *resumeCA {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -83,12 +83,12 @@ func newTestCA(t *testing.T) *testCA {
 	}
 	pool := x509.NewCertPool()
 	pool.AddCert(caCert)
-	return &testCA{cert: caCert, key: key, pool: pool}
+	return &resumeCA{cert: caCert, key: key, pool: pool}
 }
 
 // leafCert mints a leaf certificate signed by the CA. serverAuth selects
 // server- vs client-auth extended key usage.
-func (ca *testCA) leafCert(t *testing.T, commonName string, serial int64, serverAuth bool) tls.Certificate {
+func (ca *resumeCA) leafCert(t *testing.T, commonName string, serial int64, serverAuth bool) tls.Certificate {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -203,12 +203,12 @@ func dialAndPumpTicket(t *testing.T, addr string, clientCfg *tls.Config) (*tls.C
 func TestBuildCNVerifier_RunsOnResumedSessions(t *testing.T) {
 	t.Parallel()
 
-	ca := newTestCA(t)
+	ca := newResumeCA(t)
 	serverCert := ca.leafCert(t, "127.0.0.1", 2, true)
 	clientCert := ca.leafCert(t, "worker-3.example.com", 3, false)
 
 	var mu sync.Mutex
-	verify, calls := recordingVerifier(buildCNVerifier("worker-*.example.com"))
+	verify, calls := recordingVerifier(cnVerifier("relp", "worker-*.example.com"))
 
 	serverCfg := &tls.Config{
 		Certificates: []tls.Certificate{serverCert},
@@ -292,12 +292,12 @@ func TestBuildCNVerifier_RunsOnResumedSessions(t *testing.T) {
 func TestBuildCNVerifier_EnforcesTightenedACLOnResumedSession(t *testing.T) {
 	t.Parallel()
 
-	ca := newTestCA(t)
+	ca := newResumeCA(t)
 	serverCert := ca.leafCert(t, "127.0.0.1", 2, true)
 	clientCert := ca.leafCert(t, "worker-3.example.com", 3, false)
 
 	var mu sync.Mutex
-	verify, calls := recordingVerifier(buildCNVerifier("worker-*.example.com"))
+	verify, calls := recordingVerifier(cnVerifier("relp", "worker-*.example.com"))
 
 	serverCfg := &tls.Config{
 		Certificates: []tls.Certificate{serverCert},
@@ -343,7 +343,7 @@ func TestBuildCNVerifier_EnforcesTightenedACLOnResumedSession(t *testing.T) {
 	// reassigning it here changes what the next handshake observes without
 	// needing to touch the config itself.
 	mu.Lock()
-	verify, calls = recordingVerifier(buildCNVerifier("admin-*.example.com"))
+	verify, calls = recordingVerifier(cnVerifier("relp", "admin-*.example.com"))
 	mu.Unlock()
 
 	go func() {
@@ -394,7 +394,7 @@ func TestBuildCNVerifier_EnforcesTightenedACLOnResumedSession(t *testing.T) {
 	if got[0].err == nil {
 		t.Error("expected the resumed connection to be rejected under the tightened ACL")
 	}
-	if !strings.Contains(got[0].err.Error(), "does not match allowed pattern") {
+	if !strings.Contains(got[0].err.Error(), "does not match") {
 		t.Errorf("expected a CN-mismatch error, got: %v", got[0].err)
 	}
 }

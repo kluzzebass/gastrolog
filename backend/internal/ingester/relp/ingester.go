@@ -6,18 +6,13 @@ package relp
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
-	"gastrolog/internal/cert"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/ingester/limits"
 	"gastrolog/internal/ingester/syslogparse"
@@ -304,84 +299,4 @@ func (r *Ingester) sendAnswer(session *Session, msg *Message, writeErr error) bo
 		return false
 	}
 	return true
-}
-
-// BuildTLSConfig builds a *tls.Config from ingester parameters.
-// Returns nil if TLS is not configured (tls param is empty or "false").
-//
-// The server certificate is resolved from the cert manager by name
-// (tls_cert param). For mutual TLS, tls_ca specifies the CA file path
-// and tls_allowed_cn optionally restricts client certificate CNs.
-func BuildTLSConfig(params map[string]string, certMgr *cert.Manager) (*tls.Config, error) {
-	if params["tls"] != "true" {
-		return nil, nil
-	}
-
-	cfg := &tls.Config{
-		MinVersion: tls.VersionTLS12,
-	}
-
-	// Resolve server certificate from the cert manager by name.
-	// Uses GetCertificate callback so cert rotations are picked up automatically.
-	certName := params["tls_cert"]
-	if certName != "" {
-		if certMgr == nil {
-			return nil, errors.New("RELP TLS: cert manager not available")
-		}
-		// Verify the cert exists at config time.
-		if certMgr.Certificate(certName) == nil {
-			return nil, fmt.Errorf("RELP TLS: certificate %q not found in cert manager", certName)
-		}
-		cfg.GetCertificate = func(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
-			c := certMgr.Certificate(certName)
-			if c == nil {
-				return nil, fmt.Errorf("RELP TLS: certificate %q no longer available", certName)
-			}
-			return c, nil
-		}
-	}
-
-	// Load CA for client certificate verification (mutual TLS).
-	caFile := params["tls_ca"]
-	if caFile != "" {
-		caPEM, err := os.ReadFile(caFile) //nolint:gosec //ok:os-readfile bounded PEM at startup; x509.AppendCertsFromPEM needs full bytes
-		if err != nil {
-			return nil, fmt.Errorf("read RELP CA file: %w", err)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(caPEM) {
-			return nil, errors.New("RELP CA file contains no valid certificates")
-		}
-		cfg.ClientCAs = pool
-		cfg.ClientAuth = tls.RequireAndVerifyClientCert
-
-		// Optional CN-based ACL.
-		if pattern := params["tls_allowed_cn"]; pattern != "" {
-			// VerifyConnection instead of VerifyPeerCertificate: it runs on
-			// every handshake, including a resumed one, so the CN check
-			// can't be skipped by session resumption.
-			cfg.VerifyConnection = buildCNVerifier(pattern)
-		}
-	}
-
-	return cfg, nil
-}
-
-// buildCNVerifier returns a VerifyConnection function that checks the
-// client certificate's Common Name against a wildcard pattern.
-func buildCNVerifier(pattern string) func(tls.ConnectionState) error {
-	return func(cs tls.ConnectionState) error {
-		if len(cs.PeerCertificates) == 0 {
-			return errors.New("relp: no client certificate provided")
-		}
-		cert := cs.PeerCertificates[0]
-		matched, err := filepath.Match(pattern, cert.Subject.CommonName)
-		if err != nil {
-			return fmt.Errorf("relp: invalid CN pattern %q: %w", pattern, err)
-		}
-		if !matched {
-			return fmt.Errorf("relp: client CN %q does not match allowed pattern %q", cert.Subject.CommonName, pattern)
-		}
-		return nil
-	}
 }
