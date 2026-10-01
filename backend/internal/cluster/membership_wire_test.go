@@ -226,3 +226,27 @@ func TestRequestMembershipRefusesAnIDTheCertificateDoesNotName(t *testing.T) {
 		t.Fatalf("refusal carries code %v (%v), want PermissionDenied", status.Code(err), err)
 	}
 }
+
+// Raft administration is not served at all — not gated, absent. A cluster
+// certificate buys exactly the calls the lane registers, and a re-registered
+// raftadmin would silently restore configuration rewrite for every
+// certificate holder. Unimplemented is the only acceptable answer, even for
+// a legitimate member.
+func TestRaftAdminIsNotServed(t *testing.T) {
+	t.Parallel()
+
+	addr, memberTLS := startMember(t, nil, "node-2")
+
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(credentials.NewTLS(memberTLS.ClientTLSConfig())))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = conn.Invoke(ctx, "/RaftAdmin/AddVoter", &gastrologv1.RequestMembershipRequest{}, &gastrologv1.RequestMembershipResponse{})
+	if status.Code(err) != codes.Unimplemented {
+		t.Fatalf("raftadmin answered with %v (%v), want Unimplemented — configuration rewrite is reachable again", status.Code(err), err)
+	}
+}
