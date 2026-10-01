@@ -2,7 +2,6 @@ package mqtt
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
@@ -79,10 +78,8 @@ func (ing *v5Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMes
 		},
 	}
 
-	if ing.cfg.TLS {
-		cliCfg.TlsCfg = &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		}
+	if ing.cfg.TLSConfig != nil {
+		cliCfg.TlsCfg = ing.cfg.TLSConfig
 	}
 
 	if ing.cfg.Username != "" {

@@ -4,7 +4,9 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"gastrolog/internal/cert"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/ingester/ingesttls"
 	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"strings"
@@ -18,7 +20,7 @@ func ParamDefaults() map[string]string {
 }
 
 // NewFactory returns an IngesterFactory for Kafka ingesters.
-func NewFactory() ingestion.IngesterFactory {
+func NewFactory(certMgr *cert.Manager) ingestion.IngesterFactory {
 	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 		brokers := params["brokers"]
 		if brokers == "" {
@@ -31,7 +33,13 @@ func NewFactory() ingestion.IngesterFactory {
 		}
 
 		group := cmp.Or(params["group"], "gastrolog")
-		tls := params["tls"] == "true"
+		tlsCfg, insecure, err := ingesttls.Client("kafka", params, certMgr)
+		if err != nil {
+			return nil, err
+		}
+		if insecure {
+			logger.Warn("kafka ingester: tls_verify=false disables broker verification — a network position between this node and the broker can read and forge records; tls_ca with a stored CA certificate covers the self-signed case safely")
+		}
 
 		var sasl *SASLConfig
 		if mech := params["sasl_mechanism"]; mech != "" {
@@ -53,13 +61,13 @@ func NewFactory() ingestion.IngesterFactory {
 		}
 
 		return New(Config{
-			ID:      id.String(),
-			Brokers: brokerList,
-			Topic:   topic,
-			Group:   group,
-			TLS:     tls,
-			SASL:    sasl,
-			Logger:  logger,
+			ID:        id.String(),
+			Brokers:   brokerList,
+			Topic:     topic,
+			Group:     group,
+			TLSConfig: tlsCfg,
+			SASL:      sasl,
+			Logger:    logger,
 		}), nil
 	}
 }

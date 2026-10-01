@@ -4,7 +4,9 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"gastrolog/internal/cert"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/ingester/ingesttls"
 	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"strconv"
@@ -20,7 +22,7 @@ func ParamDefaults() map[string]string {
 }
 
 // NewFactory returns an IngesterFactory for MQTT ingesters.
-func NewFactory() ingestion.IngesterFactory {
+func NewFactory(certMgr *cert.Manager) ingestion.IngesterFactory {
 	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 		broker := params["broker"]
 		if broker == "" {
@@ -42,7 +44,13 @@ func NewFactory() ingestion.IngesterFactory {
 
 		const qos = 1 // Subscribe at QoS 1 (at least once); broker delivers at min(pub, sub).
 
-		tls := params["tls"] == "true"
+		tlsCfg, insecure, err := ingesttls.Client("mqtt", params, certMgr)
+		if err != nil {
+			return nil, err
+		}
+		if insecure {
+			logger.Warn("mqtt ingester: tls_verify=false disables broker verification — a network position between this node and the broker can read and forge records; tls_ca with a stored CA certificate covers the self-signed case safely")
+		}
 		cleanSession := params["clean_session"] != "false"
 
 		version := 3
@@ -61,7 +69,7 @@ func NewFactory() ingestion.IngesterFactory {
 			Topics:       topics,
 			ClientID:     clientID,
 			QoS:          byte(qos),
-			TLS:          tls,
+			TLSConfig:    tlsCfg,
 			CleanSession: cleanSession,
 			Username:     params["username"],
 			Password:     params["password"],

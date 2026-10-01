@@ -87,6 +87,10 @@ func parseConfig(id string, params map[string]string, cfgStore system.Store, log
 		if err != nil {
 			return ingesterConfig{}, err
 		}
+		if params["tls_verify"] == "false" {
+			logger.Warn("docker ingester: tls_verify=false disables daemon verification — a network position between this node and the daemon can read and forge container logs; tls_ca with a stored CA certificate covers the self-signed case safely",
+				"ingester", id)
+		}
 	}
 
 	// Filter.

@@ -2,7 +2,6 @@ package mqtt
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
@@ -27,10 +26,8 @@ func (ing *v3Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMes
 		SetConnectRetry(true).
 		SetOrderMatters(false)
 
-	if ing.cfg.TLS {
-		opts.SetTLSConfig(&tls.Config{
-			MinVersion: tls.VersionTLS12,
-		})
+	if ing.cfg.TLSConfig != nil {
+		opts.SetTLSConfig(ing.cfg.TLSConfig)
 	}
 
 	if ing.cfg.Username != "" {

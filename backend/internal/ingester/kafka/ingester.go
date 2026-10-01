@@ -44,9 +44,10 @@ type Config struct {
 	Brokers []string
 	Topic   string
 	Group   string
-	TLS     bool
-	SASL    *SASLConfig
-	Logger  *slog.Logger
+	// TLSConfig, when non-nil, makes broker dials use TLS.
+	TLSConfig *tls.Config
+	SASL      *SASLConfig
+	Logger    *slog.Logger
 }
 
 // Ingester consumes messages from a Kafka topic.
@@ -89,10 +90,8 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 		kgo.ConsumerGroup(ing.cfg.Group),
 	}
 
-	if ing.cfg.TLS {
-		opts = append(opts, kgo.DialTLSConfig(&tls.Config{
-			MinVersion: tls.VersionTLS12,
-		}))
+	if ing.cfg.TLSConfig != nil {
+		opts = append(opts, kgo.DialTLSConfig(ing.cfg.TLSConfig))
 	}
 
 	if ing.cfg.SASL != nil {
