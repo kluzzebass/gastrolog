@@ -84,6 +84,28 @@ When creating a **question** issue, always draft the title and description first
 
 **Stacked branches are allowed** when a follow-up issue naturally builds on an in-review branch (e.g. you discover a related bug while validating the parent fix and don't want to wait for merge). Branch the child off the parent's HEAD, keep each branch single-issue, and either (a) merge the stack as one when both close together, or (b) merge the parent into the stack branch first and rebase the child onto that stack tip. What is NOT allowed is **lumping** — multiple issues' commits intermixed on a single branch with no clean revertable history. Stacking ≠ lumping: each branch still owns exactly one issue's work.
 
+### Handoff checklist
+
+Run down this table before moving an issue to in_review. Every row gets
+considered; the ones that apply get done — not mentioned, done. The table
+exists because each row is an obligation that was forgotten at least once
+when it lived only in prose.
+
+| Control | Applies when | Satisfied by |
+|---------|--------------|--------------|
+| Tests across all dimensions | every change | single-node, multi-node (4+), happy, unhappy, adversarial, edge cases — see Test Coverage |
+| Premise check | every failure-asserting or guard-pinning test | disable the guard / revert the fix: the test must go red |
+| Fast gates | every change | `just test` green, `bunx react-doctor@latest .` clean |
+| Full acceptance gate | before in_review | `just backend test-full` green, once, not optional |
+| Cluster-first audit | new RPCs, handlers, state | works from any node: remote collection (`collectRemote`), PeerState aggregation, no node-local truth — see Cluster-First |
+| Denied-capabilities table | security-touching work | handoff comment pairs each denied capability with its driving test |
+| Help system | user-visible feature added or changed | `SettingsDialog.tsx` `helpTopicId` + `help/topics.ts` + `help/*.md` updated with the feature |
+| Docs in the same commit | behavior or concept changes | design docs describe the code as it now is; `docs/ubiquitous_language.md` gains new terms |
+| Proto regeneration | any `.proto` change | `just gen` (both sides — the commit hook refuses half a generation) |
+| Rename through the stack | any rename | proto, generated code, Go, TypeScript, UI labels, tests — no partial renames, nothing deferred |
+| UI/CLI parity | new operator-facing capability | both surfaces can do it, or the gap is a filed issue |
+| Verify the artifact | asking the user to look at a running system | prove the running binary/UI contains the change first |
+
 ### Closing issues
 
 **NEVER** close issues without explicit user approval:
