@@ -715,7 +715,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		CloudTesters:        s.cloudTesters,
 		Tokens:              s.tokens,
 		PlacementReconcile:  s.placementReconcile,
-		OnTLSConfigChange:   s.reconfigureTLS,
+		OnTLSConfigChange:   s.ReconfigureTLS,
 		OnLookupConfigChange: func(cfg system.LookupConfig, mm system.MaxMindConfig) {
 			s.applyLookupConfig(cfg, mm, lookupRegistry)
 		},
@@ -849,7 +849,7 @@ func (s *Server) Serve(listener net.Listener) error {
 	s.mu.Unlock()
 
 	// Initial TLS config: start HTTPS if enabled
-	s.reconfigureTLS()
+	s.ReconfigureTLS()
 
 	// Start Unix socket for local CLI access (no auth).
 	if s.unixSocketConfig != "" {

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"gastrolog/internal/cluster"
@@ -1756,4 +1757,25 @@ func TestReplayConfigFromStore_NoOpWhenOrchUnwired(t *testing.T) {
 	d := &configDispatcher{logger: slog.Default()}
 	// Should not panic and should not call into any store.
 	d.ReplayConfigFromStore(context.Background())
+}
+
+// A certificate change reaches every node as a notification; each node
+// mirrors the store into its cert manager and swaps its HTTPS listener. The
+// RPC-serving node has no special role — before this leg existed, a
+// certificate created at runtime served only the node that took the RPC.
+func TestHandleCertificateChangeReloadsCerts(t *testing.T) {
+	h := &captureHandler{}
+	d := newTestDispatcher(&mockOrch{}, &stubCfgStore{}, h)
+	var calls atomic.Int32
+	d.certsChanged = func(context.Context) error {
+		calls.Add(1)
+		return nil
+	}
+
+	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyCertificatePut, ID: glid.New()})
+	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyCertificateDeleted, ID: glid.New()})
+
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("certificate notifications triggered %d reloads, want 2", got)
+	}
 }
