@@ -28,6 +28,12 @@ The ingester always subscribes at QoS 1 (at least once). The broker delivers eac
 
 The message payload is used as the raw log line.
 
+## TLS
+
+When TLS is enabled, the connection to the broker uses TLS. A CA Certificate from the certificate store pins the trust root — the safe way to talk to a broker with a self-signed or private-CA certificate. A Client Certificate is presented to brokers that require mutual TLS.
+
+Disabling server verification is unsafe: anyone between this node and the broker can read and forge records, and the ingester logs a warning at startup when it is set. Prefer a stored CA certificate instead.
+
 ## Timestamps
 
 MQTT does not include a protocol-level timestamp. IngestTS is set to GastroLog arrival time. SourceTS is not set; use a [timestamp digester](help:digester-timestamp) to extract the original event time from the message payload.

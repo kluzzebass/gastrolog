@@ -19,6 +19,12 @@ Supports all four Fluent Forward message modes: Message, Forward, PackedForward,
 
 The raw log line is extracted from the first matching key: `message`, `log`, or `msg`. If none is found, the entire record is JSON-serialized.
 
+## TLS
+
+When TLS is enabled, the Forward listener serves TLS. Select a server certificate from the certificate store — certificates are managed in the Certificates settings tab, and rotations take effect without a restart.
+
+For mutual TLS, also select a Client CA Certificate: clients must then present a certificate signed by that CA, and a plaintext or unverified client is refused before any of its bytes are parsed. The Allowed Client CN field optionally narrows which client certificates are accepted using a wildcard pattern (e.g. `producer-*`).
+
 ## Timestamps
 
 SourceTS is set from the Fluentd event timestamp, which is always present in the protocol. IngestTS is set to GastroLog arrival time.

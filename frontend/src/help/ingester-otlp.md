@@ -29,6 +29,12 @@ When attribute keys collide, record attributes take precedence over scope attrib
 
 The log record body is used as the raw log line. Complex body values (arrays, maps) are JSON-serialized.
 
+## TLS
+
+When TLS is enabled, both listeners — the HTTP port and the gRPC port — serve TLS from the same configuration. Select a server certificate from the certificate store — certificates are managed in the Certificates settings tab, and rotations take effect without a restart.
+
+For mutual TLS, also select a Client CA Certificate: clients must then present a certificate signed by that CA, and a plaintext or unverified client is refused before any of its bytes are parsed. The Allowed Client CN field optionally narrows which client certificates are accepted using a wildcard pattern (e.g. `producer-*`).
+
 ## Timestamps
 
 | Field | Source |

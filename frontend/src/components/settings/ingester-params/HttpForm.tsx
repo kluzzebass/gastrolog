@@ -1,4 +1,5 @@
 import { FormField, TextInput } from "../FormField";
+import { TlsListenerFields } from "./TlsFields";
 import type { SubFormProps } from "./types";
 
 export function HttpForm({
@@ -23,6 +24,7 @@ export function HttpForm({
           examples={[":3100"]}
         />
       </FormField>
+      <TlsListenerFields params={params} onChange={onChange} dark={dark} />
     </div>
   );
 }

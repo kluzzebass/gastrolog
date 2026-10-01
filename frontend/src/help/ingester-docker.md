@@ -56,3 +56,7 @@ SourceTS is set from the Docker log entry timestamp — the time the Docker daem
 ## Recipe
 
 See [Docker with mTLS](help:recipe-docker-mtls) for a complete walkthrough of setting up Docker daemon TCP access with client and server certificate authentication.
+
+## Disabling TLS verification
+
+`tls_verify=false` turns off verification of the Docker daemon's certificate. It is unsafe — anyone between this node and a TCP daemon endpoint can read and forge container logs — and the ingester logs a warning at startup when it is set. A stored CA certificate (`tls_ca`) covers the self-signed-daemon case without giving up verification.
