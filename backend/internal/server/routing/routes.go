@@ -120,9 +120,13 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.JobServiceWatchJobsProcedure: {Strategy: RouteLocal, IsStreaming: true},
 
 		// ── LifecycleService ─────────────────────────────────────────────
-		gastrologv1connect.LifecycleServiceHealthProcedure:            {Strategy: RouteLocal},
-		gastrologv1connect.LifecycleServiceShutdownProcedure:          {Strategy: RouteLocal},
-		gastrologv1connect.LifecycleServiceGetClusterStatusProcedure:  {Strategy: RouteLocal},
+		gastrologv1connect.LifecycleServiceHealthProcedure:           {Strategy: RouteLocal},
+		gastrologv1connect.LifecycleServiceShutdownProcedure:         {Strategy: RouteLocal},
+		gastrologv1connect.LifecycleServiceGetClusterStatusProcedure: {Strategy: RouteLocal},
+		// Minting a join token reads replicated state and writes nothing, so
+		// any node answers it — the same property that lets any node enrol a
+		// joiner.
+		gastrologv1connect.LifecycleServiceCreateJoinTokenProcedure:   {Strategy: RouteLocal},
 		gastrologv1connect.LifecycleServiceJoinClusterProcedure:       {Strategy: RouteLocal},
 		gastrologv1connect.LifecycleServiceWatchSystemStatusProcedure: {Strategy: RouteLocal, IsStreaming: true},
 		// YieldLeadership is invoked on the terminating node by its own preStop

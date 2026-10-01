@@ -276,12 +276,16 @@ message SetNodeStateCommand {
 
 // --- Cluster TLS ---
 
+// The cluster's trust root and the credential for joining it. Node
+// certificates are not here: each node holds its own, issued against this CA
+// and never replicated, so that one stolen key is one node rather than the
+// cluster.
 message PutClusterTLSCommand {
   bytes ca_cert_pem = 1;
   bytes ca_key_pem = 2;
-  bytes cluster_cert_pem = 3;
-  bytes cluster_key_pem = 4;
-  string join_token = 5;
+  // Key the cluster mints join tokens with. Tokens themselves are minted on
+  // demand and expire; this is what signs them and never leaves the cluster.
+  string join_token_key = 5;
 }
 
 // --- Routes ---

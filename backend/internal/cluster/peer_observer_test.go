@@ -31,7 +31,7 @@ func TestRegisterPeerObserver_FiresOnRemoval(t *testing.T) {
 	ch := make(chan hraft.Observation, 16)
 	node1.srv.RegisterPeerObserver(ch)
 
-	addVoter(t, node1.srv.Addr(), "node-2", node2.srv.Addr())
+	addVoter(t, node1.srv, "node-2", node2.srv.Addr())
 
 	// Wait for 2-voter config.
 	deadline := time.After(5 * time.Second)

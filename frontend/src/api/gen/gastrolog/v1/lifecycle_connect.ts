@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, JoinClusterRequest, JoinClusterResponse, RemoveNodeRequest, RemoveNodeResponse, SetNodeStateRequest, SetNodeStateResponse, SetNodeSuffrageRequest, SetNodeSuffrageResponse, ShutdownRequest, ShutdownResponse, WatchSystemStatusRequest, WatchSystemStatusResponse, YieldLeadershipRequest, YieldLeadershipResponse } from "./lifecycle_pb.js";
+import { CreateJoinTokenRequest, CreateJoinTokenResponse, GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, JoinClusterRequest, JoinClusterResponse, RemoveNodeRequest, RemoveNodeResponse, SetNodeStateRequest, SetNodeStateResponse, SetNodeSuffrageRequest, SetNodeSuffrageResponse, ShutdownRequest, ShutdownResponse, WatchSystemStatusRequest, WatchSystemStatusResponse, YieldLeadershipRequest, YieldLeadershipResponse } from "./lifecycle_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -45,6 +45,19 @@ export const LifecycleService = {
       name: "GetClusterStatus",
       I: GetClusterStatusRequest,
       O: GetClusterStatusResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * CreateJoinToken mints a join token for admitting a new node. Tokens
+     * expire, so this is an action rather than a field of cluster status:
+     * there is no standing token to read, and one is issued when asked for.
+     *
+     * @generated from rpc gastrolog.v1.LifecycleService.CreateJoinToken
+     */
+    createJoinToken: {
+      name: "CreateJoinToken",
+      I: CreateJoinTokenRequest,
+      O: CreateJoinTokenResponse,
       kind: MethodKind.Unary,
     },
     /**

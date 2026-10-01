@@ -4,7 +4,7 @@ import { lifecycleClient } from "../client";
 export function useJoinCluster() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (args: { leaderAddress: string; joinToken: string }) => {
+    mutationFn: async (args: { memberAddress: string; joinToken: string }) => {
       await lifecycleClient.joinCluster(args);
     },
     onSuccess: () => {

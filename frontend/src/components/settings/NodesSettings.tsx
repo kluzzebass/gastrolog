@@ -5,6 +5,7 @@ import { useConfig, usePutNodeConfig } from "../../api/hooks/useSystem";
 import { useSettings } from "../../api/hooks/useSettings";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useSetNodeSuffrage } from "../../api/hooks/useSetNodeSuffrage";
+import { useCreateJoinToken } from "../../api/hooks/useCreateJoinToken";
 import { useJoinCluster } from "../../api/hooks/useJoinCluster";
 import { useRemoveNode } from "../../api/hooks/useRemoveNode";
 import { ClusterNodeRole, ClusterNodeSuffrage } from "../../api/gen/gastrolog/v1/lifecycle_pb";
@@ -257,8 +258,8 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
         )}
       </div>
 
-      {clusterEnabled && clusterData?.joinToken && (
-        <JoinInfoCard dark={dark} joinToken={clusterData.joinToken} clusterAddress={clusterData.clusterAddress} />
+      {clusterEnabled && (
+        <JoinInfoCard dark={dark} clusterAddress={clusterData?.clusterAddress ?? ""} />
       )}
 
       {clusterEnabled && nodes.length === 1 && (
@@ -273,20 +274,20 @@ function JoinClusterCard({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const { addToast } = useToast();
   const joinCluster = useJoinCluster();
-  const [leaderAddress, setLeaderAddress] = useState("");
+  const [memberAddress, setMemberAddress] = useState("");
   const [joinToken, setJoinToken] = useState("");
   const [confirmed, setConfirmed] = useState(false);
 
-  const canSubmit = leaderAddress.trim() !== "" && joinToken.trim() !== "" && confirmed;
+  const canSubmit = memberAddress.trim() !== "" && joinToken.trim() !== "" && confirmed;
 
   const handleJoin = async () => {
     try {
       await joinCluster.mutateAsync({
-        leaderAddress: leaderAddress.trim(),
+        memberAddress: memberAddress.trim(),
         joinToken: joinToken.trim(),
       });
       addToast("Successfully joined cluster", "info");
-      setLeaderAddress("");
+      setMemberAddress("");
       setJoinToken("");
       setConfirmed(false);
     } catch (err: unknown) {
@@ -303,13 +304,13 @@ function JoinClusterCard({ dark }: Readonly<{ dark: boolean }>) {
         Join Cluster
       </h3>
       <p className={`text-[0.75em] mb-3 ${c("text-text-muted", "text-light-text-muted")}`}>
-        Join an existing cluster at runtime. This node's local configuration will be replaced by the cluster's configuration.
+        Join an existing cluster at runtime, through the address of any node in it. This node's local configuration will be replaced by the cluster's configuration.
       </p>
       <div className="flex flex-col gap-2.5">
-        <FormField label="Leader Address" dark={dark}>
+        <FormField label="Member Address" dark={dark}>
           <TextInput
-            value={leaderAddress}
-            onChange={setLeaderAddress}
+            value={memberAddress}
+            onChange={setMemberAddress}
             placeholder="e.g. 10.0.0.1:4566"
             dark={dark}
             mono
@@ -320,7 +321,7 @@ function JoinClusterCard({ dark }: Readonly<{ dark: boolean }>) {
           <TextInput
             value={joinToken}
             onChange={setJoinToken}
-            placeholder="Paste join token from the leader"
+            placeholder="Paste join token from the cluster"
             dark={dark}
             mono
             disabled={joinCluster.isPending}
@@ -351,22 +352,34 @@ function JoinClusterCard({ dark }: Readonly<{ dark: boolean }>) {
   );
 }
 
-function JoinInfoCard({ dark, joinToken, clusterAddress }: Readonly<{ dark: boolean; joinToken: string; clusterAddress: string }>) {
+function JoinInfoCard({ dark, clusterAddress }: Readonly<{ dark: boolean; clusterAddress: string }>) {
   const c = useThemeClass(dark);
+  const readOnly = useReadOnly();
+  const createToken = useCreateJoinToken();
   const [showToken, setShowToken] = useState(false);
 
-  const displayToken = showToken ? joinToken : middleTruncate(joinToken, 13, 8, 4);
-
-  const joinCmd = `gastrolog server --join-addr ${clusterAddress || "<cluster-addr>"} --join-token ${joinToken} --cluster-addr :4575`;
+  // No token is shown until one is asked for. Tokens expire, so there is
+  // nothing standing to display, and a credential left on screen for a
+  // session that never uses it is a credential leaked for nothing.
+  const minted = createToken.data;
+  const displayToken = minted
+    ? (showToken ? minted.token : middleTruncate(minted.token, 13, 8, 4))
+    : "";
+  const joinCmd = minted
+    ? `gastrolog server --join-addr ${clusterAddress || "<cluster-addr>"} --join-token ${minted.token} --cluster-addr :4575`
+    : "";
 
   return (
     <div className={`mt-4 rounded-lg border p-4 ${c(
       "bg-ink-well/50 border-ink-border",
       "bg-light-well/50 border-light-border",
     )}`}>
-      <h3 className={`text-[0.85em] font-semibold mb-3 ${c("text-text-bright", "text-light-text-bright")}`}>
+      <h3 className={`text-[0.85em] font-semibold mb-1 ${c("text-text-bright", "text-light-text-bright")}`}>
         Cluster Join Info
       </h3>
+      <p className={`text-[0.75em] mb-3 ${c("text-text-muted", "text-light-text-muted")}`}>
+        Join tokens expire. Mint one when you are about to add a node.
+      </p>
       <div className="flex flex-col gap-2.5">
         <div className="flex flex-col gap-1">
           <span className={`text-[0.75em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}>
@@ -374,44 +387,66 @@ function JoinInfoCard({ dark, joinToken, clusterAddress }: Readonly<{ dark: bool
           </span>
           <div className="flex items-center gap-1.5">
             <code className={`text-[0.8em] font-mono ${c("text-text-normal", "text-light-text-normal")}`}>
-              {clusterAddress || "—"}
+              {clusterAddress || "\u2014"}
             </code>
             {clusterAddress && <CopyButton text={clusterAddress} dark={dark} />}
           </div>
         </div>
-        <div className="flex flex-col gap-1">
-          <span className={`text-[0.75em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}>
-            Join Token
+
+        {!readOnly && (
+          <Button
+            onClick={() => { void createToken.mutateAsync(undefined).catch(() => {}); }}
+            dark={dark}
+            variant="ghost"
+            disabled={createToken.isPending}
+          >
+            {createToken.isPending ? "Minting…" : minted ? "Mint another token" : "Mint a join token"}
+          </Button>
+        )}
+
+        {createToken.isError && (
+          <span className={`text-[0.75em] ${c("text-rust", "text-rust")}`}>
+            {createToken.error instanceof Error ? createToken.error.message : "Could not mint a join token"}
           </span>
-          <div className="flex items-center gap-1.5">
-            <code className={`text-[0.8em] font-mono break-all ${c("text-text-normal", "text-light-text-normal")}`}>
-              {displayToken}
-            </code>
-            <button
-              type="button"
-              onClick={() => setShowToken(!showToken)}
-              className={`shrink-0 transition-colors ${c("text-text-muted hover:text-copper", "text-light-text-muted hover:text-copper")}`}
-              title={showToken ? "Hide token" : "Reveal token"}
-            >
-              {showToken ? <EyeOffIcon className="w-3.5 h-3.5" /> : <EyeIcon className="w-3.5 h-3.5" />}
-            </button>
-            <CopyButton text={joinToken} dark={dark} />
-          </div>
-        </div>
-        <div className="flex flex-col gap-1">
-          <span className={`text-[0.75em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}>
-            Join Command
-          </span>
-          <div className="flex items-start gap-1.5">
-            <code className={`text-[0.75em] font-mono break-all leading-relaxed ${c(
-              "text-text-muted bg-ink-well px-2 py-1.5 rounded",
-              "text-light-text-muted bg-light-well px-2 py-1.5 rounded",
-            )}`}>
-              {joinCmd}
-            </code>
-            <CopyButton text={joinCmd} dark={dark} className="mt-1 shrink-0" />
-          </div>
-        </div>
+        )}
+
+        {minted && (
+          <>
+            <div className="flex flex-col gap-1">
+              <span className={`text-[0.75em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}>
+                Join Token — expires {new Date(Number(minted.expiresAt) * 1000).toLocaleTimeString()}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <code className={`text-[0.8em] font-mono break-all ${c("text-text-normal", "text-light-text-normal")}`}>
+                  {displayToken}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => setShowToken(!showToken)}
+                  className={`shrink-0 transition-colors ${c("text-text-muted hover:text-copper", "text-light-text-muted hover:text-copper")}`}
+                  title={showToken ? "Hide token" : "Reveal token"}
+                >
+                  {showToken ? <EyeOffIcon className="w-3.5 h-3.5" /> : <EyeIcon className="w-3.5 h-3.5" />}
+                </button>
+                <CopyButton text={minted.token} dark={dark} />
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className={`text-[0.75em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}>
+                Join Command
+              </span>
+              <div className="flex items-start gap-1.5">
+                <code className={`text-[0.75em] font-mono break-all leading-relaxed ${c(
+                  "text-text-muted bg-ink-well px-2 py-1.5 rounded",
+                  "text-light-text-muted bg-light-well px-2 py-1.5 rounded",
+                )}`}>
+                  {joinCmd}
+                </code>
+                <CopyButton text={joinCmd} dark={dark} className="mt-1 shrink-0" />
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

@@ -82,8 +82,8 @@ func threeNodeCluster(t *testing.T) []*testNode {
 	node3 := newTestNode(t, "node-3", false)
 	t.Cleanup(node3.close)
 
-	addVoter(t, node1.srv.Addr(), "node-2", node2.srv.Addr())
-	addVoter(t, node1.srv.Addr(), "node-3", node3.srv.Addr())
+	addVoter(t, node1.srv, "node-2", node2.srv.Addr())
+	addVoter(t, node1.srv, "node-3", node3.srv.Addr())
 
 	// Wait for all 3 nodes visible in Raft system.
 	deadline := time.After(5 * time.Second)

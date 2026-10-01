@@ -13,10 +13,7 @@ import (
 	"gastrolog/internal/system/raftfsm"
 	"gastrolog/internal/system/raftstore"
 
-	"github.com/Jille/raftadmin/proto"
 	hraft "github.com/hashicorp/raft"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // testNode bundles a cluster server, raft instance, and config store for testing.
@@ -115,31 +112,13 @@ func waitLeader(t *testing.T, r *hraft.Raft, timeout time.Duration) {
 	}
 }
 
-// addVoter adds a voter to the cluster via raftadmin gRPC.
-func addVoter(t *testing.T, leaderAddr, voterID, voterAddr string) {
+// addVoter puts a node in the configuration. The cluster's own admission
+// path routes to the leader and applies the change there; these tests hold
+// the leader directly, so they apply it directly.
+func addVoter(t *testing.T, leader *cluster.Server, voterID, voterAddr string) {
 	t.Helper()
-	conn, err := grpc.NewClient(leaderAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatalf("dial leader for AddVoter: %v", err)
-	}
-	defer conn.Close()
-
-	client := proto.NewRaftAdminClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	resp, err := client.AddVoter(ctx, &proto.AddVoterRequest{
-		Id:      voterID,
-		Address: voterAddr,
-	})
-	if err != nil {
-		t.Fatalf("AddVoter: %v", err)
-	}
-
-	// Await the future.
-	_, err = client.Await(ctx, resp)
-	if err != nil {
-		t.Fatalf("Await AddVoter: %v", err)
+	if err := leader.AddVoter(voterID, voterAddr, 5*time.Second); err != nil {
+		t.Fatalf("add voter %s: %v", voterID, err)
 	}
 }
 
@@ -194,9 +173,8 @@ func TestThreeNodeCluster(t *testing.T) {
 	node3 := newTestNode(t, "node-3", false)
 	defer node3.close()
 
-	// Add nodes 2 and 3 as voters via raftadmin.
-	addVoter(t, node1.srv.Addr(), "node-2", node2.srv.Addr())
-	addVoter(t, node1.srv.Addr(), "node-3", node3.srv.Addr())
+	addVoter(t, node1.srv, "node-2", node2.srv.Addr())
+	addVoter(t, node1.srv, "node-3", node3.srv.Addr())
 
 	// Wait for Raft configuration to include all 3 voters.
 	deadline := time.After(5 * time.Second)

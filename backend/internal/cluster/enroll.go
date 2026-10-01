@@ -10,9 +10,12 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// EnrollHandler is a callback for the Enroll RPC. The handler is responsible
-// for verifying the token, calling AddVoter, and returning TLS material.
-// Registered via Server.SetEnrollHandler().
+// EnrollHandler is a callback for the Enroll RPC: it verifies the join token
+// and returns the cluster's TLS material. Registered via
+// Server.SetEnrollHandler().
+//
+// It does not touch the Raft configuration. The joiner comes back for that
+// through RequestMembership, holding the certificate this issued it.
 type EnrollHandler func(ctx context.Context, req *gastrologv1.EnrollRequest) (*gastrologv1.EnrollResponse, error)
 
 // SetEnrollHandler registers the callback invoked when a joining node calls Enroll.

@@ -18,7 +18,7 @@ func TestSaveFileWritesOwnerOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	crt, err := tlsutil.GenerateClusterCert(ca.CertPEM, ca.KeyPEM, LaneSANs)
+	crt, err := tlsutil.GenerateNodeCert(ca.CertPEM, ca.KeyPEM, "test-node", LaneSANs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestSaveFileDoesNotUseAGuessableTempName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	crt, err := tlsutil.GenerateClusterCert(ca.CertPEM, ca.KeyPEM, LaneSANs)
+	crt, err := tlsutil.GenerateNodeCert(ca.CertPEM, ca.KeyPEM, "test-node", LaneSANs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestSaveFileIsRepeatable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	crt, err := tlsutil.GenerateClusterCert(ca.CertPEM, ca.KeyPEM, LaneSANs)
+	crt, err := tlsutil.GenerateNodeCert(ca.CertPEM, ca.KeyPEM, "test-node", LaneSANs)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -24,7 +24,7 @@ func loadedClusterTLS(t *testing.T) *ClusterTLS {
 	if err != nil {
 		t.Fatalf("GenerateCA: %v", err)
 	}
-	cert, err := tlsutil.GenerateClusterCert(ca.CertPEM, ca.KeyPEM, LaneSANs)
+	cert, err := tlsutil.GenerateNodeCert(ca.CertPEM, ca.KeyPEM, "test-node", LaneSANs)
 	if err != nil {
 		t.Fatalf("GenerateClusterCert: %v", err)
 	}
@@ -152,20 +152,20 @@ func TestPeerDialRefusesUnloadedTLS(t *testing.T) {
 	}
 }
 
-func TestJoinCredentials(t *testing.T) {
+func TestMembershipCredentials(t *testing.T) {
 	t.Parallel()
 
-	if creds, err := joinCredentials(nil); err != nil {
+	if creds, err := membershipCredentials(nil); err != nil {
 		t.Fatalf("no holder: %v", err)
 	} else if creds.Info().SecurityProtocol != "insecure" {
 		t.Fatalf("no holder: want plaintext, got %q", creds.Info().SecurityProtocol)
 	}
 
-	if _, err := joinCredentials(NewClusterTLS()); !errors.Is(err, ErrClusterTLSUnloaded) {
+	if _, err := membershipCredentials(NewClusterTLS()); !errors.Is(err, ErrClusterTLSUnloaded) {
 		t.Fatalf("unloaded holder: got %v, want %v", err, ErrClusterTLSUnloaded)
 	}
 
-	if creds, err := joinCredentials(loadedClusterTLS(t)); err != nil {
+	if creds, err := membershipCredentials(loadedClusterTLS(t)); err != nil {
 		t.Fatalf("loaded holder: %v", err)
 	} else if creds.Info().SecurityProtocol != "tls" {
 		t.Fatalf("loaded holder: want tls, got %q", creds.Info().SecurityProtocol)

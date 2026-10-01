@@ -222,11 +222,12 @@ type MaxMindConfig struct {
 // All fields are PEM-encoded except JoinToken which is a hex string.
 // Stored atomically via a single Raft command to prevent inconsistent states.
 type ClusterTLS struct {
-	CACertPEM      string `json:"ca_cert_pem"`
-	CAKeyPEM       string `json:"ca_key_pem"`
-	ClusterCertPEM string `json:"cluster_cert_pem"`
-	ClusterKeyPEM  string `json:"cluster_key_pem"`
-	JoinToken      string `json:"join_token"`
+	CACertPEM string `json:"ca_cert_pem"`
+	CAKeyPEM  string `json:"ca_key_pem"`
+	// JoinTokenKey signs minted join tokens. Hex-encoded. Tokens are minted
+	// on demand and expire; this key is the durable credential and is never
+	// handed out.
+	JoinTokenKey string `json:"join_token_key"`
 }
 
 // LogLevelConfig is the cluster-wide per-component log level

@@ -12,10 +12,15 @@ import (
 	"time"
 )
 
-// selfSignedCert creates a self-signed certificate for fingerprint tests.
-// isCA controls the basic-constraints CA bit, which verifyCAFingerprint
-// uses to decide which of its two matching passes finds the cert.
+// selfSignedCert creates a self-signed certificate. isCA sets the
+// basic-constraints CA bit so the certificate can issue others.
 func selfSignedCert(t *testing.T, commonName string, isCA bool) *x509.Certificate {
+	t.Helper()
+	cert, _ := selfSignedPair(t, commonName, isCA)
+	return cert
+}
+
+func selfSignedPair(t *testing.T, commonName string, isCA bool) (*x509.Certificate, *ecdsa.PrivateKey) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -24,7 +29,7 @@ func selfSignedCert(t *testing.T, commonName string, isCA bool) *x509.Certificat
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
 		Subject:               pkix.Name{CommonName: commonName},
-		NotBefore:             time.Now(),
+		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(time.Hour),
 		BasicConstraintsValid: true,
 		IsCA:                  isCA,
@@ -40,6 +45,33 @@ func selfSignedCert(t *testing.T, commonName string, isCA bool) *x509.Certificat
 	if err != nil {
 		t.Fatalf("parse certificate: %v", err)
 	}
+	return cert, key
+}
+
+// issuedBy creates a server certificate signed by the given CA, which is the
+// shape a real cluster presents: leaf first, issuer behind it.
+func issuedBy(t *testing.T, commonName string, ca *x509.Certificate, caKey *ecdsa.PrivateKey) *x509.Certificate {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(2),
+		Subject:               pkix.Name{CommonName: commonName},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		BasicConstraintsValid: true,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca, &key.PublicKey, caKey)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("parse certificate: %v", err)
+	}
 	return cert
 }
 
@@ -48,60 +80,79 @@ func fingerprintOf(cert *x509.Certificate) []byte {
 	return h[:]
 }
 
-func TestVerifyCAFingerprint(t *testing.T) {
+// The join token pins the cluster CA by fingerprint, and that certificate is
+// public — anyone who has watched a handshake holds a copy. Finding it
+// somewhere in the presented chain therefore proves nothing; the certificate
+// terminating the connection has to chain to it. Otherwise a joiner hands its
+// token to whoever answered.
+func TestVerifyEnrollmentChain(t *testing.T) {
 	t.Parallel()
 
-	caCert := selfSignedCert(t, "Test CA", true)
-	otherCert := selfSignedCert(t, "Other CA", true)
-	leafCert := selfSignedCert(t, "leaf.example.com", false)
+	ca, caKey := selfSignedPair(t, "Test CA", true)
+	genuine := issuedBy(t, "gastrolog-cluster", ca, caKey)
+	otherCA := selfSignedCert(t, "Other CA", true)
+	impostor := selfSignedCert(t, "attacker.example.com", false)
 
 	cases := []struct {
 		name         string
 		peerCerts    []*x509.Certificate
 		expectedHash []byte
 		wantErr      bool
+		why          string
 	}{
 		{
-			name:         "accepts a matching CA cert",
-			peerCerts:    []*x509.Certificate{caCert},
-			expectedHash: fingerprintOf(caCert),
+			name:         "the shape a real cluster presents",
+			peerCerts:    []*x509.Certificate{genuine, ca},
+			expectedHash: fingerprintOf(ca),
 			wantErr:      false,
+			why:          "the leaf is issued by the pinned CA",
 		},
 		{
-			name:         "rejects a fingerprint mismatch",
-			peerCerts:    []*x509.Certificate{caCert},
-			expectedHash: fingerprintOf(otherCert),
+			name:         "an impostor holding a copy of the public CA",
+			peerCerts:    []*x509.Certificate{impostor, ca},
+			expectedHash: fingerprintOf(ca),
 			wantErr:      true,
+			why:          "the pinned CA is present but did not issue the leaf",
 		},
 		{
-			name:         "rejects an empty chain",
+			name:         "a token pinning the leaf itself",
+			peerCerts:    []*x509.Certificate{genuine},
+			expectedHash: fingerprintOf(genuine),
+			wantErr:      false,
+			why:          "pinning an exact certificate is stronger than pinning its issuer",
+		},
+		{
+			name:         "a self-signed single certificate",
+			peerCerts:    []*x509.Certificate{ca},
+			expectedHash: fingerprintOf(ca),
+			wantErr:      false,
+			why:          "minimal deployments present one certificate and pin it",
+		},
+		{
+			name:         "a chain carrying no pinned certificate",
+			peerCerts:    []*x509.Certificate{genuine, otherCA},
+			expectedHash: fingerprintOf(ca),
+			wantErr:      true,
+			why:          "nothing presented matches the token",
+		},
+		{
+			name:         "an empty chain",
 			peerCerts:    nil,
-			expectedHash: fingerprintOf(caCert),
+			expectedHash: fingerprintOf(ca),
 			wantErr:      true,
-		},
-		{
-			name:         "falls back to fingerprinting a non-CA-only chain",
-			peerCerts:    []*x509.Certificate{leafCert},
-			expectedHash: fingerprintOf(leafCert),
-			wantErr:      false,
-		},
-		{
-			name:         "falls back correctly when a non-matching CA precedes the match",
-			peerCerts:    []*x509.Certificate{otherCert, leafCert},
-			expectedHash: fingerprintOf(leafCert),
-			wantErr:      false,
+			why:          "there is nothing to verify",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := verifyCAFingerprint(tc.peerCerts, tc.expectedHash)
+			err := verifyEnrollmentChain(tc.peerCerts, tc.expectedHash)
 			if tc.wantErr && err == nil {
-				t.Fatal("expected an error, got nil")
+				t.Fatalf("accepted the connection, but %s", tc.why)
 			}
 			if !tc.wantErr && err != nil {
-				t.Fatalf("expected no error, got: %v", err)
+				t.Fatalf("rejected the connection (%v), but %s", err, tc.why)
 			}
 		})
 	}

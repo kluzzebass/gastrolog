@@ -32,7 +32,7 @@ when used.
 | `GASTROLOG_LISTEN` | `--listen` | string | HTTP / Connect-RPC listen address (default `:4564`). |
 | `GASTROLOG_CLUSTER_ADDR` | `--cluster-addr` | string | Cluster gRPC listen address (default `:4566`). Set to the literal string `auto` to have the entrypoint resolve the container's own hostname to its overlay IP and use that — required for Docker Swarm and Kubernetes overlay networks where service-name DNS resolves to a routing-mesh VIP that can't be bound. |
 | `GASTROLOG_NAME` | `--name` | string | Node name. Defaults to a random petname; set explicitly when stable identity matters (e.g. `gastrolog-0` from a StatefulSet ordinal). |
-| `GASTROLOG_JOIN_ADDR` | `--join-addr` | string | Bootstrap node's cluster address — set on joiners. Omit on the bootstrap node. |
+| `GASTROLOG_JOIN_ADDR` | `--join-addr` | string | Cluster address of any node already in the cluster — set on joiners. The node reached serves the join wherever it sits in the configuration, so this need not be the bootstrap node or the leader. Omit on the bootstrap node. |
 | `GASTROLOG_JOIN_TOKEN` | `--join-token` | string | Cluster join token — set on joiners. Pair with `GASTROLOG_JOIN_ADDR`. |
 | `GASTROLOG_NO_AUTH` | `--no-auth` | bool | Disable authentication. Truthy values: `1`, `true`, `yes`, `y`, `on` (case-insensitive). Anything else (including `false`, `0`, empty) is off. **Use only for testing.** |
 | `GASTROLOG_PPROF` | `--pprof` | string | pprof HTTP server address (e.g. `localhost:6060`). Empty/unset = disabled. Serves `/debug/pprof/{profile,trace,heap,goroutine,mutex,block}`. |
@@ -40,8 +40,6 @@ when used.
 | `GASTROLOG_PPROF_MUTEX_FRACTION` | `--pprof-mutex-fraction` | int | Mutex contention sample rate (`0`=off, `1`=all, `5`=one in five). Overrides `--pprof-debug` default when set. |
 | `GASTROLOG_PPROF_BLOCK_RATE` | `--pprof-block-rate` | int | Block profile sample period in nanoseconds (`0`=off, `1`=all events, `10000000`≈one per 10ms blocked). Overrides `--pprof-debug` default when set. |
 | `GASTROLOG_CONFIG_TYPE` | `--config-type` | string | Config store: `raft` (default) or `memory`. Use `memory` only for tests / ephemeral demos. |
-| `GASTROLOG_WRITE_BOOTSTRAP_TOKEN` | `--write-bootstrap-token` | string | Bootstrap node only: atomically write the join token to this path (mode 0600) so joiners can read it via `GASTROLOG_BOOTSTRAP_TOKEN_FILE`. |
-| `GASTROLOG_BOOTSTRAP_TOKEN_FILE` | `--bootstrap-token-file` | string | Joiner only: read the join token from this path, polling with backoff (1s → 30s, 10min total) until present. Alternative to `GASTROLOG_JOIN_TOKEN`. |
 | `GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET` | `--bootstrap-token-serve-secret` | string | Bootstrap node only: serve the join token at `GET /cluster/bootstrap-token`, gated on this shared secret. Empty disables. |
 | `GASTROLOG_BOOTSTRAP_TOKEN_URL` | `--bootstrap-token-url` | string | Joiner only: fetch the join token from this URL, polling with backoff. Pair with `GASTROLOG_BOOTSTRAP_TOKEN_SECRET`. |
 | `GASTROLOG_BOOTSTRAP_TOKEN_SECRET` | `--bootstrap-token-secret` | string | Joiner only: secret sent in the `X-Bootstrap-Token-Secret` header when fetching from `GASTROLOG_BOOTSTRAP_TOKEN_URL`. |
@@ -103,42 +101,43 @@ before they can enroll. Three delivery paths exist:
 
 - **Bootstrap node**: do NOT set `GASTROLOG_JOIN_ADDR` or
   `GASTROLOG_JOIN_TOKEN`. The first node to start without those flags
-  becomes the bootstrap and prints the token to its logs.
+  becomes the bootstrap.
 - **Joiners**: set both `GASTROLOG_JOIN_ADDR` and
-  `GASTROLOG_JOIN_TOKEN` (the operator pastes the token from the
-  bootstrap node's logs).
+  `GASTROLOG_JOIN_TOKEN`, where the operator mints the token with
+  `gastrolog cluster join-token` shortly before starting the joiner.
 
-### 2. File-based delivery (Docker Compose, K8s with shared volume)
+Join tokens expire (one hour by default), so mint one when you are about
+to use it. There is no standing token to read: a node holds the key that
+signs them, not a token.
 
-- **Bootstrap node**: set `GASTROLOG_WRITE_BOOTSTRAP_TOKEN=/path/to/token`
-  on a path that joiners can read (a named volume in compose, a
-  `PersistentVolumeClaim` or `emptyDir` in K8s). The bootstrap node
-  writes the token atomically with mode 0600 once the cluster TLS
-  is initialized.
-- **Joiners**: set `GASTROLOG_JOIN_ADDR` and
-  `GASTROLOG_BOOTSTRAP_TOKEN_FILE=/path/to/token` (same path). The
-  joiner polls the file with exponential backoff (1s → 30s, 10
-  minute total timeout) until it appears, then enrolls.
+### 2. Endpoint-based delivery (Compose, Swarm, Kubernetes)
 
-### 3. Endpoint-based delivery (cross-region, immutable infra)
-
-- **Bootstrap node**: set
-  `GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET=<secret>`. The bootstrap node
-  serves the token at `GET /cluster/bootstrap-token` on its HTTP
-  listener (port 4564 by default), gated on the secret in the
-  `X-Bootstrap-Token-Secret` header.
+- **Any existing node**: set
+  `GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET=<secret>`. That node serves
+  `GET /cluster/bootstrap-token` on its HTTP listener (port 4564 by
+  default), gated on the secret in the `X-Bootstrap-Token-Secret`
+  header, **minting a fresh token per authorized request**.
 - **Joiners**: set `GASTROLOG_JOIN_ADDR`,
-  `GASTROLOG_BOOTSTRAP_TOKEN_URL=http://bootstrap-host:4564/cluster/bootstrap-token`,
-  and `GASTROLOG_BOOTSTRAP_TOKEN_SECRET=<same-secret>`. The joiner
-  polls the URL with the same backoff as the file-based path.
+  `GASTROLOG_BOOTSTRAP_TOKEN_URL=http://<node>:4564/cluster/bootstrap-token`,
+  and `GASTROLOG_BOOTSTRAP_TOKEN_SECRET=<same-secret>`. The joiner polls
+  the URL with backoff (1s → 30s, 10 minute total timeout).
+
+Minting per request is what makes expiry workable: a joiner starting a
+week after the cluster was built still gets a token whose window has not
+begun closing. The durable credential here is the serve secret, which the
+operator supplies and can rotate.
+
+There is deliberately no file-drop delivery. A token written to a shared
+volume at bootstrap is read by joiners that start arbitrarily later, so it
+would have to outlive every join the cluster ever sees — which is the same
+as not expiring.
 
 ### Precedence
 
-If multiple are set, precedence is:
+If both are set, precedence is:
 
 1. `GASTROLOG_JOIN_TOKEN` (literal) wins outright.
-2. `GASTROLOG_BOOTSTRAP_TOKEN_FILE` is consulted next.
-3. `GASTROLOG_BOOTSTRAP_TOKEN_URL` is the fallback.
+2. `GASTROLOG_BOOTSTRAP_TOKEN_URL` is the fallback.
 
 A joiner without `GASTROLOG_JOIN_ADDR` set is a bootstrap node, even
 if a bootstrap-token source is configured (the bootstrap-token sources

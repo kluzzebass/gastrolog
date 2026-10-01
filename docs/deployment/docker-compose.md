@@ -41,15 +41,16 @@ enroll with it.
 
 ### Cluster bootstrap flow
 
-1. `gastrolog-0` starts; generates cluster TLS + a join token; writes
-   the token atomically to `/shared/token` (mode 0600) on the
-   `cluster-token` named volume.
+1. `gastrolog-0` starts; generates cluster TLS and the key it mints join
+   tokens with. No token is written anywhere: tokens expire, so one is
+   minted when a joiner asks for it.
 2. `gastrolog-1` and `gastrolog-2` start with
    `depends_on: condition: service_healthy`, so they wait for
    `gastrolog-0`'s `/healthz` probe to pass before starting.
-3. Each joiner reads `/shared/token` (same volume mounted into all
-   services), enrolls with `gastrolog-0:4566`, and joins the Raft
-   cluster.
+3. Each joiner fetches a freshly minted token from
+   `GASTROLOG_BOOTSTRAP_TOKEN_URL`, authenticating with
+   `GASTROLOG_BOOTSTRAP_TOKEN_SECRET`, then enrols with
+   `gastrolog-0:4566` and joins the Raft cluster.
 4. Both joiners settle as `FOLLOWER` / `VOTER` within ~10 seconds.
 
 ### Admin credentials

@@ -16,7 +16,7 @@
 # this is the only way to get per-ordinal env in a StatefulSet
 # (Kubernetes env substitution doesn't have conditionals).
 #
-# Token delivery uses the HTTP endpoint path (gastrolog-o9z6o):
+# Token delivery uses the HTTP endpoint path:
 # pod 0 serves /cluster/bootstrap-token gated on a shared secret;
 # joiners poll the URL with backoff. Same secret value flows to every
 # pod via the gastrolog-secrets Secret; the wrapper picks which
@@ -45,7 +45,7 @@ spec:
   # quorum can't form until peer addresses resolve, but readiness depends
   # on Raft being functional. Without this flag, headless DNS only returns
   # Ready pods, creating a chicken-and-egg deadlock on cluster bootstrap
-  # and on rolling restarts. See gastrolog-4zy8a.
+  # and on rolling restarts.
   publishNotReadyAddresses: true
   selector:
     app: gastrolog
@@ -178,7 +178,7 @@ spec:
               # store a stable identifier and reconnect through DNS after
               # the pod IP rotates on restart. Without this, the cluster
               # Raft pins the original pod IP and a rolled pod is
-              # unreachable forever. See gastrolog-4zy8a.
+              # unreachable forever.
               export GASTROLOG_CLUSTER_ADVERTISE=$HOSTNAME.gastrolog-headless.gastrolog.svc.cluster.local:4566
               ord=${HOSTNAME##*-}
               if [ "$ord" = "0" ]; then

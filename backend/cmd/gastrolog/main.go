@@ -147,8 +147,6 @@ func main() {
 				NodeName:  mustString(cmd, "name"),
 				PprofAddr: mustString(cmd, "pprof"),
 
-				WriteBootstrapToken:       mustString(cmd, "write-bootstrap-token"),
-				BootstrapTokenFile:        mustString(cmd, "bootstrap-token-file"),
 				BootstrapTokenServeSecret: secretFlag(cmd, "bootstrap-token-serve-secret", "GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET"),
 				BootstrapTokenURL:         mustString(cmd, "bootstrap-token-url"),
 				BootstrapTokenSecret:      secretFlag(cmd, "bootstrap-token-secret", "GASTROLOG_BOOTSTRAP_TOKEN_SECRET"),
@@ -183,13 +181,11 @@ func main() {
 	serverCmd.Flags().String("cluster-addr", ":4566", "cluster gRPC listen address")
 	serverCmd.Flags().String("cluster-advertise", "", "address peers store and dial to reach this node (empty = use bind address); set to a stable DNS name in environments with rotating pod IPs (e.g. Kubernetes)")
 	serverCmd.Flags().Int("service-pool-max-per-peer", 0, "max parallel outbound service-lane gRPC connections per peer (0 = default 4)")
-	serverCmd.Flags().String("join-addr", "", "leader's cluster address to join an existing cluster")
+	serverCmd.Flags().String("join-addr", "", "cluster address of any node in the cluster to join")
 	serverCmd.Flags().String("join-token", "", "join token for cluster enrollment (from cluster-init node); prefer GASTROLOG_JOIN_TOKEN — a flag is visible to every process on the host")
 	serverCmd.Flags().String("name", "", "node name (default: random petname)")
 
 	// Non-interactive cluster bootstrap.
-	serverCmd.Flags().String("write-bootstrap-token", "", "bootstrap node only: atomically write the join token to this path (mode 0600) for joiners to read via --bootstrap-token-file")
-	serverCmd.Flags().String("bootstrap-token-file", "", "joiner only: read the join token from this path, polling with backoff until present (alternative to --join-token)")
 	serverCmd.Flags().String("bootstrap-token-serve-secret", "", "bootstrap node only: serve the join token at GET /cluster/bootstrap-token, gated on this secret (empty disables endpoint); prefer GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET — a flag is visible to every process on the host")
 	serverCmd.Flags().String("bootstrap-token-url", "", "joiner only: fetch the join token from this URL, polling with backoff (alternative to --join-token); pair with --bootstrap-token-secret")
 	serverCmd.Flags().String("bootstrap-token-secret", "", "joiner only: secret sent in the X-Bootstrap-Token-Secret header when fetching from --bootstrap-token-url; prefer GASTROLOG_BOOTSTRAP_TOKEN_SECRET — a flag is visible to every process on the host")

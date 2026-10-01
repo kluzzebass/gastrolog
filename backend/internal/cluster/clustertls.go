@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -77,6 +78,23 @@ func (c *ClusterTLS) Load(certPEM, keyPEM, caCertPEM []byte) error {
 		CAPool: pool,
 	})
 	return nil
+}
+
+// HasCA reports whether the loaded trust root is the one in caCertPEM.
+//
+// Callers use it to tell a cluster-TLS change that moved the CA from one that
+// left it alone, because only the former invalidates this node's own
+// certificate.
+func (c *ClusterTLS) HasCA(caCertPEM []byte) bool {
+	st := c.state.Load()
+	if st == nil || st.CACert == nil {
+		return false
+	}
+	block, _ := pem.Decode(caCertPEM)
+	if block == nil {
+		return false
+	}
+	return bytes.Equal(st.CACert.Raw, block.Bytes)
 }
 
 // State returns the current TLS state, or nil if Load has not been called.

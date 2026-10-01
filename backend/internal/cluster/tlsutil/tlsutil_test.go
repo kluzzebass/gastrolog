@@ -1,10 +1,8 @@
 package tlsutil_test
 
 import (
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/hex"
 	"encoding/pem"
 	"testing"
 
@@ -39,14 +37,14 @@ func TestGenerateCA(t *testing.T) {
 	}
 }
 
-func TestGenerateClusterCert(t *testing.T) {
+func TestGenerateNodeCert(t *testing.T) {
 	t.Parallel()
 	ca, err := tlsutil.GenerateCA()
 	if err != nil {
 		t.Fatalf("GenerateCA: %v", err)
 	}
 
-	cluster, err := tlsutil.GenerateClusterCert(ca.CertPEM, ca.KeyPEM, []string{"node1.local", "10.0.0.1"})
+	cluster, err := tlsutil.GenerateNodeCert(ca.CertPEM, ca.KeyPEM, "test-node", []string{"node1.local", "10.0.0.1"})
 	if err != nil {
 		t.Fatalf("GenerateClusterCert: %v", err)
 	}
@@ -131,49 +129,6 @@ func TestGenerateClusterCert(t *testing.T) {
 		t.Fatalf("X509KeyPair: %v", err)
 	}
 }
-
-func TestJoinTokenRoundTrip(t *testing.T) {
-	t.Parallel()
-	ca, err := tlsutil.GenerateCA()
-	if err != nil {
-		t.Fatalf("GenerateCA: %v", err)
-	}
-
-	token, err := tlsutil.GenerateJoinToken(ca.CertPEM)
-	if err != nil {
-		t.Fatalf("GenerateJoinToken: %v", err)
-	}
-
-	secret, caHash, err := tlsutil.ParseJoinToken(token)
-	if err != nil {
-		t.Fatalf("ParseJoinToken: %v", err)
-	}
-	if secret == "" {
-		t.Error("empty secret")
-	}
-	if caHash == "" {
-		t.Error("empty CA hash")
-	}
-
-	// Verify the CA fingerprint matches by computing SHA-256 of the CA DER.
-	block, _ := pem.Decode(ca.CertPEM)
-	if block == nil {
-		t.Fatal("failed to decode CA PEM")
-	}
-	actual := sha256.Sum256(block.Bytes)
-	if hex.EncodeToString(actual[:]) != caHash {
-		t.Error("CA fingerprint mismatch")
-	}
-
-	// Verify a different CA doesn't match.
-	ca2, _ := tlsutil.GenerateCA()
-	block2, _ := pem.Decode(ca2.CertPEM)
-	actual2 := sha256.Sum256(block2.Bytes)
-	if hex.EncodeToString(actual2[:]) == caHash {
-		t.Error("expected CA fingerprint mismatch for different CA")
-	}
-}
-
 func TestParseJoinTokenInvalid(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -181,8 +136,8 @@ func TestParseJoinTokenInvalid(t *testing.T) {
 		token string
 	}{
 		{"no colon", "abcdef1234"},
-		{"bad secret", "zzzz:abcd"},
-		{"bad hash", "abcd:zzzz"},
+		{"no credential", ":abcd"},
+		{"bad hash", "1.abcd:zzzz"},
 	}
 
 	for _, tt := range tests {
