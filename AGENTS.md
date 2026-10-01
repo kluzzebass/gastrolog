@@ -105,13 +105,14 @@ when it lived only in prose.
 | Rename through the stack | any rename | proto, generated code, Go, TypeScript, UI labels, tests — no partial renames, nothing deferred |
 | UI/CLI parity | new operator-facing capability | both surfaces can do it, or the gap is a filed issue |
 | Verify the artifact | asking the user to look at a running system | prove the running binary/UI contains the change first |
+| Self-test first | anything the CLI or the k8s substrate can exercise | tested by you, end to end, before the handoff — the user tests only what an agent cannot reach |
 
 ### Closing issues
 
 **NEVER** close issues without explicit user approval:
 
 1. Set status to `in_review`
-2. Ask the user to test
+2. Ask the user to test **what remains**: everything testable by CLI or the k8s substrate has already been tested by you — the user's testing is for what only a human can judge
 3. Ask if we can close it
 4. Only run `dcat close` after user confirms
 5. **Upon closing:** commit (including tracker), **merge to the issue’s stack branch**, and **push that branch** — in that order after `dcat close`. Do not merge to the default branch or push the merge **before** the issue is closed.
