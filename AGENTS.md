@@ -86,10 +86,18 @@ When creating a **question** issue, always draft the title and description first
 
 ### Handoff checklist
 
-Run down this table before moving an issue to in_review. Every row gets
-considered; the ones that apply get done — not mentioned, done. The table
-exists because each row is an obligation that was forgotten at least once
-when it lived only in prose.
+Run down this table before moving an issue to in_review, and post the
+FILLED table — one verdict per row, "n/a" rows included — as part of the
+in_review handoff comment. The filled table is the handoff artifact: a
+handoff without it is incomplete, and a skipped row is visible to the
+reviewer instead of silent. The table exists because each row is an
+obligation that was forgotten at least once when it lived only in prose —
+including, the day it was written, by its author; a checklist that relies
+on remembering to run it has the failure mode it was built to remove.
+
+AGENTS.md and other process changes land on main via a docs-only PR
+immediately, never riding a feature branch: a rule committed to an unmerged
+branch does not exist for any sibling branch.
 
 | Control | Applies when | Satisfied by |
 |---------|--------------|--------------|
