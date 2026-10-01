@@ -14,6 +14,7 @@ import (
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/cluster"
+	"gastrolog/internal/cluster/tlsutil"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
@@ -866,15 +867,31 @@ func (d *configDispatcher) handleClusterTLSPut(ctx context.Context) error {
 		return errors.New("read cluster TLS for reload: cluster TLS absent from config")
 	}
 	tls := cfg.Runtime.ClusterTLS
-	if err := d.clusterTLS.Load([]byte(tls.ClusterCertPEM), []byte(tls.ClusterKeyPEM), []byte(tls.CACertPEM)); err != nil {
+	// What is replicated is the trust root, not a certificate to adopt. While
+	// the CA is the one this node already holds, its certificate is still
+	// good and the put changed something else — the join token, most often.
+	// Reissuing anyway would mint a fresh certificate on every startup replay
+	// and would make each node's name self-asserted rather than the one
+	// enrolment gave it.
+	if d.clusterTLS.HasCA([]byte(tls.CACertPEM)) {
+		return nil
+	}
+	// A new CA is different: a certificate signed by the previous one no
+	// longer chains for peers that have already moved, so the node issues
+	// itself one under the CA the cluster now has.
+	cert, err := tlsutil.GenerateNodeCert([]byte(tls.CACertPEM), []byte(tls.CAKeyPEM), d.localNodeID, cluster.LaneSANs)
+	if err != nil {
+		return fmt.Errorf("issue node cert against reloaded cluster CA: %w", err)
+	}
+	if err := d.clusterTLS.Load(cert.CertPEM, cert.KeyPEM, []byte(tls.CACertPEM)); err != nil {
 		return fmt.Errorf("reload cluster TLS: %w", err)
 	}
 	if d.tlsFilePath != "" {
-		if err := cluster.SaveFile(d.tlsFilePath, []byte(tls.ClusterCertPEM), []byte(tls.ClusterKeyPEM), []byte(tls.CACertPEM)); err != nil {
+		if err := cluster.SaveFile(d.tlsFilePath, cert.CertPEM, cert.KeyPEM, []byte(tls.CACertPEM)); err != nil {
 			return fmt.Errorf("save cluster TLS file: %w", err)
 		}
 	}
-	d.logger.Info("dispatch: cluster TLS reloaded")
+	d.logger.Info("dispatch: cluster TLS reloaded, node certificate reissued", "node_id", d.localNodeID)
 	return nil
 }
 

@@ -101,26 +101,22 @@ type RunConfig struct {
 
 	// Non-interactive cluster bootstrap.
 	//
-	// File-based path (default; no shared HTTP needed):
-	//   - WriteBootstrapToken: the bootstrap node atomically writes its
-	//     join token to this path with mode 0600 once cluster TLS is
-	//     bootstrapped. Joiners on the same shared volume read it via
-	//     BootstrapTokenFile.
-	//   - BootstrapTokenFile: a joiner reads the join token from this
-	//     path, polling with backoff until the file exists or the
-	//     timeout fires. Mutually exclusive with JoinToken (the literal
-	//     flag wins if both are set).
-	//
-	// Endpoint-based path (opt-in; for cross-region / immutable infra):
-	//   - BootstrapTokenServeSecret: the bootstrap node serves
+	// A joiner fetches a token from a node that mints one for it:
+	//   - BootstrapTokenServeSecret: a node serves
 	//     `GET /cluster/bootstrap-token` on its HTTP listener (port
-	//     4564 by default), gated on this shared secret. Empty disables.
+	//     4564 by default), gated on this shared secret, minting a fresh
+	//     token per authorized request. Empty disables.
 	//   - BootstrapTokenURL: a joiner fetches the join token from this
 	//     URL, polling with backoff. Authenticates with
-	//     BootstrapTokenSecret.
+	//     BootstrapTokenSecret. Mutually exclusive with JoinToken (the
+	//     literal flag wins if both are set).
 	//   - BootstrapTokenSecret: the secret sent by the joiner.
-	WriteBootstrapToken       string
-	BootstrapTokenFile        string
+	//
+	// There is no file-drop equivalent. Tokens expire, and one written to a
+	// shared volume at bootstrap would have to stay valid for every join the
+	// cluster ever sees; minting per request is what lets the window be short.
+	// The durable credential in this arrangement is BootstrapTokenServeSecret,
+	// which the operator supplies and can rotate.
 	BootstrapTokenServeSecret string
 	BootstrapTokenURL         string
 	BootstrapTokenSecret      string
@@ -230,7 +226,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	}
 
 	// When running unattended (Docker, K8s), the operator may have
-	// configured --bootstrap-token-file or --bootstrap-token-url instead
+	// configured --bootstrap-token-url instead
 	// of supplying --join-token directly. Resolve those into
 	// cfg.JoinToken before setupCluster reads it. No-op if --join-token
 	// is already set or if no source is configured.
@@ -277,7 +273,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	cfgStore := system.Store(proxy)
 	var groupMgr *raftgroup.GroupManager // set later if cluster mode
 
-	if err := startClusterServices(ctx, clusterSrv, clusterTLS, cfgStore, hd, logger, cfg.WriteBootstrapToken); err != nil {
+	if err := startClusterServices(ctx, clusterSrv, clusterTLS, cfgStore, hd, nodeID, logger); err != nil {
 		_ = proxy.Close()
 		return err
 	}
@@ -291,7 +287,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	defer func() { _ = proxy.Close() }()
 
 	// Non-blocking: try local FSM, bootstrap, or return nil for replication cases.
-	appSys, fromLocalFSM, err := loadLocalConfig(ctx, logger, cfg, cfgStore, clusterTLS, nodeID)
+	appSys, fromLocalFSM, err := loadLocalConfig(ctx, logger, cfg, cfgStore, clusterSrv, clusterTLS, nodeID)
 	if err != nil {
 		return err
 	}
@@ -644,7 +640,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	}
 
 	// Build cluster operation callbacks (raft mode only).
-	var joinClusterFn func(ctx context.Context, leaderAddr, joinToken string) error
+	var joinClusterFn func(ctx context.Context, memberAddr, joinToken string) error
 	var removeNodeFn cluster.RemoveNodeFunc
 	var setNodeSuffrageFn func(ctx context.Context, nodeID string, voter bool) error
 	advertisedAddr := cfg.advertisedClusterAddr()
@@ -1030,8 +1026,8 @@ func resolveIdentity(logger *slog.Logger, cfg RunConfig, hd home.Dir) (string, e
 }
 
 // loadLocalConfig attempts to load config from the local FSM or bootstrap.
-func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cfgStore system.Store, clusterTLS *cluster.ClusterTLS, nodeID string) (*system.System, bool, error) {
-	if err := requestClusterMembership(ctx, logger, cfg, cfgStore, clusterTLS, nodeID); err != nil {
+func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cfgStore system.Store, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, nodeID string) (*system.System, bool, error) {
+	if err := requestClusterMembership(ctx, logger, cfg, cfgStore, clusterSrv, clusterTLS, nodeID); err != nil {
 		return nil, false, err
 	}
 
@@ -1110,17 +1106,23 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 	return appSys, false, nil
 }
 
-// requestClusterMembership asks the cluster leader to add this node to
-// the Raft configuration. Fresh joiners enter as nonvoters (learners)
-// and get promoted by the cluster-ctl learner promoter once caught up;
-// restart-of-existing-voter requests use AddVoter for idempotent
-// address refresh. The fresh-vs-restart decision probes the local FSM
-// (presence of vault configs or a JWT secret).
+// requestClusterMembership asks a cluster member to put this node in the
+// Raft configuration. The member serves the request wherever it sits in the
+// configuration, so cfg.JoinAddr names any node, not the leader. Fresh
+// joiners enter as nonvoters (learners) and get promoted by the cluster-ctl
+// learner promoter once caught up; a node rejoining at a new address asks as
+// a voter, which re-adds it there. The fresh-vs-restart decision probes the
+// local FSM (presence of vault configs or a JWT secret).
 //
-// No-op if join parameters are not set.
-func requestClusterMembership(ctx context.Context, logger *slog.Logger, cfg RunConfig, cfgStore system.Store, clusterTLS *cluster.ClusterTLS, nodeID string) error {
+// No-op if join parameters are not set, or if this node is already in the
+// configuration at this address — see alreadyInConfiguration.
+func requestClusterMembership(ctx context.Context, logger *slog.Logger, cfg RunConfig, cfgStore system.Store, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, nodeID string) error {
 	advertise := cfg.advertisedClusterAddr()
 	if cfg.JoinAddr == "" || clusterTLS == nil || advertise == "" {
+		return nil
+	}
+	if alreadyInConfiguration(clusterSrv, nodeID, advertise) {
+		logger.Info("already in the cluster configuration at this address, not asking to be added", "advertise", advertise)
 		return nil
 	}
 	asVoter := isRestartOfVoter(ctx, cfg, cfgStore)
@@ -1128,14 +1130,49 @@ func requestClusterMembership(ctx context.Context, logger *slog.Logger, cfg RunC
 	if asVoter {
 		kind = "voter (restart of existing voter)"
 	}
-	logger.Info("requesting cluster membership", "leader_addr", cfg.JoinAddr, "advertise", advertise, "as", kind)
+	logger.Info("requesting cluster membership", "member_addr", cfg.JoinAddr, "advertise", advertise, "as", kind)
 	joinCtx, joinCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer joinCancel()
 	if err := cluster.JoinCluster(joinCtx, logger, cfg.JoinAddr, nodeID, advertise, clusterTLS, asVoter); err != nil {
 		return fmt.Errorf("join cluster: %w", err)
 	}
-	logger.Info("cluster membership granted by leader", "as", kind)
+	logger.Info("cluster membership granted", "as", kind)
 	return nil
+}
+
+// alreadyInConfiguration reports whether the Raft configuration this node
+// replayed from its own disk already lists it at this address.
+//
+// A node that is already in the configuration where it says it is has nothing
+// to ask for: adding it again would commit a change that changes nothing. Not
+// asking also keeps a restart from depending on any other node being up and
+// on the same version, which is what a rolling restart is.
+//
+// A stale local view is safe in both directions. Believing itself absent, it
+// asks and the cluster answers idempotently; believing itself present when
+// the cluster has removed it, the leader evicts it on the next contact, which
+// the eviction handler already covers.
+func alreadyInConfiguration(clusterSrv *cluster.Server, nodeID, advertise string) bool {
+	if clusterSrv == nil {
+		return false
+	}
+	servers, err := clusterSrv.Servers()
+	if err != nil {
+		return false
+	}
+	return configurationLists(servers, nodeID, advertise)
+}
+
+// configurationLists reports whether servers place nodeID at advertise. A
+// node listed at a different address is not there as far as the cluster is
+// concerned: peers would dial the old one.
+func configurationLists(servers []cluster.RaftServer, nodeID, advertise string) bool {
+	for _, srv := range servers {
+		if srv.ID == nodeID {
+			return srv.Address == advertise
+		}
+	}
+	return false
 }
 
 // isRestartOfVoter probes the local FSM to determine whether this
@@ -1520,7 +1557,7 @@ type serverDeps struct {
 	ClusterRouteRates   func() (*gastrologv1.ThroughputRate, *gastrologv1.ThroughputRate)
 	SearchForwarder     *cluster.SearchForwarder
 	RoutingForwarder    routing.UnaryForwarder
-	JoinClusterFunc     func(ctx context.Context, leaderAddr, joinToken string) error
+	JoinClusterFunc     func(ctx context.Context, memberAddr, joinToken string) error
 	RemoveNodeFunc      cluster.RemoveNodeFunc
 	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
 	Dispatcher          *configDispatcher

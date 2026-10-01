@@ -83,13 +83,15 @@ Raft. (See "Scaling" below.)
    and resolves the container's own hostname (`hostname -i`) to
    its overlay IP (e.g. `10.0.1.6`). Binds the cluster gRPC server
    to that IP on port 4566 and advertises the same address.
-2. Bootstrap generates the cluster TLS material and a join token,
-   writes the token to `/shared/token` (the `cluster-token`
-   volume) with mode 0600, and reads
-   `/run/secrets/admin_creds` to provision the initial admin user.
+2. Bootstrap generates the cluster TLS material and the key it mints
+   join tokens with, and reads `/run/secrets/admin_creds` to provision
+   the initial admin user. No token is written anywhere: tokens expire,
+   so one is minted when a joiner asks for it.
 3. Joiner-1 starts. Auto-resolves its own overlay IP for
-   `GASTROLOG_CLUSTER_ADDR`. Polls `/shared/token` (same volume
-   on the same node) until the file appears.
+   `GASTROLOG_CLUSTER_ADDR`. Fetches a freshly minted token from
+   `GASTROLOG_BOOTSTRAP_TOKEN_URL`, authenticating with
+   `GASTROLOG_BOOTSTRAP_TOKEN_SECRET`, polling with backoff until the
+   endpoint answers.
 4. Joiner-1 enrolls with bootstrap via
    `GASTROLOG_JOIN_ADDR=tasks.gastrolog_bootstrap:4566`. The
    `tasks.<service>` DNS resolves on the overlay network to the

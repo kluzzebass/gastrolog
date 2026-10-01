@@ -198,7 +198,7 @@ type Config struct {
 
 	// JoinClusterFunc is called by the JoinCluster RPC to join a running
 	// single-node server to an existing cluster at runtime. Nil disables.
-	JoinClusterFunc func(ctx context.Context, leaderAddr, joinToken string) error
+	JoinClusterFunc func(ctx context.Context, memberAddr, joinToken string) error
 
 	// RemoveNodeFunc is called by the RemoveNode RPC to evict a node from the
 	// cluster. opts.Force bypasses the leader-side removal gates
@@ -297,7 +297,7 @@ type Server struct {
 	clusterRouteRatesFn        func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)
 	localNodeID                string
 	clusterAddress             string
-	joinClusterFn              func(ctx context.Context, leaderAddr, joinToken string) error
+	joinClusterFn              func(ctx context.Context, memberAddr, joinToken string) error
 	removeNodeFn               cluster.RemoveNodeFunc
 	setNodeSuffrageFn          func(ctx context.Context, nodeID string, voter bool) error
 	startTime                  time.Time

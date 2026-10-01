@@ -45,13 +45,16 @@ services:
       # Environment banner (gastrolog-4vr0l). Bottom-left ribbon in the UI.
       GASTROLOG_ENVIRONMENT_LABEL: Swarm
       GASTROLOG_ENVIRONMENT_COLOR: orange
-      GASTROLOG_WRITE_BOOTSTRAP_TOKEN: /shared/token
+      # Join tokens expire, so they are minted per request rather than
+      # dropped on a shared volume at bootstrap. This node serves
+      # GET /cluster/bootstrap-token gated on the shared secret below;
+      # joiners fetch one at their own startup, however much later that is.
+      GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET: "rotate-this-secret-please"
       GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
     secrets:
       - source: gastrolog_admin_creds
         target: admin_creds
     volumes:
-      - cluster-token:/shared
       - bootstrap-config:/config
       - bootstrap-vaults:/vaults
     ports:
@@ -83,7 +86,8 @@ services:
       # is up and registered in the overlay's DNS), so the resolution
       # always succeeds.
       GASTROLOG_JOIN_ADDR: tasks.gastrolog_bootstrap:4566
-      GASTROLOG_BOOTSTRAP_TOKEN_FILE: /shared/token
+      GASTROLOG_BOOTSTRAP_TOKEN_URL: http://tasks.gastrolog_bootstrap:4564/cluster/bootstrap-token
+      GASTROLOG_BOOTSTRAP_TOKEN_SECRET: "rotate-this-secret-please"
       GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
       # Environment banner (gastrolog-4vr0l). Bottom-left ribbon in the UI.
       GASTROLOG_ENVIRONMENT_LABEL: Swarm
@@ -92,7 +96,6 @@ services:
       - source: gastrolog_admin_creds
         target: admin_creds
     volumes:
-      - cluster-token:/shared
       - joiner-1-config:/config
       - joiner-1-vaults:/vaults
     networks:
@@ -268,7 +271,6 @@ services:
       placement: { constraints: [ node.role == manager ] }
 
 volumes:
-  cluster-token:
   bootstrap-config:
   bootstrap-vaults:
   joiner-1-config:

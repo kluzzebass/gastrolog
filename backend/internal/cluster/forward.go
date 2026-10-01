@@ -1136,6 +1136,10 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:    enrollRPCHandler,
 		},
 		{
+			MethodName: "RequestMembership",
+			Handler:    requestMembershipRPCHandler,
+		},
+		{
 			MethodName: "Broadcast",
 			Handler:    broadcastHandler,
 		},
@@ -1275,6 +1279,7 @@ var clusterServiceDesc = grpc.ServiceDesc{
 type clusterServiceServer interface {
 	forwardApply(context.Context, *gastrologv1.ForwardApplyRequest) (*gastrologv1.ForwardApplyResponse, error)
 	enroll(context.Context, *gastrologv1.EnrollRequest) (*gastrologv1.EnrollResponse, error)
+	requestMembership(context.Context, *gastrologv1.RequestMembershipRequest) (*gastrologv1.RequestMembershipResponse, error)
 	broadcast(context.Context, *gastrologv1.BroadcastRequest) (*gastrologv1.BroadcastResponse, error)
 	forwardGetContext(context.Context, *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error)
 	forwardListChunks(context.Context, *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error)

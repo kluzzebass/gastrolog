@@ -1682,6 +1682,11 @@ export class SetNodeStateCommand extends Message<SetNodeStateCommand> {
 }
 
 /**
+ * The cluster's trust root and the credential for joining it. Node
+ * certificates are not here: each node holds its own, issued against this CA
+ * and never replicated, so that one stolen key is one node rather than the
+ * cluster.
+ *
  * @generated from message gastrolog.v1.PutClusterTLSCommand
  */
 export class PutClusterTLSCommand extends Message<PutClusterTLSCommand> {
@@ -1696,19 +1701,12 @@ export class PutClusterTLSCommand extends Message<PutClusterTLSCommand> {
   caKeyPem = new Uint8Array(0);
 
   /**
-   * @generated from field: bytes cluster_cert_pem = 3;
+   * Key the cluster mints join tokens with. Tokens themselves are minted on
+   * demand and expire; this is what signs them and never leaves the cluster.
+   *
+   * @generated from field: string join_token_key = 5;
    */
-  clusterCertPem = new Uint8Array(0);
-
-  /**
-   * @generated from field: bytes cluster_key_pem = 4;
-   */
-  clusterKeyPem = new Uint8Array(0);
-
-  /**
-   * @generated from field: string join_token = 5;
-   */
-  joinToken = "";
+  joinTokenKey = "";
 
   constructor(data?: PartialMessage<PutClusterTLSCommand>) {
     super();
@@ -1720,9 +1718,7 @@ export class PutClusterTLSCommand extends Message<PutClusterTLSCommand> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "ca_cert_pem", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "ca_key_pem", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 3, name: "cluster_cert_pem", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 4, name: "cluster_key_pem", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 5, name: "join_token", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "join_token_key", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutClusterTLSCommand {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
@@ -64,9 +65,6 @@ func newClusterStatusCmd() *cobra.Command {
 			}
 			if msg.ClusterAddress != "" {
 				pairs = append(pairs, [2]string{"Cluster Address", msg.ClusterAddress})
-			}
-			if msg.JoinToken != "" {
-				pairs = append(pairs, [2]string{"Join Token", msg.JoinToken})
 			}
 			p.kv(pairs)
 
@@ -344,23 +342,31 @@ func newClusterHealthCmd() *cobra.Command {
 }
 
 func newClusterJoinTokenCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "join-token",
-		Short: "Print the cluster join token",
+		Short: "Mint a join token for admitting a new node",
+		Long: "Mint a join token for admitting a new node.\n\n" +
+			"Tokens expire, so one is issued when asked for rather than kept standing. " +
+			"Mint it when you are about to use it; a token found later is already dead.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ttl, _ := cmd.Flags().GetDuration("ttl")
 			client := clientFromCmd(cmd)
-			resp, err := client.Lifecycle.GetClusterStatus(context.Background(), connect.NewRequest(&v1.GetClusterStatusRequest{}))
+			resp, err := client.Lifecycle.CreateJoinToken(context.Background(), connect.NewRequest(&v1.CreateJoinTokenRequest{
+				TtlSeconds: int64(ttl.Seconds()),
+			}))
 			if err != nil {
 				return err
 			}
-			token := resp.Msg.JoinToken
-			if token == "" {
-				return errors.New("no join token available (cluster TLS may not be initialized)")
-			}
-			fmt.Println(token)
+			// Token on stdout so it pipes; the expiry alongside it on stderr
+			// so a pipeline gets the token alone and a human still sees when
+			// it dies.
+			fmt.Println(resp.Msg.GetJoinToken())
+			fmt.Fprintf(os.Stderr, "expires %s\n", time.Unix(resp.Msg.GetExpiresAtUnix(), 0).Format(time.RFC3339))
 			return nil
 		},
 	}
+	cmd.Flags().Duration("ttl", 0, "how long the token stays usable (0 = cluster default)")
+	return cmd
 }
 
 func newClusterShutdownCmd() *cobra.Command {
@@ -673,11 +679,11 @@ func newClusterJoinCmd() *cobra.Command {
 		Use:   "join",
 		Short: "Join this node to an existing cluster",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			leader, _ := cmd.Flags().GetString("leader")
+			member, _ := cmd.Flags().GetString("member")
 			token, _ := cmd.Flags().GetString("join-token")
 			client := clientFromCmd(cmd)
 			_, err := client.Lifecycle.JoinCluster(context.Background(), connect.NewRequest(&v1.JoinClusterRequest{
-				LeaderAddress: leader,
+				MemberAddress: member,
 				JoinToken:     token,
 			}))
 			if err != nil {
@@ -687,9 +693,9 @@ func newClusterJoinCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().String("leader", "", "cluster address of the leader node (required)")
-	cmd.Flags().String("join-token", "", "join token from the leader (required)")
-	_ = cmd.MarkFlagRequired("leader")
+	cmd.Flags().String("member", "", "cluster address of any node in the cluster to join (required)")
+	cmd.Flags().String("join-token", "", "join token from the cluster (required)")
+	_ = cmd.MarkFlagRequired("member")
 	_ = cmd.MarkFlagRequired("join-token")
 	return cmd
 }

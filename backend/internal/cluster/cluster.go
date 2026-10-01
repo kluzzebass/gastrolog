@@ -14,22 +14,24 @@ package cluster
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/cluster/tlsutil"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/multiraft"
 
 	"github.com/Jille/raft-grpc-leader-rpc/leaderhealth"
-	"github.com/Jille/raftadmin"
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -74,7 +76,7 @@ type Config struct {
 // Server manages the cluster gRPC port, Raft transport, and inter-node services.
 type Server struct {
 	cfg              Config
-	grpcSrv          *grpc.Server // service lane (ClusterService, raftadmin, …)
+	grpcSrv          *grpc.Server // service lane (ClusterService, leader health, …)
 	raftLaneMu       sync.Mutex
 	raftGroupServers map[string]*grpc.Server // per-group raft lanes (TLS mode)
 	sniDemux         *sniDemuxListener
@@ -112,6 +114,10 @@ type Server struct {
 
 	// enrollHandler handles the Enroll RPC for joining nodes.
 	enrollHandler EnrollHandler
+
+	// membershipHandler handles the RequestMembership RPC, putting a node
+	// that asked to join into the Raft configuration.
+	membershipHandler MembershipHandler
 
 	// subscribers receives broadcast messages from peers.
 	subscribers subscriberRegistry
@@ -649,7 +655,6 @@ func (s *Server) startCombined() error {
 	s.grpcSrv = grpc.NewServer(opts...)
 	s.tm.Register(s.grpcSrv)
 	if s.raft != nil {
-		raftadmin.Register(s.grpcSrv, s.raft)
 		leaderhealth.Setup(s.raft, s.grpcSrv, []string{"cluster"})
 	}
 	registerClusterService(s.grpcSrv, s)
@@ -664,7 +669,6 @@ func (s *Server) startWithLaneIsolation() error {
 	serviceOpts := s.baseServerOpts(maxChunkTransferBytes)
 	s.grpcSrv = grpc.NewServer(serviceOpts...)
 	if s.raft != nil {
-		raftadmin.Register(s.grpcSrv, s.raft)
 		leaderhealth.Setup(s.raft, s.grpcSrv, []string{"cluster"})
 	}
 	registerClusterService(s.grpcSrv, s)
@@ -756,41 +760,109 @@ func (s *Server) serveListener(ln net.Listener, srv *grpc.Server, label string) 
 	return nil
 }
 
-// mTLSUnaryInterceptor enforces client certificates on all RPCs except Enroll.
+// mTLSUnaryInterceptor enforces peer authority on all unary RPCs.
 func (s *Server) mTLSUnaryInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-	if err := requireClientCert(ctx, info.FullMethod); err != nil {
+	if err := s.requirePeerAuthority(ctx, info.FullMethod); err != nil {
 		return nil, err
 	}
 	return handler(ctx, req)
 }
 
-// mTLSStreamInterceptor enforces client certificates on all streaming RPCs.
+// mTLSStreamInterceptor enforces peer authority on all streaming RPCs.
 func (s *Server) mTLSStreamInterceptor(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-	if err := requireClientCert(ss.Context(), info.FullMethod); err != nil {
+	if err := s.requirePeerAuthority(ss.Context(), info.FullMethod); err != nil {
 		return err
 	}
 	return handler(srv, ss)
 }
 
-// requireClientCert checks that the peer presented a verified client certificate.
-// The Enroll RPC is exempt — joining nodes don't have a cert yet.
-func requireClientCert(ctx context.Context, method string) error {
+// requirePeerAuthority decides whether a caller may make this call.
+//
+// A certificate signed by the cluster CA is necessary but no longer
+// sufficient: it says which node the caller claims to be, and the caller has
+// to be a node this cluster currently has. That is what makes removing a node
+// revoke it, rather than leaving a valid certificate loose until the whole
+// cluster is reissued.
+//
+// Two calls sit before membership and are exempt in different ways. Enrol
+// takes no certificate at all, because it exists to hand one out.
+// RequestMembership takes the certificate but cannot require membership —
+// the caller is asking for exactly that — so it is the one call a node holds
+// a certificate for while still being outside the configuration.
+func (s *Server) requirePeerAuthority(ctx context.Context, method string) error {
 	if strings.HasSuffix(method, "/Enroll") {
 		return nil
 	}
+	leaf, err := verifiedPeerLeaf(ctx)
+	if err != nil {
+		return err
+	}
+	if strings.HasSuffix(method, "/RequestMembership") {
+		return nil
+	}
+	return s.requireCurrentMember(leaf)
+}
 
+// verifiedPeerLeaf returns the certificate the peer presented, once the TLS
+// stack has verified it chains to the cluster CA.
+func verifiedPeerLeaf(ctx context.Context) (*x509.Certificate, error) {
 	p, ok := peer.FromContext(ctx)
 	if !ok {
-		return status.Error(codes.Unauthenticated, "no peer info")
+		return nil, status.Error(codes.Unauthenticated, "no peer info")
 	}
 	tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
 	if !ok {
-		return status.Error(codes.Unauthenticated, "no TLS info")
+		return nil, status.Error(codes.Unauthenticated, "no TLS info")
 	}
-	if len(tlsInfo.State.VerifiedChains) == 0 {
-		return status.Error(codes.Unauthenticated, "client certificate required")
+	if len(tlsInfo.State.VerifiedChains) == 0 || len(tlsInfo.State.VerifiedChains[0]) == 0 {
+		return nil, status.Error(codes.Unauthenticated, "client certificate required")
 	}
-	return nil
+	return tlsInfo.State.VerifiedChains[0][0], nil
+}
+
+// requireCurrentMember checks the node a certificate names against the
+// configuration this node holds.
+//
+// An empty configuration means this node does not know the membership rather
+// than that there is none: it has just started, or it is a joiner that has
+// not replicated yet and whose peers must be able to reach it to deliver the
+// configuration in the first place. Refusing there would make a new node
+// unreachable by the very traffic that would populate it, so an unknown
+// membership admits a valid certificate. A configuration this node does hold
+// and that does not list the caller is a different statement, and refused.
+func (s *Server) requireCurrentMember(leaf *x509.Certificate) error {
+	if s.raft == nil {
+		return nil
+	}
+	future := s.raft.GetConfiguration()
+	if err := future.Error(); err != nil {
+		// Same reasoning as an empty configuration: a node that cannot read
+		// its own membership does not know it, and must not refuse traffic
+		// on the strength of not knowing.
+		return nil //nolint:nilerr // an unreadable configuration is unknown membership, which admits
+	}
+	servers := future.Configuration().Servers
+	configured := make([]string, 0, len(servers))
+	for _, srv := range servers {
+		configured = append(configured, string(srv.ID))
+	}
+	return checkMembership(configured, leaf)
+}
+
+// checkMembership is the decision requireCurrentMember reads the
+// configuration for. See there for why an empty configuration admits.
+func checkMembership(configured []string, leaf *x509.Certificate) error {
+	if len(configured) == 0 {
+		return nil
+	}
+	nodeID := tlsutil.NodeIDFromCert(leaf)
+	if nodeID == "" {
+		return status.Error(codes.Unauthenticated, "client certificate names no node")
+	}
+	if slices.Contains(configured, nodeID) {
+		return nil
+	}
+	return status.Errorf(codes.PermissionDenied, "node %s is not a member of this cluster", nodeID)
 }
 
 // Stop gracefully stops the cluster gRPC server.
@@ -879,9 +951,10 @@ func (s *Server) gracefulStopServer(srv *grpc.Server) {
 }
 
 // PrepareRejoin stops the cluster gRPC server and re-binds the listen port,
-// returning a fresh transport for the new Raft instance. Because raftadmin
-// captures the *raft.Raft pointer at registration time and gRPC doesn't
-// support service re-registration, we must stop and restart the gRPC server.
+// returning a fresh transport for the new Raft instance. Because the leader
+// health service captures the *raft.Raft pointer at registration time and
+// gRPC does not support service re-registration, we must stop and restart the
+// gRPC server.
 //
 // The caller must:
 //  1. Create a new Raft with the returned transport

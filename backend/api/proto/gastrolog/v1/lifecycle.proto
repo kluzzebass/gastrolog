@@ -28,6 +28,13 @@ service LifecycleService {
     option (auth_level) = AUTH_LEVEL_ADMIN;
   }
 
+  // CreateJoinToken mints a join token for admitting a new node. Tokens
+  // expire, so this is an action rather than a field of cluster status:
+  // there is no standing token to read, and one is issued when asked for.
+  rpc CreateJoinToken(CreateJoinTokenRequest) returns (CreateJoinTokenResponse) {
+    option (auth_level) = AUTH_LEVEL_ADMIN;
+  }
+
   // SetNodeSuffrage promotes or demotes a node's voting status.
   rpc SetNodeSuffrage(SetNodeSuffrageRequest) returns (SetNodeSuffrageResponse) {
     option (auth_level) = AUTH_LEVEL_ADMIN;
@@ -103,8 +110,19 @@ message GetClusterStatusResponse {
   repeated ClusterNode nodes = 4;
   RaftStats local_stats = 5;
   bytes local_node_id = 6;
-  string join_token = 7;
   string cluster_address = 8;
+}
+
+message CreateJoinTokenRequest {
+  // How long the token stays usable. Zero uses the cluster default.
+  int64 ttl_seconds = 1;
+}
+
+message CreateJoinTokenResponse {
+  string join_token = 1;
+  // When the token stops being accepted, so a caller can say so rather than
+  // making the operator work it out from the token.
+  int64 expires_at_unix = 2;
 }
 
 // RaftStats contains Raft consensus statistics for the local node.
@@ -184,7 +202,10 @@ message SetNodeStateRequest {
 message SetNodeStateResponse {}
 
 message JoinClusterRequest {
-  string leader_address = 1; // cluster address of the leader to join (e.g., "10.0.0.1:4566")
+  // Cluster address of any member of the cluster to join (e.g.
+  // "10.0.0.1:4566"). The member serves the request wherever it sits in the
+  // configuration, so the caller does not have to know which node leads.
+  string member_address = 1;
   string join_token = 2;     // join token from the leader's cluster status
 }
 

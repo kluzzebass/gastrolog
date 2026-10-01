@@ -297,7 +297,7 @@ func TestLoadLocalConfig_JoinAddrFreshJoinReturnsNil(t *testing.T) {
 	t.Parallel()
 	cfg := RunConfig{JoinAddr: "leader:9876", ConfigType: "raft", ClusterAddr: ""}
 
-	appCfg, fromFSM, err := loadLocalConfig(context.Background(), discardLogger(), cfg, &startupStub{}, nil, "node1")
+	appCfg, fromFSM, err := loadLocalConfig(context.Background(), discardLogger(), cfg, &startupStub{}, nil, nil, "node1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestLoadLocalConfig_JoinAddrRestartUsesLocalFSM(t *testing.T) {
 	}
 	cfg := RunConfig{JoinAddr: "leader:9876", ConfigType: "raft"}
 
-	appCfg, fromFSM, err := loadLocalConfig(context.Background(), discardLogger(), cfg, store, nil, "node1")
+	appCfg, fromFSM, err := loadLocalConfig(context.Background(), discardLogger(), cfg, store, nil, nil, "node1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestLoadLocalConfig_JoinAddrRestartWithOnlyJWTUsesLocalFSM(t *testing.T) {
 	}
 	cfg := RunConfig{JoinAddr: "leader:9876", ConfigType: "raft"}
 
-	appCfg, fromFSM, err := loadLocalConfig(context.Background(), discardLogger(), cfg, store, nil, "node1")
+	appCfg, fromFSM, err := loadLocalConfig(context.Background(), discardLogger(), cfg, store, nil, nil, "node1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestLoadLocalConfig_RaftWithLocalFSM(t *testing.T) {
 	}
 	cfg := RunConfig{ConfigType: "raft"}
 
-	appCfg, fromFSM, err := loadLocalConfig(context.Background(), discardLogger(), cfg, store, nil, "node1")
+	appCfg, fromFSM, err := loadLocalConfig(context.Background(), discardLogger(), cfg, store, nil, nil, "node1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -388,7 +388,7 @@ func TestLoadLocalConfig_MemoryBootstraps(t *testing.T) {
 	store := memory.NewStore()
 	cfg := RunConfig{ConfigType: "memory"}
 
-	appCfg, fromFSM, err := loadLocalConfig(context.Background(), discardLogger(), cfg, store, nil, "node1")
+	appCfg, fromFSM, err := loadLocalConfig(context.Background(), discardLogger(), cfg, store, nil, nil, "node1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

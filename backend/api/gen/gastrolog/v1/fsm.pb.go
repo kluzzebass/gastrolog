@@ -2342,15 +2342,19 @@ func (x *SetNodeStateCommand) GetSince() *timestamppb.Timestamp {
 	return nil
 }
 
+// The cluster's trust root and the credential for joining it. Node
+// certificates are not here: each node holds its own, issued against this CA
+// and never replicated, so that one stolen key is one node rather than the
+// cluster.
 type PutClusterTLSCommand struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	CaCertPem      []byte                 `protobuf:"bytes,1,opt,name=ca_cert_pem,json=caCertPem,proto3" json:"ca_cert_pem,omitempty"`
-	CaKeyPem       []byte                 `protobuf:"bytes,2,opt,name=ca_key_pem,json=caKeyPem,proto3" json:"ca_key_pem,omitempty"`
-	ClusterCertPem []byte                 `protobuf:"bytes,3,opt,name=cluster_cert_pem,json=clusterCertPem,proto3" json:"cluster_cert_pem,omitempty"`
-	ClusterKeyPem  []byte                 `protobuf:"bytes,4,opt,name=cluster_key_pem,json=clusterKeyPem,proto3" json:"cluster_key_pem,omitempty"`
-	JoinToken      string                 `protobuf:"bytes,5,opt,name=join_token,json=joinToken,proto3" json:"join_token,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	CaCertPem []byte                 `protobuf:"bytes,1,opt,name=ca_cert_pem,json=caCertPem,proto3" json:"ca_cert_pem,omitempty"`
+	CaKeyPem  []byte                 `protobuf:"bytes,2,opt,name=ca_key_pem,json=caKeyPem,proto3" json:"ca_key_pem,omitempty"`
+	// Key the cluster mints join tokens with. Tokens themselves are minted on
+	// demand and expire; this is what signs them and never leaves the cluster.
+	JoinTokenKey  string `protobuf:"bytes,5,opt,name=join_token_key,json=joinTokenKey,proto3" json:"join_token_key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PutClusterTLSCommand) Reset() {
@@ -2397,23 +2401,9 @@ func (x *PutClusterTLSCommand) GetCaKeyPem() []byte {
 	return nil
 }
 
-func (x *PutClusterTLSCommand) GetClusterCertPem() []byte {
+func (x *PutClusterTLSCommand) GetJoinTokenKey() string {
 	if x != nil {
-		return x.ClusterCertPem
-	}
-	return nil
-}
-
-func (x *PutClusterTLSCommand) GetClusterKeyPem() []byte {
-	if x != nil {
-		return x.ClusterKeyPem
-	}
-	return nil
-}
-
-func (x *PutClusterTLSCommand) GetJoinToken() string {
-	if x != nil {
-		return x.JoinToken
+		return x.JoinTokenKey
 	}
 	return ""
 }
@@ -3505,15 +3495,12 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x13SetNodeStateCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12-\n" +
 	"\x05state\x18\x02 \x01(\x0e2\x17.gastrolog.v1.NodeStateR\x05state\x120\n" +
-	"\x05since\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\"\xc5\x01\n" +
+	"\x05since\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\"z\n" +
 	"\x14PutClusterTLSCommand\x12\x1e\n" +
 	"\vca_cert_pem\x18\x01 \x01(\fR\tcaCertPem\x12\x1c\n" +
 	"\n" +
-	"ca_key_pem\x18\x02 \x01(\fR\bcaKeyPem\x12(\n" +
-	"\x10cluster_cert_pem\x18\x03 \x01(\fR\x0eclusterCertPem\x12&\n" +
-	"\x0fcluster_key_pem\x18\x04 \x01(\fR\rclusterKeyPem\x12\x1d\n" +
-	"\n" +
-	"join_token\x18\x05 \x01(\tR\tjoinToken\"\xea\x01\n" +
+	"ca_key_pem\x18\x02 \x01(\fR\bcaKeyPem\x12$\n" +
+	"\x0ejoin_token_key\x18\x05 \x01(\tR\fjoinTokenKey\"\xea\x01\n" +
 	"\x0fPutRouteCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +

@@ -84,12 +84,43 @@ When creating a **question** issue, always draft the title and description first
 
 **Stacked branches are allowed** when a follow-up issue naturally builds on an in-review branch (e.g. you discover a related bug while validating the parent fix and don't want to wait for merge). Branch the child off the parent's HEAD, keep each branch single-issue, and either (a) merge the stack as one when both close together, or (b) merge the parent into the stack branch first and rebase the child onto that stack tip. What is NOT allowed is **lumping** — multiple issues' commits intermixed on a single branch with no clean revertable history. Stacking ≠ lumping: each branch still owns exactly one issue's work.
 
+### Handoff checklist
+
+Run down this table before moving an issue to in_review, and post the
+FILLED table — one verdict per row, "n/a" rows included — as part of the
+in_review handoff comment. The filled table is the handoff artifact: a
+handoff without it is incomplete, and a skipped row is visible to the
+reviewer instead of silent. The table exists because each row is an
+obligation that was forgotten at least once when it lived only in prose —
+including, the day it was written, by its author; a checklist that relies
+on remembering to run it has the failure mode it was built to remove.
+
+AGENTS.md and other process changes land on main via a docs-only PR
+immediately, never riding a feature branch: a rule committed to an unmerged
+branch does not exist for any sibling branch.
+
+| Control | Applies when | Satisfied by |
+|---------|--------------|--------------|
+| Tests across all dimensions | every change | single-node, multi-node (4+), happy, unhappy, adversarial, edge cases — see Test Coverage |
+| Premise check | every failure-asserting or guard-pinning test | disable the guard / revert the fix: the test must go red |
+| Fast gates | every change | `just test` green, `bunx react-doctor@latest .` clean |
+| Full acceptance gate | before in_review | `just backend test-full` green, once, not optional |
+| Cluster-first audit | new RPCs, handlers, state | works from any node: remote collection (`collectRemote`), PeerState aggregation, no node-local truth — see Cluster-First |
+| Denied-capabilities table | security-touching work | handoff comment pairs each denied capability with its driving test |
+| Help system | user-visible feature added or changed | `SettingsDialog.tsx` `helpTopicId` + `help/topics.ts` + `help/*.md` updated with the feature |
+| Docs in the same commit | behavior or concept changes | design docs describe the code as it now is; `docs/ubiquitous_language.md` gains new terms |
+| Proto regeneration | any `.proto` change | `just gen` (both sides — the commit hook refuses half a generation) |
+| Rename through the stack | any rename | proto, generated code, Go, TypeScript, UI labels, tests — no partial renames, nothing deferred |
+| UI/CLI parity | new operator-facing capability | both surfaces can do it, or the gap is a filed issue |
+| Verify the artifact | asking the user to look at a running system | prove the running binary/UI contains the change first |
+| Self-test first | anything the CLI or the k8s substrate can exercise | tested by you, end to end, before the handoff — the user tests only what an agent cannot reach |
+
 ### Closing issues
 
 **NEVER** close issues without explicit user approval:
 
 1. Set status to `in_review`
-2. Ask the user to test
+2. Ask the user to test **what remains**: everything testable by CLI or the k8s substrate has already been tested by you — the user's testing is for what only a human can judge
 3. Ask if we can close it
 4. Only run `dcat close` after user confirms
 5. **Upon closing:** commit (including tracker), **merge to the issue’s stack branch**, and **push that branch** — in that order after `dcat close`. Do not merge to the default branch or push the merge **before** the issue is closed.
@@ -166,6 +197,7 @@ Every feature must have tests across ALL of these dimensions:
 - **Multi-node**: cluster behavior with 4+ nodes, file-backed vaults, real transferrers
 - **Happy path**: feature works as designed
 - **Unhappy path**: failures, errors, races, partial operations, recovery, disk full, corrupt data
+- **Adversarial path**: callers that are hostile rather than unlucky. The unhappy path is honest participants meeting misfortune; the adversarial path is a caller pursuing a capability the system must deny — a stolen credential, a forged or expired token, a request naming someone else's identity, an authority a certificate does not convey. The test asserts the denial itself (the attacker's goal unachieved, not merely an error returned) and is premise-checked: disable the guard and the test must fail. A security-sensitive feature is not done until every capability it denies has such a test — the guard that exists but is never driven is exactly the one that quietly stops existing. When moving security-touching work to in_review, the dcat handoff comment includes a denied-capabilities table: each capability the change denies, paired with the test that drives the denial. The author enumerating the denials is what makes a missing test visible — absence has no failure mode of its own.
 - **Edge cases**: boundary conditions, concurrent access, restart survival, empty inputs
 
 Single-node happy-path tests are NOT sufficient. A feature is not done until all dimensions are covered. This applies to every new feature, every bug fix, every refactor that changes behavior.

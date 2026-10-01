@@ -205,14 +205,14 @@ swarm-expand count="1":
         --name $name \
         --network gastrolog_gastrolog \
         --secret source=gastrolog_admin_creds,target=admin_creds \
-        --mount type=volume,source=gastrolog_cluster-token,target=/shared \
         --mount type=volume,source=gastrolog_${name}-config,target=/config \
         --mount type=volume,source=gastrolog_${name}-vaults,target=/vaults \
         --hostname gastrolog-$next \
         --env GASTROLOG_NAME=gastrolog-$next \
         --env GASTROLOG_CLUSTER_ADDR=auto \
         --env GASTROLOG_JOIN_ADDR=tasks.gastrolog_bootstrap:4566 \
-        --env GASTROLOG_BOOTSTRAP_TOKEN_FILE=/shared/token \
+        --env GASTROLOG_BOOTSTRAP_TOKEN_URL=http://tasks.gastrolog_bootstrap:4564/cluster/bootstrap-token \
+        --env GASTROLOG_BOOTSTRAP_TOKEN_SECRET=rotate-this-secret-please \
         --env GASTROLOG_INITIAL_ADMIN_FILE=/run/secrets/admin_creds \
         --replicas 1 \
         --constraint node.role==manager \
@@ -257,14 +257,14 @@ swarm-scale total:
           --name $name \
           --network gastrolog_gastrolog \
           --secret source=gastrolog_admin_creds,target=admin_creds \
-          --mount type=volume,source=gastrolog_cluster-token,target=/shared \
-          --mount type=volume,source=gastrolog_${name}-config,target=/config \
+            --mount type=volume,source=gastrolog_${name}-config,target=/config \
           --mount type=volume,source=gastrolog_${name}-vaults,target=/vaults \
           --hostname gastrolog-$i \
           --env GASTROLOG_NAME=gastrolog-$i \
           --env GASTROLOG_CLUSTER_ADDR=auto \
           --env GASTROLOG_JOIN_ADDR=tasks.gastrolog_bootstrap:4566 \
-          --env GASTROLOG_BOOTSTRAP_TOKEN_FILE=/shared/token \
+          --env GASTROLOG_BOOTSTRAP_TOKEN_URL=http://tasks.gastrolog_bootstrap:4564/cluster/bootstrap-token \
+        --env GASTROLOG_BOOTSTRAP_TOKEN_SECRET=rotate-this-secret-please \
           --env GASTROLOG_INITIAL_ADMIN_FILE=/run/secrets/admin_creds \
           --replicas 1 \
           --constraint node.role==manager \

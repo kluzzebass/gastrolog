@@ -226,22 +226,36 @@ describe("NodesSettings", () => {
     expect(getByText("10.0.0.1:4575")).toBeTruthy();
   });
 
-  test("join info card masks token by default", () => {
+  // Join tokens expire, so there is no standing one to show. Rendering the
+  // page must not put a credential on screen for a session that never asks
+  // for one; it offers to mint one instead.
+  test("join info card shows no token until one is minted", () => {
     const qc = createTestQueryClient();
     seedQueries(qc, {
-      cluster: {
-        ...sampleCluster,
-        joinToken: "abcd1234secrettoken9876",
-        clusterAddress: "10.0.0.1:4575",
-      },
+      cluster: { ...sampleCluster, clusterAddress: "10.0.0.1:4575" },
     });
 
     const { getByText, queryByText } = renderWritable(<NodesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
-    expect(getByText("abcd1234…9876")).toBeTruthy();
-    expect(queryByText("abcd1234secrettoken9876")).toBeNull();
+    expect(getByText("Mint a join token")).toBeTruthy();
+    expect(queryByText("Join Command")).toBeNull();
+    expect(getByText("10.0.0.1:4575")).toBeTruthy();
+  });
+
+  // A caller who cannot change anything cannot mint a credential either.
+  test("join info card offers no minting without write access", () => {
+    const qc = createTestQueryClient();
+    seedQueries(qc, {
+      cluster: { ...sampleCluster, clusterAddress: "10.0.0.1:4575" },
+    });
+
+    const { queryByText } = render(<NodesSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expect(queryByText("Mint a join token")).toBeNull();
   });
 
   test("empty state when no nodes", () => {

@@ -51,8 +51,6 @@ github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapp
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.55.0/go.mod h1:Mf6O40IAyB9zR/1J8nGDDPirZQQPbYJni8Yisy7NTMc=
 github.com/Jille/raft-grpc-leader-rpc v1.1.0 h1:u36rmA4tjp+4FSdZ17jg/1sfSCYNQIe5bzzwvW0iVTM=
 github.com/Jille/raft-grpc-leader-rpc v1.1.0/go.mod h1:l+pK+uPuqpFDFcPmyUPSng4257UXrST0Vc3Lo4XwVB0=
-github.com/Jille/raftadmin v1.2.1 h1:P35JYYJmyHnsJ7sEjdXVRRvaqXUQUuNjIqPFf5n3CEM=
-github.com/Jille/raftadmin v1.2.1/go.mod h1:CocBqmOFhfk8oIgbzZKYACdm5PizUXfzupqTQV17Pgk=
 github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/SaveTheRbtz/zstd-seekable-format-go/pkg v0.8.0 h1:tgjwQrDH5m6jIYB7kac5IQZmfUzQNseac/e3H4VoCNE=
