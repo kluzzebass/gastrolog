@@ -1083,3 +1083,29 @@ func TestSnapshotRestoreAdvancesApplyWait(t *testing.T) {
 		t.Fatalf("Applied() after Restore = %d, want %d", fsm2.ApplyWait().Applied(), want)
 	}
 }
+
+// A certificate put or delete must notify: every node's cert manager
+// mirrors the store, and without the notification a certificate created
+// after boot serves nothing anywhere until the next restart.
+func TestApplyCertificateNotifies(t *testing.T) {
+	t.Parallel()
+	var got []Notification
+	fsm := New(WithOnApply(func(n Notification) {
+		got = append(got, n)
+	}))
+	id := newID()
+	applyCmd(t, fsm, command.NewPutCertificate(system.CertPEM{
+		ID: id, Name: "srv", CertPEM: "cert", KeyPEM: "key",
+	}))
+	applyCmd(t, fsm, command.NewDeleteCertificate(id))
+
+	if len(got) != 2 {
+		t.Fatalf("got %d notifications, want 2: %+v", len(got), got)
+	}
+	if got[0].Kind != NotifyCertificatePut || got[0].ID != id {
+		t.Fatalf("put notified %+v, want NotifyCertificatePut for %s", got[0], id)
+	}
+	if got[1].Kind != NotifyCertificateDeleted || got[1].ID != id {
+		t.Fatalf("delete notified %+v, want NotifyCertificateDeleted for %s", got[1], id)
+	}
+}

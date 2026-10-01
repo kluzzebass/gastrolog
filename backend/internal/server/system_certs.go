@@ -10,30 +10,8 @@ import (
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
-	"gastrolog/internal/cert"
 	"gastrolog/internal/system"
 )
-
-// reloadCertManager lists all certs from the vault and loads them into the cert manager.
-func (s *SystemServer) reloadCertManager(ctx context.Context) error {
-	if s.certManager == nil {
-		return nil
-	}
-	ss, err := s.sysStore.LoadServerSettings(ctx)
-	if err != nil {
-		return fmt.Errorf("load server settings: %w", err)
-	}
-	tlsCfg := ss.TLS
-	certList, err := s.sysStore.ListCertificates(ctx)
-	if err != nil {
-		return fmt.Errorf("list certificates: %w", err)
-	}
-	certs := make(map[string]cert.CertSource, len(certList))
-	for _, c := range certList {
-		certs[c.Name] = cert.CertSource{CertPEM: c.CertPEM, KeyPEM: c.KeyPEM, CertFile: c.CertFile, KeyFile: c.KeyFile}
-	}
-	return s.certManager.LoadFromConfig(tlsCfg.DefaultCert, certs)
-}
 
 // ListCertificates returns all certificate names.
 func (s *SystemServer) ListCertificates(
@@ -160,12 +138,9 @@ func (s *SystemServer) PutCertificate(
 		}
 	}
 
-	if err := s.reloadCertManager(ctx); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload certs: %w", err))
-	}
-	if s.onTLSConfigChange != nil {
-		s.onTLSConfigChange()
-	}
+	// The cert manager and the HTTPS listener follow the store through the
+	// certificate-change dispatcher leg — on this node inside the apply the
+	// write above just committed, and identically on every other node.
 	cfg, err := s.buildFullSystem(ctx)
 	if err != nil {
 		return nil, errInternal(err)
@@ -307,12 +282,8 @@ func (s *SystemServer) DeleteCertificate(
 		}
 	}
 
-	if err := s.reloadCertManager(ctx); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload certs: %w", err))
-	}
-	if s.onTLSConfigChange != nil {
-		s.onTLSConfigChange()
-	}
+	// Manager + HTTPS listener follow through the dispatcher leg, here and
+	// on every peer.
 	cfg, err := s.buildFullSystem(ctx)
 	if err != nil {
 		return nil, errInternal(err)

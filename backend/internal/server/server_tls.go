@@ -14,8 +14,10 @@ import (
 	"gastrolog/internal/auth"
 )
 
-// reconfigureTLS starts/stops HTTPS listener based on system. Safe to call from any goroutine.
-func (s *Server) reconfigureTLS() {
+// ReconfigureTLS starts/stops the HTTPS listener from the current system
+// configuration. Safe to call from any goroutine; the certificate-change
+// dispatcher leg calls it on every node when a stored certificate changes.
+func (s *Server) ReconfigureTLS() {
 	ctx, cancel := context.WithTimeout(context.Background(), systemLoadTimeout)
 	defer cancel()
 	ss, err := s.cfgStore.LoadServerSettings(ctx)
