@@ -41,12 +41,17 @@ func startIngesterReconcileSweep(ctx context.Context, scheduler scheduledJobRegi
 		// running), which stays a log per the operator razor.
 		d.settle(entIngester, "", "reconcile-ingesters", d.reconcileIngesters(ctx))
 		d.reportIngesterDivergence(ctx, logger)
+		// After convergence, clear any alive entry this node no longer backs
+		// (crashed previous session, config edited while down). Read-first —
+		// zero store writes in the steady state — and here rather than at
+		// startup so readiness never gates on write quorum.
+		clearStaleIngesterAlive(ctx, d.cfgStore, d.orch.ListIngesters(), d.localNodeID, logger)
 	}
 	if err := scheduler.AddJob(ingesterReconcileJobName, ingesterReconcileSchedule, task); err != nil {
 		return err
 	}
 	scheduler.Describe(ingesterReconcileJobName,
-		"Ingester convergence sweep — periodic safety net. Recomputes the ingesters this node should run from config and drives the orchestrator toward it (idempotent; running ingesters never flap), then logs any desired ingester that is still not running. Event-driven reconciles (config puts, singleton assignment) remain the fast path; this tick heals missed triggers such as a node that was not ready at boot dispatch.")
+		"Ingester convergence sweep — periodic safety net. Recomputes the ingesters this node should run from config and drives the orchestrator toward it (idempotent; running ingesters never flap), logs any desired ingester that is still not running, and clears stale alive entries this node no longer backs (read-first; zero writes in the steady state). Event-driven reconciles (config puts, singleton assignment) remain the fast path; this tick heals missed triggers such as a node that was not ready at boot dispatch.")
 	return nil
 }
 

@@ -437,11 +437,10 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	}
 	close(orchReady)
 
-	// Clear any stale "alive" entries in Raft for ingesters this node is
-	// configured to know about but isn't running (e.g. last session crashed
-	// before setIngesterAlive(false), or config was edited while down).
-	// Must happen AFTER orch.Start so ListIngesters() reflects reality.
-	clearStaleIngesterAlive(ctx, cfgStore, orch, nodeID, logger)
+	// Stale ingester "alive" entries from a crashed previous session are
+	// cleared by the ingester convergence sweep, not here: the clear is a
+	// cluster-wide store write, and startup must not gate readiness on
+	// write quorum.
 
 	wireClusterRaftApplies(clusterSrv, groupMgr)
 
