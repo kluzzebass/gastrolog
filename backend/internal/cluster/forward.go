@@ -846,6 +846,13 @@ func (s *Server) forwardRemoveNode(ctx context.Context, req *gastrologv1.Forward
 		opts.Policy = RemovalPolicySelf
 	}
 	if err := s.removeNodeFn(ctx, string(req.GetNodeId()), opts); err != nil {
+		// Sentinel identity dies at the wire; the status code carries it
+		// across the hop so the follower can rehydrate it. Without this, a
+		// not-in-cluster refusal reaching the operator through a follower
+		// sanitizes into an opaque internal error.
+		if errors.Is(err, ErrNodeNotInCluster) {
+			return nil, status.Errorf(codes.NotFound, "remove node: %v", err)
+		}
 		return nil, status.Errorf(codes.Internal, "remove node: %v", err)
 	}
 	return &gastrologv1.ForwardRemoveNodeResponse{}, nil

@@ -682,6 +682,83 @@ func (r *nodeRemover) remove(ctx context.Context, targetNodeID string, opts clus
 	return r.execute(ctx, targetNodeID, opts)
 }
 
+// executeNodeRemoval performs the leader-side removal: the Raft membership
+// change, the system-FSM NodeConfig deletion, and the best-effort eviction
+// notification to the removed node. Runs after the removal gates have passed.
+func executeNodeRemoval(
+	ctx context.Context,
+	clusterSrv *cluster.Server,
+	cfgStore system.Store,
+	logger *slog.Logger,
+	targetNodeID string,
+	opts cluster.RemoveNodeOptions,
+) error {
+	peerConns := clusterSrv.PeerConns()
+	var evictHandle cluster.PeerConnHandle
+	if peerConns != nil {
+		if h, err := peerConns.AcquireService(targetNodeID, cluster.PurposeEviction); err == nil {
+			evictHandle = h
+		} else {
+			logger.Warn("cannot pre-connect to evicted node for notification", "error", err)
+		}
+	}
+
+	// Deletes the system-FSM NodeConfig so that downstream consumers
+	// (placement manager, RefreshVaultCtlMembers, ListNodes RPC) stop
+	// treating the removed node as a cluster member. Without this, a
+	// scale-down leaves stale NodeConfig entries that keep vault-ctl Raft
+	// groups attempting to talk to defunct pod IPs.
+	deleteNodeConfig := func() {
+		if cfgStore == nil {
+			return
+		}
+		targetGLID, err := glid.Parse(targetNodeID)
+		if err != nil {
+			logger.Warn("delete node config: parse node ID failed", "node_id", targetNodeID, "error", err)
+		} else if err := cfgStore.DeleteNode(ctx, targetGLID); err != nil {
+			logger.Warn("delete node config failed", "node_id", targetNodeID, "error", err)
+		}
+	}
+
+	logger.Info("removing node from cluster", "node_id", targetNodeID, "force", opts.Force, "policy", opts.Policy)
+	if err := clusterSrv.RemoveServer(targetNodeID, 10*time.Second); err != nil {
+		if errors.Is(err, cluster.ErrNodeNotInCluster) {
+			// The target is not a Raft member, but a stale NodeConfig
+			// entry may be exactly why the operator asked for the
+			// removal — heal that drift, then tell the truth instead
+			// of reporting a removal that changed nothing.
+			logger.Warn("remove node: target is not in the Raft configuration; cleaning up any stale node config",
+				"node_id", targetNodeID)
+			deleteNodeConfig()
+			if evictHandle != nil {
+				evictHandle.Release()
+			}
+			return fmt.Errorf("remove server: %w (any stale node config was cleaned up)", err)
+		}
+		return fmt.Errorf("remove server: %w", err)
+	}
+	logger.Info("node removed from cluster", "node_id", targetNodeID)
+
+	deleteNodeConfig()
+
+	if evictHandle != nil {
+		go func() { //nolint:gosec // G118: notification outlives the request; it needs its own bounded context, not the handler's
+			defer evictHandle.Release()
+			notifyCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			client := cluster.NewNotifyEvictionClient(evictHandle.GRPC())
+			if err := client.NotifyEviction(notifyCtx, "removed from cluster by leader"); err != nil {
+				logger.Warn("failed to notify evicted node", "node_id", targetNodeID, "error", err)
+			} else {
+				logger.Info("eviction notification sent", "node_id", targetNodeID)
+			}
+			peerConns.Invalidate(targetNodeID, status.Error(codes.Unavailable, "node evicted from cluster"))
+		}()
+	}
+
+	return nil
+}
+
 // makeRemoveNodeFunc creates the callback for the RemoveNode RPC. The
 // returned function runs the leader-side removal gates — orphan-refusal and
 // RF-preservation — before the Raft membership change, so a removal that
@@ -696,52 +773,7 @@ func makeRemoveNodeFunc(
 	logger *slog.Logger,
 ) cluster.RemoveNodeFunc {
 	execute := func(ctx context.Context, targetNodeID string, opts cluster.RemoveNodeOptions) error {
-		peerConns := clusterSrv.PeerConns()
-		var evictHandle cluster.PeerConnHandle
-		if peerConns != nil {
-			if h, err := peerConns.AcquireService(targetNodeID, cluster.PurposeEviction); err == nil {
-				evictHandle = h
-			} else {
-				logger.Warn("cannot pre-connect to evicted node for notification", "error", err)
-			}
-		}
-
-		logger.Info("removing node from cluster", "node_id", targetNodeID, "force", opts.Force, "policy", opts.Policy)
-		if err := clusterSrv.RemoveServer(targetNodeID, 10*time.Second); err != nil {
-			return fmt.Errorf("remove server: %w", err)
-		}
-		logger.Info("node removed from cluster", "node_id", targetNodeID)
-
-		// Also delete the system-FSM NodeConfig so that downstream consumers
-		// (placement manager, RefreshVaultCtlMembers, ListNodes RPC) stop
-		// treating the removed node as a cluster member. Without this, a
-		// scale-down leaves stale NodeConfig entries that keep vault-ctl Raft
-		// groups attempting to talk to defunct pod IPs.
-		if cfgStore != nil {
-			targetGLID, err := glid.Parse(targetNodeID)
-			if err != nil {
-				logger.Warn("delete node config: parse node ID failed", "node_id", targetNodeID, "error", err)
-			} else if err := cfgStore.DeleteNode(ctx, targetGLID); err != nil {
-				logger.Warn("delete node config failed", "node_id", targetNodeID, "error", err)
-			}
-		}
-
-		if evictHandle != nil {
-			go func() { //nolint:gosec // G118: notification outlives the request; it needs its own bounded context, not the handler's
-				defer evictHandle.Release()
-				notifyCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				client := cluster.NewNotifyEvictionClient(evictHandle.GRPC())
-				if err := client.NotifyEviction(notifyCtx, "removed from cluster by leader"); err != nil {
-					logger.Warn("failed to notify evicted node", "node_id", targetNodeID, "error", err)
-				} else {
-					logger.Info("eviction notification sent", "node_id", targetNodeID)
-				}
-				peerConns.Invalidate(targetNodeID, status.Error(codes.Unavailable, "node evicted from cluster"))
-			}()
-		}
-
-		return nil
+		return executeNodeRemoval(ctx, clusterSrv, cfgStore, logger, targetNodeID, opts)
 	}
 
 	remover := &nodeRemover{cfgStore: cfgStore, logger: logger, execute: execute}
@@ -775,6 +807,13 @@ func makeRemoveNodeFunc(
 		resp := &gastrologv1.ForwardRemoveNodeResponse{}
 		if err := peerConns.InvokeService(ctx, leaderID, cluster.PurposeRemoveNode,
 			"/gastrolog.v1.ClusterService/ForwardRemoveNode", req, resp); err != nil {
+			// Rehydrate the sentinel the wire stripped: the leader encodes
+			// not-in-cluster as NotFound, and the RPC handler and CLI need
+			// the sentinel back to surface an operator-readable refusal
+			// instead of a sanitized internal error.
+			if status.Code(err) == codes.NotFound {
+				return fmt.Errorf("forward remove node to leader %s: %w: %s", leaderID, cluster.ErrNodeNotInCluster, targetNodeID)
+			}
 			return fmt.Errorf("forward remove node to leader %s: %w", leaderID, err)
 		}
 		return nil

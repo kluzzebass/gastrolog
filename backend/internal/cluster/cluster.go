@@ -425,6 +425,28 @@ func (s *Server) RemoveServer(id string, timeout time.Duration) error {
 	if s.raft == nil {
 		return errors.New("raft not initialized")
 	}
+	cfgFuture := s.raft.GetConfiguration()
+	if err := cfgFuture.Error(); err != nil {
+		return fmt.Errorf("get configuration: %w", err)
+	}
+	found := false
+	for _, srv := range cfgFuture.Configuration().Servers {
+		if string(srv.ID) == id {
+			found = true
+			break
+		}
+	}
+	if !found {
+		// hashicorp/raft's RemoveServer treats an unknown ID as success — it
+		// commits a no-op configuration entry and reports nil with the voter
+		// set unchanged — so without this check every caller logs "removed"
+		// while nothing happened, and whatever acts on that report (an
+		// operator, a preStop hook, a reconciler) acts on a lie.
+		return fmt.Errorf("%s: %w", id, ErrNodeNotInCluster)
+	}
+	// A removal can race this check; the loser's RemoveServer no-ops, which
+	// is acceptable — the configuration ends up exactly where the caller
+	// asked. The check exists to catch targets that were never there.
 	return s.raft.RemoveServer(hraft.ServerID(id), 0, timeout).Error()
 }
 
