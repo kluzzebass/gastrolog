@@ -861,6 +861,17 @@ func (s *Scheduler) completeOneTimeJob(id uuid.UUID, name string, failed bool, t
 		delete(s.descriptions, name)
 	}
 
+	// A re-run of the same name supersedes its predecessors' retained
+	// entries: status polling wants the latest outcome, and a short-cycle
+	// retry job (a sweep re-enqueuing an idempotency-keyed RunOnceIfAbsent
+	// every few seconds through an outage) would otherwise flood the job
+	// listing with hundreds of identical terminal records inside the
+	// retention window.
+	for id, prev := range s.completed {
+		if prev.Name == name {
+			delete(s.completed, id)
+		}
+	}
 	s.completed[jobID] = info
 	delete(s.progress, jobID)
 	notify := s.onJobChange

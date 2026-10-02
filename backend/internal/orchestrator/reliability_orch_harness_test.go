@@ -105,6 +105,10 @@ type orchRelHarness struct {
 	// routeVaultIdxs lists vaults (indexes into h.vaults) that get an
 	// enabled match-all route seeded in the shared config.
 	routeVaultIdxs []int
+	// nilConfigBootIdxs marks nodes (by index into h.nodeIDs) that boot the
+	// fresh-joiner way: ApplyConfig(nil) at startNode, config arriving only
+	// through the test-driven dispatcher-equivalent fan-out.
+	nilConfigBootIdxs map[int]bool
 	// rotationPolicyID is the shared pipeline rotation policy written by
 	// seedSharedConfig (nil without withPipelineCluster); vaults added
 	// mid-test (addRuntimeVault) reference it too.
@@ -147,6 +151,19 @@ func withExtraVault(nodeIdxs []int) orchRelOption {
 			id:       id,
 			nodeIdxs: nodeIdxs,
 		})
+	}
+}
+
+// withNilConfigBoot marks the node at nodeIdx to boot the fresh-joiner way:
+// startNode calls ApplyConfig with nil config, as production does when the
+// config has not replicated yet, and the test drives the dispatcher-replay
+// fan-out itself.
+func withNilConfigBoot(nodeIdx int) orchRelOption {
+	return func(h *orchRelHarness) {
+		if h.nilConfigBootIdxs == nil {
+			h.nilConfigBootIdxs = make(map[int]bool)
+		}
+		h.nilConfigBootIdxs[nodeIdx] = true
 	}
 }
 
@@ -708,9 +725,17 @@ func (h *orchRelHarness) startNode(id string) {
 	n.factories = factories
 
 	ctx := context.Background()
-	sys, err := h.cfgStore.Load(ctx)
-	if err != nil {
-		h.t.Fatalf("%s: cfgStore.Load: %v", id, err)
+	// A fresh joiner boots before its config replicates: production calls
+	// ApplyConfig with nil and replays the config through the dispatcher
+	// afterwards. Nodes marked nilConfigBoot take that path; the test drives
+	// the replay-equivalent fan-out (AddVault / ReloadFilters) itself.
+	var sys *system.System
+	if !h.nilConfigBootIdxs[slices.Index(h.nodeIDs, id)] {
+		var err error
+		sys, err = h.cfgStore.Load(ctx)
+		if err != nil {
+			h.t.Fatalf("%s: cfgStore.Load: %v", id, err)
+		}
 	}
 	if err := orch.ApplyConfig(sys, factories); err != nil {
 		h.t.Fatalf("%s: ApplyConfig: %v", id, err)
