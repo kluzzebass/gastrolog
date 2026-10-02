@@ -102,10 +102,14 @@ type Factories struct {
 // the orchestrator on error and create a fresh one. Do not attempt to recover
 // or retry with the same orchestrator instance.
 func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) error {
-	if sys == nil {
-		return nil
-	}
-
+	// Everything up to the nil-sys return is wiring that does not depend on
+	// config and MUST happen even when the node boots without one — a fresh
+	// joiner's startup config arrives via Raft replication after this call,
+	// and the dispatcher replay that follows restores vaults and routes but
+	// never re-runs this wiring. Skipping it leaves o.groupMgr nil, so
+	// vaultCtlHandle() reports no-handle for every vault forever: segment
+	// publishes stay fail-closed, peer collection never registers, and
+	// chunking is gated cluster-wide for want of second holders.
 	o.groupMgr = factories.GroupManager
 	o.peerConns = factories.PeerConns
 	if factories.PeerConns != nil && o.segmentPuller == nil {
@@ -133,6 +137,19 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 		o.vaultsDir = factories.HomeDir
 	}
 
+	if sys == nil {
+		// The handle-convergence safety net runs config-free (each tick loads
+		// config itself) and a config-less boot needs it most. On the non-nil
+		// path it is registered only AFTER the vaults are applied — the
+		// scheduler runs eagerly, and a reconcile tick interleaved with a
+		// half-applied vault set registers pipeline vaults from config state
+		// the local instances do not have yet.
+		if err := o.startPipelineConfigReconcile(); err != nil {
+			o.logger.Warn("failed to add pipeline-config-reconcile job", "error", err)
+		}
+		return nil
+	}
+
 	if err := o.applyVaults(sys, factories); err != nil {
 		return err
 	}
@@ -151,10 +168,13 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 	// converges — async Raft convergence with no config event to hang off.
 	// Without a periodic pass, a vault-ctl election that lands leadership on a
 	// non-home node leaves the chunking planner (home ∧ vault-ctl leader)
-	// running nowhere, stalling manifest planning until the next unrelated
-	// config change. Keep that one leg on a narrowed scheduler job — narrowing
-	// it away regressed once, with a home node down — it is the sibling of
-	// vault-ctl-membership-reconcile, not the retired placement sweep.
+	// running nowhere, stalling manifest planning for the vault cluster-wide.
+	// Keep that one leg on a narrowed scheduler job — narrowing it away
+	// regressed once, with a home node down, and anchoring it behind a
+	// non-nil config regressed on every fresh joiner (see the nil-sys branch
+	// above). It is the sibling of vault-ctl-membership-reconcile, not the
+	// retired placement sweep. Registered after the vaults are applied so a
+	// tick cannot interleave with the half-applied set.
 	if err := o.startPipelineConfigReconcile(); err != nil {
 		o.logger.Warn("failed to add pipeline-config-reconcile job", "error", err)
 	}

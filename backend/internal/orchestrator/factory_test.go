@@ -12,10 +12,34 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
+	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
 
 	hraft "github.com/hashicorp/raft"
 )
+
+// A fresh joiner boots with no local config — it arrives via Raft replication
+// after startup, and nothing re-runs ApplyConfig. The config-independent
+// wiring must therefore land on the nil-config call: anchoring it behind a
+// non-nil config left every fresh joiner without a vault-ctl handle
+// (groupMgr nil) and without the handle-convergence safety-net job, so
+// segment publishes stayed fail-closed and chunking was gated cluster-wide
+// for want of second holders.
+func TestApplyConfigNilConfigStillWires(t *testing.T) {
+	orch := newTestOrch(t, Config{LocalNodeID: "joiner"})
+
+	gm := raftgroup.NewGroupManager(raftgroup.GroupManagerConfig{NodeID: "joiner"})
+	if err := orch.ApplyConfig(nil, Factories{GroupManager: gm, HomeDir: t.TempDir()}); err != nil {
+		t.Fatalf("ApplyConfig(nil): %v", err)
+	}
+
+	if orch.groupMgr != gm {
+		t.Fatal("nil-config ApplyConfig did not wire the group manager; vaultCtlHandle reports no-handle for every vault on this node forever")
+	}
+	if orch.scheduler.JobSchedule(pipelineConfigReconcileJobName) == "" {
+		t.Fatal("nil-config ApplyConfig did not register the pipeline-config-reconcile safety net")
+	}
+}
 
 // fakeChunkManager implements chunk.ChunkManager for testing.
 type fakeChunkManager struct{}
