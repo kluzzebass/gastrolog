@@ -90,7 +90,7 @@ func newIngesterCheckCluster(t *testing.T, mode topologyMode, names ...string) *
 		ChunkManagers: map[string]chunk.ManagerFactory{"memory": chunkmem.NewFactory()},
 		IndexManagers: map[string]index.ManagerFactory{"memory": indexmem.NewFactory()},
 		IngesterTypes: map[string]orchestrator.IngesterRegistration{
-			"syslog": {Factory: ingestsyslog.NewFactory(), Defaults: ingestsyslog.ParamDefaults, ListenAddrs: ingestsyslog.ListenAddrs},
+			"syslog": {Factory: ingestsyslog.NewFactory(nil), Defaults: ingestsyslog.ParamDefaults, ListenAddrs: ingestsyslog.ListenAddrs},
 		},
 	}
 

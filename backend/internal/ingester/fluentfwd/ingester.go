@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -36,10 +37,11 @@ const refusedLogInterval = 10 * time.Second
 
 // Ingester accepts messages via the Fluent Forward protocol over TCP.
 type Ingester struct {
-	id     string
-	addr   string
-	out    chan<- ingestion.IngesterMessage
-	logger *slog.Logger
+	id        string
+	addr      string
+	tlsConfig *tls.Config
+	out       chan<- ingestion.IngesterMessage
+	logger    *slog.Logger
 
 	// conns caps concurrent connections; refusedLog throttles both the
 	// refusal warning and the report of attributes the record ceiling
@@ -62,9 +64,11 @@ func (ing *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 
 // Config holds Fluent Forward ingester configuration.
 type Config struct {
-	ID     string
-	Addr   string // e.g. ":24224"
-	Logger *slog.Logger
+	ID   string
+	Addr string // e.g. ":24224"
+	// TLSConfig, when non-nil, makes the listener serve TLS.
+	TLSConfig *tls.Config
+	Logger    *slog.Logger
 }
 
 // New creates a new Fluent Forward ingester.
@@ -72,6 +76,7 @@ func New(cfg Config) *Ingester {
 	return &Ingester{
 		id:         cfg.ID,
 		addr:       cfg.Addr,
+		tlsConfig:  cfg.TLSConfig,
 		conns:      limits.NewConnLimiter(limits.MaxConnections),
 		refusedLog: logging.Throttle{Interval: refusedLogInterval},
 		logger:     comp.Ingester.Sub("fluentfwd").Desc("Fluent Forward ingester — accepts records from fluentd/fluent-bit using the Forward protocol.").Apply(logging.Default(cfg.Logger)),
@@ -112,6 +117,9 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 	ing.out = out
 
 	ln, err := net.Listen("tcp", ing.addr)
+	if err == nil && ing.tlsConfig != nil {
+		ln = tls.NewListener(ln, ing.tlsConfig)
+	}
 	if err != nil {
 		return fmt.Errorf("fluentfwd listen: %w", err)
 	}

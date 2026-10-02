@@ -69,12 +69,15 @@ type ManagedFileHandler interface {
 // It is called synchronously from within FSM.Apply, so actions complete before
 // the cfgStore write method returns to the server handler.
 type configDispatcher struct {
-	orch               orchActions
-	cfgStore           system.Store
-	factories          orchestrator.Factories
-	localNodeID        string
-	logger             *slog.Logger
-	clusterTLS         *cluster.ClusterTLS                               // nil for single-node or memory mode
+	orch        orchActions
+	cfgStore    system.Store
+	factories   orchestrator.Factories
+	localNodeID string
+	logger      *slog.Logger
+	clusterTLS  *cluster.ClusterTLS
+	// certsChanged mirrors the store's certificates into this node's cert
+	// manager and swaps the HTTPS listener; set by app wiring.
+	certsChanged       func(ctx context.Context) error                   // nil for single-node or memory mode
 	tlsFilePath        string                                            // path to persist cluster TLS on rotation
 	configSignal       *notify.Signal                                    // broadcasts config changes to WatchConfig streams
 	managedFileHandler ManagedFileHandler                                // nil for single-node or before wiring
@@ -128,6 +131,7 @@ const (
 	entRetention  = "retention-policy"
 	entSetting    = "setting"
 	entClusterTLS = "cluster-tls"
+	entCert       = "certificate"
 	entNodeConfig = "node-config"
 )
 
@@ -244,6 +248,14 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		d.settle(entSetting, n.Key, "apply-setting", d.handleSettingPut(ctx, n.Key))
 	case raftfsm.NotifyClusterTLSPut:
 		d.settle(entClusterTLS, "", "reload-cluster-tls", d.handleClusterTLSPut(ctx))
+	case raftfsm.NotifyCertificatePut, raftfsm.NotifyCertificateDeleted:
+		// Every node mirrors the store's certificates into its cert
+		// manager and swaps its HTTPS listener — the RPC-serving node has
+		// no special role, or a certificate created there would serve
+		// nowhere else until the next restart.
+		if d.certsChanged != nil {
+			d.settle(entCert, "", "reload-certificates", d.certsChanged(ctx))
+		}
 	case raftfsm.NotifyNodeConfigPut, raftfsm.NotifyNodeConfigDeleted:
 		// Cluster membership changed — refresh every local vault's
 		// vault-ctl Raft group desired-member set. The vault-ctl leader's

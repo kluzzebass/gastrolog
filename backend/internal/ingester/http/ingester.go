@@ -3,6 +3,7 @@ package http
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,13 +57,14 @@ const (
 //
 // Note: X-Wait-Ack is a GastroLog extension not part of the Loki API.
 type Ingester struct {
-	id       string
-	addr     string
-	listener net.Listener
-	server   *http.Server
-	out      chan<- ingestion.IngesterMessage
-	logger   *slog.Logger
-	ready    chan struct{} // closed once listener is bound
+	id        string
+	addr      string
+	listener  net.Listener
+	server    *http.Server
+	tlsConfig *tls.Config
+	out       chan<- ingestion.IngesterMessage
+	logger    *slog.Logger
+	ready     chan struct{} // closed once listener is bound
 
 	// pressureGate is consulted non-blockingly by handlePush to decide
 	// whether to reject push requests with 429. Hysteresis in the gate
@@ -84,6 +86,9 @@ type Config struct {
 	// Addr is the address to listen on (e.g., ":3100", "127.0.0.1:3100").
 	Addr string
 
+	// TLSConfig, when non-nil, makes the listener serve TLS.
+	TLSConfig *tls.Config
+
 	// Logger for structured logging.
 	Logger *slog.Logger
 }
@@ -91,10 +96,11 @@ type Config struct {
 // New creates a new HTTP ingester.
 func New(cfg Config) *Ingester {
 	return &Ingester{
-		id:     cfg.ID,
-		addr:   cfg.Addr,
-		logger: comp.Ingester.Sub("http").Desc("HTTP ingester — accepts log messages via the Loki Push API (POST /loki/api/v1/push).").Apply(logging.Default(cfg.Logger)),
-		ready:  make(chan struct{}),
+		id:        cfg.ID,
+		addr:      cfg.Addr,
+		tlsConfig: cfg.TLSConfig,
+		logger:    comp.Ingester.Sub("http").Desc("HTTP ingester — accepts log messages via the Loki Push API (POST /loki/api/v1/push).").Apply(logging.Default(cfg.Logger)),
+		ready:     make(chan struct{}),
 	}
 }
 
@@ -122,6 +128,9 @@ func (r *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage
 	// Create listener.
 	var err error
 	r.listener, err = net.Listen("tcp", r.addr)
+	if err == nil && r.tlsConfig != nil {
+		r.listener = tls.NewListener(r.listener, r.tlsConfig)
+	}
 	if err != nil {
 		return err
 	}

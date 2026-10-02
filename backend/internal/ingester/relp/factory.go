@@ -1,11 +1,12 @@
 package relp
 
 import (
-	"gastrolog/internal/glid"
-	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 
 	"gastrolog/internal/cert"
+	"gastrolog/internal/glid"
+	"gastrolog/internal/ingester/ingesttls"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 // ParamDefaults returns the default parameter values for a RELP ingester.
@@ -24,7 +25,7 @@ func NewFactory(certMgr *cert.Manager) ingestion.IngesterFactory {
 			addr = ":2514" // RELP convention port
 		}
 
-		tlsCfg, err := BuildTLSConfig(params, certMgr)
+		tlsCfg, err := ingesttls.Server("relp", params, certMgr)
 		if err != nil {
 			return nil, err
 		}

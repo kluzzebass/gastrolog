@@ -1,4 +1,5 @@
 import { FormField, TextInput, SelectInput } from "../FormField";
+import { TlsClientFields } from "./TlsFields";
 import { Checkbox } from "../Checkbox";
 import { TestConnectionButton } from "./TestConnectionButton";
 import type { SubFormProps } from "./types";
@@ -72,21 +73,14 @@ export function MqttForm({
           dark={dark}
         />
       </FormField>
-      <div className="flex gap-6">
-        <Checkbox
-          checked={params["tls"] === "true"}
-          onChange={(v) => set("tls", v ? "true" : "false")}
-          label="Enable TLS"
-          dark={dark}
-        />
-        <Checkbox
-          checked={params["clean_session"] !== "false"}
-          onChange={(v) => set("clean_session", v ? "true" : "false")}
-          label="Clean session"
-          helpTopicId="ingester-mqtt"
-          dark={dark}
-        />
-      </div>
+      <Checkbox
+        checked={params["clean_session"] !== "false"}
+        onChange={(v) => set("clean_session", v ? "true" : "false")}
+        label="Clean session"
+        helpTopicId="ingester-mqtt"
+        dark={dark}
+      />
+      <TlsClientFields params={params} onChange={onChange} dark={dark} />
       <div className="grid grid-cols-2 gap-3">
         <FormField label="Username" dark={dark}>
           <TextInput

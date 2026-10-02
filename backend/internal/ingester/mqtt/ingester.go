@@ -3,6 +3,7 @@
 package mqtt
 
 import (
+	"crypto/tls"
 	"log/slog"
 
 	"gastrolog/internal/chanwatch"
@@ -26,12 +27,13 @@ func (p *pressureAware) SetPressureGate(gate *chanwatch.PressureGate) {
 
 // Config holds MQTT ingester configuration.
 type Config struct {
-	ID           string
-	Broker       string
-	Topics       []string
-	ClientID     string
-	QoS          byte
-	TLS          bool
+	ID       string
+	Broker   string
+	Topics   []string
+	ClientID string
+	QoS      byte
+	// TLSConfig, when non-nil, makes the broker connection use TLS.
+	TLSConfig    *tls.Config
 	CleanSession bool
 	Username     string
 	Password     string

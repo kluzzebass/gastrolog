@@ -1,4 +1,5 @@
 import { FormField, TextInput } from "../FormField";
+import { TlsListenerFields } from "./TlsFields";
 import type { SubFormProps } from "./types";
 
 export function FluentfwdForm({
@@ -23,6 +24,7 @@ export function FluentfwdForm({
           examples={[":24224"]}
         />
       </FormField>
+      <TlsListenerFields params={params} onChange={onChange} dark={dark} />
     </div>
   );
 }

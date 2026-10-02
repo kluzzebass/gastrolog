@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/ingestion"
+	"gastrolog/internal/system"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1159,5 +1161,64 @@ func TestDockerCheckpointOverwritesPreviousState(t *testing.T) {
 	}
 	if _, ok := ing3.restoredState.Containers["container-bbb"]; !ok {
 		t.Fatal("container-bbb should be in state after loading data2")
+	}
+}
+
+// warnCapture records WARN-level messages.
+type warnCapture struct {
+	slog.Handler
+	mu    sync.Mutex
+	warns []string
+}
+
+func (h *warnCapture) Handle(_ context.Context, r slog.Record) error {
+	if r.Level >= slog.LevelWarn {
+		h.mu.Lock()
+		h.warns = append(h.warns, r.Message)
+		h.mu.Unlock()
+	}
+	return nil
+}
+func (h *warnCapture) Enabled(context.Context, slog.Level) bool { return true }
+func (h *warnCapture) WithAttrs([]slog.Attr) slog.Handler       { return h }
+func (h *warnCapture) WithGroup(string) slog.Handler            { return h }
+
+// tls_verify=false is an explicit opt-out of daemon verification; it must
+// announce itself at startup, and only when actually set — a verified
+// configuration gets no noise.
+func TestParseConfigWarnsOnDisabledVerification(t *testing.T) {
+	t.Parallel()
+	store := sysmem.NewStore()
+	if err := store.PutCertificate(context.Background(), system.CertPEM{
+		Name: "daemon-ca", CertPEM: "-----BEGIN CERTIFICATE-----\nZm9v\n-----END CERTIFICATE-----",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &warnCapture{}
+	logger := slog.New(h)
+	if _, err := parseConfig("d1", map[string]string{
+		"host": "tcp://daemon:2376", "tls_ca": "daemon-ca", "tls_verify": "false",
+	}, store, logger); err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	h.mu.Lock()
+	warned := len(h.warns) > 0 && strings.Contains(h.warns[0], "tls_verify=false")
+	h.mu.Unlock()
+	if !warned {
+		t.Fatalf("disabling verification produced no warning: %v", h.warns)
+	}
+
+	h2 := &warnCapture{}
+	if _, err := parseConfig("d2", map[string]string{
+		"host": "tcp://daemon:2376", "tls_ca": "daemon-ca",
+	}, store, slog.New(h2)); err != nil {
+		t.Fatalf("parseConfig verified: %v", err)
+	}
+	h2.mu.Lock()
+	noisy := len(h2.warns)
+	h2.mu.Unlock()
+	if noisy != 0 {
+		t.Fatalf("a verified configuration warned anyway: %v", h2.warns)
 	}
 }

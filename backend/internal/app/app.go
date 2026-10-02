@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	petname "github.com/dustinkirkland/golang-petname"
@@ -382,6 +383,20 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	if err != nil {
 		return err
 	}
+	// Certificate changes land on every node through the FSM notification:
+	// mirror the store into the local cert manager and swap the HTTPS
+	// listener. The listener swap late-binds — the HTTP server is built
+	// after the dispatcher — through tlsSwap.
+	var tlsSwap atomic.Pointer[func()]
+	disp.certsChanged = func(ctx context.Context) error {
+		if err := cert.ReloadFromStore(ctx, certMgr, cfgStore); err != nil {
+			return err
+		}
+		if swap := tlsSwap.Load(); swap != nil {
+			(*swap)()
+		}
+		return nil
+	}
 
 	groupMgr, vaultWAL, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger, alertCollector)
 
@@ -659,6 +674,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		Factories:           factories,
 		Tokens:              tokens,
 		CertMgr:             certMgr,
+		TLSSwap:             &tlsSwap,
 		NoAuth:              cfg.NoAuth,
 		AfterConfigApply:    nonRaftApplyHook(cfg.ConfigType, disp.Handle),
 		ConfigSignal:        configSignal,
@@ -1509,20 +1525,8 @@ func buildAuthTokens(ctx context.Context, logger *slog.Logger, cfgStore system.S
 
 func loadCertManager(ctx context.Context, logger *slog.Logger, cfgStore system.Store) (*cert.Manager, error) {
 	certMgr := cert.New(cert.Config{Logger: logger})
-	certList, err := cfgStore.ListCertificates(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list certificates: %w", err)
-	}
-	certs := make(map[string]cert.CertSource, len(certList))
-	for _, c := range certList {
-		certs[c.ID.String()] = cert.CertSource{CertPEM: c.CertPEM, KeyPEM: c.KeyPEM, CertFile: c.CertFile, KeyFile: c.KeyFile}
-	}
-	ss, err := cfgStore.LoadServerSettings(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("load server settings for TLS: %w", err)
-	}
-	if err := certMgr.LoadFromConfig(ss.TLS.DefaultCert, certs); err != nil {
-		return nil, fmt.Errorf("load certs: %w", err)
+	if err := cert.ReloadFromStore(ctx, certMgr, cfgStore); err != nil {
+		return nil, err
 	}
 	return certMgr, nil
 }
@@ -1540,6 +1544,7 @@ type serverDeps struct {
 	Factories           orchestrator.Factories
 	Tokens              *auth.TokenService
 	CertMgr             *cert.Manager
+	TLSSwap             *atomic.Pointer[func()]
 	NoAuth              bool
 	AfterConfigApply    func(raftfsm.Notification)
 	ConfigSignal        *notify.Signal
@@ -1578,6 +1583,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if deps.ServerAddr != "" {
+		//nolint:contextcheck // registration, not a call
 		srv = server.New(deps.Orch, deps.CfgStore, deps.Factories, deps.Tokens, server.Config{
 			Logger: deps.Logger, CertManager: deps.CertMgr, NoAuth: deps.NoAuth,
 			HomeDir: deps.HomeDir, NodeID: deps.NodeID, UnixSocket: deps.SocketPath,
@@ -1613,6 +1619,12 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 		// NoAuthInterceptor + no routing interceptor prevents loops.
 		if deps.ClusterSrv != nil {
 			deps.ClusterSrv.SetInternalHandler(srv.BuildInternalHandler())
+		}
+		// Late-bind the HTTPS listener swap for the certificate-change
+		// dispatcher leg: the dispatcher exists before this server does.
+		if deps.TLSSwap != nil {
+			swap := srv.ReconfigureTLS
+			deps.TLSSwap.Store(&swap)
 		}
 
 		// Wire managed file transfer handlers on the cluster server. The HTTP
@@ -1801,14 +1813,14 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore sys
 			func(ctx context.Context, params map[string]string) (string, error) {
 				return ingestdocker.TestConnection(ctx, params, cfgStore)
 			}),
-		"fluentfwd": listen(ingestfluentfwd.NewFactory(), ingestfluentfwd.ParamDefaults, ingestfluentfwd.ListenAddrs),
-		"http":      listen(ingesthttp.NewFactory(), ingesthttp.ParamDefaults, ingesthttp.ListenAddrs),
-		"kafka":     regHA(ingestkafka.NewFactory(), ingestkafka.ParamDefaults, ingestkafka.TestConnection),
-		"mqtt":      regHA(ingestmqtt.NewFactory(), ingestmqtt.ParamDefaults, ingestmqtt.TestConnection),
+		"fluentfwd": listen(ingestfluentfwd.NewFactory(certMgr), ingestfluentfwd.ParamDefaults, ingestfluentfwd.ListenAddrs),
+		"http":      listen(ingesthttp.NewFactory(certMgr), ingesthttp.ParamDefaults, ingesthttp.ListenAddrs),
+		"kafka":     regHA(ingestkafka.NewFactory(certMgr), ingestkafka.ParamDefaults, ingestkafka.TestConnection),
+		"mqtt":      regHA(ingestmqtt.NewFactory(certMgr), ingestmqtt.ParamDefaults, ingestmqtt.TestConnection),
 		"metrics":   reg(ingestmetrics.NewFactory(metricsStatsAdapter{orch: orch}), ingestmetrics.ParamDefaults, nil),
-		"otlp":      listen(ingestotlp.NewFactory(), ingestotlp.ParamDefaults, ingestotlp.ListenAddrs),
+		"otlp":      listen(ingestotlp.NewFactory(certMgr), ingestotlp.ParamDefaults, ingestotlp.ListenAddrs),
 		"relp":      listen(ingestrelp.NewFactory(certMgr), ingestrelp.ParamDefaults, ingestrelp.ListenAddrs),
-		"syslog":    listen(ingestsyslog.NewFactory(), ingestsyslog.ParamDefaults, ingestsyslog.ListenAddrs),
+		"syslog":    listen(ingestsyslog.NewFactory(certMgr), ingestsyslog.ParamDefaults, ingestsyslog.ListenAddrs),
 		"tail":      reg(ingesttail.NewFactory(), ingesttail.ParamDefaults, nil),
 	}
 	if slogCh != nil {

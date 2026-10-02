@@ -23,6 +23,12 @@ Labels are validated: max 32 attributes per message, keys up to 64 characters, v
 
 By default, the HTTP ingester returns `204 No Content` immediately (fire-and-forget). Clients can send `X-Wait-Ack: true` to wait for the record to be persisted before receiving the response.
 
+## TLS
+
+When TLS is enabled, the push endpoint serves HTTPS. Select a server certificate from the certificate store — certificates are managed in the Certificates settings tab, and rotations take effect without a restart.
+
+For mutual TLS, also select a Client CA Certificate: clients must then present a certificate signed by that CA, and a plaintext or unverified client is refused before any of its bytes are parsed. The Allowed Client CN field optionally narrows which client certificates are accepted using a wildcard pattern (e.g. `producer-*`).
+
 ## Timestamps
 
 SourceTS is set from the Loki push request's nanosecond entry timestamp, which is always present in the protocol. IngestTS is set to GastroLog arrival time.

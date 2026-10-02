@@ -1,4 +1,5 @@
 import { FormField, TextInput, SelectInput } from "../FormField";
+import { TlsClientFields } from "./TlsFields";
 import { Checkbox } from "../Checkbox";
 import { TestConnectionButton } from "./TestConnectionButton";
 import type { SubFormProps } from "./types";
@@ -58,12 +59,7 @@ export function KafkaForm({
           />
         </FormField>
       </div>
-      <Checkbox
-        checked={params["tls"] === "true"}
-        onChange={(v) => set("tls", v ? "true" : "false")}
-        label="Enable TLS"
-        dark={dark}
-      />
+      <TlsClientFields params={params} onChange={onChange} dark={dark} />
       <FormField
         label="SASL Mechanism"
         description="Authentication mechanism (leave empty to disable)"

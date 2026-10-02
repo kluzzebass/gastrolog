@@ -4,6 +4,7 @@ package syslog
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -46,6 +47,7 @@ type Ingester struct {
 	mu          sync.Mutex
 	udpConn     *net.UDPConn
 	tcpListener net.Listener
+	tlsConfig   *tls.Config
 
 	// conns caps concurrent TCP connections; refusedLog keeps a peer that
 	// hammers the cap from filling the log with one line per refusal.
@@ -78,6 +80,10 @@ type Config struct {
 	// Empty string disables TCP.
 	TCPAddr string
 
+	// TLSConfig, when non-nil, makes the TCP listener serve TLS
+	// (RFC 5425). UDP has no TLS and is unaffected.
+	TLSConfig *tls.Config
+
 	// Logger for structured logging.
 	Logger *slog.Logger
 }
@@ -88,6 +94,7 @@ func New(cfg Config) *Ingester {
 		id:         cfg.ID,
 		udpAddr:    cfg.UDPAddr,
 		tcpAddr:    cfg.TCPAddr,
+		tlsConfig:  cfg.TLSConfig,
 		conns:      limits.NewConnLimiter(limits.MaxConnections),
 		refusedLog: logging.Throttle{Interval: refusedLogInterval},
 		logger:     comp.Ingester.Sub("syslog").Desc("Syslog ingester — RFC 3164 + RFC 5424 over UDP/TCP with auto-detection.").Apply(logging.Default(cfg.Logger)),
@@ -228,9 +235,16 @@ func (r *Ingester) runUDP(ctx context.Context) error {
 
 // runTCP handles TCP syslog connections.
 func (r *Ingester) runTCP(ctx context.Context) error {
-	listener, err := net.Listen("tcp", r.tcpAddr)
+	rawLn, err := net.Listen("tcp", r.tcpAddr)
 	if err != nil {
 		return err
+	}
+	// Accept deadlines are set on the raw TCP listener; Accept happens on
+	// the TLS wrapper when TLS is configured.
+	tcpLn := rawLn.(*net.TCPListener)
+	listener := net.Listener(tcpLn)
+	if r.tlsConfig != nil {
+		listener = tls.NewListener(tcpLn, r.tlsConfig)
 	}
 
 	r.mu.Lock()
@@ -249,7 +263,7 @@ func (r *Ingester) runTCP(ctx context.Context) error {
 		}
 
 		// Set accept deadline to allow checking context.
-		_ = listener.(*net.TCPListener).SetDeadline(time.Now().Add(time.Second))
+		_ = tcpLn.SetDeadline(time.Now().Add(time.Second))
 
 		conn, err := listener.Accept()
 		if err != nil {

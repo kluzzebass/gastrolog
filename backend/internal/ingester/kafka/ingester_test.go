@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"crypto/tls"
 	"gastrolog/internal/glid"
 	"testing"
 )
@@ -9,7 +10,7 @@ import (
 
 func TestFactoryRequiresBrokers(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	_, err := factory(glid.New(), map[string]string{
 		"topic": "logs",
@@ -21,7 +22,7 @@ func TestFactoryRequiresBrokers(t *testing.T) {
 
 func TestFactoryRequiresTopic(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	_, err := factory(glid.New(), map[string]string{
 		"brokers": "localhost:9092",
@@ -33,7 +34,7 @@ func TestFactoryRequiresTopic(t *testing.T) {
 
 func TestFactoryMinimalParams(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	ing, err := factory(glid.New(), map[string]string{
 		"brokers": "localhost:9092",
@@ -50,8 +51,8 @@ func TestFactoryMinimalParams(t *testing.T) {
 	if ki.cfg.Group != "gastrolog" {
 		t.Errorf("default group: expected gastrolog, got %q", ki.cfg.Group)
 	}
-	if ki.cfg.TLS {
-		t.Error("TLS should be false by default")
+	if ki.cfg.TLSConfig != nil {
+		t.Error("TLS should be off by default")
 	}
 	if ki.cfg.SASL != nil {
 		t.Error("SASL should be nil by default")
@@ -60,7 +61,7 @@ func TestFactoryMinimalParams(t *testing.T) {
 
 func TestFactoryMultipleBrokers(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	ing, err := factory(glid.New(), map[string]string{
 		"brokers": "broker1:9092, broker2:9092 , broker3:9092",
@@ -84,7 +85,7 @@ func TestFactoryMultipleBrokers(t *testing.T) {
 
 func TestFactoryCustomGroup(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	ing, err := factory(glid.New(), map[string]string{
 		"brokers": "localhost:9092",
@@ -103,7 +104,7 @@ func TestFactoryCustomGroup(t *testing.T) {
 
 func TestFactoryTLSEnabled(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	ing, err := factory(glid.New(), map[string]string{
 		"brokers": "localhost:9093",
@@ -115,14 +116,14 @@ func TestFactoryTLSEnabled(t *testing.T) {
 	}
 
 	ki := ing.(*Ingester)
-	if !ki.cfg.TLS {
-		t.Error("TLS should be true")
+	if ki.cfg.TLSConfig == nil {
+		t.Error("expected a TLS config when tls=true")
 	}
 }
 
 func TestFactoryTLSNotEnabled(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	// "tls" set to something other than "true" should be false.
 	ing, err := factory(glid.New(), map[string]string{
@@ -135,8 +136,8 @@ func TestFactoryTLSNotEnabled(t *testing.T) {
 	}
 
 	ki := ing.(*Ingester)
-	if ki.cfg.TLS {
-		t.Error("TLS should be false when set to 'false'")
+	if ki.cfg.TLSConfig != nil {
+		t.Error("TLS config should be nil when tls=false")
 	}
 }
 
@@ -144,7 +145,7 @@ func TestFactoryTLSNotEnabled(t *testing.T) {
 
 func TestFactorySASLPlain(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	ing, err := factory(glid.New(), map[string]string{
 		"brokers":        "localhost:9092",
@@ -174,7 +175,7 @@ func TestFactorySASLPlain(t *testing.T) {
 
 func TestFactorySASLScramSHA256(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	ing, err := factory(glid.New(), map[string]string{
 		"brokers":        "localhost:9092",
@@ -195,7 +196,7 @@ func TestFactorySASLScramSHA256(t *testing.T) {
 
 func TestFactorySASLScramSHA512(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	ing, err := factory(glid.New(), map[string]string{
 		"brokers":        "localhost:9092",
@@ -216,7 +217,7 @@ func TestFactorySASLScramSHA512(t *testing.T) {
 
 func TestFactorySASLMechanismCaseInsensitive(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	ing, err := factory(glid.New(), map[string]string{
 		"brokers":        "localhost:9092",
@@ -237,7 +238,7 @@ func TestFactorySASLMechanismCaseInsensitive(t *testing.T) {
 
 func TestFactorySASLUnsupportedMechanism(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	_, err := factory(glid.New(), map[string]string{
 		"brokers":        "localhost:9092",
@@ -251,7 +252,7 @@ func TestFactorySASLUnsupportedMechanism(t *testing.T) {
 
 func TestFactoryNoSASLWhenMechanismEmpty(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	ing, err := factory(glid.New(), map[string]string{
 		"brokers":        "localhost:9092",
@@ -271,7 +272,7 @@ func TestFactoryNoSASLWhenMechanismEmpty(t *testing.T) {
 
 func TestFactoryEmptyBrokersString(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	_, err := factory(glid.New(), map[string]string{
 		"brokers": "",
@@ -284,7 +285,7 @@ func TestFactoryEmptyBrokersString(t *testing.T) {
 
 func TestFactoryEmptyTopicString(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	_, err := factory(glid.New(), map[string]string{
 		"brokers": "localhost:9092",
@@ -297,7 +298,7 @@ func TestFactoryEmptyTopicString(t *testing.T) {
 
 func TestFactoryNilParams(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	_, err := factory(glid.New(), nil, nil)
 	if err == nil {
@@ -368,11 +369,11 @@ func TestNewIngester(t *testing.T) {
 	t.Parallel()
 	id := glid.New().String()
 	ing := New(Config{
-		ID:      id,
-		Brokers: []string{"b1:9092", "b2:9092"},
-		Topic:   "test-topic",
-		Group:   "test-group",
-		TLS:     true,
+		ID:        id,
+		Brokers:   []string{"b1:9092", "b2:9092"},
+		Topic:     "test-topic",
+		Group:     "test-group",
+		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 		SASL: &SASLConfig{
 			Mechanism: "plain",
 			User:      "admin",
@@ -392,8 +393,8 @@ func TestNewIngester(t *testing.T) {
 	if ing.cfg.Group != "test-group" {
 		t.Errorf("group: expected test-group, got %q", ing.cfg.Group)
 	}
-	if !ing.cfg.TLS {
-		t.Error("TLS should be true")
+	if ing.cfg.TLSConfig == nil {
+		t.Error("expected the TLS config to be carried")
 	}
 	if ing.cfg.SASL == nil {
 		t.Fatal("SASL should not be nil")
@@ -407,7 +408,7 @@ func TestNewIngester(t *testing.T) {
 
 func TestFactoryAllParams(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	ing, err := factory(glid.New(), map[string]string{
 		"brokers":        "broker1:9092,broker2:9092",
@@ -438,8 +439,8 @@ func TestFactoryAllParams(t *testing.T) {
 	if ki.cfg.Group != "log-consumers" {
 		t.Errorf("group: expected log-consumers, got %q", ki.cfg.Group)
 	}
-	if !ki.cfg.TLS {
-		t.Error("TLS should be true")
+	if ki.cfg.TLSConfig == nil {
+		t.Error("expected a TLS config when tls=true")
 	}
 	if ki.cfg.SASL == nil {
 		t.Fatal("SASL should not be nil")
@@ -457,7 +458,7 @@ func TestFactoryAllParams(t *testing.T) {
 
 func TestFactorySingleBroker(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	ing, err := factory(glid.New(), map[string]string{
 		"brokers": "kafka.example.com:9092",
@@ -478,7 +479,7 @@ func TestFactorySingleBroker(t *testing.T) {
 
 func TestFactoryBrokerWhitespaceTrimming(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	ing, err := factory(glid.New(), map[string]string{
 		"brokers": "  b1:9092 ,  b2:9093  ,b3:9094  ",
@@ -502,7 +503,7 @@ func TestFactoryBrokerWhitespaceTrimming(t *testing.T) {
 
 func TestFactoryIDPropagated(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 	id := glid.New()
 
 	ing, err := factory(id, map[string]string{

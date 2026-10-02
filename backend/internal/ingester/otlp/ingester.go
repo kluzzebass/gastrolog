@@ -4,6 +4,7 @@ package otlp
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -56,11 +58,12 @@ const (
 
 // Ingester accepts OpenTelemetry log records via HTTP and gRPC.
 type Ingester struct {
-	id       string
-	httpAddr string
-	grpcAddr string
-	out      chan<- ingestion.IngesterMessage
-	logger   *slog.Logger
+	id        string
+	httpAddr  string
+	grpcAddr  string
+	tlsConfig *tls.Config
+	out       chan<- ingestion.IngesterMessage
+	logger    *slog.Logger
 
 	// droppedAttrLog throttles the report of attributes the record ceiling
 	// refused. Dropping them silently would leave records that quietly
@@ -85,7 +88,9 @@ type Config struct {
 	ID       string
 	HTTPAddr string // e.g. ":4318"
 	GRPCAddr string // e.g. ":4317"
-	Logger   *slog.Logger
+	// TLSConfig, when non-nil, makes both listeners serve TLS.
+	TLSConfig *tls.Config
+	Logger    *slog.Logger
 }
 
 // New creates a new OTLP ingester.
@@ -94,6 +99,7 @@ func New(cfg Config) *Ingester {
 		id:             cfg.ID,
 		httpAddr:       cfg.HTTPAddr,
 		grpcAddr:       cfg.GRPCAddr,
+		tlsConfig:      cfg.TLSConfig,
 		droppedAttrLog: logging.Throttle{Interval: droppedAttrLogInterval},
 		logger:         comp.Ingester.Sub("otlp").Desc("OpenTelemetry Logs ingester — accepts OTLP log records via HTTP (POST /v1/logs) and gRPC.").Apply(logging.Default(cfg.Logger)),
 	}
@@ -113,6 +119,9 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 	// before Serve starts draining them, so bind-then-serve makes readiness
 	// honest without extra signaling.
 	httpLn, err := net.Listen("tcp", ing.httpAddr)
+	if err == nil && ing.tlsConfig != nil {
+		httpLn = tls.NewListener(httpLn, ing.tlsConfig)
+	}
 	if err != nil {
 		return fmt.Errorf("otlp http listen: %w", err)
 	}
@@ -148,7 +157,11 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 	// without this interceptor a panic in Export ends the process. The
 	// service exposes only unary methods; a stream interceptor would guard
 	// nothing.
-	grpcSrv := grpc.NewServer(grpc.UnaryInterceptor(ing.recoverUnary))
+	grpcOpts := []grpc.ServerOption{grpc.UnaryInterceptor(ing.recoverUnary)}
+	if ing.tlsConfig != nil {
+		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(ing.tlsConfig)))
+	}
+	grpcSrv := grpc.NewServer(grpcOpts...)
 	collogspb.RegisterLogsServiceServer(grpcSrv, &logsServiceServer{ing: ing})
 
 	go func() {

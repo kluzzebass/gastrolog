@@ -1,4 +1,5 @@
 import { FormField, TextInput } from "../FormField";
+import { TlsListenerFields } from "./TlsFields";
 import type { SubFormProps } from "./types";
 
 export function SyslogForm({
@@ -39,6 +40,7 @@ export function SyslogForm({
           />
         </FormField>
       </div>
+      <TlsListenerFields params={params} onChange={onChange} dark={dark} />
     </div>
   );
 }

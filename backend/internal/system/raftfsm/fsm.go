@@ -52,6 +52,8 @@ const (
 	NotifySetupWizardDismissedSet
 	NotifyLogLevelsSet
 	NotifyNodeStateChanged
+	NotifyCertificatePut
+	NotifyCertificateDeleted
 )
 
 // Notification describes a config mutation that the FSM just applied.
@@ -238,13 +240,22 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 		if err != nil {
 			return nil, err
 		}
-		return nil, f.store.PutCertificate(ctx, cert)
+		if err := f.store.PutCertificate(ctx, cert); err != nil {
+			return nil, err
+		}
+		// The cert manager on every node mirrors the store's certificates;
+		// without a notification, a certificate created after boot serves
+		// nothing until the next restart.
+		return &Notification{Kind: NotifyCertificatePut, ID: cert.ID}, nil
 	case *gastrologv1.SystemCommand_DeleteCertificate:
 		id, err := command.ExtractDeleteCertificate(c.DeleteCertificate)
 		if err != nil {
 			return nil, err
 		}
-		return nil, f.store.DeleteCertificate(ctx, id)
+		if err := f.store.DeleteCertificate(ctx, id); err != nil {
+			return nil, err
+		}
+		return &Notification{Kind: NotifyCertificateDeleted, ID: id}, nil
 	case *gastrologv1.SystemCommand_PutNodeConfig:
 		node, err := command.ExtractPutNodeConfig(c.PutNodeConfig)
 		if err != nil {

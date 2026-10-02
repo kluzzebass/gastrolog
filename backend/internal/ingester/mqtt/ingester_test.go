@@ -7,7 +7,7 @@ import (
 
 func TestFactory_RequiredParams(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 	id := glid.New()
 
 	_, err := factory(id, map[string]string{}, nil)
@@ -23,7 +23,7 @@ func TestFactory_RequiredParams(t *testing.T) {
 
 func TestFactory_DefaultsV3(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 	id := glid.New()
 
 	ing, err := factory(id, map[string]string{
@@ -50,7 +50,7 @@ func TestFactory_DefaultsV3(t *testing.T) {
 
 func TestFactory_V5(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 	id := glid.New()
 
 	ing, err := factory(id, map[string]string{
@@ -69,7 +69,7 @@ func TestFactory_V5(t *testing.T) {
 
 func TestFactory_VersionValidation(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 	id := glid.New()
 
 	base := map[string]string{
@@ -98,7 +98,7 @@ func TestFactory_VersionValidation(t *testing.T) {
 
 func TestFactory_TopicSplitting(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 	id := glid.New()
 
 	ing, err := factory(id, map[string]string{
@@ -123,7 +123,7 @@ func TestFactory_TopicSplitting(t *testing.T) {
 
 func TestFactory_ClientID(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 	id := glid.New()
 
 	ing, err := factory(id, map[string]string{
@@ -143,7 +143,7 @@ func TestFactory_ClientID(t *testing.T) {
 
 func TestFactory_TLSAndAuth(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 	id := glid.New()
 
 	ing, err := factory(id, map[string]string{
@@ -158,8 +158,8 @@ func TestFactory_TLSAndAuth(t *testing.T) {
 	}
 
 	v3 := ing.(*v3Ingester)
-	if !v3.cfg.TLS {
-		t.Error("expected TLS true")
+	if v3.cfg.TLSConfig == nil {
+		t.Error("expected a TLS config when tls=true")
 	}
 	if v3.cfg.Username != "user" {
 		t.Errorf("expected username 'user', got %q", v3.cfg.Username)
@@ -171,7 +171,7 @@ func TestFactory_TLSAndAuth(t *testing.T) {
 
 func TestFactory_CleanSessionFalse(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 	id := glid.New()
 
 	ing, err := factory(id, map[string]string{

@@ -9,7 +9,7 @@ import (
 
 func FuzzNewFactory(f *testing.F) {
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
-	// Pass nil certMgr — BuildTLSConfig only uses it when tls=true AND
+	// Pass nil certMgr — ingesttls.Server only uses it when tls=true AND
 	// tls_cert is set, so we seed without those to test the rest of parsing.
 	// The fuzzer may also hit the nil certMgr path, which returns a clear error.
 	factory := NewFactory(nil)

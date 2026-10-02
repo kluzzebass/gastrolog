@@ -25,6 +25,12 @@ At least one address (UDP or TCP) must be configured.
 | `proc_id` | Process ID (from `[PID]` notation) |
 | `msg_id` | Message ID (RFC 5424 only) |
 
+## TLS
+
+When TLS is enabled, the TCP listener serves syslog over TLS (RFC 5425). UDP syslog has no TLS and is unaffected. Select a server certificate from the certificate store — certificates are managed in the Certificates settings tab, and rotations take effect without a restart.
+
+For mutual TLS, also select a Client CA Certificate: clients must then present a certificate signed by that CA, and a plaintext or unverified client is refused before any of its bytes are parsed. The Allowed Client CN field optionally narrows which client certificates are accepted using a wildcard pattern (e.g. `producer-*`).
+
 ## Timestamps
 
 IngestTS is set to GastroLog arrival time. SourceTS is not set by this ingester — syslog protocol timestamps are unreliable (RFC 3164 has no year or timezone, RFC 5424 allows omitting the timestamp entirely, and the sender's clock may be drifting). The [timestamp digester](help:digester-timestamp) extracts SourceTS from the raw message during digestion.
