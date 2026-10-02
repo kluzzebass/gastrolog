@@ -43,6 +43,13 @@ type cloudHealthChecker interface {
 	CloudDegradedError() string
 }
 
+// cloudIndexEnsurer is the slice of the chunk manager the health sweep uses
+// to drive cloud-index discovery off the construction path.
+type cloudIndexEnsurer interface {
+	CloudIndexPopulated() bool
+	EnsureCloudIndex() error
+}
+
 // evaluateCloudHealth checks every instance's cloud health and sets/clears
 // alerts. On the vault's uploader it fires a one-shot upload catch-up sweep
 // only on an edge (first observation, degraded→healthy recovery, or a stuck
@@ -119,6 +126,17 @@ func (o *Orchestrator) evaluateVaultCloudHealth(vaultInst *VaultInstance) {
 	chk, ok := vaultInst.Chunks.(cloudHealthChecker)
 	if !ok {
 		return
+	}
+	// An unpopulated cloud index gets its discovery scheduled here — never
+	// on the construction path, where a blackholed store dial under the
+	// registry lock inside the FSM apply silently stops every ingest on
+	// the node. RunOnceIfAbsent keeps attempts from stacking; the job
+	// retries on the next tick until the store answers.
+	if ens, ok := vaultInst.Chunks.(cloudIndexEnsurer); ok && !ens.CloudIndexPopulated() {
+		vid := vaultInst.VaultID
+		_, _ = o.scheduler.RunOnceIfAbsent("cloud-index-discovery:"+vid.String(), func() {
+			_ = ens.EnsureCloudIndex()
+		})
 	}
 	degraded := chk.CloudDegraded()
 	if degraded {

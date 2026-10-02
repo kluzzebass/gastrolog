@@ -32,6 +32,11 @@ func openCloudManager(t *testing.T, dir string, vaultID glid.GLID, store blobsto
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
+	// Discovery left the construction path; drive it the way the
+	// cloud-health sweep does.
+	if err := cm.EnsureCloudIndex(); err != nil {
+		t.Logf("EnsureCloudIndex: %v (the skip test corrupts the store deliberately)", err)
+	}
 	tokenIndexer := filetoken.NewIndexer(dir, cm, nil)
 	im := indexfile.NewManager(dir, []index.Indexer{tokenIndexer}, nil, cm)
 	cm.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})

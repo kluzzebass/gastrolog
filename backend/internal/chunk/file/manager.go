@@ -293,6 +293,16 @@ type Manager struct {
 	cloudDegraded    atomic.Bool
 	cloudDegradedErr atomic.Value // stores the last cloud error (string) for alert messages
 
+	// cloudIdxPopulated reports whether the cloud index has been populated
+	// from the store at least once. Population happens OFF the construction
+	// path — a store dial can block for minutes, and the constructor runs
+	// under the orchestrator registry lock inside the FSM apply, where one
+	// blackholed endpoint silently stops every ingest on the node. The
+	// cloud-health sweep schedules EnsureCloudIndex until it succeeds.
+	cloudIdxPopulated atomic.Bool
+	cloudIdxEnsuring  atomic.Bool
+	ensureIdxWarn     logging.Throttle
+
 	// pendingAnnouncements accumulates closures that fire metadata announcer
 	// calls. The fields are protected by mu. Locked code paths (openLocked,
 	// sealLocked, etc.) APPEND closures here instead of calling the announcer
@@ -479,6 +489,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 
 	manager := &Manager{
+		ensureIdxWarn:  logging.Throttle{Interval: time.Minute},
 		cfg:            cfg,
 		lockFile:       lockFile,
 		metas:          make(map[chunk.ChunkID]*chunkMeta),
@@ -503,17 +514,14 @@ func NewManager(cfg Config) (*Manager, error) {
 			return nil, fmt.Errorf("open cloud index: %w", err)
 		}
 		manager.cloudIdx = cidx
-		if err := manager.loadCloudBackedChunks(); err != nil {
-			// S3 may be unreachable at startup (e.g. MinIO not started yet).
-			// The cloud index stays empty — the active chunk on local disk
-			// works independently. Existing cloud-backed chunks will be discovered
-			// on the next reconciliation sweep when S3 comes online. This
-			// prevents the entire vault from being permanently skipped on
-			// this node.
-			logger.Warn("cloud-backed chunk discovery failed, continuing without cloud index",
-				"error", err)
-			manager.cloudDegraded.Store(true)
-		}
+		// Reconcile against the PERSISTED index only — drop local metas it
+		// masks, correct stale diskBytes. Both are pure disk work. The
+		// store listing is deferred to EnsureCloudIndex (cloud-health
+		// sweep): a store dial can block for minutes, and this constructor
+		// runs under the orchestrator registry lock inside the FSM apply —
+		// a blackholed endpoint here silently stops every ingest on the
+		// node. The persisted index serves reads meanwhile.
+		manager.reconcileCloudIndexLocally()
 	}
 
 	if cfg.ExpectExisting && !dirExisted {
@@ -2561,6 +2569,37 @@ func (m *Manager) trackCloudResult(err error) {
 	} else {
 		m.cloudDegraded.Store(false)
 	}
+}
+
+// CloudIndexPopulated reports whether the cloud index has been populated
+// from the store at least once. False for managers without cloud backing's
+// index as well — callers gate on cloud backing first.
+func (m *Manager) CloudIndexPopulated() bool {
+	return m.cloudIdxPopulated.Load()
+}
+
+// EnsureCloudIndex populates the cloud index from the store when it has not
+// been populated yet. Idempotent and non-stacking: a success latches, a
+// concurrent attempt is skipped, and a failure (store unreachable) is
+// retried by the next caller — the cloud-health sweep, every few seconds —
+// with the warning throttled so an outage does not flood the log.
+func (m *Manager) EnsureCloudIndex() error {
+	if m.cloudIdxPopulated.Load() || m.cloudIdx == nil {
+		return nil
+	}
+	if !m.cloudIdxEnsuring.CompareAndSwap(false, true) {
+		return nil // an attempt is already in flight
+	}
+	defer m.cloudIdxEnsuring.Store(false)
+	if err := m.loadCloudBackedChunks(); err != nil {
+		if n, ok := m.ensureIdxWarn.Allow("ensure-cloud-index"); ok {
+			m.logger.Warn("cloud index population failed; retrying on the health sweep",
+				"error", err, "suppressed", n)
+		}
+		return err
+	}
+	m.cloudIdxPopulated.Store(true)
+	return nil
 }
 
 // CloudDegraded returns true if the cloud store is currently unreachable.
@@ -4976,18 +5015,22 @@ func (m *Manager) loadCloudBackedChunks() error {
 		} else {
 			m.logger.Info("cloud index ready", "count", newCount)
 		}
-		// Drop local m.metas entries for chunks that the cloud index also
-		// holds — the local data.glcb sticks around as warm cache after
-		// upload, but the authoritative meta (with archived / TOC
-		// offsets) is the cloud index entry. Without this
-		// reconciliation a restart resurrects a stale local-sealed meta
-		// that masks the cloud-recorded archived flag. The data.glcb file
-		// itself stays put — OpenCursor's local-GLCB fast path picks it
-		// up via hasLocalGLCB.
-		m.dropLocalMetaForCloudBackedChunks()
-		m.reconcileCloudDiskBytesAtStartup()
+		m.reconcileCloudIndexLocally()
 	}
 	return nil
+}
+
+// reconcileCloudIndexLocally reconciles in-memory state against the
+// PERSISTED cloud index: drops local m.metas entries the index also holds —
+// the local data.glcb sticks around as warm cache after upload, but the
+// authoritative meta (archived flag, TOC offsets) is the index entry, and
+// without the drop a restart resurrects a stale local-sealed meta that
+// masks the cloud-recorded archived flag — and corrects stale persisted
+// diskBytes with a stat pass. Pure disk work: safe at construction, before
+// any store contact.
+func (m *Manager) reconcileCloudIndexLocally() {
+	m.dropLocalMetaForCloudBackedChunks()
+	m.reconcileCloudDiskBytesAtStartup()
 }
 
 // reconcileCloudDiskBytesAtStartup stats every EXISTING cloud-index entry's
