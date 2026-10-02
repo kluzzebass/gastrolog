@@ -43,25 +43,29 @@ func setupCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd ho
 
 	clusterTLS := cluster.NewClusterTLS()
 
-	// Joining flow: enroll with a member before creating the cluster server.
-	// cfg.JoinToken may have been populated from a file or HTTP source by
-	// resolveJoinTokenFromSources before we got here, so the literal-token
-	// check still does the right thing.
-	if cfg.JoinAddr != "" && cfg.JoinToken != "" {
+	// Resume first: a node that has enrolled TLS material on disk is an
+	// existing member restarting, not a new joiner — containerized
+	// deployments pass the join flags on EVERY boot, so the flags alone
+	// cannot distinguish the two. Re-enrolling here presents an ID the
+	// cluster already has, and the admission guard rightly refuses it,
+	// crash-looping the node on every restart. Replacing a genuinely lost
+	// node stays an explicit operator flow: remove it, then enroll.
+	if found, err := clusterTLS.LoadFile(hd.ClusterTLSPath()); err != nil {
+		return nil, nil, fmt.Errorf("load cluster TLS file: %w", err)
+	} else if found {
+		logger.Info("cluster TLS loaded from local file")
+	}
+
+	// First boot of a joiner: enroll with a member before creating the
+	// cluster server. cfg.JoinToken may have been populated from a file or
+	// HTTP source by resolveJoinTokenFromSources before we got here, so the
+	// literal-token check still does the right thing.
+	if clusterTLS.State() == nil && cfg.JoinAddr != "" && cfg.JoinToken != "" {
 		enrolled, err := enrollInCluster(ctx, logger, cfg, hd, nodeID)
 		if err != nil {
 			return nil, nil, err
 		}
 		clusterTLS = enrolled
-	}
-
-	// Restart: load existing TLS from disk.
-	if clusterTLS.State() == nil {
-		if found, err := clusterTLS.LoadFile(hd.ClusterTLSPath()); err != nil {
-			return nil, nil, fmt.Errorf("load cluster TLS file: %w", err)
-		} else if found {
-			logger.Info("cluster TLS loaded from local file")
-		}
 	}
 
 	clusterSrv, err := cluster.New(cluster.Config{

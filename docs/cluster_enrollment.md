@@ -121,6 +121,9 @@ re-issued.
 - Optional short-lived tokens via API (single-use or TTL-limited)
 - Token is only used during enrollment — the node's own certificate,
   together with its membership, is the ongoing credential
+- Enrollment runs only on a node's first boot. A restarting node resumes
+  with its stored certificate even when the join address and token are
+  still configured (containerized deployments pass both on every boot)
 
 ## Certificate Properties
 
