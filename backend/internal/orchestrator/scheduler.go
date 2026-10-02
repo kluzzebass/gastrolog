@@ -624,11 +624,21 @@ func (s *Scheduler) runOnce(name string, claim *onceClaim, taskFn any, args ...a
 // record cannot be registered before the job exists — s.progress is keyed by
 // job id — so it is threaded in and filed once gocron has minted one.
 func (s *Scheduler) runOnceWith(name string, claim *onceClaim, prog *JobProgress, taskFn any, args ...any) (bool, error) {
+	// Mint the job's identity before it exists so the broker holds back the
+	// job's own events until the Scheduled publish below — gocron starts the
+	// task immediately, and a fast task would otherwise be reported finished
+	// before subscribers learn it was scheduled. Announced OUTSIDE s.mu (an
+	// announcement is a map write, not a publish), so the claim check below
+	// keeps its single uninterrupted lock hold.
+	jobUUID := uuid.New()
+	s.events.ExpectScheduled(jobUUID.String())
+
 	s.mu.Lock()
 
 	if claim != nil {
 		if _, exists := s.jobs[name]; exists {
 			s.mu.Unlock()
+			s.events.AbandonScheduled(jobUUID.String())
 			return false, nil
 		}
 		if claim.limit > 0 && s.countByPrefixLocked(claim.prefix) >= claim.limit {
@@ -640,6 +650,7 @@ func (s *Scheduler) runOnceWith(name string, claim *onceClaim, prog *JobProgress
 			// strand an entry no completion will ever remove.
 			delete(s.descriptions, name)
 			s.mu.Unlock()
+			s.events.AbandonScheduled(jobUUID.String())
 			return false, nil
 		}
 	}
@@ -648,6 +659,7 @@ func (s *Scheduler) runOnceWith(name string, claim *onceClaim, prog *JobProgress
 		gocron.OneTimeJob(gocron.OneTimeJobStartImmediately()),
 		gocron.NewTask(taskFn, args...),
 		gocron.WithName(name),
+		gocron.WithIdentifier(jobUUID),
 		gocron.WithEventListeners(
 			gocron.AfterJobRuns(func(jobID uuid.UUID, jobName string) {
 				s.completeOneTimeJob(jobID, jobName, false, "")
@@ -659,6 +671,7 @@ func (s *Scheduler) runOnceWith(name string, claim *onceClaim, prog *JobProgress
 	)
 	if err != nil {
 		s.mu.Unlock()
+		s.events.AbandonScheduled(jobUUID.String())
 		return false, fmt.Errorf("create one-time job %s: %w", name, err)
 	}
 
@@ -737,6 +750,14 @@ func (s *Scheduler) runOnceProgress(name string, claim *onceClaim, fn func(conte
 // job ID. The fn receives a context (detached from the caller) and a
 // JobProgress for reporting progress.
 func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) string {
+	// Mint the job's identity here so the broker can be told a Scheduled
+	// publish is coming BEFORE the job exists — gocron starts a one-time job
+	// immediately, so its Started/terminal events can reach the broker first,
+	// and without the announcement subscribers would observe a finished job
+	// being reported as freshly queued.
+	jobUUID := uuid.New()
+	s.events.ExpectScheduled(jobUUID.String())
+
 	s.mu.Lock()
 
 	prog := &JobProgress{
@@ -753,14 +774,11 @@ func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) 
 		// (we're already inside the gocron worker goroutine).
 		s.mu.Lock()
 		startInfo := JobInfo{
-			ID:          "",
+			ID:          jobUUID.String(),
 			Name:        name,
 			Description: s.descriptions[name],
 			Schedule:    "once",
 			Progress:    prog,
-		}
-		if j := s.jobs[name]; j != nil {
-			startInfo.ID = j.ID().String()
 		}
 		s.mu.Unlock()
 		s.publishEvent(JobEventStarted, startInfo)
@@ -781,6 +799,7 @@ func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) 
 		gocron.OneTimeJob(gocron.OneTimeJobStartImmediately()),
 		gocron.NewTask(wrapper),
 		gocron.WithName(name),
+		gocron.WithIdentifier(jobUUID),
 		gocron.WithEventListeners(
 			gocron.AfterJobRuns(func(jobID uuid.UUID, jobName string) {
 				s.completeOneTimeJob(jobID, jobName, false, "")
@@ -791,6 +810,7 @@ func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) 
 		),
 	)
 	if err != nil {
+		s.events.AbandonScheduled(jobUUID.String())
 		s.logger.Error("failed to schedule job", "name", name, "error", err)
 		prog.Fail(s.now(), "failed to schedule: "+err.Error())
 		// Generate an ID for the failed job so the caller can still look it up.

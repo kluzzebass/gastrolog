@@ -87,8 +87,12 @@ func TestScheduler_Events_Submit(t *testing.T) {
 	}
 }
 
-// TestScheduler_Events_SubmitFailure verifies that Submit emits
-// JobEventFailed when the progress record was marked failed.
+// TestScheduler_Events_SubmitFailure verifies a job that fails the instant
+// it runs still presents its lifecycle in order: Scheduled, Started, Failed.
+// gocron starts a one-time job immediately, so pre-broker-ordering the
+// terminal events raced Submit's own Scheduled publish and slower hardware
+// observed failed-then-scheduled; the broker's per-job hold makes the order
+// structural, so the full sequence is assertable deterministically.
 func TestScheduler_Events_SubmitFailure(t *testing.T) {
 	s := newQuietScheduler(t)
 	sub, cancel := s.Events().Subscribe()
@@ -99,8 +103,11 @@ func TestScheduler_Events_SubmitFailure(t *testing.T) {
 	})
 
 	evts := collectEvents(t, sub, 3, 2*time.Second)
-	if evts[len(evts)-1].Kind != JobEventFailed {
-		t.Errorf("last event kind=%v, want Failed (all: %v)", evts[len(evts)-1].Kind, evts)
+	want := []JobEventKind{JobEventScheduled, JobEventStarted, JobEventFailed}
+	for i, k := range want {
+		if evts[i].Kind != k {
+			t.Errorf("event[%d] kind=%v, want %v (all: %v)", i, evts[i].Kind, k, evts)
+		}
 	}
 }
 

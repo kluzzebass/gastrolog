@@ -80,12 +80,22 @@ func (s *JobSubscription) Dropped() int64 { return s.dropped.Load() }
 // JobEventBroker is a fan-out pub/sub for scheduler job transitions.
 // Subscribers each get their own bounded channel; publish is non-blocking
 // and drops events for slow subscribers rather than stalling the scheduler.
+//
+// The broker also owns per-job event ORDERING: a one-time job starts running
+// the moment it is created, so its Started/Completed/Failed can reach Publish
+// before the scheduler's own Scheduled publish. Subscribers keying on "latest
+// event wins" would then display a finished job as freshly queued, forever.
+// ExpectScheduled, called before the job is created, makes the broker hold
+// back that job's events until its Scheduled has been delivered.
 type JobEventBroker struct {
 	buffer int
 
-	mu     sync.RWMutex
+	mu     sync.Mutex
 	subs   map[*JobSubscription]struct{}
 	closed bool
+	// pending holds back events for job IDs whose Scheduled publish has been
+	// announced (ExpectScheduled) but not yet delivered, in arrival order.
+	pending map[string][]JobEvent
 }
 
 // NewJobEventBroker creates a broker with the given per-subscriber buffer
@@ -95,8 +105,9 @@ func NewJobEventBroker(buffer int) *JobEventBroker {
 		buffer = 256
 	}
 	return &JobEventBroker{
-		buffer: buffer,
-		subs:   make(map[*JobSubscription]struct{}),
+		buffer:  buffer,
+		subs:    make(map[*JobSubscription]struct{}),
+		pending: make(map[string][]JobEvent),
 	}
 }
 
@@ -124,16 +135,73 @@ func (b *JobEventBroker) Subscribe() (*JobSubscription, func()) {
 	return sub, cancel
 }
 
+// ExpectScheduled announces that a Scheduled event for jobID is on its way.
+// Until it is published, every other event carrying that jobID is held back
+// and replayed, in arrival order, right after the Scheduled delivery — the
+// job may start (and finish) between its creation and the scheduler's
+// Scheduled publish, and subscribers must never observe a job's lifecycle
+// before learning it was scheduled. Call it BEFORE creating the job; a
+// creation that fails must call AbandonScheduled with the same ID.
+func (b *JobEventBroker) ExpectScheduled(jobID string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed || jobID == "" {
+		return
+	}
+	if _, exists := b.pending[jobID]; !exists {
+		b.pending[jobID] = nil
+	}
+}
+
+// AbandonScheduled withdraws an ExpectScheduled announcement whose Scheduled
+// will never be published (job creation failed). Any events held back under
+// the ID are delivered rather than dropped — they are facts subscribers are
+// owed even when the ordering promise cannot be kept.
+func (b *JobEventBroker) AbandonScheduled(jobID string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	queued, exists := b.pending[jobID]
+	if !exists {
+		return
+	}
+	delete(b.pending, jobID)
+	for _, evt := range queued {
+		b.deliverLocked(evt)
+	}
+}
+
 // Publish delivers an event to every subscriber. Non-blocking: if a
 // subscriber's buffer is full the event is dropped for that subscriber
 // (the drop counter is incremented) but delivery to other subscribers
 // continues. Safe to call concurrently with Subscribe and cancel.
+//
+// Delivery runs under b.mu so per-job ordering (ExpectScheduled) is a real
+// guarantee rather than a race between publishers; sends are non-blocking,
+// so the hold never waits on a subscriber.
 func (b *JobEventBroker) Publish(evt JobEvent) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if b.closed {
 		return
 	}
+	id := evt.Job.ID
+	if queued, held := b.pending[id]; held {
+		if evt.Kind != JobEventScheduled {
+			b.pending[id] = append(queued, evt)
+			return
+		}
+		delete(b.pending, id)
+		b.deliverLocked(evt)
+		for _, held := range queued {
+			b.deliverLocked(held)
+		}
+		return
+	}
+	b.deliverLocked(evt)
+}
+
+// deliverLocked fans one event out to every subscriber. Caller holds b.mu.
+func (b *JobEventBroker) deliverLocked(evt JobEvent) {
 	for sub := range b.subs {
 		select {
 		case sub.ch <- evt:
@@ -155,6 +223,7 @@ func (b *JobEventBroker) Close() {
 	b.closed = true
 	subs := b.subs
 	b.subs = nil
+	b.pending = nil
 	b.mu.Unlock()
 	for sub := range subs {
 		sub.close()
@@ -164,7 +233,7 @@ func (b *JobEventBroker) Close() {
 // NumSubscribers returns the current subscriber count. Useful in tests
 // and for diagnostics.
 func (b *JobEventBroker) NumSubscribers() int {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	return len(b.subs)
 }
