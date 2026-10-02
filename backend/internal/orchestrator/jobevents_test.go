@@ -258,3 +258,74 @@ func TestJobEventBroker_DefaultBuffer(t *testing.T) {
 		cancel()
 	}
 }
+
+// An announced job's own events must never be observable before its
+// Scheduled: a one-time job starts the moment it is created, so Started and
+// the terminal event can reach the broker first, and a subscriber keying on
+// "latest event wins" would render a finished job as freshly queued forever.
+// This drives that exact interleaving deterministically — no timing, no
+// slower-CI dependency.
+func TestJobEventBroker_HoldsEventsUntilScheduled(t *testing.T) {
+	t.Parallel()
+	b := NewJobEventBroker(8)
+	sub, cancel := b.Subscribe()
+	defer cancel()
+
+	job := JobInfo{ID: "job-1", Name: "fast-failure"}
+	b.ExpectScheduled("job-1")
+	b.Publish(JobEvent{Kind: JobEventStarted, Job: job})
+	b.Publish(JobEvent{Kind: JobEventFailed, Job: job})
+
+	select {
+	case evt := <-sub.Events():
+		t.Fatalf("observed %v before the job's Scheduled was published", evt.Kind)
+	default:
+	}
+
+	b.Publish(JobEvent{Kind: JobEventScheduled, Job: job})
+	want := []JobEventKind{JobEventScheduled, JobEventStarted, JobEventFailed}
+	for i, k := range want {
+		evt := <-sub.Events()
+		if evt.Kind != k {
+			t.Fatalf("event[%d] kind=%v, want %v", i, evt.Kind, k)
+		}
+	}
+
+	// The hold is gone: later events for the same ID stream straight through.
+	b.Publish(JobEvent{Kind: JobEventCompleted, Job: job})
+	if evt := <-sub.Events(); evt.Kind != JobEventCompleted {
+		t.Fatalf("post-flush event kind=%v, want Completed", evt.Kind)
+	}
+}
+
+// Unannounced jobs are untouched by the hold machinery.
+func TestJobEventBroker_UnannouncedEventsPassThrough(t *testing.T) {
+	t.Parallel()
+	b := NewJobEventBroker(8)
+	sub, cancel := b.Subscribe()
+	defer cancel()
+
+	b.Publish(JobEvent{Kind: JobEventFailed, Job: JobInfo{ID: "cron-ish"}})
+	if evt := <-sub.Events(); evt.Kind != JobEventFailed {
+		t.Fatalf("pass-through event kind=%v, want Failed", evt.Kind)
+	}
+}
+
+// A withdrawn announcement (job creation failed) must deliver anything it
+// held rather than swallow it — the events are facts subscribers are owed
+// even when the ordering promise cannot be kept.
+func TestJobEventBroker_AbandonDeliversHeldEvents(t *testing.T) {
+	t.Parallel()
+	b := NewJobEventBroker(8)
+	sub, cancel := b.Subscribe()
+	defer cancel()
+
+	job := JobInfo{ID: "job-2", Name: "stillborn"}
+	b.ExpectScheduled("job-2")
+	b.Publish(JobEvent{Kind: JobEventFailed, Job: job})
+	b.AbandonScheduled("job-2")
+
+	if evt := <-sub.Events(); evt.Kind != JobEventFailed {
+		t.Fatalf("abandoned hold delivered kind=%v, want Failed", evt.Kind)
+	}
+}
