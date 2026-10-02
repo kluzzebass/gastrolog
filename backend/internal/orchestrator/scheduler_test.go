@@ -197,6 +197,41 @@ func TestRunOnceIfAbsentReclaimsAfterCompletion(t *testing.T) {
 	}
 }
 
+// A re-run of the same one-time name supersedes its predecessors' retained
+// entries: the listing keeps the latest terminal record per name, not one per
+// attempt. A sweep re-enqueuing an idempotency-keyed job every few seconds
+// through an outage must not flood the job listing with identical rows.
+func TestRunOnceRetainsOnlyLatestCompletionPerName(t *testing.T) {
+	t.Parallel()
+
+	sched, err := newScheduler(slog.Default(), 4, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sched.Stop() }()
+
+	sub, cancel := sched.Events().Subscribe()
+	defer cancel()
+
+	for range 5 {
+		ok, err := sched.RunOnceIfAbsent("flapper", func() {})
+		if err != nil || !ok {
+			t.Fatalf("claim: scheduled=%v err=%v", ok, err)
+		}
+		awaitSchedulerJobDone(t, sub, "flapper")
+	}
+
+	var retained int
+	for _, info := range sched.ListJobs() {
+		if info.Name == "flapper" {
+			retained++
+		}
+	}
+	if retained != 1 {
+		t.Fatalf("listing retains %d entries for a 5x re-run name, want 1", retained)
+	}
+}
+
 // awaitSchedulerJobDone blocks until the scheduler publishes a terminal event
 // for name — the scheduler's own completion signal, not a sleep.
 func awaitSchedulerJobDone(t *testing.T, sub *JobSubscription, name string) {

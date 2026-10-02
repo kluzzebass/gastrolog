@@ -5102,6 +5102,13 @@ func (m *Manager) dropLocalMetaForCloudBackedChunks() {
 // loadCloudBackedChunksFromStore iterates blobs from the cloud store and populates
 // the local B+ tree index. Does NOT insert into m.metas.
 func (m *Manager) loadCloudBackedChunksFromStore() error {
+	// Ensure the bucket exists before listing: a fresh vault's first rescan
+	// is also the first store contact (construction never dials). Idempotent
+	// and cheap when the bucket already exists.
+	if err := m.cfg.CloudStore.EnsureBucket(context.Background()); err != nil { //nolint:contextcheck // long-lived background scan
+		m.trackCloudResult(err)
+		return fmt.Errorf("ensure bucket: %w", err)
+	}
 	var indexed int
 	err := m.cfg.CloudStore.List(context.Background(), m.cloudPrefix(), func(blob blobstore.BlobInfo) error { //nolint:contextcheck // long-lived background scan
 		id, ok := m.chunkIDFromBlobKey(blob.Key)

@@ -1,7 +1,6 @@
 package file
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
@@ -130,12 +129,13 @@ func configureSealedBacking(cfg *Config, params map[string]string) error {
 		return nil
 	}
 
+	// No store dial here: construction runs under the orchestrator registry
+	// lock inside the FSM apply path, where a slow endpoint stalls ingest
+	// cluster-wide. The bucket is ensured lazily by the first store rescan
+	// (EnsureCloudIndex via the cloud-health sweep).
 	store, err := blobstore.CreateStore(backing, params, cfg.Logger)
 	if err != nil {
 		return fmt.Errorf("create %s store for sealed backing: %w", backing, err)
-	}
-	if err := store.EnsureBucket(context.Background()); err != nil {
-		return fmt.Errorf("ensure %s bucket for sealed backing: %w", backing, err)
 	}
 	vaultID, err := glid.ParseUUID(params[blobstore.ParamVaultID])
 	if err != nil {

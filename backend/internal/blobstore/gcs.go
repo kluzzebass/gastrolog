@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 
 	"cloud.google.com/go/storage"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
@@ -48,11 +50,14 @@ func NewGCS(ctx context.Context, cfg GCSConfig) (*GCSStore, error) {
 
 func (g *GCSStore) EnsureBucket(ctx context.Context) error {
 	err := g.client.Bucket(g.bucket).Create(ctx, "", nil)
-	if err != nil {
-		// Ignore "bucket already exists" (status 409 / ErrBucketExists).
-		return nil //nolint:nilerr
+	// "Bucket already exists" (HTTP 409) is the ensured state, not a failure.
+	// Real errors (unreachable endpoint, auth) must surface so callers can
+	// retry.
+	var apiErr *googleapi.Error
+	if errors.As(err, &apiErr) && apiErr.Code == http.StatusConflict {
+		return nil
 	}
-	return nil
+	return err
 }
 
 func (g *GCSStore) Upload(ctx context.Context, key string, data io.Reader, metadata map[string]string) error {

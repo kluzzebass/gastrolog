@@ -21,9 +21,9 @@ import (
 	"gastrolog/internal/waittest"
 )
 
-// blackholeStore embeds the in-memory store and makes List block until
-// released — the shape of a service IP whose pod is gone: the dial
-// neither succeeds nor refuses.
+// blackholeStore embeds the in-memory store and makes every dialing verb
+// (EnsureBucket, List) block until released — the shape of a service IP
+// whose pod is gone: the dial neither succeeds nor refuses.
 type blackholeStore struct {
 	blobstore.Store
 	mu       sync.Mutex
@@ -53,6 +53,16 @@ func (b *blackholeStore) List(ctx context.Context, prefix string, fn func(blobst
 	}
 	b.mu.Unlock()
 	return b.Store.List(ctx, prefix, fn)
+}
+
+func (b *blackholeStore) EnsureBucket(ctx context.Context) error {
+	b.calls.Add(1)
+	b.mu.Lock()
+	for !b.released {
+		b.cond.Wait()
+	}
+	b.mu.Unlock()
+	return b.Store.EnsureBucket(ctx)
 }
 
 func newCloudManager(t *testing.T, store blobstore.Store) *Manager {
@@ -138,6 +148,49 @@ func (f *failingStore) List(ctx context.Context, prefix string, fn func(blobstor
 		return errors.New("store unreachable")
 	}
 	return f.Store.List(ctx, prefix, fn)
+}
+
+// bucketFailStore errors on EnsureBucket while List would succeed — the
+// first-contact-against-a-dead-endpoint shape for a brand-new vault, where
+// bucket creation is the verb that fails.
+type bucketFailStore struct {
+	blobstore.Store
+	fail atomic.Bool
+}
+
+func (f *bucketFailStore) EnsureBucket(ctx context.Context) error {
+	if f.fail.Load() {
+		return errors.New("store unreachable")
+	}
+	return f.Store.EnsureBucket(ctx)
+}
+
+func TestEnsureCloudIndexSurvivesABucketCreateOutage(t *testing.T) {
+	t.Parallel()
+	store := &bucketFailStore{Store: blobstore.NewMemory()}
+	store.fail.Store(true)
+	m := newCloudManager(t, store)
+
+	if err := m.EnsureCloudIndex(); err == nil {
+		t.Fatal("a failed bucket create populated the index")
+	}
+	if m.CloudIndexPopulated() {
+		t.Fatal("failure latched as success")
+	}
+	if !m.CloudDegraded() {
+		t.Fatal("a failed bucket create did not mark the store degraded")
+	}
+
+	store.fail.Store(false)
+	if err := m.EnsureCloudIndex(); err != nil {
+		t.Fatalf("retry after the outage: %v", err)
+	}
+	if !m.CloudIndexPopulated() {
+		t.Fatal("recovery did not latch")
+	}
+	if m.CloudDegraded() {
+		t.Fatal("recovery did not clear the degraded flag")
+	}
 }
 
 func TestEnsureCloudIndexSurvivesAnOutage(t *testing.T) {

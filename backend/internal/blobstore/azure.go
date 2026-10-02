@@ -9,6 +9,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 )
 
@@ -35,11 +36,12 @@ func NewAzure(cfg AzureConfig) (*AzureStore, error) {
 
 func (a *AzureStore) EnsureBucket(ctx context.Context) error {
 	_, err := a.client.CreateContainer(ctx, a.containerName, nil)
-	if err != nil {
-		// Ignore "container already exists" errors.
-		return nil //nolint:nilerr
+	// "Container already exists" is the ensured state, not a failure. Real
+	// errors (unreachable endpoint, auth) must surface so callers can retry.
+	if bloberror.HasCode(err, bloberror.ContainerAlreadyExists) {
+		return nil
 	}
-	return nil
+	return err
 }
 
 func (a *AzureStore) Upload(ctx context.Context, key string, data io.Reader, metadata map[string]string) error {

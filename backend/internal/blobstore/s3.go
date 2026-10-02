@@ -139,12 +139,15 @@ func spoolReaderToTemp(r io.Reader) (*os.File, int64, error) {
 
 func (s *S3Store) EnsureBucket(ctx context.Context) error {
 	_, err := s.client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: &s.bucket})
-	if err != nil {
-		// Ignore "bucket already exists" — BucketAlreadyExists and
-		// BucketAlreadyOwnedByYou are both fine.
-		return nil //nolint:nilerr
+	// "Bucket already exists" is the ensured state, not a failure. Anything
+	// else (unreachable endpoint, auth) must surface so callers can retry —
+	// swallowing it turns a dead store into a silent no-op.
+	var owned *types.BucketAlreadyOwnedByYou
+	var exists *types.BucketAlreadyExists
+	if errors.As(err, &owned) || errors.As(err, &exists) {
+		return nil
 	}
-	return nil
+	return err
 }
 
 func (s *S3Store) Upload(ctx context.Context, key string, data io.Reader, metadata map[string]string) error {
