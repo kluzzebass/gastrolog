@@ -18,6 +18,7 @@ import (
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/waittest"
 )
 
 // blackholeStore embeds the in-memory store and makes List block until
@@ -98,9 +99,9 @@ func TestEnsureCloudIndexRetriesAndLatches(t *testing.T) {
 	// immediately (non-stacking) rather than queue behind it.
 	done := make(chan error, 1)
 	go func() { done <- m.EnsureCloudIndex() }()
-	for store.calls.Load() == 0 {
-		time.Sleep(time.Millisecond)
-	}
+	waittest.For(t, "first ensure attempt reaches the store", func() bool {
+		return store.calls.Load() > 0
+	})
 	if err := m.EnsureCloudIndex(); err != nil {
 		t.Fatalf("concurrent attempt should no-op, got %v", err)
 	}
