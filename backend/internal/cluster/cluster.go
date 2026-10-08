@@ -398,16 +398,29 @@ func (s *Server) AddNonvoter(id, addr string, timeout time.Duration) error {
 // can answer with FailedPrecondition or NotFound without reading message
 // text, and so the CLI can tell an already-gone node from a failure.
 var (
+	// ErrRemovalRefused matches every removal-gate refusal. Both gate
+	// sentinels below satisfy it, and so does a refusal rehydrated after the
+	// follower-to-leader hop — where which gate fired is carried only by the
+	// message, so no specific gate sentinel can honestly be claimed.
+	ErrRemovalRefused = errors.New("removal refused by a removal gate")
 	// ErrWouldDropBelowRF is the sentinel wrapped by every RF-preservation
 	// refusal: the removal would drop a vault below its replication factor.
-	ErrWouldDropBelowRF = errors.New("removal would drop a vault below its replication factor")
+	ErrWouldDropBelowRF error = &removalRefusal{msg: "removal would drop a vault below its replication factor"}
 	// ErrWouldOrphanVaults is the sentinel wrapped by every orphan refusal:
 	// the removal would leave a vault with no holder at all.
-	ErrWouldOrphanVaults = errors.New("removal would orphan a vault")
+	ErrWouldOrphanVaults error = &removalRefusal{msg: "removal would orphan a vault"}
 	// ErrNodeNotInCluster is returned when the node named is not in the
 	// Raft configuration.
 	ErrNodeNotInCluster = errors.New("node not in cluster configuration")
 )
+
+// removalRefusal is a removal-gate refusal: its own message, and a match for
+// ErrRemovalRefused.
+type removalRefusal struct{ msg string }
+
+func (e *removalRefusal) Error() string { return e.msg }
+
+func (e *removalRefusal) Is(target error) bool { return target == ErrRemovalRefused }
 
 // DemoteVoter demotes an existing voter to a nonvoter.
 // The node continues receiving log replication but no longer participates in elections.

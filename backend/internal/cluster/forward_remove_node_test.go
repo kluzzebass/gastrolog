@@ -10,8 +10,6 @@ import (
 	"testing"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // A RemoveNode request can land on any node — the gates live on the
@@ -48,26 +46,12 @@ func startForwardRemoveNodeLeader(t *testing.T, fn RemoveNodeFunc) (*PeerConnMan
 	}
 }
 
-// forwardFromFollower performs the follower-side half of the hop: build
-// the request the way app.makeRemoveNodeFunc does and invoke it over the
-// service lane.
+// forwardFromFollower performs the follower-side half of the hop through
+// the same function production calls, so the tests cover the translation the
+// operator actually sees.
 func forwardFromFollower(t *testing.T, mgr *PeerConnManager, target string, opts RemoveNodeOptions) error {
 	t.Helper()
-	return NewForwardRemoveNodeClient(&peerConnInvoker{mgr: mgr}).ForwardRemoveNode(context.Background(), target, opts)
-}
-
-// peerConnInvoker adapts the PeerConnManager's service lane to the
-// grpc.ClientConnInterface the generated forward client expects.
-type peerConnInvoker struct {
-	mgr *PeerConnManager
-}
-
-func (p *peerConnInvoker) Invoke(ctx context.Context, method string, req, reply any, _ ...grpc.CallOption) error {
-	return p.mgr.InvokeService(ctx, "leader", PurposeRemoveNode, method, req, reply)
-}
-
-func (p *peerConnInvoker) NewStream(context.Context, *grpc.StreamDesc, string, ...grpc.CallOption) (grpc.ClientStream, error) {
-	return nil, errors.New("streaming not supported")
+	return ForwardRemoveNode(context.Background(), mgr, "leader", target, opts)
 }
 
 // TestForwardRemoveNode_CarriesPolicyAndForce: every combination of
@@ -132,10 +116,10 @@ func TestForwardRemoveNode_RefusalReachesCaller(t *testing.T) {
 
 // A not-in-cluster refusal must keep its identity across the hop: the
 // sentinel cannot cross the wire as a Go error, so the leader encodes it as
-// the NotFound status code and the follower rehydrates it. Without the
+// the NotFound status code and the follower translates it back. Without the
 // encoding, a follower-received removal of an unknown node sanitizes into an
 // opaque internal error instead of an operator-readable refusal.
-func TestForwardRemoveNode_NotInClusterCrossesTheHopAsNotFound(t *testing.T) {
+func TestForwardRemoveNode_NotInClusterSurvivesTheHop(t *testing.T) {
 	t.Parallel()
 	mgr, cleanup := startForwardRemoveNodeLeader(t, func(_ context.Context, target string, _ RemoveNodeOptions) error {
 		return fmt.Errorf("remove server: %s: %w", target, ErrNodeNotInCluster)
@@ -146,10 +130,35 @@ func TestForwardRemoveNode_NotInClusterCrossesTheHopAsNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the leader's not-in-cluster refusal to reach the follower")
 	}
-	if got := status.Code(err); got != codes.NotFound {
-		t.Fatalf("refusal crossed the hop as %v, want NotFound: %v", got, err)
+	if !errors.Is(err, ErrNodeNotInCluster) {
+		t.Fatalf("refusal lost its sentinel crossing the hop: %v", err)
 	}
-	if !strings.Contains(err.Error(), "node not in cluster configuration") {
-		t.Fatalf("forwarded refusal lost its message: %v", err)
+	if want := "remove server: node-ghost: node not in cluster configuration"; err.Error() != want {
+		t.Fatalf("follower reads differently from the leader:\n follower: %s\n   leader: %s", err, want)
+	}
+}
+
+// A removal-gate refusal must survive the hop as a refusal: the leader
+// encodes it as FailedPrecondition, and the follower translates it into an
+// error matching ErrRemovalRefused that carries the leader's message — which
+// gate, which vaults — verbatim. Without the translation the RemoveNode
+// handler on a follower cannot recognize the refusal and sanitizes the
+// operator-actionable detail into an opaque internal error.
+func TestForwardRemoveNode_GateRefusalSurvivesTheHop(t *testing.T) {
+	t.Parallel()
+	for _, gate := range []error{ErrWouldDropBelowRF, ErrWouldOrphanVaults} {
+		mgr, cleanup := startForwardRemoveNodeLeader(t, func(_ context.Context, target string, _ RemoveNodeOptions) error {
+			return fmt.Errorf("refusing to remove node %s: %w — 1 vault(s) affected: \"logs\"", target, gate)
+		})
+
+		err := forwardFromFollower(t, mgr, "node-target", RemoveNodeOptions{Policy: RemovalPolicyOperator})
+		cleanup()
+		if !errors.Is(err, ErrRemovalRefused) {
+			t.Fatalf("gate %q: refusal lost its identity crossing the hop: %v", gate, err)
+		}
+		want := fmt.Sprintf("refusing to remove node node-target: %v — 1 vault(s) affected: \"logs\"", gate)
+		if err.Error() != want {
+			t.Fatalf("gate %q: follower reads differently from the leader:\n follower: %s\n   leader: %s", gate, err, want)
+		}
 	}
 }

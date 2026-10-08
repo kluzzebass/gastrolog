@@ -208,6 +208,38 @@ func TestRemoveNode_GateRefusalIsFailedPrecondition(t *testing.T) {
 	}
 }
 
+// hopRefusal stands in for a refusal translated after the follower-to-leader
+// hop: it matches ErrRemovalRefused, but which gate fired survives only in
+// the message, so it matches neither specific gate sentinel.
+type hopRefusal struct{ msg string }
+
+func (e hopRefusal) Error() string        { return e.msg }
+func (e hopRefusal) Is(target error) bool { return target == cluster.ErrRemovalRefused }
+
+// A request landing on a follower reaches the handler with the refusal
+// translated back from the wire, not with the leader's original sentinel.
+// It must still answer FailedPrecondition with the detail intact: the same
+// removal must read the same from every node.
+func TestRemoveNode_ForwardedGateRefusalIsFailedPrecondition(t *testing.T) {
+	t.Parallel()
+	refusal := hopRefusal{msg: `remove node: refusing to remove node n1: removal would orphan a vault: 1 vault(s): "logs" (v1)`}
+	if errors.Is(refusal, cluster.ErrWouldOrphanVaults) || errors.Is(refusal, cluster.ErrWouldDropBelowRF) {
+		t.Fatal("premise: a hop-translated refusal must not claim a specific gate sentinel")
+	}
+	rec := &removeNodeRecorder{err: refusal}
+	client, _ := setupRemoveNodeTest(t, rec)
+
+	_, err := client.RemoveNode(context.Background(), connect.NewRequest(&gastrologv1.RemoveNodeRequest{
+		NodeId: []byte(glid.New().String()),
+	}))
+	if got := connect.CodeOf(err); got != connect.CodeFailedPrecondition {
+		t.Fatalf("forwarded refusal answered %s, want FailedPrecondition: %v", got, err)
+	}
+	if !strings.Contains(err.Error(), "logs") {
+		t.Fatalf("forwarded refusal must reach the caller naming the vault: %v", err)
+	}
+}
+
 // A genuine failure inside the removal is still Internal — the
 // FailedPrecondition mapping must not swallow real errors.
 func TestRemoveNode_InternalErrorStaysInternal(t *testing.T) {
