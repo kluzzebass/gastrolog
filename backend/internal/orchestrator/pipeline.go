@@ -710,7 +710,6 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 		if _, ok := desired[vid]; !ok {
 			o.pipeline.UnregisterVault(vid)
 			o.reconcileChunkCron(vid, false, "")
-			o.installLazyGLCBResolver(vid, false, nil, "")
 			o.deletePipelineVaultLocked(vid)
 		}
 	}
@@ -746,7 +745,6 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 		}
 		o.setPipelineVaultLocked(vid, want)
 		o.reconcileChunkCron(vid, chunkEnabled, cronExpr)
-		o.installLazyGLCBResolver(vid, chunkEnabled, fsm, spec.ChunkRoot)
 		o.finishPendingPipelineCtlRestore(vid)
 	}
 

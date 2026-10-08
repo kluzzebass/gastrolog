@@ -68,7 +68,7 @@ func TestSweepMissingReplicas_PipelineVault_SyncsGLCBNotCatchup(t *testing.T) {
 	vaultInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: cm}
 	rec := NewVaultLifecycleReconciler(orch, vaultID, vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
-	orch.installLazyGLCBResolverOn(vaultInst, vaultID, true, fsm, chunkRoot)
+	installGLCBResolverOn(vaultInst, func() (*vaultctlfsm.FSM, string, bool) { return fsm, chunkRoot, true })
 
 	rec.SweepMissingReplicas()
 

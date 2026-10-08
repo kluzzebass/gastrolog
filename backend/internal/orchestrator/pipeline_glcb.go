@@ -28,36 +28,52 @@ type externalGLCBResolverSetter interface {
 	SetExternalGLCBLister(func() []chunk.ChunkID)
 }
 
-// installLazyGLCBResolver installs (or, when disabled, clears) the on-miss
-// external-GLCB resolver on a pipeline vault's chunk manager. With it, a
-// meta-lookup miss resolves against the vault-ctl manifest and the on-disk
-// GLCB at lookup time: a chunk is servable the moment its FSM entry and
-// file both exist, regardless of process history, sweep timing, or boot
-// ordering — no boot-eager registration scan, no warm-up window.
-//
-// chunkRoot is captured BY VALUE. The resolver runs under the chunk
-// manager's mutex, so it must never take orchestrator locks (o.mu holders
-// call into the manager — ABBA). Its lock footprint is exactly:
-// groupMgr/FSM internal locks (via vaultCtlHandle, which is o.mu-free;
-// FSM apply effects fire outside FSM locks, so no path holds those locks
-// while entering the manager) plus a one-time on-disk GLCB read
-// (externalGLCBInfoForPipeline): pure os.* file I/O that acquires no shared
-// lock, so no inversion with m.mu. The manager memoizes the resolved info
-// into m.metas, so the read happens ONCE per chunk on the first miss.
-//
-// Caller holds o.mu (the pipeline reload path).
-func (o *Orchestrator) installLazyGLCBResolver(vaultID glid.GLID, enabled bool, fsm *vaultctlfsm.FSM, chunkRoot string) {
-	vault := o.vaults[vaultID]
-	if vault == nil || vault.Instance == nil {
-		return
+// pipelineGLCBSource answers, at lookup time, whether this node serves the
+// vault's pipeline GLCBs and from where: the live vault-ctl FSM and the chunk
+// root, when the vault is pipeline-registered here as a home with a vault-ctl
+// handle. Lock-free — the registration map is an atomically published
+// immutable map and vaultCtlHandle never takes o.mu — because the resolver
+// runs under the chunk manager's mutex, and o.mu holders call into the
+// manager (ABBA).
+func (o *Orchestrator) pipelineGLCBSource(vaultID glid.GLID) (*vaultctlfsm.FSM, string, bool) {
+	reg, ok := o.lookupPipelineVault(vaultID)
+	if !ok || !reg.home || !reg.hasHandle || o.segmentsDir == "" {
+		return nil, "", false
 	}
-	o.installLazyGLCBResolverOn(vault.Instance, vaultID, enabled, fsm, chunkRoot)
+	f, _, _, ok := o.vaultCtlHandle(vaultID)
+	if !ok || f == nil {
+		return nil, "", false
+	}
+	return f, pipelineChunkRoot(pipelineVaultRoot(o.segmentsDir, vaultID)), true
 }
 
-// installLazyGLCBResolverOn is the instance-scoped core of
-// installLazyGLCBResolver (separated so fixtures can wire a resolver
-// without a fully-populated vault registry).
-func (o *Orchestrator) installLazyGLCBResolverOn(inst *VaultInstance, vaultID glid.GLID, enabled bool, fsm *vaultctlfsm.FSM, chunkRoot string) {
+// installPipelineGLCBResolver installs the on-miss external-GLCB resolver on
+// a freshly built vault instance. It is installed once, at construction, and
+// consults the pipeline registration on every lookup rather than capturing
+// it: the registration and the instance change independently (a placement
+// change re-registers a joining home before its instance exists), so an
+// install keyed to either one's change event can fire while the other is
+// absent and be lost — leaving a home that holds the bytes but answers a
+// match-all search with nothing, with no later event to repair it.
+func (o *Orchestrator) installPipelineGLCBResolver(inst *VaultInstance, vaultID glid.GLID) {
+	installGLCBResolverOn(inst, func() (*vaultctlfsm.FSM, string, bool) {
+		return o.pipelineGLCBSource(vaultID)
+	})
+}
+
+// installGLCBResolverOn wires the resolver and its enumeration companion onto
+// an instance's chunk manager, with source answering at lookup time whether
+// (and from which FSM and chunk root) GLCBs are served. A meta-lookup miss
+// resolves against the vault-ctl manifest and the on-disk GLCB: a chunk is
+// servable the moment its FSM entry and file both exist, regardless of
+// process history, sweep timing or boot ordering.
+//
+// Lock footprint (the resolver runs under the chunk manager's mutex):
+// source's lock-free reads, FSM-internal locks (FSM apply effects fire
+// outside FSM locks, so no path holds those while entering the manager), and
+// a one-time on-disk GLCB read — pure os.* I/O. The manager memoizes the
+// resolved info into m.metas, so the read happens once per chunk.
+func installGLCBResolverOn(inst *VaultInstance, source func() (*vaultctlfsm.FSM, string, bool)) {
 	if inst == nil || inst.Chunks == nil {
 		return
 	}
@@ -65,20 +81,9 @@ func (o *Orchestrator) installLazyGLCBResolverOn(inst *VaultInstance, vaultID gl
 	if !ok {
 		return
 	}
-	if !enabled || chunkRoot == "" {
-		setter.SetExternalGLCBResolver(nil)
-		setter.SetExternalGLCBLister(nil)
-		return
-	}
-	lookupFSM := func() *vaultctlfsm.FSM {
-		if f, _, _, ok := o.vaultCtlHandle(vaultID); ok && f != nil {
-			return f
-		}
-		return fsm // pre-restore fallback; a ctl restore swaps the live FSM
-	}
 	setter.SetExternalGLCBResolver(func(id chunk.ChunkID) (string, chunk.ExternalGLCBInfo, bool) {
-		f := lookupFSM()
-		if f == nil {
+		f, chunkRoot, ok := source()
+		if !ok {
 			return "", chunk.ExternalGLCBInfo{}, false
 		}
 		e := f.Get(id)
@@ -109,8 +114,8 @@ func (o *Orchestrator) installLazyGLCBResolverOn(inst *VaultInstance, vaultID gl
 	// sealed entries participate; Sealing/Active chunks are served through
 	// the pipeline manifest-cursor path, not manager enumeration.
 	setter.SetExternalGLCBLister(func() []chunk.ChunkID {
-		f := lookupFSM()
-		if f == nil {
+		f, _, ok := source()
+		if !ok {
 			return nil
 		}
 		entries := f.List()

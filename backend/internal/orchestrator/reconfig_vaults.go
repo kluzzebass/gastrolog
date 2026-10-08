@@ -919,6 +919,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	wireVaultFSMOnCreate(vaultGroup, vaultCfg.ID, cm, o)
 	wireVaultFSMOnUpload(vaultGroup, vaultCfg.ID, o)
 	o.wireLazyCloudBackedResolver(vaultGroup, vaultCfg.ID, cm)
+	o.installPipelineGLCBResolver(ti, vaultCfg.ID)
 	return ti, nil
 }
 
@@ -1031,6 +1032,7 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 	wireVaultFSMOnCreate(vaultGroup, vaultCfg.ID, cm, o)
 	wireVaultFSMOnUpload(vaultGroup, vaultCfg.ID, o)
 	o.wireLazyCloudBackedResolver(vaultGroup, vaultCfg.ID, cm)
+	o.installPipelineGLCBResolver(ti, vaultCfg.ID)
 	return ti, nil
 }
 
