@@ -3,12 +3,15 @@ package cluster
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
 	"testing"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // A RemoveNode request can land on any node — the gates live on the
@@ -124,5 +127,29 @@ func TestForwardRemoveNode_RefusalReachesCaller(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("forwarded refusal missing %q in: %v", want, err)
 		}
+	}
+}
+
+// A not-in-cluster refusal must keep its identity across the hop: the
+// sentinel cannot cross the wire as a Go error, so the leader encodes it as
+// the NotFound status code and the follower rehydrates it. Without the
+// encoding, a follower-received removal of an unknown node sanitizes into an
+// opaque internal error instead of an operator-readable refusal.
+func TestForwardRemoveNode_NotInClusterCrossesTheHopAsNotFound(t *testing.T) {
+	t.Parallel()
+	mgr, cleanup := startForwardRemoveNodeLeader(t, func(_ context.Context, target string, _ RemoveNodeOptions) error {
+		return fmt.Errorf("remove server: %s: %w", target, ErrNodeNotInCluster)
+	})
+	defer cleanup()
+
+	err := forwardFromFollower(t, mgr, "node-ghost", RemoveNodeOptions{Policy: RemovalPolicyOperator})
+	if err == nil {
+		t.Fatal("expected the leader's not-in-cluster refusal to reach the follower")
+	}
+	if got := status.Code(err); got != codes.NotFound {
+		t.Fatalf("refusal crossed the hop as %v, want NotFound: %v", got, err)
+	}
+	if !strings.Contains(err.Error(), "node not in cluster configuration") {
+		t.Fatalf("forwarded refusal lost its message: %v", err)
 	}
 }
