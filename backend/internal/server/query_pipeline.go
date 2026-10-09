@@ -90,7 +90,7 @@ func (s *QueryServer) searchPipelineGlobal(
 
 	// Stream raw records from remote nodes (no pipeline — just the base
 	// query); the pipeline runs once, over local and remote records merged.
-	remoteIter, remoteHist, _ := s.collectRemote(ctx, q, nil)
+	remoteIter, remoteHist, _ := s.collectRemote(ctx, q)
 
 	result, err := eng.RunPipelineWithRemote(ctx, q, pipeline, remoteIter, budget)
 	if err != nil {

@@ -31,7 +31,7 @@ import (
 // response has been assembled from EVERY vault in this set — so the fanned-out
 // set is exactly the contributor set. nil when there are no remote vaults in
 // scope.
-func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTokens map[glid.GLID][]byte) (iter.Seq2[chunk.Record, error], []*apiv1.HistogramBucket, []glid.GLID) {
+func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) (iter.Seq2[chunk.Record, error], []*apiv1.HistogramBucket, []glid.GLID) {
 	if s.remoteSearcher == nil || s.cfgStore == nil {
 		return nil, nil, nil
 	}
@@ -42,9 +42,7 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 	}
 
 	queryExpr := q.String()
-	if remoteTokens == nil {
-		remoteTokens = make(map[glid.GLID][]byte)
-	}
+	resumeToken := remoteCursorToken(q)
 
 	// Fan out streaming RPCs concurrently — one per remote vault.
 	type vaultStream struct {
@@ -61,14 +59,13 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 	for nodeID, vaultIDs := range byNode {
 		for _, vid := range vaultIDs {
 			wg.Go(func() {
-				// Remote positions are never carried across pages; the remote
-				// resumes at the coordinator's cursor, which its own engine
-				// applies ahead of the page limit — so the token getter is
-				// dropped here.
+				// The remote resumes at the coordinator's cursor, which its own
+				// engine applies ahead of the page limit; its positions are
+				// never carried across pages, so the token getter is dropped.
 				recCh, _, eCh, _, getHist := s.remoteSearcher.SearchStream(ctx, nodeID, &apiv1.ForwardSearchRequest{
 					VaultId:     vid.ToProto(),
 					Query:       queryExpr,
-					ResumeToken: remoteTokenOrCursor(q, remoteTokens[vid]),
+					ResumeToken: resumeToken,
 				})
 				mu.Lock()
 				streams = append(streams, vaultStream{records: recCh, errCh: eCh, getHistogram: getHist, vaultID: vid})

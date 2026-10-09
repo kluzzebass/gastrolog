@@ -63,7 +63,7 @@ func (s *QueryServer) GetFields(
 	}
 
 	// Include records from remote nodes in the cluster.
-	remoteIter, _, _ := s.collectRemote(ctx, q, nil)
+	remoteIter, _, _ := s.collectRemote(ctx, q)
 	if remoteIter != nil {
 		for rec, iterErr := range remoteIter {
 			if iterErr != nil {

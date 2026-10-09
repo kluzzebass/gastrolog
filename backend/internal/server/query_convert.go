@@ -351,12 +351,6 @@ func ProtoToResumeToken(data []byte) (*query.ResumeToken, error) {
 // InnerVaultToken. Entries that fail to deserialize as InnerVaultToken
 // are skipped — this protects upstream callers from a malformed remote
 // fragment poisoning the entire resume.
-//
-// For the upstream QueryServer path (where VaultTokens may carry a mix
-// of vault-keyed local InnerVaultTokens and vault-keyed full remote
-// ResumeToken protos), use ProtoToResumeToken + splitResumeToken
-// instead — that flow routes remote-keyed entries back to the remote
-// node rather than trying to interpret them locally.
 func ProtoToLocalResumeToken(data []byte) (*query.ResumeToken, error) {
 	token, err := ProtoToResumeToken(data)
 	if err != nil {
