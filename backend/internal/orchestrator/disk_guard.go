@@ -612,7 +612,7 @@ func (g *diskGuard) vaultChunkCountBoundCapped(vaultID glid.GLID) bool {
 // disk-guard-entry layer (retainVaultGuards prunes on
 // vault-removed-from-config/placement-moved, a separate discovery sweep
 // from retention's own runner GC).
-func (g *diskGuard) setVaultAgeBoundCapped(alerts alert.Sink, id glid.GLID, capped bool) {
+func (g *diskGuard) setVaultAgeBoundCapped(alerts alert.Sink, id glid.GLID, capped bool, disposition string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	v := g.vaults[id]
@@ -625,15 +625,15 @@ func (g *diskGuard) setVaultAgeBoundCapped(alerts alert.Sink, id glid.GLID, capp
 	}
 	g.reconcileVaultBoundAlarmLocked(alerts, id, v, "age", capped, &v.ageBoundAlarmRaised,
 		fmt.Sprintf("Vault %s's max-age retention bound is still violated after retention swept and attempted to clear it — "+
-			"new records for this vault are REFUSED (the stating policy has refuse enabled). "+
-			"Read the retention-deferred alarm, if standing, for why the sweep isn't clearing it.", v.name),
+			"new records for this vault are REFUSED (the stating policy has refuse enabled). %s",
+			v.name, boundCappedFollowUp(disposition)),
 		fmt.Sprintf("vault max-age bound engaged — admission refused for vault %s (swept and still violated)", v.name),
 		"vault max-age bound released — admission resumed for vault "+v.name)
 }
 
 // setVaultChunkCountBoundCapped is setVaultAgeBoundCapped's max-chunks
 // sibling — same single-lock-for-the-whole-operation contract.
-func (g *diskGuard) setVaultChunkCountBoundCapped(alerts alert.Sink, id glid.GLID, capped bool) {
+func (g *diskGuard) setVaultChunkCountBoundCapped(alerts alert.Sink, id glid.GLID, capped bool, disposition string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	v := g.vaults[id]
@@ -646,10 +646,27 @@ func (g *diskGuard) setVaultChunkCountBoundCapped(alerts alert.Sink, id glid.GLI
 	}
 	g.reconcileVaultBoundAlarmLocked(alerts, id, v, "count", capped, &v.chunkCountAlarmRaised,
 		fmt.Sprintf("Vault %s's max-chunks retention bound is still violated after retention swept and attempted to clear it — "+
-			"new records for this vault are REFUSED (the stating policy has refuse enabled). "+
-			"Read the retention-deferred alarm, if standing, for why the sweep isn't clearing it.", v.name),
+			"new records for this vault are REFUSED (the stating policy has refuse enabled). %s",
+			v.name, boundCappedFollowUp(disposition)),
 		fmt.Sprintf("vault chunk-count bound engaged — admission refused for vault %s (swept and still violated)", v.name),
 		"vault chunk-count bound released — admission resumed for vault "+v.name)
+}
+
+// boundCappedFollowUp is the vault-bound-capped detail's pointer to what
+// explains a bound the sweep left violated. Only the route and transfer
+// dispositions can defer, so only on them can retention-deferred ever stand
+// beside this alarm.
+func boundCappedFollowUp(disposition string) string {
+	switch disposition {
+	case system.RetentionDispositionRoute, system.RetentionDispositionTransfer:
+		return fmt.Sprintf("This vault's retention disposition is %s: once it has deferred for %d consecutive sweeps, "+
+			"the %s alarm stands for this vault and names why the drain is stalled.",
+			disposition, retentionDeferralAlarmAfter, alarmRetentionDeferred)
+	default:
+		return fmt.Sprintf("This vault's retention disposition is delete, which never defers, so no %s alarm accompanies this one: "+
+			"the chunks still past the bound crossed it after the sweep evaluated it, or were still being deleted when the sweep re-checked.",
+			alarmRetentionDeferred)
+	}
 }
 
 // reconcileVaultBoundAlarmLocked raises/clears the shared
@@ -1070,7 +1087,7 @@ func (g *diskGuard) reconcileStorageProtect(id string, s *storageDiskGuard, free
 	case !s.protect.Load() && free < floorAt:
 		s.protect.Store(true)
 		if g.logger != nil {
-			g.logger.Warn("storage disk protect engaged — admission suspended for every vault placed here until free space clears its low-disk alarm band",
+			g.logger.Warn("storage disk protect engaged — admission suspended for every vault placed here until free space clears its disk-space-low alarm band",
 				"storage", id, "name", s.name, "node", s.node,
 				"free", fmtBytes(free), "floor", fmtBytes(floorAt), "resumeAbove", fmtBytes(resumeAt))
 		}
@@ -1197,7 +1214,7 @@ func (g *diskGuard) reconcileProtect(free, floorAt, warnAt uint64) {
 	case !g.protect.Load() && free < floorAt:
 		g.protect.Store(true)
 		if g.logger != nil {
-			g.logger.Warn("disk protect engaged — ingest admission suspended until free space clears the low-disk alarm band",
+			g.logger.Warn("disk protect engaged — ingest admission suspended until free space clears the node-disk-space-low alarm band",
 				"free", fmtBytes(free), "floor", fmtBytes(floorAt), "resumeAbove", fmtBytes(resumeAt))
 		}
 	}
@@ -1558,20 +1575,20 @@ func (o *Orchestrator) SetRemoteVaultChunkCountBoundCapped(fn func(glid.GLID) bo
 // guard has no entry for this vault (a memory vault, or a file vault whose
 // guard entry hasn't been registered yet by refreshVaultDiskGuards — the
 // next sweep after registration retries).
-func (o *Orchestrator) SetVaultAgeBoundCapped(id glid.GLID, capped bool) {
+func (o *Orchestrator) SetVaultAgeBoundCapped(id glid.GLID, capped bool, disposition string) {
 	if o.diskGuard == nil {
 		return
 	}
-	o.diskGuard.setVaultAgeBoundCapped(o.alerts, id, capped)
+	o.diskGuard.setVaultAgeBoundCapped(o.alerts, id, capped, disposition)
 }
 
 // SetVaultChunkCountBoundCapped is SetVaultAgeBoundCapped's max-chunks
 // sibling.
-func (o *Orchestrator) SetVaultChunkCountBoundCapped(id glid.GLID, capped bool) {
+func (o *Orchestrator) SetVaultChunkCountBoundCapped(id glid.GLID, capped bool, disposition string) {
 	if o.diskGuard == nil {
 		return
 	}
-	o.diskGuard.setVaultChunkCountBoundCapped(o.alerts, id, capped)
+	o.diskGuard.setVaultChunkCountBoundCapped(o.alerts, id, capped, disposition)
 }
 
 // nodeDisplayName resolves a node ID to its operator-facing name from the
