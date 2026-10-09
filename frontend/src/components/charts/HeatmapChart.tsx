@@ -5,6 +5,11 @@ import { cssVar } from "./chartColors";
 import { heatmapTooltipHtml } from "./chartTooltips";
 import type { EChartsOption } from "echarts";
 
+// Fixed like every other chart's height: a polled result whose row count
+// changes must not resize the chart and move the results below it. Rows
+// share the height; the y-axis thins its labels when they crowd.
+const HEATMAP_HEIGHT = 320;
+
 interface HeatmapChartProps {
   columns: string[];
   rows: string[][];
@@ -114,14 +119,11 @@ export function HeatmapChart({ columns, rows, dark }: Readonly<HeatmapChartProps
     ],
   };
 
-  // Dynamic height: 32px per y-axis value, min 160, max 500.
-  const height = Math.min(500, Math.max(160, yValues.length * 32 + 80));
-
   return (
     <ReactEChartsCore
       echarts={echarts}
       option={option}
-      style={{ height, width: "100%" }}
+      style={{ height: HEATMAP_HEIGHT, width: "100%" }}
       notMerge
       lazyUpdate
     />
