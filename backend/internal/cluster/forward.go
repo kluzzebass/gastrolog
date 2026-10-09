@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"errors"
+	"fmt"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
 	"io"
@@ -847,13 +848,22 @@ func (s *Server) forwardRemoveNode(ctx context.Context, req *gastrologv1.Forward
 	}
 	if err := s.removeNodeFn(ctx, string(req.GetNodeId()), opts); err != nil {
 		// Sentinel identity dies at the wire; the status code carries it
-		// across the hop so the follower can rehydrate it. Without this, a
-		// not-in-cluster refusal reaching the operator through a follower
+		// across the hop so the follower can translate it back. Without
+		// this, a refusal reaching the operator through a follower
 		// sanitizes into an opaque internal error.
-		if errors.Is(err, ErrNodeNotInCluster) {
-			return nil, status.Errorf(codes.NotFound, "remove node: %v", err)
+		switch {
+		// Encoded refusals carry the bare message so the follower can
+		// present exactly what the leader would have printed.
+		case errors.Is(err, ErrNodeNotInCluster):
+			return nil, status.Error(codes.NotFound, err.Error())
+		case errors.Is(err, ErrRemovalRefused):
+			// The removal gates' refusals are operator-correctable; the
+			// message names the gate and the affected vaults, so the code
+			// alone distinguishes refusal from failure.
+			return nil, status.Error(codes.FailedPrecondition, err.Error())
+		default:
+			return nil, status.Errorf(codes.Internal, "remove node: %v", err)
 		}
-		return nil, status.Errorf(codes.Internal, "remove node: %v", err)
 	}
 	return &gastrologv1.ForwardRemoveNodeResponse{}, nil
 }
@@ -1747,29 +1757,49 @@ func (c *NotifyEvictionClient) NotifyEviction(ctx context.Context, reason string
 	return c.cc.Invoke(ctx, "/gastrolog.v1.ClusterService/NotifyEviction", req, out)
 }
 
-// ForwardRemoveNodeClient forwards node removal to the leader via cluster gRPC.
-type ForwardRemoveNodeClient struct {
-	cc grpc.ClientConnInterface
-}
-
-// NewForwardRemoveNodeClient creates a client bound to a connection.
-func NewForwardRemoveNodeClient(cc grpc.ClientConnInterface) *ForwardRemoveNodeClient {
-	return &ForwardRemoveNodeClient{cc: cc}
-}
-
-// ForwardRemoveNode asks the leader to remove a node from the cluster.
-// opts carries the force flag (bypasses every removal gate) and the
-// removal policy, which must survive the follower → leader hop so the
-// leader's RF-preservation gate applies the right stance.
-func (c *ForwardRemoveNodeClient) ForwardRemoveNode(ctx context.Context, nodeID string, opts RemoveNodeOptions) error {
+// ForwardRemoveNode asks the leader to remove a node from the cluster and
+// translates the leader's refusal back into a sentinel. opts carries the
+// force flag (bypasses every removal gate) and the removal policy, which must
+// survive the follower → leader hop so the leader's RF-preservation gate
+// applies the right stance. This is the only follower-side path: a removal
+// must read the same from every node, so the translation lives in one place.
+func ForwardRemoveNode(ctx context.Context, peers *PeerConnManager, leaderID, nodeID string, opts RemoveNodeOptions) error {
 	req := &gastrologv1.ForwardRemoveNodeRequest{
 		NodeId:      []byte(nodeID),
 		Force:       opts.Force,
 		SelfRemoval: opts.Policy == RemovalPolicySelf,
 	}
 	out := &gastrologv1.ForwardRemoveNodeResponse{}
-	return c.cc.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardRemoveNode", req, out)
+	err := peers.InvokeService(ctx, leaderID, PurposeRemoveNode,
+		"/gastrolog.v1.ClusterService/ForwardRemoveNode", req, out)
+	if err == nil {
+		return nil
+	}
+	// The leader encodes sentinel identity in the status code
+	// (forwardRemoveNode); the message carries the detail — which gate,
+	// which vaults — verbatim.
+	st, _ := status.FromError(err)
+	if st.Code() == codes.NotFound {
+		return &translatedRefusal{msg: st.Message(), sentinel: ErrNodeNotInCluster}
+	}
+	if st.Code() == codes.FailedPrecondition {
+		return &translatedRefusal{msg: st.Message(), sentinel: ErrRemovalRefused}
+	}
+	return fmt.Errorf("forward remove node to leader %s: %w", leaderID, err)
 }
+
+// translatedRefusal is a leader's refusal rebuilt after the hop: the
+// leader's message verbatim, so the operator reads the same text whichever
+// node took the request, and a match for the sentinel the status code
+// encoded.
+type translatedRefusal struct {
+	msg      string
+	sentinel error
+}
+
+func (e *translatedRefusal) Error() string { return e.msg }
+
+func (e *translatedRefusal) Is(target error) bool { return target == e.sentinel }
 
 // ForwardSetNodeSuffrageClient forwards suffrage changes to the leader via cluster gRPC.
 type ForwardSetNodeSuffrageClient struct {

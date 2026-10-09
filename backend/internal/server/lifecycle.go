@@ -478,7 +478,7 @@ func (s *LifecycleServer) RemoveNode(
 		// operator-correctable: drain the vault, add an eligible node, or
 		// re-run with --force. Surface as FailedPrecondition so the CLI
 		// can treat them differently from genuine internal errors.
-		if errors.Is(err, cluster.ErrWouldDropBelowRF) || errors.Is(err, cluster.ErrWouldOrphanVaults) {
+		if errors.Is(err, cluster.ErrRemovalRefused) {
 			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
 		}
 		if errors.Is(err, cluster.ErrNodeNotInCluster) {

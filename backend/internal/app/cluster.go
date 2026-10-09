@@ -799,24 +799,7 @@ func makeRemoveNodeFunc(
 		// The policy rides along: the gates run on the leader, so a
 		// preStop self-removal that lands on a follower must still be
 		// evaluated optimistically there.
-		req := &gastrologv1.ForwardRemoveNodeRequest{
-			NodeId:      []byte(targetNodeID),
-			Force:       opts.Force,
-			SelfRemoval: opts.Policy == cluster.RemovalPolicySelf,
-		}
-		resp := &gastrologv1.ForwardRemoveNodeResponse{}
-		if err := peerConns.InvokeService(ctx, leaderID, cluster.PurposeRemoveNode,
-			"/gastrolog.v1.ClusterService/ForwardRemoveNode", req, resp); err != nil {
-			// Rehydrate the sentinel the wire stripped: the leader encodes
-			// not-in-cluster as NotFound, and the RPC handler and CLI need
-			// the sentinel back to surface an operator-readable refusal
-			// instead of a sanitized internal error.
-			if status.Code(err) == codes.NotFound {
-				return fmt.Errorf("forward remove node to leader %s: %w: %s", leaderID, cluster.ErrNodeNotInCluster, targetNodeID)
-			}
-			return fmt.Errorf("forward remove node to leader %s: %w", leaderID, err)
-		}
-		return nil
+		return cluster.ForwardRemoveNode(ctx, peerConns, leaderID, targetNodeID, opts)
 	}
 }
 
