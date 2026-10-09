@@ -182,6 +182,11 @@ func streamSearch(ctx context.Context, client *server.Client, expr string, limit
 			return fmt.Errorf("search: %w", err)
 		}
 
+		// The page's own token, kept apart from resumeToken: resumeToken is
+		// what the next request sends, so it must hold this page's token
+		// when the next request goes out — never a cleared value, which the
+		// server answers as page 1 again, paging forever.
+		var next []byte
 		for stream.Receive() {
 			resp := stream.Msg()
 			if err := fn(resp); err != nil {
@@ -189,7 +194,7 @@ func streamSearch(ctx context.Context, client *server.Client, expr string, limit
 			}
 			total += len(resp.Records)
 			if len(resp.ResumeToken) > 0 {
-				resumeToken = resp.ResumeToken
+				next = resp.ResumeToken
 			}
 			if limit > 0 && total >= limit {
 				return nil
@@ -199,13 +204,11 @@ func streamSearch(ctx context.Context, client *server.Client, expr string, limit
 			return fmt.Errorf("search stream: %w", err)
 		}
 
-		// No more pages if we didn't get a resume token.
-		if len(resumeToken) == 0 {
+		// A page without a resume token is the last page.
+		if len(next) == 0 {
 			return nil
 		}
-
-		// Check if the last response indicated no more results.
-		resumeToken = nil // will be set by next page if there are more
+		resumeToken = next
 	}
 }
 
