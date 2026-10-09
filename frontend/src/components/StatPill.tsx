@@ -1,19 +1,22 @@
+import { LiveValue } from "./LiveValue";
+
 export function StatPill({
   label,
   value,
+  reserve,
   dark,
 }: Readonly<{
   label: string;
   value: string;
+  /** Character cells to reserve for the value: its formatter's `*_MAX_CHARS` contract. */
+  reserve?: number;
   dark: boolean;
 }>) {
   return (
     <div className="flex items-baseline gap-1.5">
-      <span
-        className={`font-mono text-[0.9em] font-medium ${dark ? "text-text-bright" : "text-light-text-bright"}`}
-      >
+      <LiveValue dark={dark} reserve={reserve} className="text-[0.9em] font-medium">
         {value}
-      </span>
+      </LiveValue>
       <span
         className={`text-[0.7em] uppercase tracking-wider ${dark ? "text-text-muted" : "text-light-text-muted"}`}
       >

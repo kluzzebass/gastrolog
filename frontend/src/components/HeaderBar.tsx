@@ -6,7 +6,8 @@ import { SlidersIcon } from "./icons";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { useClusterStatus } from "../api/hooks/useClusterStatus";
 import { useAlerts } from "../api/hooks/useAlerts";
-import { formatBytes } from "../utils/units";
+import { BYTES_MAX_CHARS, PERCENT_MAX_CHARS, formatBytes, formatPercent } from "../utils/units";
+import { LiveValue } from "./LiveValue";
 import { middleTruncate } from "../utils/middleTruncate";
 // eslint-disable-next-line no-restricted-imports -- HeaderBar still iterates raw ClusterNode for sum/sort; deferred migration
 import type { ClusterNode } from "../api/gen/gastrolog/v1/lifecycle_pb";
@@ -162,15 +163,17 @@ export function HeaderBar({
         <div className="hidden lg:flex items-center gap-5">
           <HoverStat
             label="CPU"
-            value={loading ? "..." : `${totalCpu.toFixed(1)}%`}
+            value={loading ? "..." : formatPercent(totalCpu)}
+            reserve={PERCENT_MAX_CHARS}
             dark={dark}
             nodes={nodes}
-            renderNodeValue={(n) => `${n.stats?.cpuPercent.toFixed(1) ?? "—"}%`}
+            renderNodeValue={(n) => (n.stats ? formatPercent(n.stats.cpuPercent) : "—%")}
           />
           <span className={`text-xs ${c("text-ink-border", "text-light-border")}`}>|</span>
           <HoverStat
             label="Memory"
             value={loading ? "..." : formatBytes(totalMemory)}
+            reserve={BYTES_MAX_CHARS}
             dark={dark}
             nodes={nodes}
             renderNodeValue={(n) => formatBytes(Number(n.stats?.memoryInuse ?? 0))}
@@ -179,6 +182,7 @@ export function HeaderBar({
           <HoverStat
             label="Storage"
             value={loading ? "..." : formatBytes(totalStorage)}
+            reserve={BYTES_MAX_CHARS}
             dark={dark}
             nodes={nodes}
             renderNodeValue={(n) => formatBytes(nodeStorageBytes(n))}
@@ -293,12 +297,14 @@ export function HeaderBar({
 function HoverStat({
   label,
   value,
+  reserve,
   dark,
   nodes,
   renderNodeValue,
 }: Readonly<{
   label: string;
   value: string;
+  reserve: number;
   dark: boolean;
   nodes: ClusterNode[];
   renderNodeValue: (node: ClusterNode) => string;
@@ -325,7 +331,7 @@ function HoverStat({
       onMouseEnter={multiNode ? showTooltip : undefined}
       onMouseLeave={multiNode ? hideTooltip : undefined}
     >
-      <StatPill label={label} value={value} dark={dark} />
+      <StatPill label={label} value={value} reserve={reserve} dark={dark} />
       {hover && multiNode && (
         <div
           className={`absolute top-full right-0 mt-2 z-50 rounded-lg border shadow-lg py-2 px-3 min-w-40 ${c(
@@ -340,9 +346,9 @@ function HoverStat({
               <span className={`text-[0.75em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}>
                 {middleTruncate(node.name || encode(node.id).slice(0, 8), 14)}
               </span>
-              <span className={`text-[0.75em] font-mono shrink-0 ${c("text-text-bright", "text-light-text-bright")}`}>
+              <LiveValue dark={dark} className="text-[0.75em] shrink-0">
                 {node.stats ? renderNodeValue(node) : "—"}
-              </span>
+              </LiveValue>
             </div>
           ))}
         </div>

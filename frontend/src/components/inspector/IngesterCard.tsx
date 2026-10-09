@@ -3,6 +3,7 @@ import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { useIngesterStatus, useIngesterAlive, useNodeRegistry } from "../../api/hooks";
 import { formatBytes } from "../../utils/units";
 import { Badge } from "../Badge";
+import { LiveValue } from "../LiveValue";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { NodeBadge } from "../settings/NodeBadge";
@@ -134,15 +135,9 @@ function IngesterDetail({ ingester, nodeStatus, liveNodeIds, dark }: Readonly<{
                 </div>
               )}
             </div>
-            <span
-              className={`font-mono ${
-                stat.isError
-                  ? "text-severity-error"
-                  : c("text-text-bright", "text-light-text-bright")
-              }`}
-            >
+            <LiveValue dark={dark} tone={stat.isError ? "error" : "bright"} align="start">
               {stat.value}
-            </span>
+            </LiveValue>
           </div>
         ))}
       </div>

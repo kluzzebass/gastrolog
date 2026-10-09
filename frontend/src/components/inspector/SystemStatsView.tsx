@@ -4,7 +4,15 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import type { ClusterNode } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 // eslint-disable-next-line no-restricted-imports -- NodeStats is a passthrough type from Node.stats; no model wrap planned
 import type { NodeStats } from "../../api/gen/gastrolog/v1/cluster_pb";
-import { formatBytes, formatRate } from "../../utils/units";
+import {
+  RATE_PER_SEC_MAX_CHARS,
+  formatBytes,
+  formatBytesPerSec,
+  formatPercent,
+  formatRatePerSec,
+} from "../../utils/units";
+import { LiveValue } from "../LiveValue";
+import { LIVE_TEXT } from "../liveValueStyle";
 import { Spark } from "../Spark";
 // eslint-disable-next-line no-restricted-imports -- ThroughputRate is a passthrough stats type; no model wrap planned
 import type { ThroughputRate } from "../../api/gen/gastrolog/v1/vault_pb";
@@ -46,7 +54,7 @@ function CompactView({
       <section>
         <CompactSectionLabel label="System" dark={dark} />
         <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-          <CompactStatRow label="CPU" value={`${stats.cpuPercent.toFixed(1)}%`} mono dark={dark} />
+          <CompactStatRow label="CPU" value={formatPercent(stats.cpuPercent)} mono dark={dark} />
           <CompactStatRow label="Goroutines" value={stats.goroutines.toLocaleString()} mono dark={dark} />
           <CompactStatRow label="Mem In-Use" value={formatBytes(Number(stats.memoryInuse))} mono dark={dark} />
           <CompactStatRow label="RSS" value={formatBytes(Number(stats.memoryRss))} mono dark={dark} />
@@ -107,14 +115,14 @@ function CompactView({
             {/* Ingest pressure raises no alarm: a throttled pipeline is a
                 handled condition, not one waiting on an operator. It is shown
                 here, next to the queue depth it derives from, and only once it
-                leaves normal — at normal there is nothing to say. */}
-            {stats.ingestPressureLevel !== "" && stats.ingestPressureLevel !== "normal" && (
-              <CompactStatRow
-                label="Pressure"
-                value={stats.ingestPressureLevel}
-                dark={dark}
-              />
-            )}
+                leaves normal — at normal there is nothing to say, so the row
+                is held invisible rather than unmounted. */}
+            <CompactStatRow
+              label="Pressure"
+              value={stats.ingestPressureLevel || "normal"}
+              reserved={stats.ingestPressureLevel === "" || stats.ingestPressureLevel === "normal"}
+              dark={dark}
+            />
           </div>
         </section>
       )}
@@ -213,47 +221,60 @@ function CompactRateRow({
   return (
     <div
       className="flex items-baseline justify-between gap-4"
-      title={`1m ${formatRate(rate?.avg1mPerSec ?? 0)}/s · 5m ${formatRate(rate?.avg5mPerSec ?? 0)}/s · 15m ${formatRate(rate?.avg15mPerSec ?? 0)}/s (EWMA)`}
+      title={`1m ${formatRatePerSec(rate?.avg1mPerSec ?? 0)} · 5m ${formatRatePerSec(rate?.avg5mPerSec ?? 0)} · 15m ${formatRatePerSec(rate?.avg15mPerSec ?? 0)} (EWMA)`}
     >
       <span
         className={`text-[0.75em] font-medium uppercase tracking-wider shrink-0 ${c("text-text-muted", "text-light-text-muted")}`}
       >
         {label}
       </span>
-      <span className={`flex items-center gap-2 text-[0.8em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
+      <span className="flex items-center gap-2 text-[0.8em]">
         <span className={c("text-copper/70", "text-copper/60")}>
           <Spark values={rate?.spark ?? []} width={40} height={12} />
         </span>
-        {formatRate(instant)}/s
+        <LiveValue dark={dark} tone="muted" reserve={RATE_PER_SEC_MAX_CHARS}>
+          {formatRatePerSec(instant)}
+        </LiveValue>
       </span>
     </div>
   );
 }
 
+// `reserved` holds the row's space while it has nothing to say, so a value
+// that comes and goes never moves the rows below it.
 function CompactStatRow({
   label,
   value,
   mono = false,
+  reserved = false,
   dark,
 }: Readonly<{
   label: string;
   value: string | number;
   mono?: boolean;
+  reserved?: boolean;
   dark: boolean;
 }>) {
   const c = useThemeClass(dark);
   return (
-    <div className="flex items-baseline justify-between gap-4">
+    <div
+      className={`flex items-baseline justify-between gap-4 ${reserved ? "invisible" : ""}`}
+      aria-hidden={reserved || undefined}
+    >
       <span
         className={`text-[0.75em] font-medium uppercase tracking-wider shrink-0 ${c("text-text-muted", "text-light-text-muted")}`}
       >
         {label}
       </span>
-      <span
-        className={`text-[0.8em] text-right ${mono ? "font-mono" : ""} ${c("text-text-muted", "text-light-text-muted")}`}
-      >
-        {value}
-      </span>
+      {mono ? (
+        <LiveValue dark={dark} tone="muted" className="text-[0.8em]">
+          {value}
+        </LiveValue>
+      ) : (
+        <span className={`text-[0.8em] text-right ${LIVE_TEXT} ${c("text-text-muted", "text-light-text-muted")}`}>
+          {value}
+        </span>
+      )}
     </div>
   );
 }
@@ -358,10 +379,10 @@ export function ClusterSummaryView({
       <section>
         <CompactSectionLabel label="Throughput" dark={dark} />
         <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-          <CompactStatRow label="Routed" value={`${formatRate(totalRoutedRate)}/s`} mono dark={dark} />
-          <CompactStatRow label="Matched" value={`${formatRate(totalMatchedRate)}/s`} mono dark={dark} />
-          <CompactStatRow label="Appended" value={`${formatRate(totalAppendRate)}/s`} mono dark={dark} />
-          <CompactStatRow label="Append data" value={`${formatBytes(totalAppendBytesRate)}/s`} mono dark={dark} />
+          <CompactStatRow label="Routed" value={formatRatePerSec(totalRoutedRate)} mono dark={dark} />
+          <CompactStatRow label="Matched" value={formatRatePerSec(totalMatchedRate)} mono dark={dark} />
+          <CompactStatRow label="Appended" value={formatRatePerSec(totalAppendRate)} mono dark={dark} />
+          <CompactStatRow label="Append data" value={formatBytesPerSec(totalAppendBytesRate)} mono dark={dark} />
         </div>
       </section>
 
@@ -370,7 +391,7 @@ export function ClusterSummaryView({
       <section>
         <CompactSectionLabel label="Combined Resources" dark={dark} />
         <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-          <CompactStatRow label="CPU" value={`${totalCpu.toFixed(1)}%`} mono dark={dark} />
+          <CompactStatRow label="CPU" value={formatPercent(totalCpu)} mono dark={dark} />
           <CompactStatRow label="Goroutines" value={totalGoroutines.toLocaleString()} mono dark={dark} />
           <CompactStatRow label="RSS" value={formatBytes(totalRss)} mono dark={dark} />
           <CompactStatRow label="Heap Alloc" value={formatBytes(totalHeapAlloc)} mono dark={dark} />

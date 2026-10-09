@@ -4,7 +4,8 @@
  */
 import { Spark } from "../Spark";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { formatBytes } from "../../utils";
+import { BYTES_PER_SEC_MAX_CHARS, formatBytesPerSec } from "../../utils/units";
+import { liveValueClass, reserveChars } from "../liveValueStyle";
 import { useVaults } from "../../api/hooks";
 // eslint-disable-next-line no-restricted-imports -- NodeStats passthrough from Node.stats gossip
 import type { NodeStats } from "../../api/gen/gastrolog/v1/cluster_pb";
@@ -246,16 +247,18 @@ function TrafficRow({
       </td>
       <td className={tdMetric}>
         <MetricCell
-          rate={hasHistory ? `${formatBytes(Math.round(txBytesPerSec))}/s` : "—"}
+          rate={hasHistory ? formatBytesPerSec(Math.round(txBytesPerSec)) : "—"}
           spark={txSpark}
           sparkClass="text-copper"
+          c={c}
         />
       </td>
       <td className={tdMetric}>
         <MetricCell
-          rate={hasHistory ? `${formatBytes(Math.round(rxBytesPerSec))}/s` : "—"}
+          rate={hasHistory ? formatBytesPerSec(Math.round(rxBytesPerSec)) : "—"}
           spark={rxSpark}
           sparkClass="text-copper-dim"
+          c={c}
         />
       </td>
     </tr>
@@ -266,14 +269,18 @@ function MetricCell({
   rate,
   spark,
   sparkClass,
+  c,
 }: Readonly<{
   rate: string;
   spark: readonly number[];
   sparkClass: string;
+  c: (dark: string, light: string) => string;
 }>) {
   return (
     <div className="inline-flex items-center justify-end gap-2">
-      <span>{rate}</span>
+      <span className={liveValueClass(c, "inherit")} style={reserveChars(BYTES_PER_SEC_MAX_CHARS)}>
+        {rate}
+      </span>
       <span className={sparkClass}>
         <Spark values={spark} />
       </span>

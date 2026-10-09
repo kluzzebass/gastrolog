@@ -1,7 +1,8 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useVaults } from "../../api/hooks";
 import type { Storage } from "../../api/model/storage";
-import { formatBytes } from "../../utils/units";
+import { BYTES_MAX_CHARS, formatBytes } from "../../utils/units";
+import { LiveValue } from "../LiveValue";
 import { protoToInstant, relativeTime } from "../../utils/temporal";
 import { Badge } from "../Badge";
 import { CogIcon } from "../icons";
@@ -82,7 +83,11 @@ export function StorageCard({
             <Badge variant="warn" dark={dark}>warn</Badge>
           )}
           <Badge variant="muted" dark={dark}>
-            {formatBytes(storage.freeBytes)} / {formatBytes(storage.totalBytes)}
+            <LiveValue dark={dark} tone="inherit" reserve={BYTES_MAX_CHARS}>
+              {formatBytes(storage.freeBytes)}
+            </LiveValue>
+            {" / "}
+            {formatBytes(storage.totalBytes)}
           </Badge>
           {onOpenSettings && (
             <CrossLinkBadge dark={dark} title="Open in Settings" onClick={onOpenSettings}>
@@ -156,16 +161,22 @@ function StorageDetail({
           <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2 text-[0.85em]">
             <div className="flex items-baseline gap-2">
               <span className={labelClass}>Free</span>
-              <span className={`font-mono ${valueClass}`}>{formatBytes(storage.freeBytes)}</span>
+              <LiveValue dark={dark} reserve={BYTES_MAX_CHARS}>
+                {formatBytes(storage.freeBytes)}
+              </LiveValue>
             </div>
             <div className="flex items-baseline gap-2">
               <span className={labelClass}>Total</span>
-              <span className={`font-mono ${valueClass}`}>{formatBytes(storage.totalBytes)}</span>
+              <LiveValue dark={dark} align="start">
+                {formatBytes(storage.totalBytes)}
+              </LiveValue>
             </div>
             {sampled && (
               <div className="flex items-baseline gap-2">
                 <span className={labelClass}>Sampled</span>
-                <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>{sampled}</span>
+                <LiveValue dark={dark} tone="muted" align="start">
+                  {sampled}
+                </LiveValue>
               </div>
             )}
             {!storage.hasSample && (
