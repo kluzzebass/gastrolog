@@ -85,11 +85,14 @@ func (m *Manager) closeMappedGLCB(id chunk.ChunkID) {
 }
 
 // WithGLCBSection implements chunk.GLCBSectionReader.
+//
+// It must not take the per-chunk lock: a search reads sections while holding
+// an open cursor on the same chunk, which already holds that lock for
+// reading, and Go's RWMutex deadlocks a recursive read against any writer
+// queued in between (delete, upload, eviction). The pin from mappedGLCB is
+// what keeps the mapping valid for fn; writers replace data.glcb only by
+// atomic rename, and mappedGLCB refuses a path that no longer exists.
 func (m *Manager) WithGLCBSection(id chunk.ChunkID, sectionType byte, fn func(version uint8, section []byte) error) error {
-	chunkLock := m.chunkLockFor(id)
-	chunkLock.RLock()
-	defer chunkLock.RUnlock()
-
 	blob, err := m.mappedGLCB(id)
 	if err != nil {
 		return err
