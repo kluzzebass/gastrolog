@@ -56,38 +56,37 @@ export function formatTimestamp(instant: Temporal.Instant): string {
   return `${y}-${mo}-${day} ${h}:${mi}:${s}`;
 }
 
-/** Elapsed time since a past instant, e.g. "3m 12s ago", "1h 4m ago". */
+const pad = (n: number) => String(n).padStart(2, "0");
+
+// Two-unit span with a zero-padded trailing unit ("3m 05s", "2h 07m"), so
+// the string keeps its length while the trailing unit ticks.
+function coarseSpan(totalSecs: number): string {
+  if (totalSecs < 60) return `${totalSecs}s`;
+  const mins = Math.floor(totalSecs / 60);
+  if (mins < 60) return `${mins}m ${pad(totalSecs % 60)}s`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ${pad(mins % 60)}m`;
+  return `${Math.floor(hours / 24)}d ${pad(hours % 24)}h`;
+}
+
+/** elapsed never emits more characters than this for spans under 100 days. */
+export const ELAPSED_MAX_CHARS = "59m 59s ago".length;
+
+/** Elapsed time since a past instant, e.g. "3m 05s ago", "1h 04m ago". */
 export function elapsed(instant: Temporal.Instant, now = Date.now()): string {
   const diff = now - instant.epochMilliseconds;
   if (diff < 0) return "just now";
-
-  const secs = Math.floor(diff / 1000);
-  if (secs < 60) return `${secs}s ago`;
-  const mins = Math.floor(secs / 60);
-  const remSecs = secs % 60;
-  if (mins < 60) return `${mins}m ${remSecs}s ago`;
-  const hours = Math.floor(mins / 60);
-  const remMins = mins % 60;
-  if (hours < 24) return `${hours}h ${remMins}m ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ${hours % 24}h ago`;
+  return `${coarseSpan(Math.floor(diff / 1000))} ago`;
 }
 
-/** Countdown to a future instant, e.g. "in 42s", "in 3m 12s". */
+/** countdown never emits more characters than this for spans under 100 days. */
+export const COUNTDOWN_MAX_CHARS = "in 59m 59s".length;
+
+/** Countdown to a future instant, e.g. "in 42s", "in 3m 05s". */
 export function countdown(instant: Temporal.Instant, now = Date.now()): string {
   const diff = instant.epochMilliseconds - now;
   if (diff <= 0) return "now";
-
-  const secs = Math.floor(diff / 1000);
-  if (secs < 60) return `in ${secs}s`;
-  const mins = Math.floor(secs / 60);
-  const remSecs = secs % 60;
-  if (mins < 60) return `in ${mins}m ${remSecs}s`;
-  const hours = Math.floor(mins / 60);
-  const remMins = mins % 60;
-  if (hours < 24) return `in ${hours}h ${remMins}m`;
-  const days = Math.floor(hours / 24);
-  return `in ${days}d ${hours % 24}h`;
+  return `in ${coarseSpan(Math.floor(diff / 1000))}`;
 }
 
 /** Locale time with fractional seconds (for log entry timestamps). */
