@@ -6,6 +6,7 @@ import { useRouteStats } from "../../api/hooks/useRouteStats";
 import { useRoutes, useVaults } from "../../api/hooks";
 import { idFromBytes, type EntityID } from "../../api/model/id";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
+import { formatCount } from "../../utils/units";
 interface RouteStatsViewProps {
   dark: boolean;
 }
@@ -261,11 +262,4 @@ function StatBox({
       </div>
     </div>
   );
-}
-
-function formatCount(n: bigint | number | string): string {
-  const num = Number(n);
-  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
-  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
-  return num.toLocaleString();
 }

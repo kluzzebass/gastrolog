@@ -1,4 +1,5 @@
 import { SEVERITY_COLOR_MAP, SEVERITY_LEVELS, SEVERITIES } from "../../lib/severity";
+import { formatCount } from "../../utils/units";
 
 /** Color cycle for multi-series line charts — CSS variables matching the severity palette. */
 export const SERIES_COLORS = [
@@ -47,8 +48,7 @@ export function resolveColor(cssColor: string): string {
 export const formatChartValue = (v: number): string => {
   const abs = Math.abs(v);
   const sign = v < 0 ? "-" : "";
-  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(1)}K`;
+  if (Number(abs.toFixed(1)) >= 1_000) return `${sign}${formatCount(Math.max(abs, 1_000))}`;
   return Number.isInteger(v) ? String(v) : v.toFixed(1);
 };
 
