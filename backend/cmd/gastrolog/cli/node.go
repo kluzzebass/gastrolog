@@ -213,21 +213,19 @@ func newNodeListStorageCmd() *cobra.Command {
 				}
 			}
 
-			// Build node name lookup.
+			configs := nodeStorageConfigsFor(resp.Msg.NodeStorageConfigs, filterNodeID)
+
+			p := newPrinter(outputFormat(cmd))
+			if outputFormat(cmd) == "json" {
+				return p.json(configs)
+			}
+
 			nodeNames := make(map[string]string)
 			for _, n := range resp.Msg.NodeConfigs {
 				nodeNames[glid.FromBytes(n.Id).String()] = n.Name
 			}
-
-			p := newPrinter(outputFormat(cmd))
-			if outputFormat(cmd) == "json" {
-				return p.json(resp.Msg.NodeStorageConfigs)
-			}
 			var rows [][]string
-			for _, nsc := range resp.Msg.NodeStorageConfigs {
-				if filterNodeID != "" && string(nsc.NodeId) != filterNodeID {
-					continue
-				}
+			for _, nsc := range configs {
 				nscNodeStr := formatIDBytes(nsc.NodeId)
 				nodeName := nodeNames[nscNodeStr]
 				if nodeName == "" && len(nscNodeStr) > 16 {
@@ -263,6 +261,19 @@ func thresholdExprLabel(expr string, isDefault bool) string {
 		return expr + " (default)"
 	}
 	return expr
+}
+
+// nodeStorageConfigsFor returns the storage configs list-storage renders:
+// the one for nodeID, or all of them when nodeID is empty. Never nil, so
+// the JSON output is always an array.
+func nodeStorageConfigsFor(nscs []*v1.NodeStorageConfig, nodeID string) []*v1.NodeStorageConfig {
+	out := make([]*v1.NodeStorageConfig, 0, len(nscs))
+	for _, nsc := range nscs {
+		if nodeID == "" || string(nsc.NodeId) == nodeID {
+			out = append(out, nsc)
+		}
+	}
+	return out
 }
 
 // fileStoragesForNode returns the existing FileStorages for nodeID. NodeId on

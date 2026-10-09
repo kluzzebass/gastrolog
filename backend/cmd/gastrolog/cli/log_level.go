@@ -165,15 +165,13 @@ func newLogLevelComponentsCmd() *cobra.Command {
 				return err
 			}
 			prefix, _ := cmd.Flags().GetString("prefix")
+			components := componentsWithPrefix(resp.Msg.GetComponents(), prefix)
 			p := newPrinter(outputFormat(cmd))
 			if outputFormat(cmd) == "json" {
-				return p.json(resp.Msg.GetComponents())
+				return p.json(components)
 			}
 			rows := [][]string{}
-			for _, c := range resp.Msg.GetComponents() {
-				if prefix != "" && !strings.HasPrefix(c.GetPath(), prefix) {
-					continue
-				}
+			for _, c := range components {
 				rows = append(rows, []string{
 					c.GetPath(),
 					levelEnumLabel(c.GetEffectiveLevel()),
@@ -186,6 +184,19 @@ func newLogLevelComponentsCmd() *cobra.Command {
 	}
 	cmd.Flags().String("prefix", "", "only list components whose path starts with this prefix")
 	return cmd
+}
+
+// componentsWithPrefix returns the components whose path starts with prefix
+// (all of them when prefix is empty). Never nil, so the JSON output is
+// always an array.
+func componentsWithPrefix(components []*v1.LogComponentInfo, prefix string) []*v1.LogComponentInfo {
+	out := make([]*v1.LogComponentInfo, 0, len(components))
+	for _, c := range components {
+		if strings.HasPrefix(c.GetPath(), prefix) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // upsertRule replaces a rule with the same pattern, or appends if new.
