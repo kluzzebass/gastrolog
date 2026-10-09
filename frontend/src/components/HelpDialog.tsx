@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Dialog } from "./Dialog";
 import { useThemeClass } from "../hooks/useThemeClass";
-import { helpTopics, findTopic, resolveTopicId, allTopics } from "../help/topics";
+import { helpTopics, findTopic, resolveTopicId, allTopics, parseHelpRef } from "../help/topics";
 import type { HelpTopic } from "../help/topics";
 import { buildMarkdownComponents } from "./helpMarkdownComponents";
 import { markdownUrlTransform } from "../lib/markdownUrlTransform";
@@ -48,7 +48,13 @@ interface SearchEntry {
 
 export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings }: Readonly<HelpDialogProps>) {
   const c = useThemeClass(dark);
-  const activeId = resolveTopicId(topicId ?? helpTopics[0]?.id ?? "");
+  const helpRef = topicId ?? helpTopics[0]?.id ?? "";
+  const { topicId: refTopicId, anchor } = parseHelpRef(helpRef);
+  const activeId = resolveTopicId(refTopicId);
+  // The anchor scrolls into view once per reference, so later re-renders
+  // leave the reader's scroll position alone.
+  const [scrolledRef, setScrolledRef] = useState<string | null>(null);
+  const scrollAnchor = scrolledRef === helpRef ? undefined : anchor;
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     // Auto-expand the branch containing the initial topic
     const initial = new Set<string>();
@@ -127,7 +133,10 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
   const navigate = (id: string) => {
     const target = findTopic(id);
     if (target) {
-      onNavigate(target.id);
+      const linkAnchor = parseHelpRef(id).anchor;
+      const nextRef = linkAnchor ? `${target.id}#${linkAnchor}` : target.id;
+      if (nextRef === helpRef) setScrolledRef(null);
+      onNavigate(nextRef);
       if (target.children) {
         setExpanded((prev) => new Set(prev).add(target.id));
       }
@@ -153,7 +162,10 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
   }
 
   const sidebarProps = { dark, activeId, expanded, searchResults, search, onSelectTopic: selectTopic, onToggleExpanded: toggleExpanded };
-  const contentProps = { dark, topic, topicContent, loadingContent, onNavigate: navigate, onOpenSettings };
+  const contentProps = {
+    dark, topic, topicContent, loadingContent, onNavigate: navigate, onOpenSettings,
+    scrollAnchor, onAnchorScrolled: () => setScrolledRef(helpRef),
+  };
   return (
     <Dialog onClose={onClose} ariaLabel="Help" dark={dark} size="xl">
       <div className="flex h-full overflow-hidden">
@@ -381,13 +393,15 @@ function SidebarContent({ dark, activeId, expanded, searchResults, search, onSel
   );
 }
 
-function ContentPanel({ dark, topic, topicContent, loadingContent, onNavigate, onOpenSettings }: Readonly<{
+function ContentPanel({ dark, topic, topicContent, loadingContent, onNavigate, onOpenSettings, scrollAnchor, onAnchorScrolled }: Readonly<{
   dark: boolean;
   topic: HelpTopic | undefined;
   topicContent: string | null;
   loadingContent: boolean;
   onNavigate: (topicId: string) => void;
   onOpenSettings?: (tab: string) => void;
+  scrollAnchor?: string;
+  onAnchorScrolled: () => void;
 }>) {
   const c = useThemeClass(dark);
   if (topic && topicContent && !loadingContent) {
@@ -397,6 +411,8 @@ function ContentPanel({ dark, topic, topicContent, loadingContent, onNavigate, o
         content={topicContent}
         onNavigate={onNavigate}
         onOpenSettings={onOpenSettings}
+        scrollAnchor={scrollAnchor}
+        onAnchorScrolled={onAnchorScrolled}
       />
     );
   }
@@ -420,14 +436,16 @@ function ContentPanel({ dark, topic, topicContent, loadingContent, onNavigate, o
  * Parent re-renders (e.g. polling in SearchView) no longer cause remounts
  * that reset scroll positions inside <pre> blocks or clear text selection.
  */
-function MarkdownContent({ dark, content, onNavigate, onOpenSettings }: Readonly<{
+function MarkdownContent({ dark, content, onNavigate, onOpenSettings, scrollAnchor, onAnchorScrolled }: Readonly<{
   dark: boolean;
   content: string;
   onNavigate: (topicId: string) => void;
   onOpenSettings?: (tab: string) => void;
+  scrollAnchor?: string;
+  onAnchorScrolled: () => void;
 }>) {
   // React Compiler handles memoization — no manual ref caching needed.
-  const components = buildMarkdownComponents(dark, onNavigate, onOpenSettings);
+  const components = buildMarkdownComponents(dark, onNavigate, onOpenSettings, scrollAnchor, onAnchorScrolled);
 
   return (
     <Suspense fallback={null}>

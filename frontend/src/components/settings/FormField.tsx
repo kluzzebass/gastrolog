@@ -163,7 +163,7 @@ export function TextInput({
 interface SelectInputProps {
   value: string;
   onChange: (v: string) => void;
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; disabled?: boolean }[];
   dark: boolean;
   disabled?: boolean;
   // See TextInput.highlighted — same purpose, applied to the select border.
@@ -199,7 +199,7 @@ export function SelectInput({
       className={`px-2.5 py-1.5 text-[0.85em] border rounded focus:outline-none transition-colors ${stateClasses} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
     >
       {options.map((o) => (
-        <option key={o.value} value={o.value}>
+        <option key={o.value} value={o.value} disabled={o.disabled}>
           {o.label}
         </option>
       ))}
