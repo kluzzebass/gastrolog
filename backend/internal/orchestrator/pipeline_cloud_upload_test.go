@@ -294,7 +294,7 @@ func TestSchedulePipelineCloudUpload_LeaderUploadsWithoutEagerRegistration(t *te
 
 	// The ONLY registration path: the lazy on-miss resolver. No
 	// RegisterExternalGLCB call — the upload must self-resolve.
-	orch.installLazyGLCBResolverOn(vaultInst, vaultID, true, fsm, chunkRoot)
+	installGLCBResolverOn(vaultInst, func() (*vaultctlfsm.FSM, string, bool) { return fsm, chunkRoot, true })
 
 	orch.schedulePipelineCloudUpload(vaultID, sealedID)
 
