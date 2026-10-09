@@ -11,13 +11,11 @@ import (
 )
 
 // NewSealCommand returns the top-level "seal" command.
-// Forces rotation: seals the active chunk for the named vault and triggers
-// the post-seal pipeline (compress → index → upload).
 func NewSealCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "seal <vault-name-or-id>",
-		Short: "Seal the active chunk and start a new one",
-		Long:  "Seal the active chunk in a vault ahead of its rotation policy. For a pipeline vault this seals the open chunk manifest on the vault's home; the sealed chunk is then built, indexed and uploaded like any other.",
+		Short: "Seal the vault's open chunks and start new ones",
+		Long:  "Seal every open chunk in a vault that holds records, ahead of its rotation policy: the pipeline's open chunk manifest and, when one is present, a chunk-manager active chunk. The sealed chunks are then built, indexed and uploaded like any other. The request runs on the vault's leader from whichever node receives it; while vault-ctl leadership is moving onto that node the seal is refused as unavailable and can be retried.",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runSeal,
 	}
@@ -38,8 +36,15 @@ func runSeal(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Sealed %d active chunk(s) in vault %s\n", resp.Msg.SealedCount, args[0])
+	fmt.Println(sealSummary(resp.Msg.SealedCount, args[0]))
 	return nil
+}
+
+func sealSummary(sealed int32, vault string) string {
+	if sealed == 0 {
+		return fmt.Sprintf("Nothing to seal in vault %s: no open chunk holds records", vault)
+	}
+	return fmt.Sprintf("Sealed %d open chunk(s) in vault %s", sealed, vault)
 }
 
 // NewReindexCommand returns the top-level "reindex" command.

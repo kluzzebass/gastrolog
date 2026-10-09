@@ -131,12 +131,12 @@ describe("VaultsSettings", () => {
     expect(saveBtn.disabled).toBe(true);
   });
 
-  test("rotate calls sealVault API", async () => {
-    m(mocks.vaultClient, "sealVault").mockResolvedValueOnce({});
+  test("rotate calls sealVault API and reports the chunks sealed", async () => {
+    m(mocks.vaultClient, "sealVault").mockResolvedValueOnce({ sealedCount: 2 });
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getByText } = renderWritable(<VaultsSettings dark />, {
+    const { getByText, findByText } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -146,6 +146,22 @@ describe("VaultsSettings", () => {
     await waitFor(() => {
       expect(m(mocks.vaultClient, "sealVault")).toHaveBeenCalledTimes(1);
     });
+    expect(await findByText("Sealed 2 open chunk(s)")).toBeTruthy();
+  });
+
+  test("rotate with nothing open says nothing was sealed", async () => {
+    m(mocks.vaultClient, "sealVault").mockResolvedValueOnce({ sealedCount: 0 });
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], sampleConfig);
+
+    const { getByText, findByText } = renderWritable(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    fireEvent.click(getByText("vault-alpha"));
+    fireEvent.click(getByText("Rotate"));
+
+    expect(await findByText("Nothing to rotate: no open chunk holds records")).toBeTruthy();
   });
 
   test("reindex calls reindexVault API", async () => {

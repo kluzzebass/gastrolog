@@ -3299,7 +3299,7 @@ func (x *SealVaultRequest) GetVault() string {
 
 type SealVaultResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	SealedCount   int32                  `protobuf:"varint,1,opt,name=sealed_count,json=sealedCount,proto3" json:"sealed_count,omitempty"` // number of vaults whose active chunk was sealed
+	SealedCount   int32                  `protobuf:"varint,1,opt,name=sealed_count,json=sealedCount,proto3" json:"sealed_count,omitempty"` // number of open chunks sealed; 0 when none held records
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
