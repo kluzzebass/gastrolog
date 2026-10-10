@@ -3,20 +3,12 @@ import { usePipelineBacklog, usePipelineBacklogContribution, useNodeRegistry } f
 import { DegradedPeersBadge } from "../DegradedPeersBadge";
 import { idFromBytes, type EntityID } from "../../api/model/id";
 import { protoToInstant, instantToDate, formatDateTimeShort } from "../../utils/temporal";
-import { formatBytes } from "../../utils/units";
+import { formatBytes, formatCount } from "../../utils/units";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
 
 interface PipelineBacklogViewProps {
   vaultId: string;
   dark: boolean;
-}
-
-function formatCount(n: number | bigint | undefined): string {
-  if (n === undefined) return "—";
-  const num = Number(n);
-  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
-  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
-  return num.toLocaleString();
 }
 
 function formatCountAndBytes(count: number, bytes: bigint): string {

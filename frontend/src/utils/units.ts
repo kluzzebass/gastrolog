@@ -16,10 +16,73 @@ export function formatBytes(b: bigint | number): string {
   return `${n} B`;
 }
 
+/**
+ * Count suffixes, largest first. K/M/B/T are the short-scale names; past
+ * trillion the ladder continues with the SI letters P and E, which agree
+ * with T (tera = trillion) and with the PB/EB byte units shown alongside.
+ * E covers the whole uint64 range (max ≈ 18.4E).
+ */
+const COUNT_SCALES: ReadonlyArray<readonly [bigint, string]> = [
+  [1_000_000_000_000_000_000n, "E"],
+  [1_000_000_000_000_000n, "P"],
+  [1_000_000_000_000n, "T"],
+  [1_000_000_000n, "B"],
+  [1_000_000n, "M"],
+  [1_000n, "K"],
+];
+
+function wholeCount(n: bigint | number | string): bigint | undefined {
+  if (typeof n === "bigint") return n;
+  if (typeof n === "string") {
+    const s = n.trim();
+    return /^\d+$/.test(s) ? BigInt(s) : wholeCount(Number(s));
+  }
+  return Number.isFinite(n) ? BigInt(Math.trunc(n)) : undefined;
+}
+
+/** One decimal of the largest scale the value reaches, rounded half-up in exact integer math. */
+function formatScaledCount(v: bigint): string {
+  let i = COUNT_SCALES.findIndex(([div]) => v >= div);
+  let [div, suffix] = COUNT_SCALES[i]!;
+  let tenths = (v * 10n + div / 2n) / div;
+  if (tenths >= 10_000n && i > 0) {
+    i--;
+    [div, suffix] = COUNT_SCALES[i]!;
+    tenths = (v * 10n + div / 2n) / div;
+  }
+  return `${tenths / 10n}.${tenths % 10n}${suffix}`;
+}
+
+/**
+ * Format a count compactly (e.g. "1.5K", "25.6B", "18.4E"). Exact across the
+ * full uint64 range: from a thousand up the scale and digits come from bigint
+ * math, so values past 2^53 lose nothing and a value that rounds to 1000.0 of
+ * one scale renders as 1.0 of the next. Below a thousand it is locale digits.
+ */
+export function formatCount(n: bigint | number | string): string {
+  const whole = wholeCount(n);
+  if (whole === undefined || whole < 1_000n) return Number(n).toLocaleString();
+  return formatScaledCount(whole);
+}
+
+/**
+ * Format a count rounded to 2 significant figures (e.g. "190K", "2.5B") so
+ * the imprecision of an estimate is visible in the digits themselves —
+ * "188,093" reads like a ground-truth count, "190K" like an approximation.
+ */
+export function formatApproxCount(n: number): string {
+  if (n < 100) return n.toString();
+  const magnitude = 10 ** (Math.floor(Math.log10(n)) - 1);
+  const rounded = Math.round(n / magnitude) * magnitude;
+  if (rounded < 1000) return rounded.toString();
+  const [div, suffix] = COUNT_SCALES.find(([d]) => rounded >= Number(d))!;
+  const v = rounded / Number(div);
+  return v < 10 ? `${v.toFixed(1)}${suffix}` : `${Math.round(v)}${suffix}`;
+}
+
 /** Format a per-second rate to a compact count (e.g. "1.5K"); pair with a "/s" suffix. */
 export function formatRate(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  if (Math.round(n) >= 1_000) return formatCount(Math.max(n, 1_000));
   if (n >= 10) return Math.round(n).toString();
   return n.toFixed(1);
 }

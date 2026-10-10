@@ -8,6 +8,9 @@ import {
   parseDurationNanos,
   formatDurationNanos,
   formatDurationMs,
+  formatCount,
+  formatApproxCount,
+  formatRate,
 } from "./units";
 
 // Binary math, honest IEC labels: GB means 10^9, GiB means 2^30, and the
@@ -168,4 +171,185 @@ describe("roundtrip: parseDuration <-> formatDuration", () => {
   for (const s of ["30s", "5m", "1h", "1h30m"]) {
     test(s, () => expect(formatDuration(parseDuration(s))).toBe(s));
   }
+});
+
+// Reference renderings the compact count formatters must keep reproducing
+// below one thousand, so unscaled inspector output stays byte-for-byte.
+function referenceCount(n: bigint | number | string): string {
+  return Number(n).toLocaleString();
+}
+
+function referenceRate(n: number): string {
+  if (n >= 10) return Math.round(n).toString();
+  return n.toFixed(1);
+}
+
+function referenceApproxCount(n: number): string {
+  if (n < 100) return n.toString();
+  const magnitude = 10 ** (Math.floor(Math.log10(n)) - 1);
+  const rounded = Math.round(n / magnitude) * magnitude;
+  if (rounded < 1000) return rounded.toString();
+  if (rounded < 1_000_000) {
+    const k = rounded / 1000;
+    return k < 10 ? `${k.toFixed(1)}K` : `${Math.round(k)}K`;
+  }
+  if (rounded < 1_000_000_000) {
+    const m = rounded / 1_000_000;
+    return m < 10 ? `${m.toFixed(1)}M` : `${Math.round(m)}M`;
+  }
+  const b = rounded / 1_000_000_000;
+  return b < 10 ? `${b.toFixed(1)}B` : `${Math.round(b)}B`;
+}
+
+function subMillionSamples(): number[] {
+  const out: number[] = [];
+  for (let i = 0; i <= 2_000; i++) out.push(i);
+  for (let i = 2_000; i < 1_000_000; i += 37) out.push(i);
+  out.push(
+    999_949, 999_950, 999_999, 1_050, 1_150, 1_250, 99_950, 999.95, 1_000.05,
+    1_049.95, 0.5, 12.345, 9.95, 9.99, 999_949.9,
+  );
+  return out;
+}
+
+function subThousandSamples(): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < 1_000; i++) out.push(i);
+  out.push(999.4, 999.5, 999.95, 0.5, 12.345, 9.95, 9.99);
+  return out;
+}
+
+const SCALE_DIVISORS = [10n ** 3n, 10n ** 6n, 10n ** 9n, 10n ** 12n, 10n ** 15n];
+
+describe("formatCount", () => {
+  test("below 1K matches the reference rendering for number, bigint and string input", () => {
+    for (const n of subThousandSamples()) {
+      expect(formatCount(n)).toBe(referenceCount(n));
+      if (Number.isInteger(n)) {
+        expect(formatCount(BigInt(n))).toBe(referenceCount(n));
+        expect(formatCount(String(n))).toBe(referenceCount(n));
+      }
+    }
+  });
+
+  test("suffix boundaries", () => {
+    expect(formatCount(0)).toBe("0");
+    expect(formatCount(999)).toBe("999");
+    expect(formatCount(1_000)).toBe("1.0K");
+    expect(formatCount(999_949)).toBe("999.9K");
+    expect(formatCount(999_950)).toBe("1.0M");
+    expect(formatCount(999_999)).toBe("1.0M");
+    expect(formatCount(1_000_000)).toBe("1.0M");
+    expect(formatCount(999_949_999)).toBe("999.9M");
+    expect(formatCount(999_950_000)).toBe("1.0B");
+    expect(formatCount(1_000_000_000)).toBe("1.0B");
+    expect(formatCount(1_000_000_000_000)).toBe("1.0T");
+    expect(formatCount(1_000_000_000_000_000n)).toBe("1.0P");
+    expect(formatCount(1_000_000_000_000_000_000n)).toBe("1.0E");
+  });
+
+  test("tens of billions render as billions, not thousands of millions", () => {
+    expect(formatCount(25_561_234_567n)).toBe("25.6B");
+    expect(formatCount(25_561_200_000)).toBe("25.6B");
+  });
+
+  test("max uint64 formats without overflow", () => {
+    expect(formatCount(18_446_744_073_709_551_615n)).toBe("18.4E");
+    expect(formatCount("18446744073709551615")).toBe("18.4E");
+  });
+
+  test("past the largest suffix stays in E", () => {
+    expect(formatCount(10n ** 21n)).toBe("1000.0E");
+  });
+
+  test("no scale below E ever renders 1000.0", () => {
+    for (const div of SCALE_DIVISORS) {
+      const top = div * 1_000n;
+      for (const v of [top - div / 20n - 1n, top - div / 20n, top - 1n, top]) {
+        expect(formatCount(v)).not.toMatch(/^1000\.0/);
+      }
+    }
+  });
+
+  test("thousands round half-up exactly like every larger scale", () => {
+    expect(formatCount(1_049)).toBe("1.0K");
+    expect(formatCount(1_050)).toBe("1.1K");
+    expect(formatCount(1_150)).toBe("1.2K");
+    expect(formatCount(1_150_000)).toBe("1.2M");
+    expect(formatCount(1_049.95)).toBe("1.0K");
+  });
+
+  test("rounds half-up in exact integer math from 1M up", () => {
+    expect(formatCount(1_049_999)).toBe("1.0M");
+    expect(formatCount(1_050_000)).toBe("1.1M");
+    expect(formatCount(1_150_000)).toBe("1.2M");
+    expect(formatCount(1_049_999_999_999_999_999n)).toBe("1.0E");
+    expect(formatCount(1_050_000_000_000_000_000n)).toBe("1.1E");
+  });
+
+  test("fractional numbers from 1M up never round across a boundary twice", () => {
+    expect(formatCount(1_049_999.9)).toBe("1.0M");
+    expect(formatCount(2_500_000.5)).toBe("2.5M");
+    expect(formatCount("2500000.7")).toBe("2.5M");
+  });
+
+  test("negative, invalid and non-finite input render like the reference", () => {
+    for (const n of [-1, -999, -1_000, -1_500, -999_999, -5_000_000, Number.NaN, Number.NEGATIVE_INFINITY]) {
+      expect(formatCount(n)).toBe(referenceCount(n));
+    }
+    expect(formatCount(-25_561_234_567n)).toBe(referenceCount(-25_561_234_567n));
+    expect(formatCount("abc")).toBe("NaN");
+    expect(formatCount("")).toBe("0");
+  });
+
+  test("positive infinity renders as the locale infinity sign", () => {
+    expect(formatCount(Number.POSITIVE_INFINITY)).toBe(Number.POSITIVE_INFINITY.toLocaleString());
+  });
+});
+
+describe("formatRate", () => {
+  test("below 1K matches the reference rendering", () => {
+    for (const n of subThousandSamples().filter((s) => Math.round(s) < 1_000)) {
+      expect(formatRate(n)).toBe(referenceRate(n));
+    }
+    for (const n of [-1, -12.5, Number.NaN]) expect(formatRate(n)).toBe(referenceRate(n));
+  });
+
+  test("small rates keep one decimal, mid rates round to integers", () => {
+    expect(formatRate(0)).toBe("0.0");
+    expect(formatRate(9.4)).toBe("9.4");
+    expect(formatRate(10)).toBe("10");
+    expect(formatRate(999.4)).toBe("999");
+    expect(formatRate(1_000)).toBe("1.0K");
+    expect(formatRate(999.5)).toBe("1.0K");
+    expect(formatRate(999.95)).toBe("1.0K");
+    expect(formatRate(999_950)).toBe("1.0M");
+  });
+
+  test("large rates use the full suffix ladder", () => {
+    expect(formatRate(1_500_000)).toBe("1.5M");
+    expect(formatRate(25_561_234_567)).toBe("25.6B");
+    expect(formatRate(3.2e12)).toBe("3.2T");
+  });
+});
+
+describe("formatApproxCount", () => {
+  test("below 1T matches the reference rendering", () => {
+    const samples = subMillionSamples();
+    for (let n = 1_000_000; n < 1e12; n = Math.floor(n * 1.37) + 11) samples.push(n);
+    for (const n of samples) expect(formatApproxCount(n)).toBe(referenceApproxCount(n));
+  });
+
+  test("two significant figures per suffix", () => {
+    expect(formatApproxCount(99)).toBe("99");
+    expect(formatApproxCount(188_093)).toBe("190K");
+    expect(formatApproxCount(2_540_000)).toBe("2.5M");
+    expect(formatApproxCount(999_500)).toBe("1.0M");
+  });
+
+  test("suffixes continue past billions", () => {
+    expect(formatApproxCount(25_000_000_000_000)).toBe("25T");
+    expect(formatApproxCount(1.94e15)).toBe("1.9P");
+    expect(formatApproxCount(1.8e19)).toBe("18E");
+  });
 });
