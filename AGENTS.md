@@ -84,6 +84,8 @@ When creating a **question** issue, always draft the title and description first
 
 **Stacked branches are allowed** when a follow-up issue naturally builds on an in-review branch (e.g. you discover a related bug while validating the parent fix and don't want to wait for merge). Branch the child off the parent's HEAD, keep each branch single-issue, and either (a) merge the stack as one when both close together, or (b) merge the parent into the stack branch first and rebase the child onto that stack tip. What is NOT allowed is **lumping** — multiple issues' commits intermixed on a single branch with no clean revertable history. Stacking ≠ lumping: each branch still owns exactly one issue's work.
 
+**Parallel issues share a batch base branch.** When several issues are worked at the same time (parallel agents, a bug sweep), first create one base branch off `main` — `batch/<YYYY-MM-DD>-<topic>`, the only branch name that carries no issue ID — and branch every issue off it. On close, merge each issue branch into the base branch with `--no-ff`, so every issue stays one revertable merge commit, and run the full gates on the base branch after each merge: two issues can merge without a textual conflict and still not compile or behave together, and only the combined tree shows it. When the batch is done, open **one** PR from the base branch to `main`, listing every issue it closes. Never open one PR per parallel issue: GitHub cannot run the dcat merge driver, so every PR after the first conflicts on the tracker, and a clean textual merge on GitHub can still leave `main` broken.
+
 ### Handoff checklist
 
 Run down this table before moving an issue to in_review, and post the
@@ -137,6 +139,7 @@ Do not open PRs for routine issue closes on a stack branch — merge the feature
 |-------------|------|----------|
 | **`main`** | Released/stable baseline. Direct push blocked. | — |
 | **Stack / integration branch** | Epic or program integration tip; **merge target on issue close** for work in that stack. | `pipeline-v3`, `feat/gastrolog-4ecqt-fan-out-v2` |
+| **Batch base branch** | Integration tip for issues worked in parallel; **merge target on issue close**; lands on `main` as one PR. | `batch/2026-10-10-bug-fixes` |
 | **Feature branch** | Single-issue work (`<type>/gastrolog-<id>-…`). Branch off the stack branch (or its parent feature branch when stacked). | `feat/gastrolog-5u73c-chunking-materialize-at-seal` |
 
 Before starting work, confirm which **stack branch** the issue belongs to (epic description, issue text, or ask the user). **Never assume `main`.**
