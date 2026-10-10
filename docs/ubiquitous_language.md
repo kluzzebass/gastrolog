@@ -356,6 +356,14 @@ gRPC transport:
   answer to "which chunks should exist in this vault?" Compared against
   local disk in the reconcile sweep; disagreement means orphan cleanup.
 
+- **Pending delete** (`vaultctlfsm.PendingDelete`) — a chunk delete
+  committed in the vault FSM (`CmdRequestDelete`) and awaiting a
+  `CmdAckDelete` from every node in its `ExpectedFrom` set; the manifest
+  entry goes when the last ack commits (or a node prune drains the set).
+  The chunk has already left the retained set: retention sweeps and the
+  age/count bound re-check skip it, while the manifest and residency keep
+  reporting it until the acks land.
+
 ### Raft primitives (hashicorp/raft vocabulary)
 
 - **Term** — logical clock; increments on every election.
@@ -588,7 +596,9 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
     flapping. A violation counts as refusal-worthy only once the
     retention runner has SWEPT AND FAILED TO CLEAR it
     (`retentionRunner.checkBoundViolations`, called at every sweep exit
-    against a fresh post-sweep chunk listing) — clock-free, no streak, no
+    against a fresh post-sweep chunk listing that skips pending deletes, so
+    a delete the sweep committed counts as cleared while nodes still ack
+    it) — clock-free, no streak, no
     slack duration: the sweep's own outcome, re-observed once per sweep,
     IS the predicate. `MaxSize`'s refuse check stays instantaneous
     (measured every disk-guard tick, unchanged) — it is resource-backed

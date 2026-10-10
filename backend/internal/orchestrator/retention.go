@@ -756,6 +756,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	unreadable := r.unreadable
 	vaultInst := r.findVaultInstance()
 	r.mu.Unlock()
+	deleting := pendingDeleteSet(vaultInst)
 
 	// Overlay each meta with FSM state so selectRetentionCandidates'
 	// meta.Sealed gate reflects cluster truth — Sealing chunks (active-form
@@ -794,7 +795,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	manifest, manifestKnown := buildManifestSet(vaultInst)
 
 	now := time.Now()
-	sealed, filtered := selectRetentionCandidates(metas, streamed, manifest, manifestKnown, unreadable, now)
+	sealed, filtered := selectRetentionCandidates(metas, streamed, manifest, manifestKnown, deleting, unreadable, now)
 
 	if len(sealed) == 0 {
 		r.noteIdle("no eligible chunks", len(metas), filtered)
@@ -958,7 +959,7 @@ func (r *retentionRunner) noteIdle(reason string, metas int, f candidateFilterSt
 	r.logger.Info("retention sweep idle",
 		"vault", r.vaultName, "reason", reason, "chunks_listed", metas,
 		"filtered_unsealed", f.unsealed, "filtered_ghosts", f.ghosts,
-		"filtered_unreadable", f.unreadable)
+		"filtered_deleting", f.deleting, "filtered_unreadable", f.unreadable)
 }
 
 // noteUnenforceable reports, throttled, that a vault's retention rules
@@ -1122,14 +1123,25 @@ func (r *retentionRunner) checkBoundViolations(rules []retentionRule) {
 // selectRetentionCandidates): a chunk that keeps failing to read is an
 // honest sweep failure — it belongs in the violation count, not silently
 // excluded.
+//
+// Committed-delete filter: a chunk with a pending delete has left the
+// retained set — its delete is committed in the FSM and nothing undoes it —
+// but its manifest entry stays until every expected node acks, and every
+// node, the leader included, acks asynchronously after the sweep. Counting
+// it would refuse admission over deletes the sweep already committed. The
+// manifest and residency keep reporting the chunk until the acks land; only
+// the bound verdict looks past it.
 func (r *retentionRunner) currentSealedForBoundCheck() ([]chunk.ChunkMeta, bool) {
+	r.mu.Lock()
+	vaultInst := r.findVaultInstance()
+	r.mu.Unlock()
+	// Read before the chunk list and the manifest: a delete that finalizes
+	// in between then leaves both, rather than surviving as a counted chunk.
+	deleting := pendingDeleteSet(vaultInst)
 	metas, err := r.cm.List()
 	if err != nil {
 		return nil, false
 	}
-	r.mu.Lock()
-	vaultInst := r.findVaultInstance()
-	r.mu.Unlock()
 	if vaultInst != nil {
 		for i := range metas {
 			metas[i] = r.orch.groundChunkMeta(r.vaultID, metas[i])
@@ -1145,9 +1157,25 @@ func (r *retentionRunner) currentSealedForBoundCheck() ([]chunk.ChunkMeta, bool)
 		if manifestKnown && !manifest[m.ID] {
 			continue // ghost
 		}
+		if deleting[m.ID] {
+			continue
+		}
 		sealed = append(sealed, m)
 	}
 	return sealed, true
+}
+
+// pendingDeleteSet returns the chunks whose delete is committed in the
+// vault-ctl FSM and still awaiting acks. Empty without an FSM.
+func pendingDeleteSet(vaultInst *VaultInstance) map[chunk.ChunkID]bool {
+	set := make(map[chunk.ChunkID]bool)
+	if vaultInst == nil || vaultInst.ListPendingDeletes == nil {
+		return set
+	}
+	for _, id := range vaultInst.ListPendingDeletes() {
+		set[id] = true
+	}
+	return set
 }
 
 // buildManifestSet returns the FSM-known chunk IDs for the given instance and a
@@ -1174,13 +1202,22 @@ func buildManifestSet(vaultInst *VaultInstance) (map[chunk.ChunkID]bool, bool) {
 
 // selectRetentionCandidates filters chunk metas to the set retention can act
 // on right now: sealed, not currently being streamed, recognized by the FSM
-// manifest (when available), and past any unreadable-retry backoff window.
+// manifest (when available), without a committed delete, and past any
+// unreadable-retry backoff window.
+//
+// A chunk with a committed delete is already leaving and is not part of the
+// retained set the policies measure. Left in, it skews every policy that
+// ranks chunks: once this node has deleted its own copy, the chunk re-enters
+// from the manifest after every listed chunk, out of WriteStart order, and a
+// count or size policy then matches the newest retained chunks in its place.
+//
 // candidateFilterStats attributes every chunk a retention sweep declined
 // to consider — a sweep that silently selects nothing is indistinguishable
 // from a dozen different failures without these counts.
 type candidateFilterStats struct {
 	unsealed   int
 	ghosts     int
+	deleting   int
 	unreadable int
 }
 
@@ -1189,6 +1226,7 @@ func selectRetentionCandidates(
 	streamed map[chunk.ChunkID]bool,
 	manifest map[chunk.ChunkID]bool,
 	manifestKnown bool,
+	deleting map[chunk.ChunkID]bool,
 	unreadable map[chunk.ChunkID]*unreadableEntry,
 	now time.Time,
 ) ([]chunk.ChunkMeta, candidateFilterStats) {
@@ -1202,6 +1240,10 @@ func selectRetentionCandidates(
 		if manifestKnown && !manifest[meta.ID] {
 			stats.ghosts++
 			continue // ghost chunk: on disk but no FSM entry
+		}
+		if deleting[meta.ID] {
+			stats.deleting++
+			continue
 		}
 		if entry := unreadable[meta.ID]; entry != nil && now.Before(entry.nextRetry) {
 			stats.unreadable++

@@ -121,6 +121,11 @@ type ManifestReadFacet struct {
 	// ListRetentionPending returns chunk IDs with RetentionPending=true in the FSM.
 	ListRetentionPending func() []chunk.ChunkID
 
+	// ListPendingDeletes returns the chunk IDs whose delete is committed
+	// (CmdRequestDelete applied) and still awaiting acks. Their manifest
+	// entries stay until the last expected node acks.
+	ListPendingDeletes func() []chunk.ChunkID
+
 	// IsTombstoned returns true if the given chunk ID has been deleted from
 	// this instance's replicated FSM and is still within the tombstone retention
 	// window. Used to reject stale replication commands (ImportSealed,
@@ -158,6 +163,7 @@ func (t *VaultInstance) applyRaftCallbacks(cb vaultRaftCallbacks) {
 		ManifestEntries:      cb.manifestEntries,
 		ManifestEntry:        cb.manifestEntry,
 		ListRetentionPending: cb.listRetPending,
+		ListPendingDeletes:   cb.listPendingDeletes,
 		IsTombstoned:         cb.isTombstoned,
 		IsFSMReady:           cb.isFSMReady,
 	}
