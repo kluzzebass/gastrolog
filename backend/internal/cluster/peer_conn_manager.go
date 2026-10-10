@@ -611,6 +611,9 @@ func (m *PeerConnManager) dial(spec ConnSpec, poolIndex int) (*managedConn, erro
 		grpc.WithStreamInterceptor(m.attachNodeIDStreamInterceptor),
 		grpc.WithStatsHandler(newManagedConnStatsHandler(mc, m.byteMetrics)),
 	}
+	if spec.Lane == LaneService {
+		dialOpts = append(dialOpts, grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxServiceLaneMsgBytes)))
+	}
 	conn, err := grpc.NewClient(addr, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("dial node %s at %s: %w", spec.PeerNodeID, addr, err)
