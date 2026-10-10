@@ -325,13 +325,25 @@ func (c *boundCluster) restartLeader() {
 // seed creates n sealed chunks, oldest first, on every holder's disk and in
 // the vault-ctl manifest, each sealed at sealedAt.
 func (c *boundCluster) seed(n int, sealedAt time.Time) []chunk.ChunkID {
+	c.t.Helper()
+	starts := make([]time.Time, n)
+	for i := range starts {
+		starts[i] = c.base.Add(time.Duration(c.seeded) * time.Minute)
+		c.seeded++
+	}
+	return c.seedAt(starts, sealedAt, func(int) bool { return true })
+}
+
+// seedAt creates one sealed chunk per start, in the given order, on every
+// holder's disk and in the vault-ctl manifest. A chunk for which onLeader
+// reports false never reaches the leader's own chunk store: the leader knows
+// it only from the manifest.
+func (c *boundCluster) seedAt(starts []time.Time, sealedAt time.Time, onLeader func(i int) bool) []chunk.ChunkID {
 	t := c.t
 	t.Helper()
-	ids := make([]chunk.ChunkID, 0, n)
-	for range n {
+	ids := make([]chunk.ChunkID, 0, len(starts))
+	for i, start := range starts {
 		id := chunk.NewChunkID()
-		start := c.base.Add(time.Duration(c.seeded) * time.Minute)
-		c.seeded++
 		recs := make([]chunk.Record, 3)
 		for j := range recs {
 			ts := start.Add(time.Duration(j) * time.Second)
@@ -339,6 +351,9 @@ func (c *boundCluster) seed(n int, sealedAt time.Time) []chunk.ChunkID {
 		}
 		end := recs[len(recs)-1].WriteTS
 		for _, h := range c.holders {
+			if h == c.leader().id && !onLeader(i) {
+				continue
+			}
 			if _, err := c.node(h).cm.ImportRecords(id, testIterFromRecords(recs)); err != nil {
 				t.Fatalf("import %s on %s: %v", id, h, err)
 			}
