@@ -549,7 +549,7 @@ describe("transfer target picker", () => {
   function renderWithHelp(config: unknown) {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], config);
-    const openHelp = mock((_topicId?: string) => {});
+    const openHelp = mock((_helpRef?: string) => {});
     const result = renderWritable(
       <HelpProvider onOpen={openHelp}>
         <VaultsSettings dark />

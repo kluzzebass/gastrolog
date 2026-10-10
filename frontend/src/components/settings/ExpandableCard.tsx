@@ -2,11 +2,30 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
 import { Badge } from "../Badge";
 
+/**
+ * A header badge: bare text, or text with the meaning on hover and a help
+ * reference to open — a badge that carries a state the operator must
+ * understand is never a bare word.
+ */
+export type BadgeSpec = string | { text: string; title?: string; helpRef?: string };
+
+function badgeText(b: BadgeSpec): string {
+  return typeof b === "string" ? b : b.text;
+}
+
+function badgeTitle(b: BadgeSpec): string | undefined {
+  return typeof b === "string" ? undefined : b.title;
+}
+
+function badgeHelpRef(b: BadgeSpec): string | undefined {
+  return typeof b === "string" ? undefined : b.helpRef;
+}
+
 interface ExpandableCardProps {
   id: string;
-  typeBadge?: string;
+  typeBadge?: BadgeSpec;
   typeBadgeAccent?: boolean;
-  secondaryBadge?: string;
+  secondaryBadge?: BadgeSpec;
   dark: boolean;
   expanded?: boolean;
   onToggle?: () => void;
@@ -61,13 +80,23 @@ export function ExpandableCard({
             {id}
           </span>
           {typeBadge && (
-            <Badge variant={typeBadgeAccent ? "copper" : "muted"} dark={dark}>
-              {typeBadge}
+            <Badge
+              variant={typeBadgeAccent ? "copper" : "muted"}
+              dark={dark}
+              title={badgeTitle(typeBadge)}
+              helpRef={badgeHelpRef(typeBadge)}
+            >
+              {badgeText(typeBadge)}
             </Badge>
           )}
           {secondaryBadge && (
-            <Badge variant="muted" dark={dark}>
-              {secondaryBadge}
+            <Badge
+              variant="muted"
+              dark={dark}
+              title={badgeTitle(secondaryBadge)}
+              helpRef={badgeHelpRef(secondaryBadge)}
+            >
+              {badgeText(secondaryBadge)}
             </Badge>
           )}
           {status}

@@ -64,23 +64,23 @@ type TabDef = {
   label: string;
   icon: (p: { className?: string }) => React.ReactNode;
   adminOnly?: boolean;
-  helpTopicId?: string;
+  helpRef?: string;
 };
 
 const allTabs: TabDef[] = [
-  { id: "service", label: "Cluster", icon: ClusterIcon, helpTopicId: "service-settings" },
-  { id: "nodes", label: "Nodes", icon: ServiceIcon, helpTopicId: "clustering-nodes" },
-  { id: "certificates", label: "Certificates", icon: LockIcon, helpTopicId: "certificates" },
-  { id: "files", label: "Files", icon: FilesIcon, helpTopicId: "managed-files" },
-  { id: "lookups", label: "Lookups", icon: LookupIcon, helpTopicId: "lookups-settings" },
-  { id: "users", label: "Users", icon: UsersIcon, adminOnly: true, helpTopicId: "user-management" },
-  { id: "storage", label: "Storage", icon: StorageIcon, helpTopicId: "storage-config" },
-  { id: "ingesters", label: "Ingesters", icon: IngestersIcon, helpTopicId: "ingesters" },
-  { id: "policies", label: "Rotation Policies", icon: PolicyIcon, helpTopicId: "policy-rotation" },
-  { id: "retention", label: "Retention Policies", icon: RetentionIcon, helpTopicId: "policy-retention" },
-  { id: "vaults", label: "Vaults", icon: VaultsIcon, helpTopicId: "storage-engines" },
-  { id: "routes", label: "Routes", icon: RouteIcon, helpTopicId: "routing" },
-  { id: "logLevels", label: "Log Levels", icon: ServiceIcon, helpTopicId: "log-levels" },
+  { id: "service", label: "Cluster", icon: ClusterIcon, helpRef: "service-settings" },
+  { id: "nodes", label: "Nodes", icon: ServiceIcon, helpRef: "clustering-nodes" },
+  { id: "certificates", label: "Certificates", icon: LockIcon, helpRef: "certificates" },
+  { id: "files", label: "Files", icon: FilesIcon, helpRef: "managed-files" },
+  { id: "lookups", label: "Lookups", icon: LookupIcon, helpRef: "lookups-settings" },
+  { id: "users", label: "Users", icon: UsersIcon, adminOnly: true, helpRef: "user-management" },
+  { id: "storage", label: "Storage", icon: StorageIcon, helpRef: "storage-config" },
+  { id: "ingesters", label: "Ingesters", icon: IngestersIcon, helpRef: "ingesters" },
+  { id: "policies", label: "Rotation Policies", icon: PolicyIcon, helpRef: "policy-rotation" },
+  { id: "retention", label: "Retention Policies", icon: RetentionIcon, helpRef: "policy-retention" },
+  { id: "vaults", label: "Vaults", icon: VaultsIcon, helpRef: "storage-engines" },
+  { id: "routes", label: "Routes", icon: RouteIcon, helpRef: "routing" },
+  { id: "logLevels", label: "Log Levels", icon: ServiceIcon, helpRef: "log-levels" },
 ];
 
 /** Parse tab param — may include `:entityName` for deep-linking (e.g. "vaults:myVault"). */
@@ -166,7 +166,7 @@ export function SettingsDialog({
                 <h2 className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}>
                   {active.label}
                 </h2>
-                {active.helpTopicId && <HelpButton topicId={active.helpTopicId} />}
+                {active.helpRef && <HelpButton helpRef={active.helpRef} />}
               </div>
             );
           })()}

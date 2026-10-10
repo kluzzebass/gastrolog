@@ -15,13 +15,13 @@ interface CheckboxProps {
   label?: ReactNode;
   /** Additional classes on the outer row — e.g. `flex-1` to grow in a flex parent. */
   className?: string;
-  helpTopicId?: string;
+  helpRef?: string;
   /** When true, the checkbox is greyed out and clicks/keys are ignored. */
   disabled?: boolean;
   dark: boolean;
 }
 
-export function Checkbox({ checked, onChange, label, className, helpTopicId, disabled: disabledProp, dark }: Readonly<CheckboxProps>) {
+export function Checkbox({ checked, onChange, label, className, helpRef, disabled: disabledProp, dark }: Readonly<CheckboxProps>) {
   // A checkbox cannot be read-only in HTML, so a caller who may not write
   // sees it in its real state and cannot toggle it.
   const readOnly = useReadOnly();
@@ -72,9 +72,9 @@ export function Checkbox({ checked, onChange, label, className, helpTopicId, dis
           </span>
         )
         : label}
-      {helpTopicId && (
+      {helpRef && (
         <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} role="presentation">
-          <HelpButton topicId={helpTopicId} />
+          <HelpButton helpRef={helpRef} />
         </span>
       )}
     </div>

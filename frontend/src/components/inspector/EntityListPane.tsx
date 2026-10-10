@@ -109,7 +109,7 @@ function VaultsList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boo
 
   return (
     <div className="flex flex-col gap-3">
-      <EntityHeader title="Vaults" helpTopicId="inspector-vaults" dark={dark} />
+      <EntityHeader title="Vaults" helpRef="inspector-vaults" dark={dark} />
       {sorted.map((vault) => (
         <VaultCard
           key={vault.id}
@@ -161,7 +161,7 @@ function StoragesList({
 
   return (
     <div className="flex flex-col gap-3">
-      <EntityHeader title="Storages" helpTopicId="inspector-storages" dark={dark} />
+      <EntityHeader title="Storages" helpRef="inspector-storages" dark={dark} />
       {sorted.map((storage) => (
         <StorageCard
           key={storage.id}
@@ -201,7 +201,7 @@ function IngestersList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: 
 
   return (
     <div className="flex flex-col gap-3">
-      <EntityHeader title="Ingesters" helpTopicId="inspector-ingesters" dark={dark} />
+      <EntityHeader title="Ingesters" helpRef="inspector-ingesters" dark={dark} />
       {sorted.map((ing) => (
         <IngesterCard
           key={ing.id}
@@ -222,7 +222,7 @@ function IngestersList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: 
 function RouteStatsList({ dark }: Readonly<{ dark: boolean }>) {
   return (
     <div className="flex flex-col gap-3">
-      <EntityHeader title="Routes" helpTopicId="inspector-routes" dark={dark} />
+      <EntityHeader title="Routes" helpRef="inspector-routes" dark={dark} />
       <RouteStatsView dark={dark} />
     </div>
   );
@@ -246,7 +246,7 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
     return (
       <div className="flex flex-col gap-5">
         <div className="flex items-center gap-2">
-          <EntityHeader title="Jobs" helpTopicId="inspector-jobs" dark={dark} />
+          <EntityHeader title="Jobs" helpRef="inspector-jobs" dark={dark} />
           {reconnecting && <Badge variant="warn" dark={dark}>reconnecting</Badge>}
         </div>
         {scheduled.length > 0 && (
@@ -285,7 +285,7 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <EntityHeader title="Jobs" helpTopicId="inspector-jobs" dark={dark} />
+        <EntityHeader title="Jobs" helpRef="inspector-jobs" dark={dark} />
         {reconnecting && <Badge variant="warn" dark={dark}>reconnecting</Badge>}
       </div>
 
@@ -430,7 +430,7 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
     const localStats = registry.byId.get(localNodeId)?.stats ?? null;
     return (
       <div className="flex flex-col gap-3">
-        <EntityHeader title="System" helpTopicId="inspector-system" dark={dark} />
+        <EntityHeader title="System" helpRef="inspector-system" dark={dark} />
         <SystemStatsView nodeStats={localStats} dark={dark} />
       </div>
     );
@@ -447,7 +447,7 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
 
   return (
     <div className="flex flex-col gap-3">
-      <EntityHeader title="System" helpTopicId="inspector-system" dark={dark} />
+      <EntityHeader title="System" helpRef="inspector-system" dark={dark} />
       {nodes.length > 0 && (
         <ExpandableCard
           id="cluster-summary"
@@ -504,9 +504,9 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
 
 function EntityHeader({
   title,
-  helpTopicId,
+  helpRef,
   dark,
-}: Readonly<{ title: string; helpTopicId: string; dark: boolean }>) {
+}: Readonly<{ title: string; helpRef: string; dark: boolean }>) {
   const c = useThemeClass(dark);
   return (
     <div className="flex items-center gap-2 mb-2">
@@ -515,7 +515,7 @@ function EntityHeader({
       >
         {title}
       </h2>
-      <HelpButton topicId={helpTopicId} />
+      <HelpButton helpRef={helpRef} />
     </div>
   );
 }

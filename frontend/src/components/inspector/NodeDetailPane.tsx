@@ -201,7 +201,7 @@ function Section({
         >
           {title}
         </h3>
-        {helpTopic ? <HelpButton topicId={helpTopic} /> : null}
+        {helpTopic ? <HelpButton helpRef={helpTopic} /> : null}
         {count !== undefined && count > 0 && (
           <Badge variant="muted" dark={dark}>{count}</Badge>
         )}

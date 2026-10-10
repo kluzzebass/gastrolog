@@ -1,7 +1,7 @@
 import { createContext, useContext } from "react";
 
 interface HelpContextValue {
-  openHelp: (topicId?: string) => void;
+  openHelp: (helpRef?: string) => void;
 }
 
 const HelpContext = createContext<HelpContextValue | null>(null);
@@ -11,7 +11,7 @@ export function HelpProvider({
   onOpen,
 }: Readonly<{
   children: React.ReactNode;
-  onOpen: (topicId?: string) => void;
+  onOpen: (helpRef?: string) => void;
 }>) {
   return (
     <HelpContext.Provider value={{ openHelp: onOpen }}>

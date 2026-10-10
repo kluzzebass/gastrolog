@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { useReadOnly } from "../../hooks/useReadOnly";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { ExpandableCard } from "./ExpandableCard";
+import { ExpandableCard, type BadgeSpec } from "./ExpandableCard";
 
 interface SettingsCardProps {
   id: string;
-  typeBadge?: string;
-  secondaryBadge?: string;
+  typeBadge?: BadgeSpec;
+  secondaryBadge?: BadgeSpec;
   dark: boolean;
   expanded?: boolean;
   onToggle?: () => void;

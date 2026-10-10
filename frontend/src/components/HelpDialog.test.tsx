@@ -23,7 +23,7 @@ function anchorOf(el: Element): string | undefined {
 describe("HelpDialog section anchors", () => {
   test("a reference with an anchor scrolls that section into view once its topic renders", async () => {
     render(
-      <HelpDialog dark topicId="vaults-config#transfer-target" onClose={() => {}} onNavigate={() => {}} />,
+      <HelpDialog dark helpRef="vaults-config#transfer-target" onClose={() => {}} onNavigate={() => {}} />,
     );
 
     await waitFor(() => expect(scrolled.map(anchorOf)).toEqual(["transfer-target"]));
@@ -32,7 +32,7 @@ describe("HelpDialog section anchors", () => {
 
   test("a reference without an anchor scrolls no section", async () => {
     const { findByText } = render(
-      <HelpDialog dark topicId="vaults-config" onClose={() => {}} onNavigate={() => {}} />,
+      <HelpDialog dark helpRef="vaults-config" onClose={() => {}} onNavigate={() => {}} />,
     );
 
     await findByText("Transfer Target", { selector: "h3" });
@@ -42,7 +42,7 @@ describe("HelpDialog section anchors", () => {
   test("an in-topic link carries its anchor to navigation", async () => {
     const navigated: string[] = [];
     const { findAllByText } = render(
-      <HelpDialog dark topicId="vaults-config" onClose={() => {}} onNavigate={(id) => navigated.push(id)} />,
+      <HelpDialog dark helpRef="vaults-config" onClose={() => {}} onNavigate={(id) => navigated.push(id)} />,
     );
 
     const [link] = await findAllByText("Transfer Target", { selector: "button" });

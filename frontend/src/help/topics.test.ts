@@ -37,4 +37,51 @@ describe("help references", () => {
     expect(topic).toBeDefined();
     expect(headingAnchors(await topic!.load())).toContain(anchor!);
   });
+
+  test("every help reference in the source lands on a real topic and section", async () => {
+    const refs = await collectHelpRefs();
+    expect(refs.length).toBeGreaterThan(20);
+    const headingsByTopic = new Map<string, string[]>();
+    const broken: string[] = [];
+    for (const { ref, file } of refs) {
+      const { topicId, anchor } = parseHelpRef(ref);
+      const topic = findTopic(topicId);
+      if (!topic) {
+        broken.push(`${file}: "${ref}" names no topic`);
+        continue;
+      }
+      if (!anchor) continue;
+      let headings = headingsByTopic.get(topic.id);
+      if (!headings) {
+        headings = headingAnchors(await topic.load());
+        headingsByTopic.set(topic.id, headings);
+      }
+      if (!headings.includes(anchor)) {
+        broken.push(`${file}: "${ref}" names no heading of ${topic.id} (have: ${headings.join(", ")})`);
+      }
+    }
+    expect(broken).toEqual([]);
+  });
 });
+
+/**
+ * Every help reference written as a literal in the frontend source: the
+ * `helpRef` prop or object key, a `*_HELP_REF` constant, or an `openHelp`
+ * call. A reference that only exists at runtime (built from a variable)
+ * is outside this check.
+ */
+async function collectHelpRefs(): Promise<{ ref: string; file: string }[]> {
+  const root = new URL("../", import.meta.url).pathname;
+  const glob = new Bun.Glob("**/*.{ts,tsx}");
+  const pattern = /(?:helpRef\s*[=:]\s*\{?\s*|HELP_REF\w*\s*=\s*|openHelp\(\s*)["'`]([^"'`]+)["'`]/g;
+  const out: { ref: string; file: string }[] = [];
+  for await (const file of glob.scan(root)) {
+    if (file.includes(".test.") || file.startsWith("api/gen/")) continue;
+    const text = await Bun.file(root + file).text();
+    for (const m of text.matchAll(pattern)) {
+      const ref = m[1];
+      if (ref) out.push({ ref, file });
+    }
+  }
+  return out;
+}

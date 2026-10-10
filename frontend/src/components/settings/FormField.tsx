@@ -1,6 +1,7 @@
 import { createContext, useContext, useId, useState } from "react";
 import { useReadOnly } from "../../hooks/useReadOnly";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { HelpButton } from "../HelpButton";
 
 const FormFieldIdContext = createContext<string | undefined>(undefined);
 
@@ -12,6 +13,8 @@ function useFormFieldId() {
 interface FormFieldProps {
   label: string;
   description?: React.ReactNode;
+  /** Help reference — a topic ID, optionally with a "#section" anchor — opened from a button beside the label. */
+  helpRef?: string;
   dark: boolean;
   children: React.ReactNode;
 }
@@ -19,6 +22,7 @@ interface FormFieldProps {
 export function FormField({
   label,
   description,
+  helpRef,
   dark,
   children,
 }: Readonly<FormFieldProps>) {
@@ -27,12 +31,15 @@ export function FormField({
   return (
     <FormFieldIdContext.Provider value={id}>
       <div className="flex flex-col gap-1">
-        <label
-          htmlFor={id}
-          className={`text-[0.8em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}
-        >
-          {label}
-        </label>
+        <div className="flex items-center gap-1.5">
+          <label
+            htmlFor={id}
+            className={`text-[0.8em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}
+          >
+            {label}
+          </label>
+          {helpRef && <HelpButton helpRef={helpRef} />}
+        </div>
         {children}
         {description && (
           <div

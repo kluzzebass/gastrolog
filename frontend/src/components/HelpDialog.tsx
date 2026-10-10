@@ -13,9 +13,9 @@ import("remark-gfm").then((m) => { remarkGfmPlugin = [m.default]; });
 
 interface HelpDialogProps {
   dark: boolean;
-  topicId?: string;
+  helpRef?: string;
   onClose: () => void;
-  onNavigate: (topicId: string) => void;
+  onNavigate: (helpRef: string) => void;
   onOpenSettings?: (tab: string) => void;
 }
 
@@ -46,9 +46,9 @@ interface SearchEntry {
   plainText: string;
 }
 
-export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings }: Readonly<HelpDialogProps>) {
+export function HelpDialog({ dark, helpRef: requestedRef, onClose, onNavigate, onOpenSettings }: Readonly<HelpDialogProps>) {
   const c = useThemeClass(dark);
-  const helpRef = topicId ?? helpTopics[0]?.id ?? "";
+  const helpRef = requestedRef ?? helpTopics[0]?.id ?? "";
   const { topicId: refTopicId, anchor } = parseHelpRef(helpRef);
   const activeId = resolveTopicId(refTopicId);
   // The anchor scrolls into view once per reference, so later re-renders
