@@ -225,7 +225,8 @@ type vaultChunking struct {
 	// parks the worker here to land a Notify between the pass and the wait.
 	// Nil in production.
 	workerPassHook func()
-	// log is the per-vault logger; set when the worker starts.
+	// log is the per-vault logger, fixed at registration: the worker, the
+	// build goroutine, and FSM-callback goroutines all read it unsynchronized.
 	log *slog.Logger
 }
 
@@ -297,7 +298,7 @@ func (c VaultConfig) newChunkID() chunk.ChunkID {
 	return chunk.NewChunkID()
 }
 
-func newVaultChunking(cfg VaultConfig) (*vaultChunking, error) {
+func newVaultChunking(cfg VaultConfig, log *slog.Logger) (*vaultChunking, error) {
 	if cfg.FSM == nil {
 		return nil, errors.New("vault-ctl FSM required")
 	}
@@ -315,6 +316,7 @@ func newVaultChunking(cfg VaultConfig) (*vaultChunking, error) {
 	}
 	return &vaultChunking{
 		cfg:               cfg,
+		log:               log,
 		purgeLogThrottle:  logging.Throttle{Interval: retryLogInterval},
 		wake:              notify.NewSignal(),
 		releaseWake:       notify.NewSignal(),
@@ -386,7 +388,7 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, cfg VaultConfig) error {
 	if cfg.Alerts == nil {
 		cfg.Alerts = m.cfg.Alerts
 	}
-	v, err := newVaultChunking(cfg)
+	v, err := newVaultChunking(cfg, m.logger().With("vault", vaultID))
 	if err != nil {
 		return err
 	}
@@ -740,8 +742,7 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 		// instead of being lost.
 		ch := v.wake.C()
 		releaseCh := v.releaseWake.C()
-		log := m.logger().With("vault", v.cfg.VaultID)
-		v.log = log
+		log := v.logger()
 		// Recovery must not run before the vault-ctl FSM has replayed: at
 		// process start the registry is briefly empty, and a recovery pass
 		// against an empty FSM registers nothing and never re-runs — a node
