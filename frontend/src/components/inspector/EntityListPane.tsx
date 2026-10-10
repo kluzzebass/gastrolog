@@ -15,8 +15,10 @@ import { HelpButton } from "../HelpButton";
 import { VaultCard } from "./VaultCard";
 import { StorageCard } from "./StorageCard";
 import { IngesterCard } from "./IngesterCard";
-import { protoToInstant, formatTimestamp, elapsed, countdown } from "../../utils/temporal";
-import { useTick } from "./JobCard";
+import { ELAPSED_MAX_CHARS, protoToInstant, elapsed } from "../../utils/temporal";
+import { ChunkProgress, JobRunTimes, useTick } from "./JobCard";
+import { LiveValue } from "../LiveValue";
+import { LIVE_TEXT } from "../liveValueStyle";
 import { SystemStatsView, ClusterSummaryView } from "./SystemStatsView";
 import { RouteStatsView } from "./RouteStatsView";
 import { groupByNode } from "./groupByNode";
@@ -356,14 +358,14 @@ function JobRow({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
       </span>
       <JobStatusBadge job={job} dark={dark} />
       {Number(job.chunksTotal) > 0 && (
-        <span className={`font-mono text-[0.9em] shrink-0 ${c("text-text-muted", "text-light-text-muted")}`}>
-          {Number(job.chunksDone)}/{Number(job.chunksTotal)} chunks
+        <span className={`font-mono text-[0.9em] shrink-0 ${LIVE_TEXT} ${c("text-text-muted", "text-light-text-muted")}`}>
+          <ChunkProgress done={Number(job.chunksDone)} total={Number(job.chunksTotal)} dark={dark} />
         </span>
       )}
       {job.startedAt && (
-        <span className={`ml-auto font-mono text-[0.9em] shrink-0 ${c("text-text-muted", "text-light-text-muted")}`}>
+        <LiveValue dark={dark} tone="muted" reserve={ELAPSED_MAX_CHARS} className="ml-auto text-[0.9em] shrink-0">
           {elapsed(protoToInstant(job.startedAt), now)}
-        </span>
+        </LiveValue>
       )}
     </div>
   );
@@ -402,18 +404,7 @@ function ScheduledRow({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
       >
         {job.displaySchedule}
       </span>
-      <span
-        className={`font-mono text-[0.9em] text-right ${c("text-text-muted", "text-light-text-muted")}`}
-        title={job.lastRun ? formatTimestamp(protoToInstant(job.lastRun)) : ""}
-      >
-        {job.lastRun ? elapsed(protoToInstant(job.lastRun), now) : "\u2014"}
-      </span>
-      <span
-        className={`font-mono text-[0.9em] text-right ${c("text-text-muted", "text-light-text-muted")}`}
-        title={job.nextRun ? formatTimestamp(protoToInstant(job.nextRun)) : ""}
-      >
-        {job.nextRun ? countdown(protoToInstant(job.nextRun), now) : "\u2014"}
-      </span>
+      <JobRunTimes job={job} now={now} dark={dark} />
     </div>
   );
 }

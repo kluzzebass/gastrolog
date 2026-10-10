@@ -1,19 +1,42 @@
-/** Shared unit formatting and parsing utilities. */
+/**
+ * Shared unit formatting and parsing utilities.
+ *
+ * Display formatters for live values declare a `*_MAX_CHARS` width
+ * contract: the longest string they can emit over their domain. A live
+ * cell reserves that many character cells (see LiveValue), so a value
+ * ticking from "9.9" to "999.9K" never moves its neighbours.
+ */
+
+const PER_SEC = "/s";
+
+/** formatBytes never emits more characters than this for any byte count or rate below 2^64. */
+export const BYTES_MAX_CHARS = 10;
+/** formatBytesPerSec never emits more characters than this. */
+export const BYTES_PER_SEC_MAX_CHARS = BYTES_MAX_CHARS + PER_SEC.length;
 
 /**
  * Format a byte count to a human-readable string (e.g. "1.5 MiB").
  * Binary math with honest IEC labels: GB means 10^9 and GiB means 2^30 —
  * the parsers on both surfaces are strict about it, so dividing by 1024
  * and printing "MB" would mislabel the quantity. Accepts number or bigint.
+ * Units match the backend's units.FormatBytesDisplay; a fractional byte
+ * rate below 1 KiB rounds to whole bytes.
  */
 export function formatBytes(b: bigint | number): string {
   const n = typeof b === "bigint" ? Number(b) : b;
   if (n === 0) return "0 B";
+  if (n >= 1024 ** 6) return `${(n / 1024 ** 6).toFixed(1)} EiB`;
+  if (n >= 1024 ** 5) return `${(n / 1024 ** 5).toFixed(1)} PiB`;
   if (n >= 1024 ** 4) return `${(n / 1024 ** 4).toFixed(1)} TiB`;
   if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GiB`;
   if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MiB`;
   if (n >= 1024) return `${(n / 1024).toFixed(1)} KiB`;
-  return `${n} B`;
+  return `${Math.round(n)} B`;
+}
+
+/** Format a byte rate (e.g. "1.5 MiB/s"). */
+export function formatBytesPerSec(n: number): string {
+  return `${formatBytes(n)}${PER_SEC}`;
 }
 
 /**
@@ -53,6 +76,9 @@ function formatScaledCount(v: bigint): string {
   return `${tenths / 10n}.${tenths % 10n}${suffix}`;
 }
 
+/** formatCount never emits more characters than this for a count within the uint64 range. */
+export const COUNT_MAX_CHARS = 6;
+
 /**
  * Format a count compactly (e.g. "1.5K", "25.6B", "18.4E"). Exact across the
  * full uint64 range: from a thousand up the scale and digits come from bigint
@@ -80,11 +106,38 @@ export function formatApproxCount(n: number): string {
   return v < 10 ? `${v.toFixed(1)}${suffix}` : `${Math.round(v)}${suffix}`;
 }
 
+/** formatRate never emits more characters than this for rates below 999.95T. */
+export const RATE_MAX_CHARS = 6;
+/** formatRatePerSec never emits more characters than this. */
+export const RATE_PER_SEC_MAX_CHARS = RATE_MAX_CHARS + PER_SEC.length;
+
 /** Format a per-second rate to a compact count (e.g. "1.5K"); pair with a "/s" suffix. */
 export function formatRate(n: number): string {
-  if (Math.round(n) >= 1_000) return formatCount(Math.max(n, 1_000));
-  if (n >= 10) return Math.round(n).toString();
-  return n.toFixed(1);
+  const tenths = n.toFixed(1);
+  if (Number(tenths) < 10) return tenths;
+  if (Math.round(n) < 1_000) return Math.round(n).toString();
+  return formatCount(Math.max(n, 1_000));
+}
+
+/** Format a per-second rate with its unit (e.g. "1.5K/s"). */
+export function formatRatePerSec(n: number): string {
+  return `${formatRate(n)}${PER_SEC}`;
+}
+
+/** Format a count exactly, with the locale's digit grouping (e.g. "6,148"). */
+export function formatExactCount(c: bigint | number): string {
+  return Number(c).toLocaleString();
+}
+
+/** formatExactCount never emits more characters than this for counts below a billion. */
+export const EXACT_COUNT_MAX_CHARS = formatExactCount(999_999_999).length;
+
+/** formatPercent never emits more characters than this for values below 999.95%. */
+export const PERCENT_MAX_CHARS = 6;
+
+/** Format a percentage with one decimal (e.g. "12.5%"). */
+export function formatPercent(n: number): string {
+  return `${n.toFixed(1)}%`;
 }
 
 /**

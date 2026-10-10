@@ -1,6 +1,8 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
-import { formatRate } from "../../utils/units";
+import { RATE_PER_SEC_MAX_CHARS, formatRatePerSec } from "../../utils/units";
+import { LiveValue } from "../LiveValue";
+import { LIVE_GRID_ROW } from "../liveValueStyle";
 import { Spark } from "../Spark";
 import { HelpButton } from "../HelpButton";
 import {
@@ -31,10 +33,13 @@ export function VaultStageCountersSection({
   const milestones = aggregateStageCounters(cluster?.nodes, vaultId);
   if (milestones.length === 0) return null;
 
-  const brightMono = `font-mono text-right tabular-nums ${c("text-text-bright", "text-light-text-bright")}`;
-  const mutedMono = `font-mono text-right tabular-nums ${c("text-text-muted", "text-light-text-muted")}`;
   const rowBorder = c("border-ink-border-subtle", "border-light-border-subtle");
-  const grid = "grid grid-cols-[minmax(9rem,1fr)_5rem_4.5rem_5.5rem] items-center gap-x-3";
+  // One grid owns the columns for every row; TOTAL and RATE are max-content
+  // so they hold the widest value in any row. The edge tracks include the
+  // rows' 1rem padding.
+  const gridTemplate =
+    "grid grid-cols-[minmax(10rem,1fr)_minmax(5rem,max-content)_4.5rem_minmax(6.5rem,max-content)] gap-x-3";
+  const grid = `${LIVE_GRID_ROW} items-center`;
 
   // Preserve pipeline order but insert a group label whenever the group flips.
   // Precompute the boundary per row so render stays side-effect free (the React
@@ -51,7 +56,7 @@ export function VaultStageCountersSection({
         Pipeline stages
         <HelpButton topicId="inspector-pipeline-stages" />
       </h3>
-      <div className={`rounded-lg border overflow-hidden ${c("border-ink-border", "border-light-border")}`}>
+      <div className={`${gridTemplate} rounded-lg border overflow-hidden ${c("border-ink-border", "border-light-border")}`}>
         <div
           className={`${grid} px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c("text-text-muted border-ink-border-subtle bg-ink-well", "text-light-text-muted border-light-border-subtle bg-light-well")}`}
         >
@@ -72,23 +77,27 @@ export function VaultStageCountersSection({
           }
           const warn = m.key === "glcbPullsFailed" && m.total > 0;
           return (
-            <div key={m.key}>
+            <div key={m.key} className={LIVE_GRID_ROW}>
               {showGroup && (
                 <div
-                  className={`px-4 pt-2 pb-1 text-[0.65em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted/70", "text-light-text-muted/70")}`}
+                  className={`col-span-full px-4 pt-2 pb-1 text-[0.65em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted/70", "text-light-text-muted/70")}`}
                 >
                   {GROUP_LABELS[m.group]}
                 </div>
               )}
               <div className={`${grid} px-4 py-1.5 text-[0.85em] border-b last:border-b-0 ${rowBorder}`} title={perNodeTitle(m)}>
                 <span className={c("text-text-normal", "text-light-text-normal")}>{m.label}</span>
-                <span className={warn ? "font-mono text-right tabular-nums text-severity-warn" : brightMono}>
+                <LiveValue dark={dark} tone={warn ? "warn" : "bright"}>
                   {m.total.toLocaleString()}
-                </span>
+                </LiveValue>
                 <span className="text-copper">{hasRate && <Spark values={topSpark} />}</span>
-                <span className={hasRate && (m.clusterInstantPerSec ?? 0) > 0 ? brightMono : mutedMono}>
-                  {hasRate ? `${formatRate(m.clusterInstantPerSec ?? 0)}/s` : "—"}
-                </span>
+                <LiveValue
+                  dark={dark}
+                  tone={hasRate && (m.clusterInstantPerSec ?? 0) > 0 ? "bright" : "muted"}
+                  reserve={RATE_PER_SEC_MAX_CHARS}
+                >
+                  {hasRate ? formatRatePerSec(m.clusterInstantPerSec ?? 0) : "—"}
+                </LiveValue>
               </div>
             </div>
           );

@@ -13,7 +13,18 @@ import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 import { type ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import { VaultAdmissionCause, type Vault, type VaultAdmissionRefusal } from "../../api/model/vault";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
-import { formatBytes, formatRate } from "../../utils/units";
+import {
+  BYTES_MAX_CHARS,
+  BYTES_PER_SEC_MAX_CHARS,
+  EXACT_COUNT_MAX_CHARS,
+  RATE_PER_SEC_MAX_CHARS,
+  formatBytes,
+  formatBytesPerSec,
+  formatExactCount,
+  formatRatePerSec,
+} from "../../utils/units";
+import { LiveValue } from "../LiveValue";
+import { LIVE_GRID_ROW, LIVE_TEXT } from "../liveValueStyle";
 import { Spark } from "../Spark";
 import { middleTruncate } from "../../utils/middleTruncate";
 import { leaderNodeId, followerNodeIds } from "../../utils/placement";
@@ -188,7 +199,9 @@ export function VaultCard({
             {recordCount.toLocaleString()} records
           </Badge>
           <Badge variant="muted" dark={dark}>
-            {formatBytes(sizeBytes)}
+            <LiveValue dark={dark} tone="inherit" reserve={BYTES_MAX_CHARS}>
+              {formatBytes(sizeBytes)}
+            </LiveValue>
           </Badge>
           {onOpenSettings && (
             <CrossLinkBadge dark={dark} title="Open in Settings" onClick={onOpenSettings}>
@@ -368,12 +381,14 @@ function VaultThroughputSection({
       : { text: `×${rows.length} replication`, warn: false };
   };
 
-  // Fixed grid template shared by every row (header, stage totals, node
-  // rows) so changing number widths never shift columns horizontally.
-  // STAGE ("COLLECTED") and NODE ("Σ 4 homes") have fixed-width content, so
-  // they get fixed columns; STATUS is the only prose column and takes all
-  // spare width — it was clipping while NODE flexed.
-  const gridCols = "grid grid-cols-[5rem_5.5rem_4.5rem_5rem_5.5rem_minmax(10rem,1fr)] items-center gap-x-3";
+  // One grid owns the columns for every row (header, stage totals, node
+  // rows). The rate columns are max-content: each value cell reserves its
+  // formatter's maximum width, so the track is as wide as the widest
+  // possible value and never moves. STATUS is the only prose column and
+  // takes all spare width. The edge tracks include the rows' 1rem padding.
+  const gridTemplate =
+    "grid grid-cols-[6rem_5.5rem_4.5rem_minmax(5rem,max-content)_minmax(5.5rem,max-content)_minmax(11rem,1fr)] gap-x-3";
+  const gridCols = `${LIVE_GRID_ROW} items-center`;
 
   return (
     <section className="flex flex-col gap-4">
@@ -383,7 +398,7 @@ function VaultThroughputSection({
         Throughput
       </h3>
       <div
-        className={`rounded-lg border overflow-hidden ${c("border-ink-border", "border-light-border")}`}
+        className={`${gridTemplate} rounded-lg border overflow-hidden ${c("border-ink-border", "border-light-border")}`}
       >
         <div
           className={`${gridCols} px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c("text-text-muted border-ink-border-subtle bg-ink-well", "text-light-text-muted border-light-border-subtle bg-light-well")}`}
@@ -463,8 +478,6 @@ function StageRows({
   const totalRecords = sorted.reduce((sum, r) => sum + r.recordsPerSec, 0);
   const totalBytes = sorted.reduce((sum, r) => sum + r.bytesPerSec, 0);
   const stageClass = `text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`;
-  const brightMono = `font-mono text-right ${c("text-text-bright", "text-light-text-bright")}`;
-  const mutedMono = `font-mono text-right ${c("text-text-muted", "text-light-text-muted")}`;
   const rowBorder = c("border-ink-border-subtle", "border-light-border-subtle");
   const rowClass = `${gridCols} px-4 py-1.5 text-[0.85em] border-b last:border-b-0 ${rowBorder}`;
 
@@ -477,8 +490,8 @@ function StageRows({
             {replicated ? `Σ ${sorted.length} homes` : "all nodes"}
           </span>
           <span />
-          <span className={brightMono}>{formatRate(totalRecords)}/s</span>
-          <span className={brightMono}>{formatBytes(totalBytes)}/s</span>
+          <LiveValue dark={dark} reserve={RATE_PER_SEC_MAX_CHARS}>{formatRatePerSec(totalRecords)}</LiveValue>
+          <LiveValue dark={dark} reserve={BYTES_PER_SEC_MAX_CHARS}>{formatBytesPerSec(totalBytes)}</LiveValue>
           <span
             className={`font-mono whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
             title="Replicated stages count each record once per home: Σ ≈ append × homes when replication keeps pace; 'catch-up' when a rejoined node backfills or backlog drains."
@@ -490,7 +503,7 @@ function StageRows({
       {sorted.map((r, i) => {
         const isActive = stageRowActive(r);
         const note = isActive ? undefined : (idleNote?.(r) ?? { text: "idle", warn: false });
-        const rateClass = sorted.length > 1 || !isActive ? mutedMono : brightMono;
+        const rateTone = sorted.length > 1 || !isActive ? "muted" : "bright";
         return (
           <div key={r.node} className={rowClass} title={title}>
             <span className={stageClass}>{sorted.length === 1 && i === 0 ? label : ""}</span>
@@ -500,8 +513,12 @@ function StageRows({
             <span className="text-copper">
               <Spark values={r.spark} />
             </span>
-            <span className={rateClass}>{formatRate(r.recordsPerSec)}/s</span>
-            <span className={rateClass}>{formatBytes(r.bytesPerSec)}/s</span>
+            <LiveValue dark={dark} tone={rateTone} reserve={RATE_PER_SEC_MAX_CHARS}>
+              {formatRatePerSec(r.recordsPerSec)}
+            </LiveValue>
+            <LiveValue dark={dark} tone={rateTone} reserve={BYTES_PER_SEC_MAX_CHARS}>
+              {formatBytesPerSec(r.bytesPerSec)}
+            </LiveValue>
             <span className="flex items-center gap-2 whitespace-nowrap">
               {note && (
                 <span
@@ -524,7 +541,7 @@ function StageRows({
                   className="font-mono text-severity-warn"
                   title="Durable-commit rate lags the append rate — fsync backpressure"
                 >
-                  durable {formatRate(r.extra.durablePerSec)}/s
+                  durable {formatRatePerSec(r.extra.durablePerSec)}
                 </span>
               )}
             </span>
@@ -959,7 +976,7 @@ function ChunkRow({
         </td>
         <td className="px-2 py-2">
           <span
-            className={`text-[0.95em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+            className={`text-[0.9em] font-mono ${LIVE_TEXT} ${c("text-text-muted", "text-light-text-muted")}`}
           >
             {start ? formatDateTimeShort(start) : "\u2014"}
             <span className={`mx-1.5 ${c("text-text-muted", "text-light-text-muted")}`}>
@@ -1012,20 +1029,23 @@ function ChunkRow({
             )}
           </span>
         </td>
-        <td className={`px-2 py-2 text-right font-mono whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}>
-          {Number(chunk.recordCount).toLocaleString()}
+        <td className="px-2 py-2 text-right">
+          <LiveValue dark={dark} tone="muted" reserve={EXACT_COUNT_MAX_CHARS}>
+            {formatExactCount(chunk.recordCount)}
+          </LiveValue>
         </td>
-        <td
-          className={`px-4 py-2 text-right font-mono whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
-          title={chunkSizeCellTitle(chunk)}
-        >
+        <td className="px-4 py-2 text-right" title={chunkSizeCellTitle(chunk)}>
           {chunk.cloudBacked && Number(chunk.diskBytes) === 0 && Number(chunk.cloudBytes) > 0 ? (
             // Cloud-only: show the GLCB's cloud object size, italic to mark
             // that no local copy backs the number. Display only — the local
             // disk claim (and the vault size badge) still counts it as zero.
-            <span className="italic">{formatBytes(Number(chunk.cloudBytes))}</span>
+            <LiveValue dark={dark} tone="muted" reserve={BYTES_MAX_CHARS} className="italic">
+              {formatBytes(Number(chunk.cloudBytes))}
+            </LiveValue>
           ) : (
-            formatBytes(chunkDiskClaimBytes(chunk))
+            <LiveValue dark={dark} tone="muted" reserve={BYTES_MAX_CHARS}>
+              {formatBytes(chunkDiskClaimBytes(chunk))}
+            </LiveValue>
           )}
         </td>
       </tr>

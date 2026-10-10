@@ -3,13 +3,16 @@ import { usePipelineBacklog, usePipelineBacklogContribution, useNodeRegistry } f
 import { DegradedPeersBadge } from "../DegradedPeersBadge";
 import { idFromBytes, type EntityID } from "../../api/model/id";
 import { protoToInstant, instantToDate, formatDateTimeShort } from "../../utils/temporal";
-import { formatBytes, formatCount } from "../../utils/units";
+import { BYTES_MAX_CHARS, COUNT_MAX_CHARS, formatBytes, formatCount } from "../../utils/units";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
+import { LiveValue } from "../LiveValue";
 
 interface PipelineBacklogViewProps {
   vaultId: string;
   dark: boolean;
 }
+
+const COUNT_AND_BYTES_MAX_CHARS = COUNT_MAX_CHARS + " ()".length + BYTES_MAX_CHARS;
 
 function formatCountAndBytes(count: number, bytes: bigint): string {
   return `${formatCount(count)} (${formatBytes(bytes)})`;
@@ -25,16 +28,34 @@ const thClass = (c: (d: string, l: string) => string) =>
     "text-light-text-muted border-light-border-subtle bg-light-well",
   )}`;
 
-const tdClass = (c: (d: string, l: string) => string, warn?: boolean) => {
-  let color = c("text-text-bright", "text-light-text-bright");
-  if (warn) color = "text-severity-warn";
-  return `px-3 py-2.5 font-mono font-semibold tabular-nums whitespace-nowrap ${color}`;
-};
+const tdClass = "px-3 py-2.5";
+const tdMetricClass = "px-3 py-2.5 text-right text-[0.85em]";
 
-const tdMutedClass = (c: (d: string, l: string) => string, active: boolean) =>
-  `px-3 py-2.5 font-mono text-right tabular-nums whitespace-nowrap text-[0.85em] ${
-    active ? c("text-text-bright", "text-light-text-bright") : c("text-text-muted", "text-light-text-muted")
-  }`;
+function HeadlineValue({
+  value,
+  warn,
+  reserve,
+  dark,
+}: Readonly<{ value: string; warn?: boolean; reserve?: number; dark: boolean }>) {
+  return (
+    <LiveValue dark={dark} tone={warn ? "warn" : "bright"} align="start" reserve={reserve} className="font-semibold">
+      {value}
+    </LiveValue>
+  );
+}
+
+function StagingValue({
+  value,
+  active,
+  reserve,
+  dark,
+}: Readonly<{ value: string; active: boolean; reserve: number; dark: boolean }>) {
+  return (
+    <LiveValue dark={dark} tone={active ? "bright" : "muted"} reserve={reserve}>
+      {value}
+    </LiveValue>
+  );
+}
 
 function ClusterStagingTable({
   rows,
@@ -63,8 +84,12 @@ function ClusterStagingTable({
               <td className={`px-3 py-2.5 font-mono whitespace-nowrap ${c("text-text-bright", "text-light-text-bright")}`}>
                 {row.area}
               </td>
-              <td className={tdMutedClass(c, row.count > 0)}>{formatCount(row.count)}</td>
-              <td className={tdMutedClass(c, row.bytes > 0n)}>{formatBytes(row.bytes)}</td>
+              <td className={tdMetricClass}>
+                <StagingValue value={formatCount(row.count)} active={row.count > 0} reserve={COUNT_MAX_CHARS} dark={dark} />
+              </td>
+              <td className={tdMetricClass}>
+                <StagingValue value={formatBytes(row.bytes)} active={row.bytes > 0n} reserve={BYTES_MAX_CHARS} dark={dark} />
+              </td>
             </tr>
           ))}
         </tbody>
@@ -123,8 +148,22 @@ function NodeSegmentTable({
                   >
                     {label}
                   </td>
-                  <td className={tdMutedClass(c, a.count > 0)}>{formatCountAndBytes(a.count, a.bytes)}</td>
-                  <td className={tdMutedClass(c, b.count > 0)}>{formatCountAndBytes(b.count, b.bytes)}</td>
+                  <td className={tdMetricClass}>
+                    <StagingValue
+                      value={formatCountAndBytes(a.count, a.bytes)}
+                      active={a.count > 0}
+                      reserve={COUNT_AND_BYTES_MAX_CHARS}
+                      dark={dark}
+                    />
+                  </td>
+                  <td className={tdMetricClass}>
+                    <StagingValue
+                      value={formatCountAndBytes(b.count, b.bytes)}
+                      active={b.count > 0}
+                      reserve={COUNT_AND_BYTES_MAX_CHARS}
+                      dark={dark}
+                    />
+                  </td>
                 </tr>
               );
             })}
@@ -216,14 +255,27 @@ export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogV
           </thead>
           <tbody>
             <tr className="text-[1.05em]">
-              <td className={tdClass(c, backlogWarn)}>
-                {`${formatCount(eligible)} / ${formatCount(registry)}`}
+              <td className={tdClass}>
+                <HeadlineValue
+                  value={`${formatCount(eligible)} / ${formatCount(registry)}`}
+                  warn={backlogWarn}
+                  reserve={COUNT_MAX_CHARS + " / ".length + COUNT_MAX_CHARS}
+                  dark={dark}
+                />
               </td>
-              <td className={tdClass(c)}>{formatCount(backlog.registryRecords)}</td>
-              <td className={tdClass(c)}>
-                {`${formatCount(backlog.openManifestRefs)} refs · ${formatCount(backlog.openManifestRecords)} rec`}
+              <td className={tdClass}>
+                <HeadlineValue value={formatCount(backlog.registryRecords)} reserve={COUNT_MAX_CHARS} dark={dark} />
               </td>
-              <td className={tdClass(c, backlogWarn && oldestEligible !== "—")}>{oldestEligible}</td>
+              <td className={tdClass}>
+                <HeadlineValue
+                  value={`${formatCount(backlog.openManifestRefs)} refs · ${formatCount(backlog.openManifestRecords)} rec`}
+                  reserve={COUNT_MAX_CHARS + " refs · ".length + COUNT_MAX_CHARS + " rec".length}
+                  dark={dark}
+                />
+              </td>
+              <td className={tdClass}>
+                <HeadlineValue value={oldestEligible} warn={backlogWarn && oldestEligible !== "—"} dark={dark} />
+              </td>
             </tr>
           </tbody>
         </table>
