@@ -368,6 +368,9 @@ message GetStatsRequest {
   string vault = 1; // If empty, aggregate across all vaults
 }
 
+// The vault figures count each vault once from its manifest, however many
+// nodes hold a copy, so every node reports the same totals. total_bytes is the
+// logical size of the records: one copy of each chunk, no indexes.
 message GetStatsResponse {
   int64 total_vaults = 1;
   int64 total_chunks = 2;

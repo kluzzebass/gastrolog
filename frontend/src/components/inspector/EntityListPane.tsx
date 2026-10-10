@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
-import { useVaults, useStorages, useIngesters, useNodeRegistry } from "../../api/hooks";
+import { useVaults, useStorages, useIngesters, useNodeRegistry, useStats } from "../../api/hooks";
 import { type EntityID, idFromBytes } from "../../api/model/id";
 import { useWatchJobs } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
@@ -421,6 +421,8 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
   const { localNodeId, multiNode } = useNodeContext();
   const { data: cluster } = useClusterStatus();
   const registry = useNodeRegistry();
+  const { data: vaultStats } = useStats();
+  const { data: vaults } = useVaults();
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
 
   // Single-node: show local stats directly.
@@ -458,7 +460,12 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
           headerRight={<Badge variant="copper" dark={dark}>{nodes.length} nodes</Badge>}
         >
           <div className="p-3">
-            <ClusterSummaryView nodes={nodes} dark={dark} />
+            <ClusterSummaryView
+              nodes={nodes}
+              vaultStats={vaultStats}
+              configuredVaults={vaults.length}
+              dark={dark}
+            />
           </div>
         </ExpandableCard>
       )}
