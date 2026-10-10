@@ -1,6 +1,8 @@
 package chunking
 
 import (
+	"context"
+
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/paths"
 )
@@ -45,6 +47,14 @@ func (m *Manager) SetWorkerPassHookForTest(vaultID glid.GLID, hook func()) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.vaults[vaultID].workerPassHook = hook
+}
+
+// SetPostSealHookForTest installs a hook each post-seal goroutine runs with
+// its context before it does any work. Call before the goroutine can start.
+func (m *Manager) SetPostSealHookForTest(vaultID glid.GLID, hook func(context.Context)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.vaults[vaultID].postSealHook = hook
 }
 
 // LockBuildForTest takes the vault's buildMu, standing in for an in-flight

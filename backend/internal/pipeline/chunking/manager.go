@@ -21,9 +21,6 @@ import (
 // ErrAlreadyRunning is returned when Run is called twice.
 var ErrAlreadyRunning = errors.New("chunking manager already running")
 
-// sealRetryInterval removed — seal/build retries wake on FSM events and
-// vault-ctl leadership changes, not timed polls.
-
 // VaultCtlApplier applies marshaled vault-ctl commands for one vault.
 type VaultCtlApplier interface {
 	Apply(data []byte) error
@@ -34,8 +31,8 @@ type VaultCtlApplier interface {
 // during planner catch-up when eligible registry segments are not yet in head/.
 //
 // Deliberately NO blocking full-pass method: the chunking worker must never
-// wait on a collection pass. Under backlog a pass takes minutes-to-hours and
-// the serial seal loop stalled at one chunk per pass. Collection wakes
+// wait on a collection pass. Under backlog a pass takes minutes to hours, and
+// a serial seal loop waiting on it advances one chunk per pass. Collection wakes
 // chunking on every pass completion (OnPassComplete), so a non-blocking Nudge
 // is all the worker ever needs.
 type SegmentCollector interface {
@@ -166,7 +163,7 @@ type vaultChunking struct {
 	giveUpAlerted bool
 	// planFailures tracks segments whose on-disk index cannot be opened or
 	// read (corrupt index, unreadable file). Without it a corrupt segment
-	// was skipped silently forever: never planned into a sealed manifest,
+	// is skipped silently forever: never planned into a sealed manifest,
 	// head purge blocked. Guarded by planMu like the planner pass itself.
 	planFailures map[glid.GLID]*planFailure
 	// planFailureAlerted tracks the unplannable-segment alert state so
@@ -186,7 +183,7 @@ type vaultChunking struct {
 	pendingRelease []glid.GLID
 	// pendingPurge holds released segment IDs queued by the wake-only
 	// ReleaseSegments FSM callback; the worker's release branch drains it
-	// (purging on the Raft apply goroutine deadlocked teardown).
+	// (purging on the Raft apply goroutine deadlocks teardown).
 	purgeMu      sync.Mutex
 	pendingPurge []glid.GLID
 	// unsubPublish removes this vault's publish-callback subscription on the
@@ -220,11 +217,24 @@ type vaultChunking struct {
 	// buildWG tracks the in-flight build goroutine so worker shutdown waits
 	// for it without polling.
 	buildWG sync.WaitGroup
+	// postSealCtx bounds the post-seal goroutines the sealed-manifest-cleared
+	// callback starts; stopPostSeal cancels it and waits on postSealWG.
+	// postSealMu orders every postSealWG.Add against that Wait, and
+	// postSealStopped refuses new goroutines once teardown has begun.
+	postSealMu      sync.Mutex
+	postSealStopped bool
+	postSealCtx     context.Context
+	cancelPostSeal  context.CancelFunc
+	postSealWG      sync.WaitGroup
 	// workerPassHook, when non-nil, runs on the worker goroutine after each
 	// pass, before the worker waits for its next signal. Test-only: a test
 	// parks the worker here to land a Notify between the pass and the wait.
 	// Nil in production.
 	workerPassHook func()
+	// postSealHook, when non-nil, runs at the start of each post-seal
+	// goroutine with its context. Test-only: a test parks the goroutine here
+	// across teardown. Nil in production.
+	postSealHook func(context.Context)
 	// log is the per-vault logger, fixed at registration: the worker, the
 	// build goroutine, and FSM-callback goroutines all read it unsynchronized.
 	log *slog.Logger
@@ -314,6 +324,7 @@ func newVaultChunking(cfg VaultConfig, log *slog.Logger) (*vaultChunking, error)
 	if cfg.IsLeader == nil {
 		cfg.IsLeader = func() bool { return false }
 	}
+	postSealCtx, cancelPostSeal := context.WithCancel(context.Background())
 	return &vaultChunking{
 		cfg:               cfg,
 		log:               log,
@@ -321,7 +332,40 @@ func newVaultChunking(cfg VaultConfig, log *slog.Logger) (*vaultChunking, error)
 		wake:              notify.NewSignal(),
 		releaseWake:       notify.NewSignal(),
 		segmentIndexCache: make(map[glid.GLID]*OrderedIndex),
+		postSealCtx:       postSealCtx,
+		cancelPostSeal:    cancelPostSeal,
 	}, nil
+}
+
+// goAfterSealBuild runs afterSealBuild on a goroutine that stopPostSeal
+// cancels and waits for. It is a no-op once teardown has begun.
+func (v *vaultChunking) goAfterSealBuild(pending *vaultctlfsm.OpenChunkManifest) {
+	v.postSealMu.Lock()
+	defer v.postSealMu.Unlock()
+	if v.postSealStopped {
+		return
+	}
+	ctx := v.postSealCtx
+	v.postSealWG.Go(func() {
+		if v.postSealHook != nil {
+			v.postSealHook(ctx)
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		v.afterSealBuild(ctx, pending)
+	})
+}
+
+// stopPostSeal cancels post-seal goroutines that have not started their work
+// and returns once every one has exited, so no head purge or log line from
+// them follows teardown. Idempotent.
+func (v *vaultChunking) stopPostSeal() {
+	v.postSealMu.Lock()
+	v.postSealStopped = true
+	v.cancelPostSeal()
+	v.postSealMu.Unlock()
+	v.postSealWG.Wait()
 }
 
 // Config configures a ChunkingManager.
@@ -518,11 +562,10 @@ func (m *Manager) wireVaultFSMCallbacks(v *vaultChunking, cfg VaultConfig) {
 	// are only chunked when a future publish arrives.
 	//
 	// Must NOT call afterSealBuild inline: holder-receipt Apply on the Raft
-	// FSM apply goroutine deadlocks the vault-ctl leader. Dispatch post-seal
-	// work on a goroutine (same pattern as onRequestDelete acks).
+	// FSM apply goroutine deadlocks the vault-ctl leader.
 	cfg.FSM.SetOnSealedManifestCleared(func(_ chunk.ChunkID) {
 		if pending := v.progress.noteSealCleared(); pending != nil {
-			go v.afterSealBuild(context.Background(), pending)
+			v.goAfterSealBuild(pending)
 		}
 		v.wake.Notify()
 	})
@@ -539,6 +582,7 @@ func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 		if v.stopWorker != nil {
 			v.stopWorker()
 		}
+		v.stopPostSeal()
 		v.closeSegmentIndexCache()
 	}
 }
@@ -594,9 +638,6 @@ func (m *Manager) RotateCron(ctx context.Context, vaultID glid.GLID) error {
 	return v.planOnce(ctx, true)
 }
 
-// NotifyVault wakes the per-vault plan/build worker. Used when vault-ctl
-// leadership aligns on the placement leader so catch-up runs after startup
-// elections, not only on the first worker tick.
 // VaultSealStats is one vault's cumulative seal counters on this home
 // (records/bytes materialized into sealed GLCBs).
 type VaultSealStats struct {
@@ -657,6 +698,9 @@ func (m *Manager) StageStats() []VaultStageStats {
 	return out
 }
 
+// NotifyVault wakes the per-vault plan/build worker. Used when vault-ctl
+// leadership aligns on the placement leader so catch-up runs after startup
+// elections, not only on the first worker tick.
 func (m *Manager) NotifyVault(vaultID glid.GLID) {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
@@ -714,8 +758,7 @@ func (m *Manager) Run(ctx context.Context) error {
 
 	// Quiesce before waiting: clearing runCtx under m.mu guarantees no
 	// registration can m.wg.Go a new worker after this point, so the Wait
-	// below cannot race a concurrent Add — the WaitGroup misuse the race
-	// detector flagged intermittently across the pipeline managers.
+	// below cannot race a concurrent Add.
 	<-ctx.Done()
 
 	m.mu.Lock()
@@ -745,12 +788,11 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 		log := v.logger()
 		// Recovery must not run before the vault-ctl FSM has replayed: at
 		// process start the registry is briefly empty, and a recovery pass
-		// against an empty FSM registers nothing and never re-runs — a node
-		// once held 297 complete GLCBs its chunk manager knew nothing about
-		// while retention, backfill, and queries silently starved. Retry on
-		// a short ticker until the FSM is ready, then recover exactly once,
-		// in this background worker — never on the serving path (startup
-		// stays sub-3s per the vision).
+		// against an empty FSM registers nothing and never re-runs, leaving
+		// every complete GLCB on disk unknown to the chunk manager — invisible
+		// to retention, backfill, and queries. Retry on a short ticker until
+		// the FSM is ready, then recover exactly once, in this background
+		// worker — never on the serving path, so startup does not wait on it.
 		recoverTick := time.NewTicker(time.Second)
 		defer recoverTick.Stop()
 		recovered := false
@@ -775,6 +817,7 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 		for {
 			select {
 			case <-ctx.Done():
+				v.stopPostSeal()
 				v.buildWG.Wait()
 				return
 			case <-recoverTick.C:
@@ -825,8 +868,8 @@ func (m *Manager) runBuildPass(ctx context.Context, v *vaultChunking, log *slog.
 		err := v.buildOnce(ctx)
 		v.buildMu.Unlock()
 		if err != nil && ctx.Err() == nil {
-			// Retrying is correct; logging every retry is a firehose — a 6h
-			// blocked build once emitted 244k of these.
+			// Retrying is correct; logging every retry is a firehose — a
+			// long-blocked build retries on every wake.
 			if n, ok := m.buildFailLog.Allow(v.cfg.VaultID.String()); ok {
 				log.Warn("chunking build failed", "error", err, "suppressed", n)
 			}

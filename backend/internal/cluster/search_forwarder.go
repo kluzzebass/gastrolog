@@ -68,8 +68,12 @@ func (sf *SearchForwarder) Search(ctx context.Context, nodeID string, req *gastr
 			return nil, fmt.Errorf("search stream from %s: %w", nodeID, err)
 		}
 		merged.Records = append(merged.Records, msg.GetRecords()...)
-		if msg.GetTableResult() != nil {
-			merged.TableResult = msg.GetTableResult()
+		if tr := msg.GetTableResult(); tr != nil {
+			if merged.TableResult == nil {
+				merged.TableResult = tr
+			} else {
+				merged.TableResult.Rows = append(merged.TableResult.Rows, tr.GetRows()...)
+			}
 		}
 		if msg.GetHistogram() != nil {
 			merged.Histogram = msg.GetHistogram()

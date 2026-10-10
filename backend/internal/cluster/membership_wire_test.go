@@ -41,7 +41,7 @@ func startMember(t *testing.T, h MembershipHandler, joinerID string) (addr strin
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	gsrv := grpc.NewServer(srv.baseServerOpts(maxChunkTransferBytes)...)
+	gsrv := grpc.NewServer(srv.baseServerOpts(maxServiceLaneMsgBytes)...)
 	gsrv.RegisterService(&clusterServiceDesc, srv)
 	go func() { _ = gsrv.Serve(lis) }()
 	t.Cleanup(func() {
