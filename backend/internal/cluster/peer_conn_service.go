@@ -19,12 +19,12 @@ func (m *PeerConnManager) InvokeService(ctx context.Context, peerNodeID, purpose
 
 // OpenServiceStream acquires a service-lane connection and opens a client
 // stream. The caller must call handle.Release() when the stream is finished.
-func (m *PeerConnManager) OpenServiceStream(ctx context.Context, peerNodeID, purpose string, desc *grpc.StreamDesc, method string) (PeerConnHandle, grpc.ClientStream, error) {
+func (m *PeerConnManager) OpenServiceStream(ctx context.Context, peerNodeID, purpose string, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (PeerConnHandle, grpc.ClientStream, error) {
 	h, err := m.AcquireService(peerNodeID, purpose)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dial node %s: %w", peerNodeID, err)
 	}
-	stream, err := h.GRPC().NewStream(ctx, desc, method)
+	stream, err := h.GRPC().NewStream(ctx, desc, method, opts...)
 	if err != nil {
 		h.Invalidate(err)
 		h.Release()
