@@ -25,7 +25,7 @@ var sleepCeilings = map[string]int{
 	"internal/app":                   14,
 	"internal/callgroup":             3,
 	"internal/chunk/file":            1,
-	"internal/cluster":               27,
+	"internal/cluster":               23,
 	"internal/index":                 4,
 	"internal/ingester/http":         1,
 	"internal/ingester/limits":       1,

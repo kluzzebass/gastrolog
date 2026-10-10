@@ -39,6 +39,14 @@ func IsGLCBBuildTmpName(name string) bool {
 // writer call instead of retyping the literal.
 const GLCBBuildTmpPrefix = glcbBuildTmpPrefix
 
+// SetWorkerPassHookForTest installs a hook the vault's worker runs after each
+// pass, before it waits for its next signal. Call before Run starts the worker.
+func (m *Manager) SetWorkerPassHookForTest(vaultID glid.GLID, hook func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.vaults[vaultID].workerPassHook = hook
+}
+
 // LockBuildForTest takes the vault's buildMu, standing in for an in-flight
 // build pass, so tests can assert that recovery's orphan sweep serializes
 // with builds instead of deleting a live BuildGLCBFile staging file.

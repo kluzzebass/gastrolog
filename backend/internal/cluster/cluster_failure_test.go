@@ -2,12 +2,14 @@ package cluster_test
 
 import (
 	"context"
-	"gastrolog/internal/glid"
-	"runtime"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
+	"gastrolog/internal/waittest"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -30,42 +32,80 @@ func putReplProbe(t *testing.T, node *testNode, id glid.GLID, name, where string
 	}
 }
 
-// waitStableLeader waits until a node reports a stable leader (with a non-empty ID).
-func waitStableLeader(t *testing.T, nodes []*testNode, timeout time.Duration) *testNode {
+// raftView snapshots each node's role and the leader it follows.
+func raftView(nodes []*testNode) string {
+	var b strings.Builder
+	for _, n := range nodes {
+		_, leader := n.raft.LeaderWithID()
+		fmt.Fprintf(&b, "%s=%s(leader %q term %s) ", n.id, n.raft.State(), leader, n.raft.Stats()["term"])
+	}
+	return b.String()
+}
+
+// waitStableLeader waits until one of the nodes is leader and returns it.
+func waitStableLeader(t *testing.T, nodes []*testNode) *testNode {
 	t.Helper()
-	deadline := time.After(timeout)
-	for {
+	var leader *testNode
+	waittest.Progress(t, "a leader among the nodes", func() (string, bool) {
 		for _, n := range nodes {
 			if n.raft.State() == hraft.Leader {
-				return n
+				leader = n
+				return raftView(nodes), true
 			}
 		}
-		select {
-		case <-deadline:
-			t.Fatal("timed out waiting for a stable leader")
-		default:
-			runtime.Gosched()
+		return raftView(nodes), false
+	})
+	return leader
+}
+
+// waitAllFollow waits until every node names leaderID as its leader. A
+// node forwards writes to the leader it has heard from, so until then a
+// write through it finds no leader.
+func waitAllFollow(t *testing.T, nodes []*testNode, leaderID string) {
+	t.Helper()
+	waittest.Progress(t, "every node following "+leaderID, func() (string, bool) {
+		for _, n := range nodes {
+			if _, id := n.raft.LeaderWithID(); string(id) != leaderID {
+				return raftView(nodes), false
+			}
+		}
+		return raftView(nodes), true
+	})
+}
+
+// waitConfig waits until the leader's Raft configuration satisfies match.
+func waitConfig(t *testing.T, r *hraft.Raft, what string, match func([]hraft.Server) bool) {
+	t.Helper()
+	waittest.Progress(t, what, func() (string, bool) {
+		cfg := r.GetConfiguration()
+		if err := cfg.Error(); err != nil {
+			return "configuration: " + err.Error(), false
+		}
+		servers := cfg.Configuration().Servers
+		return fmt.Sprintf("%v", servers), match(servers)
+	})
+}
+
+// hasServer reports whether servers holds id with the given suffrage.
+func hasServer(servers []hraft.Server, id string, suffrage hraft.ServerSuffrage) bool {
+	for _, srv := range servers {
+		if string(srv.ID) == id && srv.Suffrage == suffrage {
+			return true
 		}
 	}
+	return false
 }
 
 // waitReplication waits for a rotation policy to appear on a node's FSM.
-// Switched from filter to rotation policy as the replication probe —
-// FilterConfig is gone, but the same Raft-replicate smoke test is what
-// matters.
-func waitReplication(t *testing.T, node *testNode, id glid.GLID, timeout time.Duration) *system.RotationPolicyConfig {
+func waitReplication(t *testing.T, node *testNode, id glid.GLID) *system.RotationPolicyConfig {
 	t.Helper()
 	ctx := context.Background()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		got, _ := node.store.GetRotationPolicy(ctx, id)
-		if got != nil {
-			return got
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("rotation policy %s not replicated within %v", id, timeout)
-	return nil
+	var got *system.RotationPolicyConfig
+	waittest.Progress(t, fmt.Sprintf("rotation policy %s on %s", id, node.id), func() (string, bool) {
+		got, _ = node.store.GetRotationPolicy(ctx, id)
+		return fmt.Sprintf("applied=%d", node.raft.AppliedIndex()), got != nil
+	})
+	return got
 }
 
 // threeNodeCluster creates and returns a 3-node Raft cluster.
@@ -85,22 +125,11 @@ func threeNodeCluster(t *testing.T) []*testNode {
 	addVoter(t, node1.srv, "node-2", node2.srv.Addr())
 	addVoter(t, node1.srv, "node-3", node3.srv.Addr())
 
-	// Wait for all 3 nodes visible in Raft system.
-	deadline := time.After(5 * time.Second)
-	for {
-		cfg := node1.raft.GetConfiguration()
-		if cfg.Error() == nil && len(cfg.Configuration().Servers) == 3 {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("timed out waiting for 3-node configuration")
-		default:
-			runtime.Gosched()
-		}
-	}
+	waitConfig(t, node1.raft, "3-node configuration", func(servers []hraft.Server) bool { return len(servers) == 3 })
+	nodes := []*testNode{node1, node2, node3}
+	waitAllFollow(t, nodes, "node-1")
 
-	return []*testNode{node1, node2, node3}
+	return nodes
 }
 
 // TestLeadershipTransfer verifies that after a leadership transfer, the new
@@ -124,7 +153,7 @@ func TestLeadershipTransfer(t *testing.T) {
 	}
 
 	// Wait for a new leader to emerge (not node1).
-	newLeader := waitStableLeader(t, nodes, 5*time.Second)
+	newLeader := waitStableLeader(t, nodes)
 	if newLeader == node1 {
 		// Leadership may return to node1 in a 3-node cluster; that's valid
 		// but we want to verify it worked at all.
@@ -137,7 +166,7 @@ func TestLeadershipTransfer(t *testing.T) {
 
 	// Verify replication to all nodes.
 	for _, n := range nodes {
-		got := waitReplication(t, n, probe2ID, 5*time.Second)
+		got := waitReplication(t, n, probe2ID)
 		if got.Name != "after-transfer" {
 			t.Errorf("expected after-transfer, got %q", got.Name)
 		}
@@ -160,27 +189,14 @@ func TestNodeRemoval(t *testing.T) {
 		t.Fatalf("RemoveServer node-3: %v", err)
 	}
 
-	// Wait for config to reflect 2 nodes.
-	deadline := time.After(5 * time.Second)
-	for {
-		cfg := node1.raft.GetConfiguration()
-		if cfg.Error() == nil && len(cfg.Configuration().Servers) == 2 {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("timed out waiting for 2-node config")
-		default:
-			runtime.Gosched()
-		}
-	}
+	waitConfig(t, node1.raft, "2-node configuration", func(servers []hraft.Server) bool { return len(servers) == 2 })
 
 	// Write on the leader after removal — cluster should still work with 2 nodes.
 	probeID := glid.New()
 	putReplProbe(t, node1, probeID, "post-removal", "after removal")
 
 	// Verify replication to surviving follower.
-	got := waitReplication(t, node2, probeID, 5*time.Second)
+	got := waitReplication(t, node2, probeID)
 	if got.Name != "post-removal" {
 		t.Errorf("expected post-removal, got %q", got.Name)
 	}
@@ -200,15 +216,12 @@ func TestFollowerShutdownClusterSurvives(t *testing.T) {
 	// Shut down node-3.
 	node3.close()
 
-	// Give Raft a moment to notice the lost follower.
-	time.Sleep(200 * time.Millisecond)
-
 	// Leader should still accept writes (quorum of 2 out of 3).
 	probeID := glid.New()
 	putReplProbe(t, node1, probeID, "after-follower-down", "with one follower down")
 
 	// Verify the surviving follower got the write.
-	got := waitReplication(t, node2, probeID, 5*time.Second)
+	got := waitReplication(t, node2, probeID)
 	if got.Name != "after-follower-down" {
 		t.Errorf("expected after-follower-down, got %q", got.Name)
 	}
@@ -238,31 +251,15 @@ func TestNonvoterReplication(t *testing.T) {
 		t.Fatalf("AddNonvoter: %v", err)
 	}
 
-	// Verify nonvoter appears in config with correct suffrage.
-	deadline := time.After(5 * time.Second)
-	for {
-		cfg := node1.raft.GetConfiguration()
-		if cfg.Error() == nil {
-			for _, srv := range cfg.Configuration().Servers {
-				if string(srv.ID) == "nonvoter-1" && srv.Suffrage == hraft.Nonvoter {
-					goto found
-				}
-			}
-		}
-		select {
-		case <-deadline:
-			t.Fatal("timed out waiting for nonvoter in config")
-		default:
-			runtime.Gosched()
-		}
-	}
-found:
+	waitConfig(t, node1.raft, "nonvoter-1 in the configuration as nonvoter", func(servers []hraft.Server) bool {
+		return hasServer(servers, "nonvoter-1", hraft.Nonvoter)
+	})
 
 	// Write on leader and verify replication to nonvoter.
 	probeID := glid.New()
 	putReplProbe(t, node1, probeID, "nonvoter-test", "to nonvoter")
 
-	got := waitReplication(t, nonvoter, probeID, 5*time.Second)
+	got := waitReplication(t, nonvoter, probeID)
 	if got.Name != "nonvoter-test" {
 		t.Errorf("expected nonvoter-test, got %q", got.Name)
 	}
@@ -284,31 +281,15 @@ func TestDemoteVoterToNonvoter(t *testing.T) {
 		t.Fatalf("DemoteVoter: %v", err)
 	}
 
-	// Verify node-3 is now a nonvoter.
-	deadline := time.After(5 * time.Second)
-	for {
-		cfg := node1.raft.GetConfiguration()
-		if cfg.Error() == nil {
-			for _, srv := range cfg.Configuration().Servers {
-				if string(srv.ID) == "node-3" && srv.Suffrage == hraft.Nonvoter {
-					goto demoted
-				}
-			}
-		}
-		select {
-		case <-deadline:
-			t.Fatal("timed out waiting for node-3 demotion")
-		default:
-			runtime.Gosched()
-		}
-	}
-demoted:
+	waitConfig(t, node1.raft, "node-3 demoted to nonvoter", func(servers []hraft.Server) bool {
+		return hasServer(servers, "node-3", hraft.Nonvoter)
+	})
 
 	// Leader should still accept writes (2 voters: node-1 + node-2).
 	probeID := glid.New()
 	putReplProbe(t, node1, probeID, "after-demote", "after demote")
 
-	got := waitReplication(t, node2, probeID, 5*time.Second)
+	got := waitReplication(t, node2, probeID)
 	if got.Name != "after-demote" {
 		t.Errorf("expected after-demote, got %q", got.Name)
 	}
@@ -328,15 +309,15 @@ func TestLeaderStepDownNewElection(t *testing.T) {
 	// Write something before the leader goes down.
 	preID := glid.New()
 	putReplProbe(t, node1, preID, "pre-election", "pre-election")
-	waitReplication(t, node2, preID, 5*time.Second)
-	waitReplication(t, node3, preID, 5*time.Second)
+	waitReplication(t, node2, preID)
+	waitReplication(t, node3, preID)
 
 	// Shut down the leader.
 	node1.close()
 
 	// Wait for a new leader to emerge among node2 and node3.
 	survivors := []*testNode{node2, node3}
-	newLeader := waitStableLeader(t, survivors, 10*time.Second)
+	newLeader := waitStableLeader(t, survivors)
 
 	// Write on the new leader.
 	postID := glid.New()
@@ -344,7 +325,7 @@ func TestLeaderStepDownNewElection(t *testing.T) {
 
 	// Verify the other survivor got the write.
 	for _, n := range survivors {
-		got := waitReplication(t, n, postID, 5*time.Second)
+		got := waitReplication(t, n, postID)
 		if got.Name != "post-election" {
 			t.Errorf("expected post-election, got %q", got.Name)
 		}
@@ -352,7 +333,7 @@ func TestLeaderStepDownNewElection(t *testing.T) {
 
 	// Verify the pre-election data survived the leader change.
 	for _, n := range survivors {
-		got := waitReplication(t, n, preID, time.Second)
+		got := waitReplication(t, n, preID)
 		if got.Name != "pre-election" {
 			t.Errorf("expected pre-election, got %q", got.Name)
 		}
@@ -374,7 +355,7 @@ func TestFollowerForwardingAfterLeaderChange(t *testing.T) {
 	// Write via follower (node2) — should forward to node1 (current leader).
 	probe1ID := glid.New()
 	putReplProbe(t, node2, probe1ID, "fwd-to-node1", "via follower before transfer")
-	waitReplication(t, node1, probe1ID, 5*time.Second)
+	waitReplication(t, node1, probe1ID)
 
 	// Transfer leadership away from node1.
 	if err := node1.raft.LeadershipTransfer().Error(); err != nil {
@@ -382,7 +363,7 @@ func TestFollowerForwardingAfterLeaderChange(t *testing.T) {
 	}
 
 	// Wait for new leader.
-	newLeader := waitStableLeader(t, nodes, 5*time.Second)
+	newLeader := waitStableLeader(t, nodes)
 
 	// Find a follower that isn't the new leader.
 	var follower *testNode
@@ -393,26 +374,14 @@ func TestFollowerForwardingAfterLeaderChange(t *testing.T) {
 		}
 	}
 
-	// Write via the follower — should forward to the new leader.
-	// Retry briefly: the follower may not know the new leader yet.
+	// Write via the follower once it follows the new leader.
+	waitAllFollow(t, nodes, newLeader.id)
 	probe2ID := glid.New()
-	fwdDeadline := time.Now().Add(5 * time.Second)
-	for {
-		err := follower.store.PutRotationPolicy(context.Background(), system.RotationPolicyConfig{
-			ID: probe2ID, Name: "fwd-to-new-leader", MaxAge: &dummyMaxAge,
-		})
-		if err == nil {
-			break
-		}
-		if time.Now().After(fwdDeadline) {
-			t.Fatalf("PutRotationPolicy via follower after transfer: %v", err)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	putReplProbe(t, follower, probe2ID, "fwd-to-new-leader", "via follower after transfer")
 
 	// Verify all nodes got both writes.
 	for _, n := range nodes {
-		waitReplication(t, n, probe2ID, 5*time.Second)
+		waitReplication(t, n, probe2ID)
 	}
 }
 
@@ -430,9 +399,6 @@ func TestQuorumLossBlocksWrites(t *testing.T) {
 	// Shut down two followers — leader loses quorum.
 	node2.close()
 	node3.close()
-
-	// Give Raft time to notice.
-	time.Sleep(time.Second)
 
 	// Attempt a write with a short timeout — should fail or hang.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
