@@ -85,7 +85,7 @@ func TestFourNodeFollowerReadAfterForwardedWrite(t *testing.T) {
 	}
 
 	nodes := fourNodeCluster(t)
-	leader := waitStableLeader(t, nodes, 5*time.Second)
+	leader := waitStableLeader(t, nodes)
 
 	// Every follower forwards a write and immediately reads it back locally.
 	for _, follower := range followersOf(nodes) {
@@ -105,7 +105,7 @@ func TestFourNodeFollowerReadAfterForwardedWrite(t *testing.T) {
 	if err := leader.raft.LeadershipTransfer().Error(); err != nil {
 		t.Fatalf("LeadershipTransfer: %v", err)
 	}
-	newLeader := waitStableLeader(t, nodes, 10*time.Second)
+	newLeader := waitStableLeader(t, nodes)
 	if newLeader == leader {
 		t.Fatalf("leadership did not move")
 	}

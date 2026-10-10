@@ -3,7 +3,6 @@ package cluster_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"gastrolog/internal/glid"
 )
@@ -23,7 +22,7 @@ func TestFourNodeFollowerCatchupBarrier(t *testing.T) {
 	}
 
 	nodes := fourNodeCluster(t)
-	leader := waitStableLeader(t, nodes, 5*time.Second)
+	leader := waitStableLeader(t, nodes)
 
 	// Commit fresh state on the leader after the cluster is formed, so a
 	// follower is not guaranteed to have replicated it yet. The catch-up
