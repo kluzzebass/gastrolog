@@ -81,6 +81,7 @@ export function MaxMindCard({
     <SettingsCard
       id="MaxMind Auto-Download"
       typeBadge="maxmind"
+      helpRef="managed-files#maxmind-auto-download"
       dark={dark}
       expanded={isExpanded("maxmind")}
       onToggle={() => toggle("maxmind")}

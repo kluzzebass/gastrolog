@@ -65,6 +65,7 @@ export function IngesterCommonFields({
           checked={singleton}
           onChange={onSingletonChange}
           label="Singleton (run on one node with automatic failover)"
+          helpRef="ingestion"
           dark={dark}
         />
       )}

@@ -11,6 +11,8 @@ import {
   formatPercent,
   formatRatePerSec,
 } from "../../utils/units";
+import { HelpButton } from "../HelpButton";
+import { HelpLink } from "../HelpLink";
 import { LiveValue } from "../LiveValue";
 import { LIVE_TEXT } from "../liveValueStyle";
 import { Spark } from "../Spark";
@@ -72,6 +74,7 @@ function CompactView({
               label="Log Drops"
               value={Number(stats.selfIngesterDropsTotal).toLocaleString()}
               mono
+              helpRef="ingester-self"
               dark={dark}
             />
           )}
@@ -122,6 +125,7 @@ function CompactView({
               label="Pressure"
               value={stats.ingestPressureLevel || "normal"}
               reserved={stats.ingestPressureLevel === "" || stats.ingestPressureLevel === "normal"}
+              helpRef="inspector-system#throughput"
               dark={dark}
             />
           </div>
@@ -161,7 +165,7 @@ function CompactView({
       {stats.raftState && (
         <section>
           <CompactDivider dark={dark} />
-          <CompactSectionLabel label="Raft State" dark={dark} />
+          <CompactSectionLabel label="Raft State" helpRef="inspector-system#peer-nodes-compact-view" dark={dark} />
           <div className="grid grid-cols-2 gap-x-6 gap-y-1">
             <CompactStatRow label="State" value={stats.raftState} dark={dark} />
             <CompactStatRow label="Term" value={stats.raftTerm.toString()} mono dark={dark} />
@@ -242,31 +246,35 @@ function CompactRateRow({
 }
 
 // `reserved` holds the row's space while it has nothing to say, so a value
-// that comes and goes never moves the rows below it.
+// that comes and goes never moves the rows below it. With `helpRef` the
+// label opens that help section.
 function CompactStatRow({
   label,
   value,
   mono = false,
   reserved = false,
+  helpRef,
   dark,
 }: Readonly<{
   label: string;
   value: string | number;
   mono?: boolean;
   reserved?: boolean;
+  helpRef?: string;
   dark: boolean;
 }>) {
   const c = useThemeClass(dark);
+  const labelClass = `text-[0.75em] font-medium uppercase tracking-wider shrink-0 ${c("text-text-muted", "text-light-text-muted")}`;
   return (
     <div
       className={`flex items-baseline justify-between gap-4 ${reserved ? "invisible" : ""}`}
       aria-hidden={reserved || undefined}
     >
-      <span
-        className={`text-[0.75em] font-medium uppercase tracking-wider shrink-0 ${c("text-text-muted", "text-light-text-muted")}`}
-      >
-        {label}
-      </span>
+      {helpRef ? (
+        <HelpLabel helpRef={helpRef} className={labelClass}>{label}</HelpLabel>
+      ) : (
+        <span className={labelClass}>{label}</span>
+      )}
       {mono ? (
         <LiveValue dark={dark} tone="muted" className="text-[0.8em]">
           {value}
@@ -280,13 +288,18 @@ function CompactStatRow({
   );
 }
 
-function CompactSectionLabel({ label, dark }: Readonly<{ label: string; dark: boolean }>) {
+function HelpLabel({ helpRef, className, children }: Readonly<{ helpRef: string; className: string; children: React.ReactNode }>) {
+  return <HelpLink helpRef={helpRef} className={className}>{children}</HelpLink>;
+}
+
+function CompactSectionLabel({ label, helpRef, dark }: Readonly<{ label: string; helpRef?: string; dark: boolean }>) {
   const c = useThemeClass(dark);
   return (
     <span
-      className={`text-[0.7em] font-medium uppercase tracking-wider mb-1.5 block ${c("text-text-muted", "text-light-text-muted")}`}
+      className={`flex items-center gap-1.5 text-[0.7em] font-medium uppercase tracking-wider mb-1.5 ${c("text-text-muted", "text-light-text-muted")}`}
     >
       {label}
+      {helpRef && <HelpButton helpRef={helpRef} />}
     </span>
   );
 }
@@ -316,6 +329,8 @@ function formatUptime(seconds: bigint): string {
 
 const UNKNOWN = "—";
 
+const QUORUM_LOSS_HELP_REF = "clustering#quorum-loss-read-only-mode";
+
 /**
  * Cluster-wide summary. Vault holdings come from the cluster vault stats,
  * which count each vault once; resources, throughput, and queue depth are
@@ -343,7 +358,12 @@ export function ClusterSummaryView({
         <CompactSectionLabel label="Cluster" dark={dark} />
         <div className="grid grid-cols-2 gap-x-6 gap-y-1">
           <CompactStatRow label="Nodes" value={nodes.length.toString()} mono dark={dark} />
-          <CompactStatRow label="Leader" value={summary.leaderName || "none"} dark={dark} />
+          <CompactStatRow
+            label="Leader"
+            value={summary.leaderName || "none"}
+            helpRef={summary.leaderName ? undefined : QUORUM_LOSS_HELP_REF}
+            dark={dark}
+          />
           <CompactStatRow label="Vaults" value={(holdings?.vaults ?? configuredVaults).toLocaleString()} mono dark={dark} />
           <CompactStatRow label="Records" value={holdings ? holdings.records.toLocaleString() : UNKNOWN} mono dark={dark} />
           <CompactStatRow label="Data" value={holdings ? formatBytes(holdings.bytes) : UNKNOWN} mono dark={dark} />

@@ -244,6 +244,7 @@ export function VaultStorageForm({
             label="Cloud Storage"
             dark={dark}
             description={cloudBindingDescription(!!cloudLocked, cloudServiceOptions.length > 0)}
+            helpRef="storage-config#cloud-storage"
           >
             <SelectInput
               value={storage.cloudServiceId}
@@ -257,7 +258,7 @@ export function VaultStorageForm({
             />
           </FormField>
 
-          <FormField label="Storage Class" dark={dark}>
+          <FormField label="Storage Class" helpRef="storage-config#file-storage" dark={dark}>
             {storageClassOptions.length > 0 ? (
               <SelectInput
                 value={storage.storageClass}
@@ -283,7 +284,7 @@ export function VaultStorageForm({
               chunks ARE the data, not a cache). */}
           {storage.cloudServiceId !== "" && (
             <>
-              <FormField label="Cache Eviction" dark={dark}>
+              <FormField label="Cache Eviction" helpRef="storage-cloud#settings" dark={dark}>
                 <SelectInput
                   value={storage.cacheEviction || "lru"}
                   onChange={(v) => onUpdate({ cacheEviction: v })}
@@ -347,7 +348,7 @@ export function VaultStorageForm({
       )}
 
       {storage.type !== "jsonl" && rotationPolicyOptions.length > 0 && (
-        <FormField label="Rotation Policy" dark={dark}>
+        <FormField label="Rotation Policy" helpRef="vaults-config#rotation-and-retention-policies" dark={dark}>
           <SelectInput
             value={storage.rotationPolicyId}
             onChange={(v) => onUpdate({ rotationPolicyId: v })}
@@ -361,7 +362,7 @@ export function VaultStorageForm({
       )}
 
       {storage.type !== "jsonl" && retentionPolicyOptions.length > 0 && (
-        <FormField label="Retention Policy" dark={dark}>
+        <FormField label="Retention Policy" helpRef="vaults-config#rotation-and-retention-policies" dark={dark}>
           <SelectInput
             value={storage.retentionPolicyId}
             onChange={(v) => onUpdate({ retentionPolicyId: v })}
@@ -413,7 +414,7 @@ export function VaultStorageForm({
       )}
 
       {storage.type !== "jsonl" && (
-        <FormField label="Replication Factor" dark={dark} description="1 = none, 2 = redundant, 3+ = fault tolerant">
+        <FormField label="Replication Factor" dark={dark} description="1 = none, 2 = redundant, 3+ = fault tolerant" helpRef="storage-config#how-vaults-use-file-storages">
           <SpinnerInput
             value={storage.replicationFactor}
             onChange={(v) => onUpdate({ replicationFactor: v })}

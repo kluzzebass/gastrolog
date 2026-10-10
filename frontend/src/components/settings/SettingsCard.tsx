@@ -7,6 +7,7 @@ interface SettingsCardProps {
   id: string;
   typeBadge?: BadgeSpec;
   secondaryBadge?: BadgeSpec;
+  helpRef?: string;
   dark: boolean;
   expanded?: boolean;
   onToggle?: () => void;
@@ -23,6 +24,7 @@ export function SettingsCard({
   id,
   typeBadge,
   secondaryBadge,
+  helpRef,
   dark,
   expanded,
   onToggle,
@@ -48,6 +50,7 @@ export function SettingsCard({
       id={id}
       typeBadge={typeBadge}
       secondaryBadge={secondaryBadge}
+      helpRef={helpRef}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}

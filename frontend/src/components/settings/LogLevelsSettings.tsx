@@ -141,6 +141,7 @@ export function LogLevelsSettings({ dark }: Props) {
     <div className="flex flex-col gap-3">
       <SettingsCard
         id="Rules"
+        helpRef="log-levels#rules"
         dark={dark}
         expanded={rulesExpanded}
         onToggle={() => setRulesExpanded(!rulesExpanded)}
@@ -253,6 +254,7 @@ export function LogLevelsSettings({ dark }: Props) {
 
       <SettingsCard
         id="Components"
+        helpRef="log-levels#components"
         dark={dark}
         expanded={componentsExpanded}
         onToggle={() => setComponentsExpanded(!componentsExpanded)}

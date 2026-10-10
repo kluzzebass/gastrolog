@@ -17,6 +17,7 @@ import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { useEditState } from "../../hooks/useEditState";
 import { useToast } from "../Toast";
 import { Badge } from "../Badge";
+import { HelpButton } from "../HelpButton";
 import { CopyButton } from "../CopyButton";
 import { EyeIcon, EyeOffIcon } from "../icons";
 import { SettingsCard } from "./SettingsCard";
@@ -36,6 +37,19 @@ function roleName(role: ClusterNodeRole): string {
       return "unknown";
   }
 }
+
+function roleTitle(role: ClusterNodeRole): string | undefined {
+  switch (role) {
+    case ClusterNodeRole.LEADER:
+      return "Raft leader — accepts configuration writes and replicates them to followers";
+    case ClusterNodeRole.FOLLOWER:
+      return "Raft follower — replicates the leader's log and votes in elections";
+    default:
+      return undefined;
+  }
+}
+
+const NODE_ROLES_HELP_REF = "clustering#node-roles";
 
 interface NodeEdit {
   name: string;
@@ -143,12 +157,12 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                     <OfflineBadge lastSeen={node.lastSeen} isOffline={!node.hasStats} dark={dark} />
                   )}
                   {clusterEnabled && node.role !== ClusterNodeRole.UNSPECIFIED && (
-                    <Badge variant={node.isLeader ? "copper" : "muted"} dark={dark}>
+                    <Badge variant={node.isLeader ? "copper" : "muted"} dark={dark} title={roleTitle(node.role)} helpRef={NODE_ROLES_HELP_REF}>
                       {roleName(node.role)}
                     </Badge>
                   )}
                   {clusterEnabled && node.suffrage === ClusterNodeSuffrage.NONVOTER && (
-                    <Badge variant="muted" dark={dark}>nonvoter</Badge>
+                    <Badge variant="muted" dark={dark} title="Nonvoter — replicates the log but has no vote and cannot become leader" helpRef={NODE_ROLES_HELP_REF}>nonvoter</Badge>
                   )}
                   {isLocal && (
                     <Badge variant="muted" dark={dark}>this node</Badge>
@@ -215,11 +229,13 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                       Promote
                     </Button>
                   )}
+                  <HelpButton helpRef="clustering-nodes#promoting-and-demoting" />
                   {!isLocal && (confirmRemoveId === node.id ? (
                     <>
                       <span className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>
                         This will evict the node from the cluster.
                       </span>
+                      <HelpButton helpRef="clustering-nodes#removing-nodes" />
                       <Button variant="danger"
                         onClick={async () => {
                           try {
@@ -300,9 +316,12 @@ function JoinClusterCard({ dark }: Readonly<{ dark: boolean }>) {
       "bg-ink-well/50 border-ink-border",
       "bg-light-well/50 border-light-border",
     )}`}>
-      <h3 className={`text-[0.85em] font-semibold mb-1 ${c("text-text-bright", "text-light-text-bright")}`}>
-        Join Cluster
-      </h3>
+      <div className="flex items-center gap-1.5 mb-1">
+        <h3 className={`text-[0.85em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}>
+          Join Cluster
+        </h3>
+        <HelpButton helpRef="clustering-nodes#joining-a-cluster" />
+      </div>
       <p className={`text-[0.75em] mb-3 ${c("text-text-muted", "text-light-text-muted")}`}>
         Join an existing cluster at runtime, through the address of any node in it. This node's local configuration will be replaced by the cluster's configuration.
       </p>
@@ -374,9 +393,12 @@ function JoinInfoCard({ dark, clusterAddress }: Readonly<{ dark: boolean; cluste
       "bg-ink-well/50 border-ink-border",
       "bg-light-well/50 border-light-border",
     )}`}>
-      <h3 className={`text-[0.85em] font-semibold mb-1 ${c("text-text-bright", "text-light-text-bright")}`}>
-        Cluster Join Info
-      </h3>
+      <div className="flex items-center gap-1.5 mb-1">
+        <h3 className={`text-[0.85em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}>
+          Cluster Join Info
+        </h3>
+        <HelpButton helpRef="clustering-nodes#joining-a-cluster" />
+      </div>
       <p className={`text-[0.75em] mb-3 ${c("text-text-muted", "text-light-text-muted")}`}>
         Join tokens expire. Mint one when you are about to add a node.
       </p>

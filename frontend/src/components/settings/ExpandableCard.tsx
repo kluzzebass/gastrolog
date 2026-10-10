@@ -1,6 +1,7 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
 import { Badge } from "../Badge";
+import { HelpButton } from "../HelpButton";
 
 /**
  * A header badge: bare text, or text with the meaning on hover and a help
@@ -26,6 +27,8 @@ interface ExpandableCardProps {
   typeBadge?: BadgeSpec;
   typeBadgeAccent?: boolean;
   secondaryBadge?: BadgeSpec;
+  /** Help reference opened from a button in the header, beside the title. */
+  helpRef?: string;
   dark: boolean;
   expanded?: boolean;
   onToggle?: () => void;
@@ -40,6 +43,7 @@ export function ExpandableCard({
   typeBadge,
   typeBadgeAccent,
   secondaryBadge,
+  helpRef,
   dark,
   expanded,
   onToggle,
@@ -98,6 +102,11 @@ export function ExpandableCard({
             >
               {badgeText(secondaryBadge)}
             </Badge>
+          )}
+          {helpRef && (
+            <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} role="presentation">
+              <HelpButton helpRef={helpRef} />
+            </span>
           )}
           {status}
         </div>

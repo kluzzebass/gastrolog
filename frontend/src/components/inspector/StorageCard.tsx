@@ -5,6 +5,7 @@ import { BYTES_MAX_CHARS, formatBytes } from "../../utils/units";
 import { LiveValue } from "../LiveValue";
 import { protoToInstant, relativeTime } from "../../utils/temporal";
 import { Badge } from "../Badge";
+import { HelpButton } from "../HelpButton";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { NodeBadge } from "../settings/NodeBadge";
@@ -69,7 +70,11 @@ export function StorageCard({
     <ExpandableCard
       key={storage.id}
       id={storage.displayLabel}
-      typeBadge={`class ${String(storage.storageClass)}`}
+      typeBadge={{
+        text: `class ${String(storage.storageClass)}`,
+        title: "storage class — lower is faster",
+        helpRef: "storage-config#file-storage",
+      }}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}
@@ -77,7 +82,14 @@ export function StorageCard({
         <span className="flex items-center gap-1.5">
           <NodeBadge nodeId={storage.nodeId} dark={dark} />
           {verdict === "protected" && (
-            <Badge variant="error" dark={dark}>protected</Badge>
+            <Badge
+              variant="error"
+              dark={dark}
+              title="below the disk-free floor — every vault here refuses new records"
+              helpRef="inspector-storages#storage-overview"
+            >
+              protected
+            </Badge>
           )}
           {verdict === "warn" && (
             <Badge variant="warn" dark={dark}>warn</Badge>
@@ -108,11 +120,12 @@ function StorageDetail({
   onNavigate,
 }: Readonly<{ storage: Storage; dark: boolean; onNavigate?: (param: string) => void }>) {
   const c = useThemeClass(dark);
-  const sectionTitle = (title: string) => (
+  const sectionTitle = (title: string, helpRef?: string) => (
     <h3
-      className={`text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+      className={`flex items-center gap-1.5 text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
     >
       {title}
+      {helpRef && <HelpButton helpRef={helpRef} />}
     </h3>
   );
   const panelClass = `rounded-lg border px-4 py-3 ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`;
@@ -136,7 +149,7 @@ function StorageDetail({
       </section>
 
       <section className="flex flex-col gap-4">
-        {sectionTitle("Thresholds")}
+        {sectionTitle("Thresholds", "storage-config#file-storage")}
         <div className={panelClass}>
           <div className="flex flex-col gap-2 text-[0.85em]">
             <div className="flex items-baseline gap-2">

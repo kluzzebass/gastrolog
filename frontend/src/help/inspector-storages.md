@@ -16,7 +16,7 @@ Nothing here is computed in the browser: both badges reflect the same hysteresis
 Expand a storage card to see:
 
 - **Identity** — the storage's path on its owning node.
-- **Thresholds** — the effective warn and floor values in bytes, with the configured expression (`10%`, `10GB`) or **inherited** when the storage falls back to its node's default.
+- **Thresholds** — the effective warn and floor values in bytes, followed by the configured expression when it is a percentage (`10%`), or by `(10%, default)` when the storage has no expression of its own and the built-in default applies. An absolute size resolves to exactly the bytes shown, so nothing follows it.
 - **Live State** — free and total bytes from the last sample, and how long ago that sample was taken. A storage just added to the cluster shows no sample until its owning node's disk guard runs.
 - **Placements** — every [vault](help:inspector-vaults) placed on this storage, config-derived so it's correct even before the next guard sample. Click a vault to jump to its card.
 

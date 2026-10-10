@@ -61,7 +61,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
   return (
     <div className="flex flex-col gap-6">
       {/* System section */}
-      <Section title="System" dark={dark}>
+      <Section title="System" dark={dark} helpRef="inspector-system">
         <SystemStatsView
           nodeStats={nodeInfo?.stats ?? null}
           dark={dark}
@@ -69,7 +69,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       </Section>
 
       {/* Vaults section */}
-      <Section title="Vaults" dark={dark}>
+      <Section title="Vaults" dark={dark} helpRef="inspector-vaults">
         {vaults.length === 0 ? (
           <EmptyMessage dark={dark}>No vaults on this node.</EmptyMessage>
         ) : (
@@ -91,7 +91,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       </Section>
 
       {/* Storages section */}
-      <Section title="Storages" dark={dark} helpTopic="inspector-storages">
+      <Section title="Storages" dark={dark} helpRef="inspector-storages">
         {storages.length === 0 ? (
           <EmptyMessage dark={dark}>No storages on this node.</EmptyMessage>
         ) : (
@@ -114,7 +114,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       </Section>
 
       {/* Ingesters section */}
-      <Section title="Ingesters" dark={dark}>
+      <Section title="Ingesters" dark={dark} helpRef="inspector-ingesters">
         {ingesters.length === 0 ? (
           <EmptyMessage dark={dark}>No ingesters on this node.</EmptyMessage>
         ) : (
@@ -136,7 +136,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       </Section>
 
       {/* Network — per-link traffic (both peers' lanes merged). */}
-      <Section title="Network" dark={dark}>
+      <Section title="Network" dark={dark} helpRef="inspector-system#network">
         <PeerBytesSection
           viewNodeId={nodeIdTyped}
           nodeStats={nodeInfo?.stats ?? null}
@@ -146,7 +146,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       </Section>
 
       {/* Scheduled jobs section */}
-      <Section title="Scheduled" dark={dark} helpTopic="inspector-jobs">
+      <Section title="Scheduled" dark={dark} helpRef="inspector-jobs#scheduled-jobs">
         {scheduled.length === 0 ? (
           <EmptyMessage dark={dark}>No scheduled jobs on this node.</EmptyMessage>
         ) : (
@@ -155,7 +155,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       </Section>
 
       {/* Tasks section */}
-      <Section title="Tasks" dark={dark}>
+      <Section title="Tasks" dark={dark} helpRef="inspector-jobs#tasks">
         {tasks.length === 0 ? (
           <EmptyMessage dark={dark}>No tasks on this node.</EmptyMessage>
         ) : (
@@ -183,13 +183,13 @@ function Section({
   title,
   dark,
   count,
-  helpTopic,
+  helpRef,
   children,
 }: Readonly<{
   title: string;
   dark: boolean;
   count?: number;
-  helpTopic?: string;
+  helpRef?: string;
   children: React.ReactNode;
 }>) {
   const c = useThemeClass(dark);
@@ -201,7 +201,7 @@ function Section({
         >
           {title}
         </h3>
-        {helpTopic ? <HelpButton helpRef={helpTopic} /> : null}
+        {helpRef ? <HelpButton helpRef={helpRef} /> : null}
         {count !== undefined && count > 0 && (
           <Badge variant="muted" dark={dark}>{count}</Badge>
         )}

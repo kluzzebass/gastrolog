@@ -156,7 +156,7 @@ function CsvFileFields({
       {/* Column pickers — only shown when we have preview data */}
       {columns.length > 0 && (
         <>
-          <FormField label="Key Column" description="Column used as the lookup key." dark={dark}>
+          <FormField label="Key Column" description="Column used as the lookup key." helpRef="lookups-settings#csv-file-lookups" dark={dark}>
             <SelectInput
               value={keyColumn}
               onChange={onKeyColumnChange}
@@ -168,7 +168,7 @@ function CsvFileFields({
             />
           </FormField>
 
-          <FormField label="Value Columns" description="Columns included in lookup results. Uncheck columns you don't need." dark={dark}>
+          <FormField label="Value Columns" description="Columns included in lookup results. Uncheck columns you don't need." helpRef="lookups-settings#csv-file-lookups" dark={dark}>
             <div className="flex flex-wrap gap-x-3 gap-y-1.5">
               {nonKeyColumns.map((col) => {
                 const checked = effectiveValues.includes(col);

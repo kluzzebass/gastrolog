@@ -6,6 +6,7 @@ import { useRouteStats } from "../../api/hooks/useRouteStats";
 import { useRoutes, useVaults } from "../../api/hooks";
 import { idFromBytes, type EntityID } from "../../api/model/id";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
+import { HelpButton } from "../HelpButton";
 import { LiveValue } from "../LiveValue";
 import { LIVE_TEXT, type LiveTone } from "../liveValueStyle";
 import { RATE_PER_SEC_MAX_CHARS, formatCount, formatPercent, formatRatePerSec } from "../../utils/units";
@@ -51,8 +52,11 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
     <div className="flex flex-col gap-5">
       {/* Global summary */}
       <div
-        className={`rounded-lg border p-4 ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`}
+        className={`relative rounded-lg border p-4 ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`}
       >
+        <div className="absolute top-2 right-2">
+          <HelpButton helpRef="inspector-routes#totals" />
+        </div>
         {!stats.routeTableActive && (
           <div
             className={`mb-3 px-3 py-2 rounded text-[0.85em] font-medium ${c("bg-severity-error/15 text-severity-error border border-severity-error/30", "bg-severity-error/10 text-severity-error border border-severity-error/20")}`}
@@ -105,9 +109,10 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
       {sorted.length > 0 && (
         <div>
           <h3
-            className={`text-[0.75em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-muted", "text-light-text-muted")}`}
+            className={`flex items-center gap-1.5 text-[0.75em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-muted", "text-light-text-muted")}`}
           >
             Per-vault delivery
+            <HelpButton helpRef="inspector-routes#per-vault-and-per-route-delivery" />
           </h3>
           <div
             className={`rounded-lg border overflow-hidden ${c("border-ink-border", "border-light-border")}`}
@@ -146,9 +151,10 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
       {sortedRoutes.length > 0 && (
         <div>
           <h3
-            className={`text-[0.75em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-muted", "text-light-text-muted")}`}
+            className={`flex items-center gap-1.5 text-[0.75em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-muted", "text-light-text-muted")}`}
           >
             Per-route delivery
+            <HelpButton helpRef="inspector-routes#per-vault-and-per-route-delivery" />
           </h3>
           <div
             className={`rounded-lg border overflow-hidden ${c("border-ink-border", "border-light-border")}`}

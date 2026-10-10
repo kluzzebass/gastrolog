@@ -135,6 +135,7 @@ export function PemCertForm({
           checked={setAsDefault}
           onChange={setSetAsDefault}
           label="Use as default for TLS-wrapping the main server"
+          helpRef="certificates#default-certificate"
           dark={dark}
         />
         {!hideActions && (
@@ -198,6 +199,7 @@ export function FilesCertForm({
         <FormField
           label="Certificate file path"
           description="Path to the PEM-encoded certificate file"
+          helpRef="certificates#hot-reload"
           dark={dark}
         >
           <TextInput
@@ -211,6 +213,7 @@ export function FilesCertForm({
         <FormField
           label="Key file path"
           description="Path to the PEM-encoded private key file"
+          helpRef="certificates#hot-reload"
           dark={dark}
         >
           <TextInput
@@ -225,6 +228,7 @@ export function FilesCertForm({
           checked={setAsDefault}
           onChange={setSetAsDefault}
           label="Use as default for TLS-wrapping the main server"
+          helpRef="certificates#default-certificate"
           dark={dark}
         />
         {!hideActions && (
@@ -285,6 +289,7 @@ export function AddCertificatePanel({
         <FormField
           label="Name"
           description="Identifier for this certificate (e.g. server, ingester.http)"
+          helpRef="certificates#sni-support"
           dark={dark}
         >
           <TextInput

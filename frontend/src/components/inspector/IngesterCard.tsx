@@ -66,8 +66,14 @@ export function IngesterCard({
 function IngesterStatusBadge({ selected, running, variant, dark }: Readonly<{
   selected: number; running: number; variant: "info" | "warn" | "error" | "muted"; dark: boolean;
 }>) {
-  if (variant === "muted") return <Badge variant="muted" dark={dark}>stopped</Badge>;
-  return <Badge variant={variant} dark={dark}>{`${String(running)}/${String(selected)}`}</Badge>;
+  if (variant === "muted") {
+    return <Badge variant="muted" dark={dark} title="not running on any node" helpRef="inspector-ingesters">stopped</Badge>;
+  }
+  return (
+    <Badge variant={variant} dark={dark} title="running / selected nodes" helpRef="inspector-ingesters">
+      {`${String(running)}/${String(selected)}`}
+    </Badge>
+  );
 }
 
 function IngesterDetail({ ingester, nodeStatus, liveNodeIds, dark }: Readonly<{

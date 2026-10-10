@@ -73,7 +73,7 @@ export function HttpAddForm({
       <FormField label="URL Template" description="Use {param} placeholders matching parameter names below. Fields map positionally in queries." dark={dark}>
         <TextInput value={draft.urlTemplate} onChange={(v) => setDraft((d) => ({ ...d, urlTemplate: v }))} placeholder="" dark={dark} mono />
       </FormField>
-      <FormField label="Response Paths" description="JSONPath expressions to extract target objects. Results are merged." dark={dark}>
+      <FormField label="Response Paths" description="JSONPath expressions to extract target objects. Results are merged." helpRef="lookups-settings#http-lookups" dark={dark}>
         <StringListEditor values={draft.responsePaths} onChange={(v) => setDraft((d) => ({ ...d, responsePaths: v }))} placeholder="$.data.user" dark={dark} />
       </FormField>
       <FormField label="Parameters" description="Ordered list of URL template parameters. Names become {name} placeholders." dark={dark}>
@@ -82,7 +82,7 @@ export function HttpAddForm({
       <FormField label="Headers" description="Custom HTTP headers (e.g. Authorization)." dark={dark}>
         <ParamsEditor params={draft.headers} onChange={(v) => setDraft((d) => ({ ...d, headers: v }))} dark={dark} />
       </FormField>
-      <FormField label="Destinations" description="Outbound lookups reach public addresses only. Enable this for a lookup service on your own network — loopback, 10.x, 172.16–31.x, 192.168.x, 100.64–127.x or an IPv6 unique-local address — then save: Test uses the saved setting, not this form. Link-local (169.254.x, fe80::) and address-translation ranges stay blocked either way." dark={dark}>
+      <FormField label="Destinations" description="Outbound lookups reach public addresses only. Enable this for a lookup service on your own network — loopback, 10.x, 172.16–31.x, 192.168.x, 100.64–127.x or an IPv6 unique-local address — then save: Test uses the saved setting, not this form. Link-local (169.254.x, fe80::) and address-translation ranges stay blocked either way." helpRef="lookups-settings#destinations-and-limits" dark={dark}>
         <Checkbox
           checked={draft.allowPrivateDestinations}
           onChange={(v) => setDraft((d) => ({ ...d, allowPrivateDestinations: v }))}
@@ -157,7 +157,7 @@ export function HttpCards({
             <FormField label="URL Template" description="Use {param} placeholders matching parameter names below. Fields map positionally in queries." dark={dark}>
               <TextInput value={h.urlTemplate} onChange={(v) => onUpdate(i, { urlTemplate: v })} placeholder="" dark={dark} mono />
             </FormField>
-            <FormField label="Response Paths" description="JSONPath expressions to extract target objects. Results are merged." dark={dark}>
+            <FormField label="Response Paths" description="JSONPath expressions to extract target objects. Results are merged." helpRef="lookups-settings#http-lookups" dark={dark}>
               <StringListEditor values={h.responsePaths} onChange={(v) => onUpdate(i, { responsePaths: v })} placeholder="$.data.user" dark={dark} />
             </FormField>
             <FormField label="Parameters" description="Ordered list of URL template parameters. Names become {name} placeholders. Fields map positionally in queries." dark={dark}>
@@ -166,7 +166,7 @@ export function HttpCards({
             <FormField label="Headers" description="Custom HTTP headers (e.g. Authorization)." dark={dark}>
               <ParamsEditor params={h.headers} onChange={(v) => onUpdate(i, { headers: v })} dark={dark} />
             </FormField>
-            <FormField label="Destinations" description="Outbound lookups reach public addresses only. Enable this for a lookup service on your own network — loopback, 10.x, 172.16–31.x, 192.168.x, 100.64–127.x or an IPv6 unique-local address — then save: Test uses the saved setting, not this form. Link-local (169.254.x, fe80::) and address-translation ranges stay blocked either way." dark={dark}>
+            <FormField label="Destinations" description="Outbound lookups reach public addresses only. Enable this for a lookup service on your own network — loopback, 10.x, 172.16–31.x, 192.168.x, 100.64–127.x or an IPv6 unique-local address — then save: Test uses the saved setting, not this form. Link-local (169.254.x, fe80::) and address-translation ranges stay blocked either way." helpRef="lookups-settings#destinations-and-limits" dark={dark}>
               <Checkbox
                 checked={h.allowPrivateDestinations}
                 onChange={(v) => onUpdate(i, { allowPrivateDestinations: v })}
@@ -282,7 +282,7 @@ export function HttpCards({
 function HttpCachingFields({ dark, draft, setDraft }: Readonly<{ dark: boolean; draft: HTTPLookupDraft; setDraft: (fn: (d: HTTPLookupDraft) => HTTPLookupDraft) => void }>) {
   return (
     <div className="grid grid-cols-3 gap-3">
-      <FormField label="Timeout" dark={dark}>
+      <FormField label="Timeout" helpRef="lookups-settings#destinations-and-limits" dark={dark}>
         <TextInput value={draft.timeout} onChange={(v) => setDraft((d) => ({ ...d, timeout: v }))} placeholder="5s" dark={dark} mono />
       </FormField>
       <FormField label="Cache TTL" dark={dark}>

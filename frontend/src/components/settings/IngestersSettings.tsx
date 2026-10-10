@@ -36,6 +36,11 @@ const ingesterTypes = [
   { value: "tail", label: "tail" },
 ];
 
+/** Every ingester type has a help topic named after it. */
+function ingesterHelpRef(type: string): string {
+  return `ingester-${type}`;
+}
+
 // -- Reducer for "Add ingester" form state --
 
 interface AddIngesterFormState {
@@ -310,6 +315,7 @@ function IngesterCard({
     <SettingsCard
       id={ing.name || encode(ing.id)}
       typeBadge={ing.type}
+      helpRef={ingesterHelpRef(ing.type)}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}

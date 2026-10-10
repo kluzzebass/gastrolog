@@ -12,6 +12,7 @@ import { Badge } from "../Badge";
 import { NodeStateBadge } from "../NodeStateBadge";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { HelpButton } from "../HelpButton";
+import { HelpLink } from "../HelpLink";
 import { VaultCard } from "./VaultCard";
 import { StorageCard } from "./StorageCard";
 import { IngesterCard } from "./IngesterCard";
@@ -246,7 +247,7 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
     return (
       <div className="flex flex-col gap-5">
         <div className="flex items-center gap-2">
-          <EntityHeader title="Jobs" helpRef="inspector-jobs" dark={dark} />
+          <EntityHeader title="Jobs" helpRef="inspector-jobs#scheduled-jobs" dark={dark} />
           {reconnecting && <Badge variant="warn" dark={dark}>reconnecting</Badge>}
         </div>
         {scheduled.length > 0 && (
@@ -285,7 +286,7 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <EntityHeader title="Jobs" helpRef="inspector-jobs" dark={dark} />
+        <EntityHeader title="Jobs" helpRef="inspector-jobs#scheduled-jobs" dark={dark} />
         {reconnecting && <Badge variant="warn" dark={dark}>reconnecting</Badge>}
       </div>
 
@@ -379,7 +380,9 @@ function ScheduledHeader({ dark }: Readonly<{ dark: boolean }>) {
     <div
       className={`${scheduledGrid} px-4 py-1.5 text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`}
     >
-      <span>Job</span>
+      <span>
+        <HelpLink helpRef="inspector-jobs#built-in-scheduled-jobs" title="Built-in scheduled jobs">Job</HelpLink>
+      </span>
       <span>Schedule</span>
       <span className="text-right">Last run</span>
       <span className="text-right">Next run</span>

@@ -98,6 +98,7 @@ function CronField({
     <FormField
       label="Cron Schedule"
       description="cron: [sec] min hour dom mon dow"
+      helpRef="policy-rotation#value-formats"
       dark={dark}
     >
       <TextInput

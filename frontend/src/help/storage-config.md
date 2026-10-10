@@ -12,7 +12,7 @@ File storages are locally-attached disk resources declared per node. Each file s
 - **Disk Free Warn** — free space on this storage below which the disk-space alarm raises. An absolute size like `10GB`, or a percentage of the volume like `10%`. Leave empty to inherit the node default.
 - **Disk Free Floor** — free space below which every vault placed on this storage is refused admission, cluster-wide, until space frees. Vaults on other storages keep ingesting. A size like `3GB` or a percentage like `3%`; leave empty to inherit the node default.
 
-File storages on the local node can be added, edited, or removed. Peer node file storages are displayed read-only.
+File storages on every node are listed together, sorted by name and badged with their node, and any of them can be edited or removed from whichever node you are connected to. **Add File Storage** asks which node the new storage belongs to, defaulting to the node you are connected to.
 
 The thresholds are evaluated once per storage, not once per vault — a below-floor storage refuses every vault placed on it with a single alarm, rather than one alarm per vault sharing the volume.
 

@@ -10,6 +10,8 @@ import { useUploadManagedFile } from "../../api/hooks/useUploadManagedFile";
 import { useDeleteManagedFile } from "../../api/hooks/useManagedFiles";
 import { useToast } from "../Toast";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
+import { HelpButton } from "../HelpButton";
+import { HelpLink } from "../HelpLink";
 import { ExpandableCard } from "./ExpandableCard";
 import { MaxMindCard } from "./lookup/MaxMindCard";
 import { handleDragOver, handleDragEnter, handleDragLeave } from "./CertificateForms";
@@ -42,6 +44,8 @@ function groupByName(files: ManagedFileInfo[]): FileGroup[] {
   groups.sort((a, b) => (b.versions[0]?.uploadedAt ?? "").localeCompare(a.versions[0]?.uploadedAt ?? ""));
   return groups;
 }
+
+const REPLACEMENT_HELP_REF = "managed-files#replacement";
 
 export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const readOnly = useReadOnly();
@@ -194,7 +198,9 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
             status={uses.length > 0 ? (
               <span className="flex items-center gap-1.5">
                 {uses.map((u) => (
-                  <span key={u} className="font-mono text-[0.8em] text-copper">{u}</span>
+                  <HelpLink key={u} helpRef="managed-files#used-by" title={`Used by ${u}`} className="font-mono text-[0.8em] text-copper">
+                    {u}
+                  </HelpLink>
                 ))}
               </span>
             ) : undefined}
@@ -204,9 +210,12 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
 
               {older.length > 0 && (
                 <div className="flex flex-col gap-2">
-                  <span className={`text-[0.75em] uppercase tracking-wider font-medium ${c("text-text-muted", "text-light-text-muted")}`}>
-                    Previous versions ({older.length})
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-[0.75em] uppercase tracking-wider font-medium ${c("text-text-muted", "text-light-text-muted")}`}>
+                      Previous versions ({older.length})
+                    </span>
+                    <HelpButton helpRef={REPLACEMENT_HELP_REF} />
+                  </div>
                   {older.map((v) => (
                     <VersionRow key={encode(v.id)} file={v} dark={dark} onDelete={() => handleDelete(encode(v.id), v.name)} />
                   ))}
@@ -251,7 +260,13 @@ function VersionRow({
             </span>
           )}
           {label && (
-            <span className="text-[0.85em] text-copper font-medium">{label}</span>
+            <HelpLink
+              helpRef={REPLACEMENT_HELP_REF}
+              title="The version lookups read; uploading the same name again replaces it"
+              className="text-[0.85em] text-copper font-medium"
+            >
+              {label}
+            </HelpLink>
           )}
         </div>
       </div>

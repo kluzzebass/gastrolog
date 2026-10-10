@@ -22,6 +22,7 @@ interface FormatSpec {
   format: FileLookupFormat;
   label: string;           // "JSON" / "YAML" — capitalized for user-visible text
   typeBadge: string;       // "json" / "yaml" — lowercase badge text
+  helpRef: string;         // help section describing this format's lookups
   accept: string;          // accepted file extensions for the drop zone
   fileExtensions: string[]; // filter for managed-file picker
   lookupKey: "jsonFileLookups" | "yamlFileLookups"; // putLookupSettings payload field
@@ -264,7 +265,7 @@ export function FileLookupAddForm({
       {/* Column pickers — only shown when the jq expression produces a valid table */}
       {tableColumns.length > 0 && (
         <>
-          <FormField label="Key Column" description="Column used as the lookup key." dark={dark}>
+          <FormField label="Key Column" description="Column used as the lookup key." helpRef={spec.helpRef} dark={dark}>
             <SelectInput
               value={draft.keyColumn}
               onChange={(v) => setDraft((d) => ({ ...d, keyColumn: v }))}
@@ -276,7 +277,7 @@ export function FileLookupAddForm({
             />
           </FormField>
 
-          <FormField label="Value Columns" description="Columns included in lookup results. Uncheck columns you don't need." dark={dark}>
+          <FormField label="Value Columns" description="Columns included in lookup results. Uncheck columns you don't need." helpRef={spec.helpRef} dark={dark}>
             <div className="flex flex-wrap gap-x-3 gap-y-1.5">
               {nonKeyColumns.map((col) => {
                 const checked = effectiveValues.includes(col);
@@ -374,7 +375,7 @@ function FileLookupCardBody({
       {/* Column pickers — only shown when the jq expression produces a valid table */}
       {tableColumns.length > 0 && (
         <>
-          <FormField label="Key Column" description="Column used as the lookup key." dark={dark}>
+          <FormField label="Key Column" description="Column used as the lookup key." helpRef={spec.helpRef} dark={dark}>
             <SelectInput
               value={draft.keyColumn}
               onChange={(v) => onUpdate(index, { keyColumn: v })}
@@ -386,7 +387,7 @@ function FileLookupCardBody({
             />
           </FormField>
 
-          <FormField label="Value Columns" description="Columns included in lookup results. Uncheck columns you don't need." dark={dark}>
+          <FormField label="Value Columns" description="Columns included in lookup results. Uncheck columns you don't need." helpRef={spec.helpRef} dark={dark}>
             <div className="flex flex-wrap gap-x-3 gap-y-1.5">
               {nonKeyColumns.map((col) => {
                 const checked = effectiveValues.includes(col);
@@ -503,6 +504,7 @@ export const jsonFormatSpec: FormatSpec = {
   format: "json",
   label: "JSON",
   typeBadge: "json",
+  helpRef: "lookups-settings#json-file-lookups",
   accept: ".json",
   fileExtensions: [".json"],
   lookupKey: "jsonFileLookups",
@@ -514,6 +516,7 @@ export const yamlFormatSpec: FormatSpec = {
   format: "yaml",
   label: "YAML",
   typeBadge: "yaml",
+  helpRef: "lookups-settings#yaml-file-lookups",
   accept: ".yaml,.yml",
   fileExtensions: [".yaml", ".yml"],
   lookupKey: "yamlFileLookups",
