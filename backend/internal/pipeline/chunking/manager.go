@@ -220,6 +220,11 @@ type vaultChunking struct {
 	// buildWG tracks the in-flight build goroutine so worker shutdown waits
 	// for it without polling.
 	buildWG sync.WaitGroup
+	// workerPassHook, when non-nil, runs on the worker goroutine after each
+	// pass, before the worker waits for its next signal. Test-only: a test
+	// parks the worker here to land a Notify between the pass and the wait.
+	// Nil in production.
+	workerPassHook func()
 	// log is the per-vault logger; set when the worker starts.
 	log *slog.Logger
 }
@@ -730,9 +735,11 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 	ctx, cancel := context.WithCancel(m.runCtx)
 	v.stopWorker = cancel
 	m.wg.Go(func() {
-		// Capture the wake channel BEFORE each pass so a signal arriving
-		// mid-pass re-fires the loop instead of being lost.
+		// Capture each wake channel BEFORE the pass it triggers, so a Notify
+		// landing mid-pass closes the held channel and re-fires the loop
+		// instead of being lost.
 		ch := v.wake.C()
+		releaseCh := v.releaseWake.C()
 		log := m.logger().With("vault", v.cfg.VaultID)
 		v.log = log
 		// Recovery must not run before the vault-ctl FSM has replayed: at
@@ -763,7 +770,7 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 		v.drainReleasedPurge()
 		v.purgeStaleHeadCatchUp()
 		m.runBuildPass(ctx, v, log)
-		releaseCh := v.releaseWake.C()
+		v.passDone()
 		for {
 			select {
 			case <-ctx.Done():
@@ -771,21 +778,28 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 				return
 			case <-recoverTick.C:
 				tryRecover()
-				continue
 			case <-releaseCh:
+				releaseCh = v.releaseWake.C()
 				if err := v.releaseOnce(ctx); err != nil && ctx.Err() == nil {
 					log.Warn("chunking release failed", "error", err)
 				}
 				v.drainReleasedPurge()
 				v.purgeStaleHeadCatchUp()
-				releaseCh = v.releaseWake.C()
-				continue
+				v.passDone()
 			case <-ch:
+				ch = v.wake.C()
 				m.runBuildPass(ctx, v, log)
+				v.passDone()
 			}
-			ch = v.wake.C()
 		}
 	})
+}
+
+// passDone runs the test hook that marks the end of a worker pass.
+func (v *vaultChunking) passDone() {
+	if v.workerPassHook != nil {
+		v.workerPassHook()
+	}
 }
 
 func (m *Manager) runBuildPass(ctx context.Context, v *vaultChunking, log *slog.Logger) {
