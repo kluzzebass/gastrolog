@@ -61,7 +61,7 @@ func mnSystemClientFor(t *testing.T, h *multiNodeHarness, nodeID string) gastrol
 	srv := server.New(node.orch, h.store(t, nodeID), orchestrator.Factories{VaultsDir: t.TempDir()}, nil, server.Config{
 		NoAuth:           true,
 		NodeID:           nodeID,
-		RoutingForwarder: newDirectUnaryForwarder(t, h.nodes, nodeID, t.TempDir()),
+		RoutingForwarder: newClusterForwarder(t, h.nodes, nodeID, t.TempDir()),
 	})
 	httpClient := &http.Client{Transport: &embeddedTransport{handler: srv.Handler()}}
 	return gastrologv1connect.NewSystemServiceClient(httpClient, "http://embedded")
