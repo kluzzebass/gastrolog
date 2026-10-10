@@ -18,13 +18,14 @@ package orchestrator
 
 import (
 	"errors"
+	"fmt"
 	"testing"
-	"time"
 
 	"github.com/go-co-op/gocron/v2"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
+	"gastrolog/internal/waittest"
 )
 
 // schedulerJob is a test-only accessor for a scheduler's real registered
@@ -36,27 +37,6 @@ func schedulerJob(s *Scheduler, name string) (gocron.Job, bool) {
 	defer s.mu.Unlock()
 	j, ok := s.jobs[name]
 	return j, ok
-}
-
-// waitForJobBody polls cond until it's true or timeout elapses. RunNow()
-// only confirms the job was HANDED to gocron's executor goroutine — see
-// gocron's selectRunJobRequest, which replies on its out channel the moment
-// the job enters the executor's input queue, not when the task function
-// returns — so a cron job's actual side effects land asynchronously after
-// RunNow returns. This is the same class of wait Scheduler.WaitIdle already
-// uses for one-time jobs (poll + short sleep); WaitIdle itself only tracks
-// jobs with schedule "once", so it does not cover a recurring cron job like
-// diskGuardJobName.
-func waitForJobBody(t *testing.T, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("registered job body did not take effect within 2s of RunNow")
 }
 
 // TestDiskGuardJobBodyProtectsStorageEndToEnd drives the disk guard's
@@ -133,9 +113,14 @@ func TestDiskGuardJobBodyProtectsStorageEndToEnd(t *testing.T) {
 		t.Fatalf("RunNow on the registered disk guard job: %v", err)
 	}
 
-	// RunNow only confirms the job reached gocron's executor queue — wait
-	// for the executor goroutine to actually run diskGuardTick.
-	waitForJobBody(t, func() bool { return orch.diskGuard.vaultStorageProtected(vaultID) })
+	// RunNow only confirms the job reached gocron's executor queue (gocron's
+	// selectRunJobRequest replies when the job enters the executor's input
+	// queue, not when the task returns), and requireIdle tracks one-time jobs
+	// only — wait for the executor goroutine to actually run diskGuardTick.
+	waittest.Progress(t, "registered disk guard job body protects the vault", func() (string, bool) {
+		protected := orch.diskGuard.vaultStorageProtected(vaultID)
+		return fmt.Sprintf("protected=%v; %s", protected, jobsProgress(orch.scheduler)), protected
+	})
 
 	if !spy.has("disk-space-exhausted:" + storageID.String()) {
 		t.Fatalf("the registered job body must raise the storage alarm too, standing alarms: %v", spy.set)

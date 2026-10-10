@@ -5,6 +5,8 @@ import (
 	"gastrolog/internal/glid"
 	"testing"
 	"time"
+
+	"gastrolog/internal/waittest"
 )
 
 // TestRetentionHookFiresRateAlerter verifies that retentionRunner.expireChunk
@@ -85,22 +87,19 @@ func TestRateAlertEvaluatorRunsPeriodically(t *testing.T) {
 	defer func() { _ = orch.Stop() }()
 
 	// Record several retention events immediately so the rate is
-	// comfortably above the warning threshold. The background
-	// evaluator runs every 5s; we wait up to 7s for it to fire.
+	// comfortably above the warning threshold.
 	vaultID := glid.New()
 	for range 5 {
 		orch.retentionRates.Record(vaultID, orch.now())
 	}
 
-	deadline := time.Now().Add(7 * time.Second)
-	for time.Now().Before(deadline) {
+	waittest.Progress(t, "background rate evaluator raises the retention alert", func() (string, bool) {
 		if calls := fa.snapshot(); len(calls) > 0 {
-			if calls[0].op == "set" && calls[0].id == "retention-rate:"+vaultID.String() {
-				return // success
+			if calls[0].op != "set" || calls[0].id != "retention-rate:"+vaultID.String() {
+				t.Fatalf("unexpected first call: %+v", calls[0])
 			}
-			t.Fatalf("unexpected first call: %+v", calls[0])
+			return "", true
 		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	t.Fatal("background rate evaluator did not raise alert within 7s")
+		return jobsProgress(orch.Scheduler()), false
+	})
 }

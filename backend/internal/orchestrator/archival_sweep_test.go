@@ -266,7 +266,7 @@ func blobStorageClass(t *testing.T, cloudStore *blobstore.Memory, id chunk.Chunk
 // TestTriggerArchivalSweepEvaluatesImmediately proves the event-driven trigger
 // runs a full archival policy evaluation through the scheduler (not just the
 // hourly tick). Eligibility is injected by advancing the orchestrator clock —
-// no sleeping — and the async one-time job is drained with WaitIdle.
+// no sleeping — and the async one-time job is drained with requireIdle.
 func TestTriggerArchivalSweepEvaluatesImmediately(t *testing.T) {
 	t.Parallel()
 	orch, _, cm, _, _, clock := archivalTestSetupLive(t, []system.CloudStorageTransition{

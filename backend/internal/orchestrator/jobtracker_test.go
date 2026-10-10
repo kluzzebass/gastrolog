@@ -2,12 +2,13 @@ package orchestrator
 
 import (
 	"context"
-	"runtime"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"gastrolog/internal/logging"
+	"gastrolog/internal/waittest"
 )
 
 func newTestScheduler(t *testing.T) *Scheduler {
@@ -21,23 +22,17 @@ func newTestScheduler(t *testing.T) *Scheduler {
 	return sched
 }
 
-// waitJobDone polls until the job reaches a terminal status (completed or failed).
+// waitJobDone waits until the job reaches a terminal status (completed or failed).
 func waitJobDone(t *testing.T, sched *Scheduler, id string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
+	waittest.Progress(t, "job "+id+" finishes", func() (string, bool) {
 		info, ok := sched.GetJob(id)
-		if ok {
-			s := info.Snapshot().Progress.Status
-			if s == JobStatusCompleted || s == JobStatusFailed {
-				return
-			}
+		if !ok {
+			return "job absent; " + jobsProgress(sched), false
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("timed out waiting for job to finish")
-		}
-		time.Sleep(time.Millisecond)
-	}
+		s := info.Snapshot().Progress.Status
+		return fmt.Sprintf("status=%v; %s", s, jobsProgress(sched)), s == JobStatusCompleted || s == JobStatusFailed
+	})
 }
 
 func TestScheduler_SubmitAndGet(t *testing.T) {
@@ -156,17 +151,10 @@ func TestScheduler_ListIncludesSubmitted(t *testing.T) {
 	})
 
 	wg.Wait()
-	// Both jobs use default auto-complete; poll until ListJobs shows them.
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if len(sched.ListJobs()) >= 2 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("timed out waiting for jobs to appear in list")
-		}
-		runtime.Gosched()
-	}
+	// Both jobs use default auto-complete; wait until ListJobs shows them.
+	waittest.Progress(t, "both submitted jobs appear in the list", func() (string, bool) {
+		return jobsProgress(sched), len(sched.ListJobs()) >= 2
+	})
 
 	jobs := sched.ListJobs()
 	names := map[string]bool{}
@@ -218,11 +206,10 @@ func TestScheduler_Cleanup(t *testing.T) {
 	now = now.Add(2 * time.Hour)
 	mu.Unlock()
 
-	// ListJobs triggers cleanup. Retry briefly to allow gocron's
-	// AfterJobRuns listener to move the job from s.jobs to s.completed
-	// (cleanup only purges from the completed map).
-	deadline := time.Now().Add(2 * time.Second)
-	for {
+	// ListJobs triggers cleanup. Retry to allow gocron's AfterJobRuns
+	// listener to move the job from s.jobs to s.completed (cleanup only
+	// purges from the completed map).
+	waittest.Progress(t, "old job is cleaned up", func() (string, bool) {
 		jobs := sched.ListJobs()
 		found := false
 		for _, j := range jobs {
@@ -230,14 +217,8 @@ func TestScheduler_Cleanup(t *testing.T) {
 				found = true
 			}
 		}
-		if !found {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("old job should have been cleaned up")
-		}
-		time.Sleep(time.Millisecond)
-	}
+		return fmt.Sprintf("found=%v; %s", found, jobsProgress(sched)), !found
+	})
 }
 
 func TestScheduler_ConcurrentProgress(t *testing.T) {

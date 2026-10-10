@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"gastrolog/internal/waittest"
 )
 
 // TestCronJobSingletonMode verifies that cron jobs registered via AddJob
@@ -237,17 +239,10 @@ func TestRunOnceRetainsOnlyLatestCompletionPerName(t *testing.T) {
 func awaitSchedulerJobDone(t *testing.T, sub *JobSubscription, name string) {
 	t.Helper()
 	for {
-		select {
-		case evt, ok := <-sub.Events():
-			if !ok {
-				t.Fatalf("job event stream closed before %s completed", name)
-			}
-			if evt.Job.Name == name &&
-				(evt.Kind == JobEventCompleted || evt.Kind == JobEventFailed) {
-				return
-			}
-		case <-time.After(30 * time.Second):
-			t.Fatalf("timed out waiting for %s to complete", name)
+		evt := nextJobEvent(t, sub, name+" completes")
+		if evt.Job.Name == name &&
+			(evt.Kind == JobEventCompleted || evt.Kind == JobEventFailed) {
+			return
 		}
 	}
 }
@@ -263,18 +258,22 @@ func awaitSchedulerJobsDone(t *testing.T, sub *JobSubscription, names ...string)
 		pending[n] = true
 	}
 	for len(pending) > 0 {
-		select {
-		case evt, ok := <-sub.Events():
-			if !ok {
-				t.Fatalf("job event stream closed with %d jobs outstanding", len(pending))
-			}
-			if evt.Kind == JobEventCompleted || evt.Kind == JobEventFailed {
-				delete(pending, evt.Job.Name)
-			}
-		case <-time.After(30 * time.Second):
-			t.Fatalf("timed out with %d jobs outstanding", len(pending))
+		evt := nextJobEvent(t, sub, fmt.Sprintf("%d outstanding jobs complete", len(pending)))
+		if evt.Kind == JobEventCompleted || evt.Kind == JobEventFailed {
+			delete(pending, evt.Job.Name)
 		}
 	}
+}
+
+// nextJobEvent returns the subscription's next event, failing when the stream
+// closes. Each event received restarts the stall window.
+func nextJobEvent(t *testing.T, sub *JobSubscription, what string) JobEvent {
+	t.Helper()
+	evt := waittest.Recv(t, what, sub.Events(), nil)
+	if evt.Kind == 0 {
+		t.Fatalf("job event stream closed before %s", what)
+	}
+	return evt
 }
 
 // hasDescription reports whether the scheduler still holds a description entry
@@ -292,16 +291,9 @@ func hasDescription(s *Scheduler, name string) bool {
 func awaitSchedulerJobScheduled(t *testing.T, sub *JobSubscription, name string) JobInfo {
 	t.Helper()
 	for {
-		select {
-		case evt, ok := <-sub.Events():
-			if !ok {
-				t.Fatalf("job event stream closed before %s was scheduled", name)
-			}
-			if evt.Job.Name == name && evt.Kind == JobEventScheduled {
-				return evt.Job
-			}
-		case <-time.After(30 * time.Second):
-			t.Fatalf("timed out waiting for %s to be scheduled", name)
+		evt := nextJobEvent(t, sub, name+" is scheduled")
+		if evt.Job.Name == name && evt.Kind == JobEventScheduled {
+			return evt.Job
 		}
 	}
 }

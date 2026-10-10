@@ -3,9 +3,11 @@ package orchestrator_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"gastrolog/internal/glid"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,6 +21,7 @@ import (
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/query"
+	"gastrolog/internal/waittest"
 )
 
 // mustNewTestOrch creates an orchestrator for external-package tests with a
@@ -33,6 +36,27 @@ func mustNewTestOrch(t *testing.T, cfg orchestrator.Config) *orchestrator.Orches
 		t.Fatal(err)
 	}
 	return orch
+}
+
+// waitSchedulerIdle waits until orch's scheduler has no one-time jobs left,
+// failing only when the job list stops changing.
+func waitSchedulerIdle(t *testing.T, orch *orchestrator.Orchestrator) {
+	t.Helper()
+	sched := orch.Scheduler()
+	waittest.Progress(t, "scheduler drains its one-time jobs", func() (string, bool) {
+		jobs := sched.ListJobs()
+		lines := make([]string, 0, len(jobs))
+		for _, j := range jobs {
+			s := fmt.Sprintf("%s last=%d", j.Name, j.LastRun.UnixNano())
+			if p := j.Snapshot().Progress; p != nil {
+				s += fmt.Sprintf(" status=%v chunks=%d/%d records=%d", p.Status, p.ChunksDone, p.ChunksTotal, p.RecordsDone)
+			}
+			lines = append(lines, s)
+		}
+		slices.Sort(lines)
+		pending := sched.PendingOnce()
+		return fmt.Sprintf("pending-once=%d; %s", pending, strings.Join(lines, "; ")), pending == 0
+	})
 }
 
 // recordCountPolicy creates a rotation policy for testing that rotates at maxRecords.
@@ -172,9 +196,6 @@ func TestSealedChunkTriggersPostSeal(t *testing.T) {
 		}
 	}
 
-	// Wait for async job to be scheduled.
-	time.Sleep(100 * time.Millisecond)
-
 	// Verify the seal happened by checking chunk count.
 	metas, err := cm.List()
 	if err != nil {
@@ -206,9 +227,6 @@ func TestSealTriggeredOncePerChunk(t *testing.T) {
 			t.Fatalf("Ingest failed: %v", err)
 		}
 	}
-
-	// Wait for seal.
-	time.Sleep(100 * time.Millisecond)
 
 	// Should have exactly 2 chunks: one sealed, one active.
 	metas, err := cm.List()
@@ -478,22 +496,21 @@ func TestIngesterAliveTracksErrorRetry(t *testing.T) {
 	})
 
 	id := glid.New()
-	orch.RegisterIngester(id, "flaky", "mock", &failOnceIngester{})
+	ing := &failOnceIngester{}
+	orch.RegisterIngester(id, "flaky", "mock", ing)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	defer orch.Stop()
 
+	stats := ingesterProgress(orch, id)
+	progress := func() string { return fmt.Sprintf("attempts=%d %s", ing.attempts.Load(), stats()) }
 	next := func(want bool) {
 		t.Helper()
-		select {
-		case ev := <-events:
-			if ev.id != id || ev.alive != want {
-				t.Fatalf("alive event = %+v, want id=%v alive=%v", ev, id, want)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatalf("timed out waiting for alive=%v event", want)
+		ev := waittest.Recv(t, fmt.Sprintf("alive=%v event", want), events, progress)
+		if ev.id != id || ev.alive != want {
+			t.Fatalf("alive event = %+v, want id=%v alive=%v", ev, id, want)
 		}
 	}
 
@@ -535,17 +552,15 @@ func TestIngesterContextCancellation(t *testing.T) {
 	// Wait for ingester to start.
 	<-recv.started
 
-	// Stop should cancel context and ingester should exit.
+	// Stop should cancel context and wait for the ingester to exit.
 	if err := orch.Stop(); err != nil {
 		t.Fatalf("Stop failed: %v", err)
 	}
 
-	// Verify ingester stopped.
 	select {
 	case <-recv.stopped:
-		// Good.
-	case <-time.After(time.Second):
-		t.Error("ingester did not stop after Stop()")
+	default:
+		t.Error("ingester still running after Stop() returned")
 	}
 }
 
@@ -579,14 +594,13 @@ func TestUnregisterIngester(t *testing.T) {
 	ingesterID := glid.New()
 	orch.RegisterIngester(ingesterID, "test", "mock", recv)
 	orch.UnregisterIngester(ingesterID)
+	if slices.Contains(orch.ListIngesters(), ingesterID) {
+		t.Fatal("unregistered ingester is still in the registry")
+	}
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-
-	// No ingesters, so nothing should be started.
-	// Give a moment then stop.
-	time.Sleep(10 * time.Millisecond)
 
 	if err := orch.Stop(); err != nil {
 		t.Fatalf("Stop failed: %v", err)
@@ -737,9 +751,7 @@ func TestRebuildMissingIndexes(t *testing.T) {
 	if err := orch.RebuildMissingIndexes(context.Background()); err != nil {
 		t.Fatalf("RebuildMissingIndexes failed: %v", err)
 	}
-
-	// Wait for async build.
-	time.Sleep(100 * time.Millisecond)
+	waitSchedulerIdle(t, orch)
 
 	// Should have triggered at least one build.
 	count := tracker.buildCount.Load()
@@ -799,8 +811,7 @@ func TestRebuildMissingIndexesCloudBackedWithCompleteIndexes(t *testing.T) {
 	if err := orch.RebuildMissingIndexes(context.Background()); err != nil {
 		t.Fatalf("RebuildMissingIndexes failed: %v", err)
 	}
-
-	time.Sleep(100 * time.Millisecond)
+	waitSchedulerIdle(t, orch)
 
 	if got := tracker.buildCount.Load(); got != 0 {
 		t.Errorf("expected 0 index builds for cloud-backed chunks with complete indexes, got %d", got)
@@ -839,8 +850,7 @@ func TestRebuildMissingIndexesCloudBackedWithMissingIndexes(t *testing.T) {
 	if err := orch.RebuildMissingIndexes(context.Background()); err != nil {
 		t.Fatalf("RebuildMissingIndexes failed: %v", err)
 	}
-
-	time.Sleep(100 * time.Millisecond)
+	waitSchedulerIdle(t, orch)
 
 	if got := tracker.buildCount.Load(); got == 0 {
 		t.Error("expected index builds for cloud-backed chunks with missing indexes, got 0")

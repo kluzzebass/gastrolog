@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,7 @@ import (
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+	"gastrolog/internal/waittest"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -62,6 +64,12 @@ func (c *captureCatchupReplicator) RequestReplicaCatchup(_ context.Context, lead
 // happened (or didn't) without needing a real on-disk manager.
 type reconcilerFakeChunkManager struct {
 	retentionFakeChunkManager
+}
+
+func (f *reconcilerFakeChunkManager) deletedCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.deleted)
 }
 
 // reconcilerFakeSealEnsurerChunkManager extends the fake chunk manager
@@ -118,14 +126,10 @@ func TestReconcilerOnRequestDeleteDeletesLocalAndAcks(t *testing.T) {
 	// avoid deadlocking the FSM apply pump (CmdAckDelete on the leader
 	// posts to the same Raft apply queue we're currently draining). Wait
 	// for the goroutine to drain before asserting.
-	deadline := time.After(2 * time.Second)
-	for ackCount.Load() < 1 {
-		select {
-		case <-deadline:
-			t.Fatalf("ack did not fire within deadline (count=%d)", ackCount.Load())
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
+	waittest.Progress(t, "local delete and ack", func() (string, bool) {
+		n := ackCount.Load()
+		return fmt.Sprintf("deleted=%d acks=%d", cm.deletedCount(), n), n >= 1
+	})
 
 	if len(cm.deleted) != 1 || cm.deleted[0] != chunkID {
 		t.Errorf("local delete = %v, want [%s]", cm.deleted, chunkID)
@@ -478,14 +482,11 @@ func TestReconcileFromSnapshotProcessesPendingObligations(t *testing.T) {
 	// the after-restore hook in production). Wait for both acks to
 	// drain before asserting.
 	var ackedIDs []chunk.ChunkID
-	deadline := time.After(2 * time.Second)
 	for len(ackedIDs) < 2 {
-		select {
-		case id := <-ackCh:
-			ackedIDs = append(ackedIDs, id)
-		case <-deadline:
-			t.Fatalf("acks did not drain within deadline (got %d/2)", len(ackedIDs))
-		}
+		id := waittest.Recv(t, fmt.Sprintf("ack %d of 2", len(ackedIDs)+1), ackCh, func() string {
+			return fmt.Sprintf("deleted=%d", cm.deletedCount())
+		})
+		ackedIDs = append(ackedIDs, id)
 	}
 
 	if len(cm.deleted) != 2 {
@@ -1142,15 +1143,13 @@ func (r *recordingSilentDeleter) DeleteSilent(id chunk.ChunkID) error {
 	return nil
 }
 
-// waitForChunkSignal blocks until the orchestrator's chunk signal fires
-// or the timeout elapses. Returns true on signal, false on timeout.
-func waitForChunkSignal(ch <-chan struct{}, timeout time.Duration) bool {
-	select {
-	case <-ch:
-		return true
-	case <-time.After(timeout):
-		return false
-	}
+// waitForChunkSignal blocks until the orchestrator's chunk signal fires,
+// observing the throttle's pending trigger token as progress.
+func waitForChunkSignal(t *testing.T, orch *Orchestrator, ch <-chan struct{}, what string) {
+	t.Helper()
+	waittest.Recv(t, what, ch, func() string {
+		return fmt.Sprintf("trigger-pending=%d", len(orch.progressTrigger.trigger))
+	})
 }
 
 // startThrottleForTest runs the orchestrator's progress-throttle
@@ -1195,9 +1194,7 @@ func TestReconcilerOnSealNotifiesChunkChange(t *testing.T) {
 		t.Fatalf("apply seal: %v", err)
 	}
 
-	if !waitForChunkSignal(signalCh, time.Second) {
-		t.Fatal("expected chunk signal after CmdSealChunk apply, got timeout")
-	}
+	waitForChunkSignal(t, orch, signalCh, "chunk signal after CmdSealChunk apply")
 	if len(cm.ensured) != 1 || cm.ensured[0] != id {
 		t.Errorf("EnsureSealed = %v, want [%s] (signal must not gate state projection)", cm.ensured, id)
 	}
@@ -1243,9 +1240,7 @@ func TestReconcilerOnSealNotifiesEvenWhenEnsureSealedFails(t *testing.T) {
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, now, now, now)})
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 1, 1, now, now, now, false, now)})
 
-	if !waitForChunkSignal(signalCh, time.Second) {
-		t.Fatal("expected chunk signal even when EnsureSealed errors, got timeout")
-	}
+	waitForChunkSignal(t, orch, signalCh, "chunk signal even when EnsureSealed errors")
 }
 
 // TestReconcilerOnFinalizeDeleteEmitsChunkDeleted pins that the receipt-
@@ -1292,19 +1287,15 @@ func TestReconcilerOnFinalizeDeleteEmitsChunkDeleted(t *testing.T) {
 	// the chunk via cluster-wide ListChunks, not local storage.
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalAckDelete(chunkID, "node-B")})
 
-	select {
-	case msg := <-events:
-		if msg.Event.Op != ChunkChangeOpDeleted {
-			t.Fatalf("event op = %v, want Deleted", msg.Event.Op)
-		}
-		if msg.Event.ChunkID != chunkID {
-			t.Fatalf("event chunk = %s, want %s", msg.Event.ChunkID, chunkID)
-		}
-		if msg.Event.VaultID != vaultID {
-			t.Fatalf("event vault = %s, want %s", msg.Event.VaultID, vaultID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for DELETED event on finalize")
+	msg := waittest.Recv(t, "DELETED event on finalize", events, nil)
+	if msg.Event.Op != ChunkChangeOpDeleted {
+		t.Fatalf("event op = %v, want Deleted", msg.Event.Op)
+	}
+	if msg.Event.ChunkID != chunkID {
+		t.Fatalf("event chunk = %s, want %s", msg.Event.ChunkID, chunkID)
+	}
+	if msg.Event.VaultID != vaultID {
+		t.Fatalf("event vault = %s, want %s", msg.Event.VaultID, vaultID)
 	}
 }
 
@@ -1338,9 +1329,7 @@ func TestWireInstanceFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
 		t.Fatalf("apply upload: %v", err)
 	}
 
-	if !waitForChunkSignal(signalCh, time.Second) {
-		t.Fatal("expected chunk signal after CmdUploadChunk apply, got timeout")
-	}
+	waitForChunkSignal(t, orch, signalCh, "chunk signal after CmdUploadChunk apply")
 }
 
 // TestReconcileFromSnapshotResumesSealingChunks pins the

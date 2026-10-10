@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"log/slog"
 	"testing"
-	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
@@ -11,12 +10,6 @@ import (
 
 	hraft "github.com/hashicorp/raft"
 )
-
-// postSealDrainBudget bounds the scheduler drain these tests use to wait out
-// the async post-seal job. It is a give-up budget, not a timing assertion:
-// the job is in-process and finishes in milliseconds, and a test that needs
-// the whole budget has found a wedge, not a slow machine.
-const postSealDrainBudget = 30 * time.Second
 
 // directCtlApplier applies vault-ctl commands straight to a local FSM,
 // standing in for the Raft round trip. Announcer.apply swallows errors, so

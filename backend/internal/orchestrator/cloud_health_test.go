@@ -63,16 +63,14 @@ func (m *mockCloudBackedChunkManager) uploadCallsCopy() []chunk.ChunkID {
 	return out
 }
 
-// waitUploadCount polls until uploadCalls reaches the expected count or the
-// deadline passes. Returns the final count.
-func waitUploadCount(m *mockCloudBackedChunkManager, want int, timeout time.Duration) int {
-	deadline := time.Now().Add(timeout)
-	for {
-		if got := m.uploadCallCount(); got >= want || time.Now().After(deadline) {
-			return got
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+// settledUploadCount drains the scheduler's one-time jobs and returns the
+// upload calls they made. Every sweep entry point registers its upload jobs
+// before returning, so draining the scheduler settles every upload a sweep
+// could cause.
+func settledUploadCount(t *testing.T, o *Orchestrator, m *mockCloudBackedChunkManager) int {
+	t.Helper()
+	requireIdle(t, o.Scheduler())
+	return m.uploadCallCount()
 }
 
 // ---------- evaluateCloudHealth ----------
@@ -215,11 +213,10 @@ func TestBackfillCloudUploads_SchedulesSealedNonCloudBacked(t *testing.T) {
 
 	orch.backfillCloudUploads(vaultInst)
 
-	// Wait for the scheduler job to run.
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()
 
-	if got := waitUploadCount(mock, 1, 5*time.Second); got != 1 {
+	if got := settledUploadCount(t, orch, mock); got != 1 {
 		t.Fatalf("expected 1 upload call, got %d", got)
 	}
 	calls := mock.uploadCallsCopy()
@@ -255,7 +252,7 @@ func TestBackfillCloudUploads_FileVaultWithCloudStore(t *testing.T) {
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()
 
-	if got := waitUploadCount(mock, 1, 5*time.Second); got != 1 {
+	if got := settledUploadCount(t, orch, mock); got != 1 {
 		t.Fatalf("expected 1 upload call, got %d", got)
 	}
 }
@@ -286,10 +283,9 @@ func TestBackfillCloudUploads_SkipsPlacementFollower(t *testing.T) {
 	orch.backfillCloudUploads(vaultInst)
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()
-	time.Sleep(100 * time.Millisecond)
 
-	if mock.uploadCallCount() != 0 {
-		t.Fatalf("expected 0 uploads on placement follower, got %d", mock.uploadCallCount())
+	if got := settledUploadCount(t, orch, mock); got != 0 {
+		t.Fatalf("expected 0 uploads on placement follower, got %d", got)
 	}
 }
 
@@ -318,9 +314,8 @@ func TestBackfillCloudUploads_SkipsCloudBacked(t *testing.T) {
 
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()
-	time.Sleep(200 * time.Millisecond) // brief grace for scheduler to (not) run
 
-	if got := mock.uploadCallCount(); got != 0 {
+	if got := settledUploadCount(t, orch, mock); got != 0 {
 		t.Fatalf("expected 0 upload calls for cloud-backed chunk, got %d", got)
 	}
 }
@@ -350,9 +345,8 @@ func TestBackfillCloudUploads_SkipsUnsealed(t *testing.T) {
 
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()
-	time.Sleep(200 * time.Millisecond)
 
-	if got := mock.uploadCallCount(); got != 0 {
+	if got := settledUploadCount(t, orch, mock); got != 0 {
 		t.Fatalf("expected 0 upload calls for unsealed chunk, got %d", got)
 	}
 }
@@ -387,9 +381,8 @@ func TestBackfillCloudUploads_SkipsWhenChunkIsCloudBacked(t *testing.T) {
 
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()
-	time.Sleep(200 * time.Millisecond)
 
-	if got := mock.uploadCallCount(); got != 0 {
+	if got := settledUploadCount(t, orch, mock); got != 0 {
 		t.Fatalf("expected 0 uploads for an already cloud-backed chunk, got %d", got)
 	}
 }
@@ -428,17 +421,8 @@ func TestBackfillCloudUploadsLeaderOnly(t *testing.T) {
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()
 
-	// Poll for the upload — under race detector this can take several seconds.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		n := mock.uploadCallCount()
-		if n == 1 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("expected 1 upload on Raft leader with data, got %d", n)
-		}
-		time.Sleep(20 * time.Millisecond)
+	if got := settledUploadCount(t, orch, mock); got != 1 {
+		t.Fatalf("expected 1 upload on Raft leader with data, got %d", got)
 	}
 }
 
@@ -474,10 +458,7 @@ func TestBackfillCloudUploadsSkippedOnFollower(t *testing.T) {
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()
 
-	// Give the scheduler a moment to (not) run anything.
-	time.Sleep(200 * time.Millisecond)
-
-	if got := mock.uploadCallCount(); got != 0 {
+	if got := settledUploadCount(t, orch, mock); got != 0 {
 		t.Fatalf("expected 0 uploads on follower, got %d", got)
 	}
 }
@@ -694,23 +675,18 @@ func TestEvaluateCloudHealth_SteadyStateHealthyDoesNotResweep(t *testing.T) {
 
 	// First observation as uploader → exactly one catch-up sweep uploads it.
 	orch.evaluateCloudHealth()
-	if got := waitUploadCount(mock, 1, 5*time.Second); got != 1 {
+	if got := settledUploadCount(t, orch, mock); got != 1 {
 		t.Fatalf("first evaluation should catch up once: want 1 upload, got %d", got)
 	}
-	// Let the upload job fully settle so a re-sweep would not be blocked by the
-	// in-flight dedup guard — isolating the "no edge → no sweep" behavior.
-	jobName := cloudUploadJobName(vaultID, chunkID)
-	deadline := time.Now().Add(5 * time.Second)
-	for orch.Scheduler().HasPendingPrefix(jobName) && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	// The settled count drained the upload job, so a re-sweep would not be
+	// blocked by the in-flight dedup guard — isolating the "no edge → no
+	// sweep" behavior.
 
 	// Steady-state healthy ticks: no edge, no sweep, no re-upload.
 	for range 3 {
 		orch.evaluateCloudHealth()
 	}
-	time.Sleep(200 * time.Millisecond)
-	if got := mock.uploadCallCount(); got != 1 {
+	if got := settledUploadCount(t, orch, mock); got != 1 {
 		t.Fatalf("steady-state healthy re-evaluations must not re-sweep: want 1 upload, got %d", got)
 	}
 }
@@ -747,8 +723,7 @@ func TestEvaluateCloudHealth_DegradedRecoveryTriggersCatchup(t *testing.T) {
 
 	// Degraded: alert raised, no sweep.
 	orch.evaluateCloudHealth()
-	time.Sleep(150 * time.Millisecond)
-	if got := mock.uploadCallCount(); got != 0 {
+	if got := settledUploadCount(t, orch, mock); got != 0 {
 		t.Fatalf("no sweep should run while degraded, got %d uploads", got)
 	}
 	if len(ac.Standing()) != 1 {
@@ -758,7 +733,7 @@ func TestEvaluateCloudHealth_DegradedRecoveryTriggersCatchup(t *testing.T) {
 	// Recover: degraded→healthy edge fires the catch-up sweep.
 	mock.degraded.Store(false)
 	orch.evaluateCloudHealth()
-	if got := waitUploadCount(mock, 1, 5*time.Second); got != 1 {
+	if got := settledUploadCount(t, orch, mock); got != 1 {
 		t.Fatalf("recovery must catch up the chunk sealed during the outage, got %d uploads", got)
 	}
 	if len(ac.Standing()) != 0 {
@@ -797,7 +772,7 @@ func TestEvaluateCloudHealth_SteadyStateRetriesStuckChunk(t *testing.T) {
 
 	// First observation → sweep → upload attempt fails → backoff entry recorded.
 	orch.evaluateCloudHealth()
-	waitBackfillJobDone(t, orch, jobName, mock, 1, 5*time.Second)
+	waitBackfillJobDone(t, orch, jobName, mock, 1)
 	if !orch.vaultHasBackfillFailures(vaultID) {
 		t.Fatal("a failed upload must record a backoff entry for retry")
 	}
@@ -806,7 +781,7 @@ func TestEvaluateCloudHealth_SteadyStateRetriesStuckChunk(t *testing.T) {
 	// vault is still swept (it has a failure), but the chunk is not due, so no
 	// new attempt is scheduled.
 	orch.evaluateCloudHealth()
-	time.Sleep(150 * time.Millisecond)
+	requireIdle(t, orch.Scheduler())
 	if got := mock.uploadCallCount(); got != 1 {
 		t.Fatalf("a stuck chunk inside its backoff window must not be retried, got %d attempts", got)
 	}
@@ -814,7 +789,7 @@ func TestEvaluateCloudHealth_SteadyStateRetriesStuckChunk(t *testing.T) {
 	// Advance past the backoff window → the next steady-state evaluation retries.
 	clock.Advance(unreadableBackoff(1) + time.Second)
 	orch.evaluateCloudHealth()
-	waitBackfillJobDone(t, orch, jobName, mock, 2, 5*time.Second)
+	waitBackfillJobDone(t, orch, jobName, mock, 2)
 	if got := mock.uploadCallCount(); got != 2 {
 		t.Fatalf("a stuck chunk past its backoff window must be retried by the periodic evaluation, got %d attempts", got)
 	}
@@ -848,7 +823,7 @@ func TestOnVaultCtlLeadGained_TriggersCloudUploadCatchup(t *testing.T) {
 
 	orch.onVaultCtlLeadGained(vaultID)
 
-	if got := waitUploadCount(mock, 1, 5*time.Second); got != 1 {
+	if got := settledUploadCount(t, orch, mock); got != 1 {
 		t.Fatalf("gaining leadership must catch up the sealed chunk, got %d uploads", got)
 	}
 	calls := mock.uploadCallsCopy()
@@ -901,7 +876,7 @@ func TestCloudUploadCatchupForVault_SkipsNonUploaderAndUnregistered(t *testing.T
 	}))
 	orch.cloudUploadCatchupForVault(followerID)
 
-	time.Sleep(150 * time.Millisecond)
+	requireIdle(t, orch.Scheduler())
 	if got := plainMock.uploadCallCount(); got != 0 {
 		t.Fatalf("non-cloud vault must not upload, got %d", got)
 	}

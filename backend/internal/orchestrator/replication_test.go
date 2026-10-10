@@ -17,6 +17,7 @@ import (
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
 	"gastrolog/internal/system"
+	"gastrolog/internal/waittest"
 )
 
 // ---------- fake instance replicator that records operations ----------
@@ -457,15 +458,10 @@ func TestCatchupSelectedChunksSkipsDuplicateWhileInFlight(t *testing.T) {
 		t.Fatalf("scheduled1 = %d, want 1", scheduled1)
 	}
 
-	deadline := time.After(2 * time.Second)
-	for mock.imports.Load() == 0 {
-		select {
-		case <-deadline:
-			t.Fatal("timed out waiting for catchup import to start")
-		default:
-			time.Sleep(5 * time.Millisecond)
-		}
-	}
+	waittest.Progress(t, "catchup import starts", func() (string, bool) {
+		n := mock.imports.Load()
+		return fmt.Sprintf("imports=%d", n), n > 0
+	})
 
 	scheduled2, err := orch.CatchupSelectedChunks(
 		context.Background(), vaultID, requester, []chunk.ChunkID{active.ID})

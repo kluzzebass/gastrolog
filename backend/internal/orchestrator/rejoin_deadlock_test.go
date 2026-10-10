@@ -10,9 +10,9 @@ package orchestrator
 
 import (
 	"testing"
-	"time"
 
 	"gastrolog/internal/glid"
+	"gastrolog/internal/waittest"
 )
 
 func TestFinishPendingCtlRestoreSafeUnderWriteLock(t *testing.T) {
@@ -41,11 +41,7 @@ func TestFinishPendingCtlRestoreSafeUnderWriteLock(t *testing.T) {
 		close(done)
 	}()
 
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("finishPendingPipelineCtlRestore deadlocked under o.mu write lock (rejoin self-deadlock regression)")
-	}
+	waittest.Recv(t, "finishPendingPipelineCtlRestore returns under the o.mu write lock", done, nil)
 
 	// Exactly-once: the pending entry must be consumed.
 	if _, still := orch.pendingPipelineCtlRestore.Load(vid); still {

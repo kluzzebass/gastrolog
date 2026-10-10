@@ -9,6 +9,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"gastrolog/internal/waittest"
 )
 
 func TestProgressWatchStalledSemantics(t *testing.T) {
@@ -49,13 +51,8 @@ func TestRunStallMonitorAbortsOnStall(t *testing.T) {
 
 	// Second tick without progress: abort with the stall sentinel.
 	tick <- time.Time{}
-	select {
-	case cause := <-aborted:
-		if !errors.Is(cause, errRetentionFanOutStalled) {
-			t.Fatalf("want errRetentionFanOutStalled, got %v", cause)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("stalled tick must abort")
+	if cause := waittest.Recv(t, "stalled tick aborts", aborted, nil); !errors.Is(cause, errRetentionFanOutStalled) {
+		t.Fatalf("want errRetentionFanOutStalled, got %v", cause)
 	}
 }
 
@@ -70,9 +67,5 @@ func TestRunStallMonitorStopsOnDone(t *testing.T) {
 		close(stopped)
 	}()
 	close(done)
-	select {
-	case <-stopped:
-	case <-time.After(5 * time.Second):
-		t.Fatal("monitor must return when done closes")
-	}
+	waittest.Recv(t, "monitor returns when done closes", stopped, nil)
 }

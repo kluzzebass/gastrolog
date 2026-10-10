@@ -40,6 +40,7 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+	"gastrolog/internal/waittest"
 )
 
 // registrarUploaderMock simulates the chunk-manager registration gap this
@@ -171,19 +172,14 @@ func backfillRepairFixture(t *testing.T, writeGLCB bool) (*Orchestrator, *VaultI
 // count) matters: it guarantees the job closure — including any repair
 // retry, markBackfillFailure, or clearBackfillFailure — has finished
 // running, not just that UploadToCloud was entered.
-func waitBackfillJobDone(t *testing.T, orch *Orchestrator, jobName string, m *registrarUploaderMock, minUploads int, timeout time.Duration) {
+func waitBackfillJobDone(t *testing.T, orch *Orchestrator, jobName string, m *registrarUploaderMock, minUploads int) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for {
-		if m.uploadCallCount() >= minUploads && !orch.Scheduler().HasPendingPrefix(jobName) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("backfill job %q did not settle with >= %d uploads within %s (got %d)",
-				jobName, minUploads, timeout, m.uploadCallCount())
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waittest.Progress(t, fmt.Sprintf("backfill job %q settles with >= %d uploads", jobName, minUploads), func() (string, bool) {
+		uploads := m.uploadCallCount()
+		pending := orch.Scheduler().HasPendingPrefix(jobName)
+		return fmt.Sprintf("uploads=%d pending=%v; %s", uploads, pending, jobsProgress(orch.Scheduler())),
+			uploads >= minUploads && !pending
+	})
 }
 
 // There is no registration-repair coverage here: a freshly-sealed on-disk
@@ -269,7 +265,7 @@ func TestBackfillCloudUploads_SkipsSchedulingDuringBackoff(t *testing.T) {
 	orch.backfillCloudUploads(vaultInst)
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()
-	time.Sleep(100 * time.Millisecond)
+	requireIdle(t, orch.Scheduler())
 
 	jobName := cloudUploadJobName(vaultID, chunkID)
 	if orch.Scheduler().HasPendingPrefix(jobName) {
@@ -445,7 +441,7 @@ func TestBackfillCloudUploads_GLCBAbsentBacksOffWithoutAlarm(t *testing.T) {
 	defer func() { _ = orch.Scheduler().Stop() }()
 
 	jobName := cloudUploadJobName(vaultInst.VaultID, id)
-	waitBackfillJobDone(t, orch, jobName, mock, 1, 5*time.Second)
+	waitBackfillJobDone(t, orch, jobName, mock, 1)
 
 	if got := mock.registerCallCount(); got != 0 {
 		t.Fatalf("a GLCB absent from disk must not trigger a repair registration, got %d calls", got)
@@ -470,7 +466,7 @@ func TestBackfillCloudUploads_GLCBAbsentBacksOffWithoutAlarm(t *testing.T) {
 	// A second sweep before the backoff window elapses must not reschedule
 	// the job — no tight loop.
 	orch.backfillCloudUploads(vaultInst)
-	time.Sleep(100 * time.Millisecond)
+	requireIdle(t, orch.Scheduler())
 	if got := mock.uploadCallCount(); got != 1 {
 		t.Fatalf("chunk must not be retried before its backoff window elapses, got %d upload calls", got)
 	}

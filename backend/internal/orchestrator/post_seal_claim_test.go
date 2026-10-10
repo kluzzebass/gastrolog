@@ -13,10 +13,10 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/waittest"
 )
 
 // postSealCountingManager counts PostSealProcess entries and can hold the first
@@ -55,11 +55,8 @@ func TestPostSealDoesNotRunTwiceForOneChunk(t *testing.T) {
 	orch.RegisterVault(NewVault(vaultID, &VaultInstance{VaultID: vaultID, Type: "file", Chunks: cm}))
 
 	orch.schedulePostSeal(vaultID, cm, chunkID)
-	select {
-	case <-cm.started: // the first job is inside PostSealProcess
-	case <-time.After(5 * time.Second):
-		t.Fatal("post-seal never ran: the fixture is not being scheduled")
-	}
+	waittest.Recv(t, "first post-seal job enters PostSealProcess", cm.started,
+		func() string { return jobsProgress(orch.scheduler) })
 
 	// A second path post-seals the same chunk while the first is running.
 	orch.schedulePostSeal(vaultID, cm, chunkID)
@@ -89,7 +86,7 @@ func TestPostSealRunsAgainAfterTheFirstCompletes(t *testing.T) {
 	requireIdle(t, orch.scheduler)
 	select {
 	case <-cm.started:
-	case <-time.After(5 * time.Second):
+	default:
 		t.Fatal("post-seal never ran: the fixture is not being scheduled")
 	}
 

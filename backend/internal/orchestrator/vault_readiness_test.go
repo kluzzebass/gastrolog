@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/query"
+	"gastrolog/internal/waittest"
 )
 
 func TestVaultReplicationReadinessErr_nilVault(t *testing.T) {
@@ -230,9 +230,9 @@ func TestLocalVaultsReplicationReady(t *testing.T) {
 // kubelet's probe times out otherwise, which is the original failure mode
 // from the K8s burst scale-out report.
 //
-// The test acquires o.mu.Lock() directly and asserts that each probe-path
-// method completes within a tight deadline. Catching IsRunning here is the
-// reason an earlier draft of this fix still produced stuck leader pods —
+// The test acquires o.mu.Lock() directly and holds it until the test ends,
+// so a probe-path method that touches o.mu never returns. Catching IsRunning
+// here is the reason an earlier draft of this fix still produced stuck leader pods —
 // the cached LocalVaultsReplicationReady alone wasn't enough; IsRunning
 // was also taking o.mu.RLock and starving behind the writer.
 func TestReadyzPathNotBlockedByWriter(t *testing.T) {
@@ -257,8 +257,7 @@ func TestReadyzPathNotBlockedByWriter(t *testing.T) {
 		t.Fatal("IsRunning should report true after CompareAndSwap")
 	}
 
-	// Hold the write lock from a background goroutine for longer than
-	// any individual /readyz call should ever wait on the probe path.
+	// Hold the write lock from a background goroutine until the test ends.
 	released := make(chan struct{})
 	holding := make(chan struct{})
 	go func() {
@@ -270,10 +269,8 @@ func TestReadyzPathNotBlockedByWriter(t *testing.T) {
 	<-holding
 	defer close(released)
 
-	// Each /readyz probe-path method must respond promptly regardless
-	// of the held writer. 200 ms is generous — every method is an
-	// atomic load — but cleanly distinguishes "lock-free" from
-	// "starved behind the writer".
+	// Each /readyz probe-path method must return while the writer holds
+	// the lock: one starved behind the writer never returns at all.
 	type probe struct {
 		name string
 		fn   func() bool
@@ -285,13 +282,8 @@ func TestReadyzPathNotBlockedByWriter(t *testing.T) {
 	for _, p := range probes {
 		done := make(chan bool, 1)
 		go func() { done <- p.fn() }()
-		select {
-		case got := <-done:
-			if !got {
-				t.Fatalf("%s returned false under contention; should reflect last-good value", p.name)
-			}
-		case <-time.After(200 * time.Millisecond):
-			t.Fatalf("%s blocked while o.mu.Lock was held — /readyz handler would starve", p.name)
+		if !waittest.Recv(t, p.name+" returns while o.mu.Lock is held", done, nil) {
+			t.Fatalf("%s returned false under contention; should reflect last-good value", p.name)
 		}
 	}
 }

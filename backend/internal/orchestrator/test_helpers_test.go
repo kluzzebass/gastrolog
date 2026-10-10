@@ -770,34 +770,21 @@ func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestN
 // assertVaultDirEmpty verifies that an instance's filesystem directory contains no
 // chunk subdirectories on ANY node. This goes below the chunk manager API —
 // it checks the actual filesystem to catch silent delete failures, leaked
-// directories, and stale files.
+// directories, and stale files. Chunk deletion is asynchronous, so it waits
+// for the directories to go, failing when the remaining set stops changing.
 func (h *clusterHarness) assertVaultDirEmpty(t *testing.T, vaultIdx int) {
 	t.Helper()
-	// Poll briefly — async chunk deletion may lag under CPU contention.
-	deadline := time.Now().Add(60 * time.Second)
-	for {
-		allEmpty := true
+	waittest.Progress(t, fmt.Sprintf("vault %d chunk directories removed on every node", vaultIdx), func() (string, bool) {
+		var remaining []string
 		for _, nid := range h.allNodeIDs() {
-			if len(h.chunkDirsOnNode(nid, vaultIdx)) > 0 {
-				allEmpty = false
-				break
+			if dirs := h.chunkDirsOnNode(nid, vaultIdx); len(dirs) > 0 {
+				slices.Sort(dirs)
+				remaining = append(remaining, fmt.Sprintf("%s=%v", nid, dirs))
 			}
 		}
-		if allEmpty {
-			return
-		}
-		if time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	for _, nid := range h.allNodeIDs() {
-		chunkDirs := h.chunkDirsOnNode(nid, vaultIdx)
-		if len(chunkDirs) > 0 {
-			t.Errorf("vault %d on %s: %d chunk directories still on disk: %v",
-				vaultIdx, nid, len(chunkDirs), chunkDirs)
-		}
-	}
+		slices.Sort(remaining)
+		return strings.Join(remaining, "; "), len(remaining) == 0
+	})
 }
 
 func (h *clusterHarness) chunkDirsOnNode(nid string, vaultIdx int) []string {
@@ -836,29 +823,26 @@ func (h *clusterHarness) listChunkDirsOnNode(t *testing.T, nodeID string, vaultI
 // Multi-node drain tests
 // ==========================================================================
 
-// waitForDrainJob polls the scheduler until the drain job completes or times out.
-// Uses ListJobs which returns snapshots — no race with the scheduler goroutine.
-func waitForDrainJob(t *testing.T, orch *Orchestrator, vaultID glid.GLID, timeout time.Duration) {
+// waitForDrainJob waits until the vault's drain job completes, failing when the
+// job fails or the scheduler's jobs stop making progress.
+func waitForDrainJob(t *testing.T, orch *Orchestrator, vaultID glid.GLID) {
 	t.Helper()
 	jobName := "drain:" + vaultID.String()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		// ListJobs returns snapshot copies under the scheduler's lock.
+	waittest.Progress(t, "drain job "+jobName+" completes", func() (string, bool) {
 		for _, j := range orch.Scheduler().ListJobs() {
 			if j.Name != jobName {
 				continue
 			}
-			snap := j.Snapshot()
-			if snap.Progress != nil && snap.Progress.Status == JobStatusCompleted {
-				return
+			p := j.Snapshot().Progress
+			if p != nil && p.Status == JobStatusFailed {
+				t.Fatalf("drain job failed: %s", p.Error)
 			}
-			if snap.Progress != nil && snap.Progress.Status == JobStatusFailed {
-				t.Fatalf("drain job failed: %s", snap.Progress.Error)
+			if p != nil && p.Status == JobStatusCompleted {
+				return "", true
 			}
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("drain job did not complete within %s", timeout)
+		return jobsProgress(orch.Scheduler()), false
+	})
 }
 
 // TestClusterDrainVaultRecordsArriveOnDestination drains a file-backed vault
@@ -873,21 +857,6 @@ func waitForDrainJob(t *testing.T, orch *Orchestrator, vaultID glid.GLID, timeou
 // buildInstanceForStorage (explicit placement path) applies the rotation
 // policy from system. Regression test for a gap where applyRotationPolicy was
 // only called in buildInstance but not buildInstanceForStorage.
-
-// waitForTransitions polls until all transition:* jobs in the scheduler
-// have completed. Transitions run as one-shot scheduler jobs, so tests
-// that call sweep() need to wait.
-func waitForTransitions(t *testing.T, orch *Orchestrator, timeout time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if !orch.scheduler.HasPendingPrefix("transition:") {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("transition jobs did not complete within timeout")
-}
 
 // requireIdle waits until the scheduler has no one-time jobs pending, failing
 // when its jobs stop making progress.

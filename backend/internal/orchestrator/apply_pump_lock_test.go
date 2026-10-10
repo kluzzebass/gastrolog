@@ -2,9 +2,9 @@ package orchestrator
 
 import (
 	"testing"
-	"time"
 
 	"gastrolog/internal/glid"
+	"gastrolog/internal/waittest"
 )
 
 // The vault-ctl Raft apply pump reads pipeline registration state while
@@ -17,11 +17,9 @@ import (
 // node permanently, taking every other o.mu consumer down with it.
 //
 // These tests hold o.mu in the mode that closes the cycle and require the
-// pump-path readers to answer anyway. The deadline is a deadlock detector, not
-// a performance assertion: the correct implementation never touches the lock,
-// so it returns immediately, while a regression blocks forever.
-const applyPumpLockDeadline = 10 * time.Second
-
+// pump-path readers to answer anyway. The correct implementation never touches
+// the lock, so it returns immediately, while a regression blocks forever and
+// fails the wait once the stall window passes.
 func mustAnswerWhileLocked(t *testing.T, name string, read func()) {
 	t.Helper()
 	done := make(chan struct{})
@@ -29,12 +27,8 @@ func mustAnswerWhileLocked(t *testing.T, name string, read func()) {
 		defer close(done)
 		read()
 	}()
-	select {
-	case <-done:
-	case <-time.After(applyPumpLockDeadline):
-		t.Fatalf("%s blocked while o.mu was held: the Raft apply pump calls this, "+
-			"so taking o.mu here deadlocks the node", name)
-	}
+	waittest.Recv(t, name+" answers while o.mu is held (the Raft apply pump calls it, "+
+		"so taking o.mu here deadlocks the node)", done, nil)
 }
 
 // TestPipelineReadersDoNotBlockOnOrchestratorWriteLock pins the pump-path
