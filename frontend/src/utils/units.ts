@@ -85,6 +85,14 @@ export function formatCount(c: bigint | number): string {
   return formatCompactScaled(n);
 }
 
+/** Format a count exactly, with the locale's digit grouping (e.g. "6,148"). */
+export function formatExactCount(c: bigint | number): string {
+  return Number(c).toLocaleString();
+}
+
+/** formatExactCount never emits more characters than this for counts below a billion. */
+export const EXACT_COUNT_MAX_CHARS = formatExactCount(999_999_999).length;
+
 /** formatPercent never emits more characters than this for values below 999.95%. */
 export const PERCENT_MAX_CHARS = 6;
 

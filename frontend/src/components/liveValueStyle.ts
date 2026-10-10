@@ -25,7 +25,11 @@ const ALIGN_CLASS: Record<LiveAlign, string> = {
 /** The classes every live value carries: monospaced tabular digits that never wrap. */
 export const LIVE_VALUE_BASE = "inline-block font-mono tabular-nums whitespace-nowrap";
 
-/** Digit stability for live numbers set in the body face, where a mono cell would restyle the text. */
+/**
+ * No-wrap and tabular digits for a live value that keeps its own element and
+ * face. Only the mono face holds its width as digits change: the body face
+ * ships without tabular figures, so a ticking number set in it still moves.
+ */
 export const LIVE_TEXT = "tabular-nums whitespace-nowrap";
 
 /**

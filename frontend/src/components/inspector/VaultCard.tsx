@@ -16,13 +16,15 @@ import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from 
 import {
   BYTES_MAX_CHARS,
   BYTES_PER_SEC_MAX_CHARS,
+  EXACT_COUNT_MAX_CHARS,
   RATE_PER_SEC_MAX_CHARS,
   formatBytes,
   formatBytesPerSec,
+  formatExactCount,
   formatRatePerSec,
 } from "../../utils/units";
 import { LiveValue } from "../LiveValue";
-import { LIVE_GRID_ROW } from "../liveValueStyle";
+import { LIVE_GRID_ROW, LIVE_TEXT } from "../liveValueStyle";
 import { Spark } from "../Spark";
 import { middleTruncate } from "../../utils/middleTruncate";
 import { leaderNodeId, followerNodeIds } from "../../utils/placement";
@@ -974,7 +976,7 @@ function ChunkRow({
         </td>
         <td className="px-2 py-2">
           <span
-            className={`text-[0.95em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+            className={`text-[0.9em] font-mono ${LIVE_TEXT} ${c("text-text-muted", "text-light-text-muted")}`}
           >
             {start ? formatDateTimeShort(start) : "\u2014"}
             <span className={`mx-1.5 ${c("text-text-muted", "text-light-text-muted")}`}>
@@ -1028,8 +1030,8 @@ function ChunkRow({
           </span>
         </td>
         <td className="px-2 py-2 text-right">
-          <LiveValue dark={dark} tone="muted">
-            {Number(chunk.recordCount).toLocaleString()}
+          <LiveValue dark={dark} tone="muted" reserve={EXACT_COUNT_MAX_CHARS}>
+            {formatExactCount(chunk.recordCount)}
           </LiveValue>
         </td>
         <td className="px-4 py-2 text-right" title={chunkSizeCellTitle(chunk)}>

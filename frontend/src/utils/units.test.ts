@@ -3,12 +3,14 @@ import {
   BYTES_MAX_CHARS,
   BYTES_PER_SEC_MAX_CHARS,
   COUNT_MAX_CHARS,
+  EXACT_COUNT_MAX_CHARS,
   PERCENT_MAX_CHARS,
   RATE_MAX_CHARS,
   RATE_PER_SEC_MAX_CHARS,
   formatBytes,
   formatBytesPerSec,
   formatCount,
+  formatExactCount,
   formatPercent,
   formatRate,
   formatRatePerSec,
@@ -237,6 +239,12 @@ describe("width contracts", () => {
 
   test("formatCount stays within COUNT_MAX_CHARS below 999.95T", () => {
     expect(longest(boundarySweep(10, 999.94e12), formatCount).length).toBe(COUNT_MAX_CHARS);
+  });
+
+  test("formatExactCount stays within EXACT_COUNT_MAX_CHARS below a billion", () => {
+    const values = [...boundarySweep(10, 999_999_999).filter((v) => v < 1e9).map(Math.floor), 999_999_999];
+    expect(longest(values, formatExactCount).length).toBe(EXACT_COUNT_MAX_CHARS);
+    expect(formatExactCount(BigInt(6148))).toBe((6148).toLocaleString());
   });
 
   test("formatPercent stays within PERCENT_MAX_CHARS below 999.95%", () => {
