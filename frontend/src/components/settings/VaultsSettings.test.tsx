@@ -1,12 +1,14 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, mock } from "bun:test";
 import { render, fireEvent, waitFor } from "@testing-library/react";
 import { installMockClients, m } from "../../../test/api-mock";
 import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 import { encode } from "../../api/glid";
+import { HelpProvider } from "../../hooks/useHelp";
 
 const mocks = installMockClients();
 
 import { VaultsSettings } from "./VaultsSettings";
+import { TRANSFER_HELP_REF, transferSourceIneligibility, transferTargetOptions } from "./transferEligibility";
 import { VaultConfig, VaultType } from "../../api/gen/gastrolog/v1/system_pb";
 import { renderWritable } from "../../testing/renderWritable";
 
@@ -398,5 +400,219 @@ describe("vault edit save", () => {
     const saveBtn = getByText("Save").closest("button")!;
     expect(saveBtn.disabled).toBe(true);
     expect(m(mocks.systemClient, "putVault")).toHaveBeenCalledTimes(0);
+  });
+});
+
+// ── Transfer eligibility ─────────────────────────────────────────────
+//
+// Each reason the picker shows corresponds to a PutVault rejection:
+// self-transfer, a non-file target, a cloud-backed target, a target whose
+// transfer chain cycles, and a source that is not a non-cloud file vault.
+
+function fileVault(n: number, name: string, extra: Partial<VaultConfig> = {}): VaultConfig {
+  return new VaultConfig({
+    id: testId(n),
+    name,
+    enabled: true,
+    type: VaultType.FILE,
+    storageClass: 1,
+    replicationFactor: 1,
+    ...extra,
+  });
+}
+
+function transferringTo(target: number): Partial<VaultConfig> {
+  return { retentionDisposition: "transfer", retentionTransferTargetVaultId: testId(target) };
+}
+
+function optionStates(select: HTMLElement): { label: string; disabled: boolean }[] {
+  return [...select.querySelectorAll("option")].map((o) => ({ label: o.textContent, disabled: o.disabled }));
+}
+
+function reasonsByLabel(options: { label: string; ineligibleReason?: string }[]): Record<string, string | undefined> {
+  return Object.fromEntries(options.map((o) => [o.label, o.ineligibleReason]));
+}
+
+describe("transferTargetOptions", () => {
+  test("names the PutVault rejection for every ineligible vault", () => {
+    const vaults = [
+      fileVault(1, "source"),
+      fileVault(2, "plain"),
+      fileVault(3, "cloudy", { cloudServiceId: testId(60) }),
+      new VaultConfig({ id: testId(4), name: "ram", type: VaultType.MEMORY }),
+      new VaultConfig({ id: testId(5), name: "sink", type: VaultType.JSONL }),
+    ];
+    expect(reasonsByLabel(transferTargetOptions(vaults, encode(testId(1))))).toEqual({
+      source: "this vault",
+      plain: undefined,
+      cloudy: "cloud-backed",
+      ram: "memory vault",
+      sink: "JSONL sink",
+    });
+  });
+
+  test("a target whose transfer chain leads back to the source would create a cycle", () => {
+    // c → source, b → c, d → b: each of them closes a loop through source.
+    const vaults = [
+      fileVault(1, "source"),
+      fileVault(2, "b", transferringTo(3)),
+      fileVault(3, "c", transferringTo(1)),
+      fileVault(4, "d", transferringTo(2)),
+      fileVault(5, "e"),
+    ];
+    expect(reasonsByLabel(transferTargetOptions(vaults, encode(testId(1))))).toEqual({
+      source: "this vault",
+      b: "would create a transfer cycle",
+      c: "would create a transfer cycle",
+      d: "would create a transfer cycle",
+      e: undefined,
+    });
+  });
+
+  test("a target ID on a vault whose disposition is not transfer is no edge", () => {
+    const vaults = [
+      fileVault(1, "source"),
+      fileVault(2, "b", { retentionDisposition: "delete", retentionTransferTargetVaultId: testId(1) }),
+      fileVault(3, "c", transferringTo(2)),
+    ];
+    expect(reasonsByLabel(transferTargetOptions(vaults, encode(testId(1))))).toEqual({
+      source: "this vault",
+      b: undefined,
+      c: undefined,
+    });
+  });
+
+  test("an existing cycle elsewhere in the graph makes its members ineligible for a new vault", () => {
+    const vaults = [fileVault(2, "b", transferringTo(3)), fileVault(3, "c", transferringTo(2)), fileVault(4, "d")];
+    expect(reasonsByLabel(transferTargetOptions(vaults))).toEqual({
+      b: "would create a transfer cycle",
+      c: "would create a transfer cycle",
+      d: undefined,
+    });
+  });
+
+  test("disabled vaults stay eligible — PutVault does not check enabled", () => {
+    const vaults = [fileVault(1, "source"), fileVault(2, "off", { enabled: false })];
+    expect(reasonsByLabel(transferTargetOptions(vaults, encode(testId(1)))).off).toBeUndefined();
+  });
+
+  test("lists eligible vaults first, each group sorted by name", () => {
+    const vaults = [
+      fileVault(1, "zulu"),
+      fileVault(2, "alpha", { cloudServiceId: testId(60) }),
+      fileVault(3, "mike"),
+      fileVault(4, "bravo"),
+    ];
+    expect(transferTargetOptions(vaults, encode(testId(1))).map((o) => o.label)).toEqual([
+      "bravo",
+      "mike",
+      "alpha",
+      "zulu",
+    ]);
+  });
+});
+
+describe("transferSourceIneligibility", () => {
+  test("only a non-cloud file vault may transfer", () => {
+    expect(transferSourceIneligibility({ type: "file", cloudServiceId: "" })).toBeUndefined();
+    expect(transferSourceIneligibility({ type: "file", cloudServiceId: "x" })).toBe("this vault is cloud-backed");
+    expect(transferSourceIneligibility({ type: "memory", cloudServiceId: "" })).toBe("this is a memory vault");
+    expect(transferSourceIneligibility({ type: "jsonl", cloudServiceId: "" })).toBe("this is a JSONL sink");
+  });
+});
+
+describe("transfer target picker", () => {
+  // The two-vault cluster where nothing qualifies: the source is excluded
+  // as itself, the only other vault as cloud-backed.
+  const noEligibleConfig = {
+    ...oneVaultConfig,
+    vaults: [fileVault(1, "vault-alpha"), fileVault(2, "vault-cloud", { cloudServiceId: testId(60) })],
+    cloudServices: [{ id: testId(60), name: "s3" }],
+  };
+
+  function renderWithHelp(config: unknown) {
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], config);
+    const openHelp = mock((_topicId?: string) => {});
+    const result = renderWritable(
+      <HelpProvider onOpen={openHelp}>
+        <VaultsSettings dark />
+      </HelpProvider>,
+      { wrapper: settingsWrapper(qc) },
+    );
+    return { ...result, openHelp };
+  }
+
+  test("an empty picker names the rule that emptied it and links to it", async () => {
+    const { getByText, getByLabelText, getByRole, openHelp } = renderWithHelp(noEligibleConfig);
+    expandVault(getByText);
+    fireEvent.change(getByLabelText("Retention Disposition"), { target: { value: "transfer" } });
+
+    await waitFor(() => expect(getByLabelText("Transfer Target")).toBeTruthy());
+    expect(getByRole("note").textContent).toContain(
+      "No eligible targets — transfer requires a different, non-cloud file vault.",
+    );
+
+    fireEvent.click(getByText("Eligibility rules"));
+    expect(openHelp).toHaveBeenCalledWith(TRANSFER_HELP_REF);
+  });
+
+  test("ineligible vaults are listed disabled with their reason", async () => {
+    const { getByText, getByLabelText } = renderWithHelp(noEligibleConfig);
+    expandVault(getByText);
+    fireEvent.change(getByLabelText("Retention Disposition"), { target: { value: "transfer" } });
+
+    await waitFor(() => expect(getByLabelText("Transfer Target")).toBeTruthy());
+    expect(optionStates(getByLabelText("Transfer Target"))).toEqual([
+      { label: "Select target vault...", disabled: false },
+      { label: "vault-alpha — this vault", disabled: true },
+      { label: "vault-cloud — cloud-backed", disabled: true },
+    ]);
+  });
+
+  test("no empty-state note while an eligible target exists", async () => {
+    const config = { ...noEligibleConfig, vaults: [...noEligibleConfig.vaults, fileVault(3, "vault-archive")] };
+    const { getByText, getByLabelText, queryByRole } = renderWithHelp(config);
+    expandVault(getByText);
+    fireEvent.change(getByLabelText("Retention Disposition"), { target: { value: "transfer" } });
+
+    await waitFor(() => expect(getByLabelText("Transfer Target")).toBeTruthy());
+    expect(queryByRole("note")).toBeNull();
+    expect(optionStates(getByLabelText("Transfer Target"))[1]).toEqual({ label: "vault-archive", disabled: false });
+  });
+
+  test("a memory vault cannot pick transfer, and says why", async () => {
+    m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
+    const { getByText, getByLabelText } = renderWithHelp(noEligibleConfig);
+    fireEvent.click(getByText("Add Vault"));
+    await waitFor(() => expect(getByText("Create")).toBeTruthy());
+
+    fireEvent.change(getByLabelText("Storage Type"), { target: { value: "memory" } });
+    expect(optionStates(getByLabelText("Retention Disposition")).at(-1)).toEqual({
+      label: "Transfer records to another vault unchanged — this is a memory vault",
+      disabled: true,
+    });
+  });
+
+  test("binding a cloud service after choosing transfer blocks Create and names the cause", async () => {
+    m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
+    const config = { ...noEligibleConfig, vaults: [...noEligibleConfig.vaults, fileVault(3, "vault-archive")] };
+    const { getByText, getByLabelText, getByRole } = renderWithHelp(config);
+    fireEvent.click(getByText("Add Vault"));
+    await waitFor(() => expect(getByText("Create")).toBeTruthy());
+
+    fireEvent.change(getByLabelText("Storage Type"), { target: { value: "file" } });
+    fireEvent.change(getByLabelText("Storage Class"), { target: { value: "1" } });
+    fireEvent.change(getByLabelText("Retention Disposition"), { target: { value: "transfer" } });
+    await waitFor(() => expect(getByLabelText("Transfer Target")).toBeTruthy());
+    fireEvent.change(getByLabelText("Transfer Target"), { target: { value: encode(testId(3)) } });
+    const createBtn = getByText("Create").closest("button")!;
+    await waitFor(() => expect(createBtn.disabled).toBe(false));
+
+    fireEvent.change(getByLabelText("Cloud Storage"), { target: { value: encode(testId(60)) } });
+    await waitFor(() => expect(createBtn.disabled).toBe(true));
+    expect(getByRole("note").textContent).toContain(
+      "Transfer records to another vault unchanged is not eligible — this vault is cloud-backed.",
+    );
   });
 });

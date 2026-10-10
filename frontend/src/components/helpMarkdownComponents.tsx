@@ -1,5 +1,6 @@
-import { isValidElement, lazy, Suspense } from "react";
+import { isValidElement, lazy, Suspense, useEffect, useRef } from "react";
 import { getHelpIcon } from "../help/icons";
+import { headingSlug } from "../help/topics";
 
 const MermaidDiagram = lazy(() => import("./Mermaid").then((m) => ({ default: m.MermaidDiagram })));
 
@@ -10,10 +11,48 @@ function childrenToText(children: React.ReactNode): string {
   return `${children as string | number}`;
 }
 
+/** The visible text of rendered Markdown children, for heading slugs. */
+function nodeText(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join("");
+  if (isValidElement<{ children?: React.ReactNode }>(node)) return nodeText(node.props.children);
+  return "";
+}
+
+/**
+ * A section heading addressable as "topic#slug". The heading matching
+ * scrollAnchor scrolls itself into view once it mounts, which is after the
+ * topic's Markdown has loaded and rendered.
+ */
+function HelpHeading({ level, className, scrollAnchor, onAnchorScrolled, children }: Readonly<{
+  level: 2 | 3;
+  className: string;
+  scrollAnchor?: string;
+  onAnchorScrolled?: () => void;
+  children?: React.ReactNode;
+}>) {
+  const ref = useRef<HTMLHeadingElement>(null);
+  const slug = headingSlug(nodeText(children));
+  const isTarget = scrollAnchor !== undefined && slug === scrollAnchor;
+  useEffect(() => {
+    if (!isTarget) return;
+    ref.current?.scrollIntoView({ block: "start" });
+    onAnchorScrolled?.();
+  }, [isTarget, onAnchorScrolled]);
+  const Tag = level === 2 ? "h2" : "h3";
+  return (
+    <Tag ref={ref} data-help-anchor={slug} className={className}>
+      {children}
+    </Tag>
+  );
+}
+
 export function buildMarkdownComponents(
   dark: boolean,
   onNavigate: (topicId: string) => void,
   onOpenSettings?: (tab: string) => void,
+  scrollAnchor?: string,
+  onAnchorScrolled?: () => void,
 ) {
   const c: (d: string, l: string) => string = dark
     ? (d) => d
@@ -27,18 +66,24 @@ export function buildMarkdownComponents(
       </h1>
     ),
     h2: ({ children }: { children?: React.ReactNode }) => (
-      <h2
+      <HelpHeading
+        level={2}
+        scrollAnchor={scrollAnchor}
+        onAnchorScrolled={onAnchorScrolled}
         className={`font-display text-[1.1em] font-semibold mt-6 mb-2 ${c("text-copper", "text-copper")}`}
       >
         {children}
-      </h2>
+      </HelpHeading>
     ),
     h3: ({ children }: { children?: React.ReactNode }) => (
-      <h3
+      <HelpHeading
+        level={3}
+        scrollAnchor={scrollAnchor}
+        onAnchorScrolled={onAnchorScrolled}
         className={`font-display text-[0.95em] font-semibold mt-4 mb-2 ${c("text-text-bright", "text-light-text-bright")}`}
       >
         {children}
-      </h3>
+      </HelpHeading>
     ),
     p: ({ children }: { children?: React.ReactNode }) => (
       <p

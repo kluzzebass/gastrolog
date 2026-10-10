@@ -29,10 +29,10 @@ import {
   isCloudBacked,
   isStorageComplete,
   vaultTypeEnum,
-  transferTargetOptions,
   type StorageEntry,
   type VaultTypeLabel,
 } from "./VaultsSettings";
+import { transferTargetOptions } from "./transferEligibility";
 
 interface VaultSettingsCardProps {
   vault: VaultConfig;

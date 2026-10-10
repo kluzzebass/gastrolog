@@ -122,13 +122,29 @@ const topicAliases: Record<string, string> = {
   'inspector-metrics': 'inspector-system',
 };
 
+/**
+ * Split a help reference — a topic ID optionally followed by "#section" —
+ * into its parts. The section is the slug of a heading in that topic.
+ */
+export function parseHelpRef(ref: string): { topicId: string; anchor?: string } {
+  const hash = ref.indexOf("#");
+  if (hash === -1) return { topicId: ref };
+  return { topicId: ref.slice(0, hash), anchor: ref.slice(hash + 1) || undefined };
+}
+
+/** The anchor slug of a heading: lowercase words joined by hyphens. */
+export function headingSlug(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
 /** Resolve an alias to its canonical topic ID. */
 export function resolveTopicId(id: string): string {
   return topicAliases[id] ?? id;
 }
 
-export function findTopic(id: string): HelpTopic | undefined {
-  return findTopicIn(helpTopics, resolveTopicId(id));
+/** Find the topic a help reference points at; any "#section" is ignored. */
+export function findTopic(ref: string): HelpTopic | undefined {
+  return findTopicIn(helpTopics, resolveTopicId(parseHelpRef(ref).topicId));
 }
 
 function findTopicIn(topics: HelpTopic[], id: string): HelpTopic | undefined {

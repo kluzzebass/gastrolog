@@ -13,6 +13,8 @@ import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput, SpinnerInput } from "./FormField";
 import { Checkbox } from "./Checkbox";
+import { EligibilitySelect, type EligibilityOption } from "./EligibilitySelect";
+import { TRANSFER_HELP_REF, transferSourceIneligibility, transferTargetOptions } from "./transferEligibility";
 import { sortByName } from "../../lib/sort";
 import { VaultSettingsCard } from "./VaultSettingsCard";
 
@@ -27,26 +29,6 @@ export type VaultTypeLabel = "memory" | "file" | "jsonl";
 /** Returns true if this vault is cloud-backed (file vault with a cloud service binding). */
 export function isCloudBacked(v: { type: VaultTypeLabel; cloudServiceId: string }): boolean {
   return v.type === "file" && v.cloudServiceId !== "";
-}
-
-/**
- * Candidate targets for retention_disposition = "transfer": file-typed,
- * non-cloud vaults other than the one identified by excludeId. Transfer is
- * file → file only (both source and target plain, non-cloud file vaults);
- * self-transfer is rejected at PutVault as the retention cascade footgun.
- */
-export function transferTargetOptions(
-  vaults: { id: Uint8Array; name: string; type: VaultType; cloudServiceId: Uint8Array }[],
-  excludeId?: string,
-): { value: string; label: string }[] {
-  const options: { value: string; label: string }[] = [];
-  for (const v of vaults) {
-    if (v.type !== VaultType.FILE || v.cloudServiceId.length > 0) continue;
-    const value = encode(v.id);
-    if (value === excludeId) continue;
-    options.push({ value, label: v.name || value });
-  }
-  return options.sort((a, b) => a.label.localeCompare(b.label));
 }
 
 export interface StorageEntry {
@@ -121,7 +103,11 @@ function extractErrorMessage(err: unknown, fallback: string): string {
 }
 
 export function isStorageComplete(s: StorageEntry, _hasCloudServices: boolean): boolean {
-  if (s.type !== "jsonl" && s.retentionDisposition === "transfer" && s.retentionTransferTarget === "") {
+  if (
+    s.type !== "jsonl" &&
+    s.retentionDisposition === "transfer" &&
+    (s.retentionTransferTarget === "" || transferSourceIneligibility(s) !== undefined)
+  ) {
     return false;
   }
   switch (s.type) {
@@ -207,10 +193,7 @@ export function VaultStorageForm({
   cloudServiceOptions: { value: string; label: string }[];
   rotationPolicyOptions: { value: string; label: string }[];
   retentionPolicyOptions: { value: string; label: string }[];
-  // Candidate targets for retention_disposition = "transfer" — file-typed,
-  // non-cloud vaults other than this one (transfer is file → file only,
-  // self-transfer rejected at PutVault).
-  transferTargetOptions: { value: string; label: string }[];
+  transferTargetOptions: EligibilityOption[];
   nodeOptions: { value: string; label: string }[];
   vaultName: string;
   maxRF?: number;
@@ -397,32 +380,33 @@ export function VaultStorageForm({
           dark={dark}
           description="What retention does with aged-out chunks: delete, route the records, or transfer the chunk unchanged."
         >
-          <SelectInput
+          <EligibilitySelect
             value={storage.retentionDisposition || "delete"}
             onChange={(v) => onUpdate({ retentionDisposition: v })}
             options={[
               { value: "delete", label: "Delete records on retention" },
               { value: "route", label: "Send records to routing engine" },
-              { value: "transfer", label: "Transfer records to another vault unchanged" },
+              {
+                value: "transfer",
+                label: "Transfer records to another vault unchanged",
+                ineligibleReason: transferSourceIneligibility(storage),
+              },
             ]}
+            helpRef={TRANSFER_HELP_REF}
             dark={dark}
           />
         </FormField>
       )}
 
       {storage.type !== "jsonl" && storage.retentionDisposition === "transfer" && (
-        <FormField
-          label="Transfer Target"
-          dark={dark}
-          description="A different, non-cloud file vault."
-        >
-          <SelectInput
+        <FormField label="Transfer Target" dark={dark}>
+          <EligibilitySelect
             value={storage.retentionTransferTarget}
             onChange={(v) => onUpdate({ retentionTransferTarget: v })}
-            options={[
-              { value: "", label: "Select target vault..." },
-              ...transferTargetOptions,
-            ]}
+            options={transferTargetOptions}
+            placeholder="Select target vault..."
+            emptyMessage="No eligible targets — transfer requires a different, non-cloud file vault."
+            helpRef={TRANSFER_HELP_REF}
             dark={dark}
           />
         </FormField>
