@@ -1,14 +1,16 @@
 /**
  * Spark renders a tiny inline polyline of recent samples (rolling-window rate
  * history). Scaled to its own max; renders an empty box below two samples so
- * layouts stay stable while a series warms up.
+ * layouts stay stable while a series warms up, and for an all-zero series so
+ * an idle rate reads as idle rather than as a baseline stroke. A constant
+ * non-zero series still draws its level line.
  */
 export function Spark({
   values,
   width = 56,
   height = 16,
 }: Readonly<{ values: readonly number[]; width?: number; height?: number }>) {
-  if (values.length < 2) {
+  if (values.length < 2 || values.every((v) => v === 0)) {
     return <svg width={width} height={height} aria-hidden="true" />;
   }
   const max = Math.max(...values, 1);

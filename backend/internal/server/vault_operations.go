@@ -16,8 +16,11 @@ import (
 	"gastrolog/internal/system"
 )
 
-// SealVault seals the active chunk of a vault.
-// Routing: RouteToResourceOwner — the interceptor forwards to the vault-owning node.
+// SealVault seals every open chunk of a vault that holds records: the chunk
+// manager's active chunk and, for a pipeline vault, the open chunk manifest.
+// Routing: RouteToResourceOwner — the interceptor forwards to the vault's
+// placement leader, which is also the chunking leader once vault-ctl
+// leadership is aligned; until then the pipeline seal reports Unavailable.
 func (s *VaultServer) SealVault(
 	ctx context.Context,
 	req *connect.Request[apiv1.SealVaultRequest],
@@ -36,10 +39,13 @@ func (s *VaultServer) SealVault(
 
 	sealed, err := s.orch.SealActive(vaultID)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("seal active chunk: %w", err))
+		if sealed > 0 {
+			err = fmt.Errorf("sealed %d chunk(s), then: %w", sealed, err)
+		}
+		return nil, mapVaultError(fmt.Errorf("seal vault: %w", err))
 	}
 
-	return connect.NewResponse(&apiv1.SealVaultResponse{SealedCount: int32(sealed)}), nil //nolint:gosec // G115: sealed-vault count is always small
+	return connect.NewResponse(&apiv1.SealVaultResponse{SealedCount: int32(sealed)}), nil //nolint:gosec // G115: at most two open chunks per vault
 }
 
 // RetryUnreadableChunks resets the retry backoff for every chunk

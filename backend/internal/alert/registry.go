@@ -360,7 +360,7 @@ var catalog = []AlarmType{
 		Priority: High, // refused ingest is not lost data
 		Source:   "retention",
 		Cause:    "A retention policy's max-age or max-chunks bound is still violated after retention swept and attempted to clear it; new records for this vault are refused. Only happens when the stating policy has refuse enabled explicitly — refuse defaults off, so a plain drain-only policy never refuses.",
-		Response: "Read the alarm detail for which bound and vault. If retention-deferred is also standing for this vault, that names why the sweep isn't clearing it; otherwise raise the bound, shorten it enough that draining can keep up, or turn the policy's refuse flag off (or simply leave it unset) to accept drain-only.",
+		Response: "Read the alarm detail for which bound and vault. On a route or transfer disposition, the retention-deferred alarm stands for this vault once its drain has deferred for consecutive sweeps, and names why the sweep isn't clearing the bound — resolve that first. On the delete disposition retention never defers, so no other alarm accompanies this one. Either way you can raise the bound, shorten it enough that draining can keep up, or turn the policy's refuse flag off (or simply leave it unset) to accept drain-only.",
 	},
 	{
 		// The free-space thresholds live on the storage entity a vault's

@@ -188,7 +188,8 @@ func (s *QueryServer) searchDirect(
 	histogramQ := q
 	query.ApplyResumeCursor(&q, resume)
 
-	localIter, getLocalToken := eng.Search(ctx, q, s.localResumePositions(resume))
+	localResume := s.localResumePositions(resume)
+	localIter, getLocalToken := eng.Search(ctx, q, localResume)
 	remoteIter, remoteHist, contributingVaults := s.collectRemote(ctx, q)
 
 	// Histogram is computed only on the FIRST page of a paginated search.
@@ -228,7 +229,7 @@ func (s *QueryServer) searchDirect(
 		return token
 	}
 
-	return s.mergeAndStream(ctx, localIter, getToken, remoteIter, q.OrderBy, q.Reverse(), q.Limit, transform, nil, contributingVaults, serverStart, stream, histCh)
+	return s.mergeAndStream(ctx, localIter, getToken, positionsOf(localResume), remoteIter, q.OrderBy, q.Reverse(), q.Limit, transform, nil, contributingVaults, serverStart, stream, histCh)
 }
 
 // guardedHistogram runs the page-1 histogram computation on its own
@@ -290,19 +291,30 @@ func (s *QueryServer) localResumePositions(resume *query.ResumeToken) *query.Res
 	return &query.ResumeToken{Positions: localPositions}
 }
 
+// positionsOf returns a resume token's positions, nil-safe.
+func positionsOf(t *query.ResumeToken) []query.MultiVaultPosition {
+	if t == nil {
+		return nil
+	}
+	return t.Positions
+}
+
 // buildResumeTokenBytes serializes the resume token for the response,
 // overriding the engine-derived highwater with the merge-level one when
 // the merge advanced strictly further. The merge-level highwater is the
 // only value that observes records emitted from BOTH local and remote
 // iterators — the engine alone cannot see remote-sourced records.
 //
-// When lastLocalSet is true, the engine's per-chunk Positions are
-// replaced with a single position pointing at the last record the merge
-// actually displayed. This corrects the "pull-ahead" mismatch: the
-// engine's lastRefs tracks the most recent value yielded by the iter,
-// but a sorted merge always has one record pulled ahead per source for
-// comparison, so the engine's positions overshoot what the client saw.
-func buildResumeTokenBytes(transform *query.RecordTransform, getToken func() *query.ResumeToken, mark *emitMark, reverse bool, lastLocalSet bool, lastLocalRec chunk.Record, mergeInvolved bool) []byte {
+// Local positions advance only past records the client was shown. The
+// engine's positions track what it yielded, but a sorted merge always holds
+// one record pulled ahead per source for comparison, so they overshoot what
+// the client saw. When lastLocalSet is true they are replaced with a single
+// position at the last local record the merge displayed. When the merge ran
+// and displayed no local record, the page leaves local positions exactly as
+// it received them (heldLocal) — resuming from the engine's would skip the
+// pulled-ahead record, one record per page for as long as remote records
+// fill the pages.
+func buildResumeTokenBytes(transform *query.RecordTransform, getToken func() *query.ResumeToken, mark *emitMark, reverse bool, lastLocalSet bool, lastLocalRec chunk.Record, heldLocal []query.MultiVaultPosition, mergeInvolved bool) []byte {
 	if transform != nil && transform.Done() {
 		return nil
 	}
@@ -323,12 +335,16 @@ func buildResumeTokenBytes(transform *query.RecordTransform, getToken func() *qu
 	if token == nil {
 		return nil
 	}
-	if lastLocalSet {
+	switch {
+	case lastLocalSet:
 		token.Positions = []query.MultiVaultPosition{{
 			VaultID:  lastLocalRec.VaultID,
 			ChunkID:  lastLocalRec.Ref.ChunkID,
 			Position: lastLocalRec.Ref.Pos,
 		}}
+		token.VaultTokens = nil
+	case mergeInvolved:
+		token.Positions = heldLocal
 		token.VaultTokens = nil
 	}
 	// mergeHighwater is the TS of the last record emitted to the client. It
@@ -372,6 +388,7 @@ func (s *QueryServer) mergeAndStream(
 	ctx context.Context,
 	localIter iter.Seq2[chunk.Record, error],
 	getToken func() *query.ResumeToken,
+	heldLocal []query.MultiVaultPosition,
 	remoteIter iter.Seq2[chunk.Record, error],
 	orderBy query.OrderBy,
 	reverse bool,
@@ -443,7 +460,7 @@ func (s *QueryServer) mergeAndStream(
 	// synthesized token would make the CLI auto-paginate against an
 	// empty stream and yield phantom duplicates.
 	synthOK := mergeInvolved && limitHit
-	tokenBytes := buildResumeTokenBytes(transform, getToken, mark, reverse, lastLocalSet, lastLocalRec, synthOK)
+	tokenBytes := buildResumeTokenBytes(transform, getToken, mark, reverse, lastLocalSet, lastLocalRec, heldLocal, synthOK)
 
 	// Attach histogram from the page-1 goroutine. Records are already
 	// streamed — waiting here only delays the trailing empty batch, not

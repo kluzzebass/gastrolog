@@ -112,7 +112,9 @@ type VaultServiceClient interface {
 	ExportVault(context.Context, *connect.Request[v1.ExportVaultRequest]) (*connect.ServerStreamForClient[v1.ExportVaultResponse], error)
 	// ImportRecords appends a batch of records to a vault.
 	ImportRecords(context.Context, *connect.Request[v1.ImportRecordsRequest]) (*connect.Response[v1.ImportRecordsResponse], error)
-	// SealVault seals the active chunk of a vault.
+	// SealVault seals every open chunk of a vault that holds records: the
+	// chunk manager's active chunk and, for a pipeline vault, the open chunk
+	// manifest. Unavailable while the vault's chunking leader is realigning.
 	SealVault(context.Context, *connect.Request[v1.SealVaultRequest]) (*connect.Response[v1.SealVaultResponse], error)
 	// RetryUnreadableChunks resets every unreadable chunk's retry backoff
 	// for a vault, so the next retention sweep retries them all immediately.
@@ -420,7 +422,9 @@ type VaultServiceHandler interface {
 	ExportVault(context.Context, *connect.Request[v1.ExportVaultRequest], *connect.ServerStream[v1.ExportVaultResponse]) error
 	// ImportRecords appends a batch of records to a vault.
 	ImportRecords(context.Context, *connect.Request[v1.ImportRecordsRequest]) (*connect.Response[v1.ImportRecordsResponse], error)
-	// SealVault seals the active chunk of a vault.
+	// SealVault seals every open chunk of a vault that holds records: the
+	// chunk manager's active chunk and, for a pipeline vault, the open chunk
+	// manifest. Unavailable while the vault's chunking leader is realigning.
 	SealVault(context.Context, *connect.Request[v1.SealVaultRequest]) (*connect.Response[v1.SealVaultResponse], error)
 	// RetryUnreadableChunks resets every unreadable chunk's retry backoff
 	// for a vault, so the next retention sweep retries them all immediately.

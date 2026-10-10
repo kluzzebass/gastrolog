@@ -138,7 +138,8 @@ export function useSealVault() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (vault: string) => {
-      await vaultClient.sealVault({ vault });
+      const response = await vaultClient.sealVault({ vault });
+      return response.sealedCount;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["vaults"] });

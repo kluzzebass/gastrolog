@@ -1,8 +1,17 @@
 import { useState, useEffect } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import type { Job } from "../../api/model/job";
-import { protoToInstant, formatTimestamp, elapsed, countdown } from "../../utils/temporal";
+import {
+  COUNTDOWN_MAX_CHARS,
+  ELAPSED_MAX_CHARS,
+  protoToInstant,
+  formatTimestamp,
+  elapsed,
+  countdown,
+} from "../../utils/temporal";
 import { Badge } from "../Badge";
+import { LiveValue } from "../LiveValue";
+import { LIVE_TEXT } from "../liveValueStyle";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { NodeBadge } from "../settings/NodeBadge";
 
@@ -85,8 +94,8 @@ export function ScheduledJobsTable({
       >
         <span>Job</span>
         <span>Schedule</span>
-        <span>Last run</span>
-        <span>Next run</span>
+        <span className="text-right">Last run</span>
+        <span className="text-right">Next run</span>
       </div>
 
       {jobs.map((job) => (
@@ -111,21 +120,40 @@ export function ScheduledJobsTable({
           >
             {job.displaySchedule}
           </span>
-          <span
-            className={`font-mono text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}
-            title={job.lastRun ? formatTimestamp(protoToInstant(job.lastRun)) : ""}
-          >
-            {job.lastRun ? elapsed(protoToInstant(job.lastRun), now) : "—"}
-          </span>
-          <span
-            className={`font-mono text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}
-            title={job.nextRun ? formatTimestamp(protoToInstant(job.nextRun)) : ""}
-          >
-            {job.nextRun ? countdown(protoToInstant(job.nextRun), now) : "—"}
-          </span>
+          <JobRunTimes job={job} now={now} dark={dark} />
         </div>
       ))}
     </div>
+  );
+}
+
+/**
+ * The last-run and next-run cells of a scheduled job. They re-render every
+ * second, so each reserves the widest string its formatter emits and keeps
+ * the unit text pinned to the right edge while the digits tick.
+ */
+export function JobRunTimes({ job, now, dark }: Readonly<{ job: Job; now: number; dark: boolean }>) {
+  return (
+    <>
+      <LiveValue
+        dark={dark}
+        tone="muted"
+        reserve={ELAPSED_MAX_CHARS}
+        className="text-[0.9em]"
+        title={job.lastRun ? formatTimestamp(protoToInstant(job.lastRun)) : ""}
+      >
+        {job.lastRun ? elapsed(protoToInstant(job.lastRun), now) : "—"}
+      </LiveValue>
+      <LiveValue
+        dark={dark}
+        tone="muted"
+        reserve={COUNTDOWN_MAX_CHARS}
+        className="text-[0.9em]"
+        title={job.nextRun ? formatTimestamp(protoToInstant(job.nextRun)) : ""}
+      >
+        {job.nextRun ? countdown(protoToInstant(job.nextRun), now) : "—"}
+      </LiveValue>
+    </>
   );
 }
 
@@ -148,13 +176,9 @@ function TaskProgress({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
 
   return (
     <span
-      className={`text-[0.8em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+      className={`text-[0.8em] font-mono ${LIVE_TEXT} ${c("text-text-muted", "text-light-text-muted")}`}
     >
-      {chunksTotal > 0 && (
-        <>
-          {chunksDone}/{chunksTotal} chunks
-        </>
-      )}
+      {chunksTotal > 0 && <ChunkProgress done={chunksDone} total={chunksTotal} dark={dark} />}
       {recordsDone > 0 && (
         <>
           {chunksTotal > 0 && " · "}
@@ -162,6 +186,18 @@ function TaskProgress({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
         </>
       )}
     </span>
+  );
+}
+
+/** "done/total chunks", with the done count reserving the width of the total it counts toward. */
+export function ChunkProgress({ done, total, dark }: Readonly<{ done: number; total: number; dark: boolean }>) {
+  return (
+    <>
+      <LiveValue dark={dark} tone="inherit" reserve={String(total).length}>
+        {done}
+      </LiveValue>
+      /{total} chunks
+    </>
   );
 }
 

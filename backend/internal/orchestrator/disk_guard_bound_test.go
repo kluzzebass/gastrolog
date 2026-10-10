@@ -35,7 +35,7 @@ func TestVaultAgeBoundCapAndAlarm(t *testing.T) {
 		t.Fatal("a fresh guard entry must start uncapped for the age bound")
 	}
 
-	g.setVaultAgeBoundCapped(spy, vaultA, true)
+	g.setVaultAgeBoundCapped(spy, vaultA, true, "")
 	if !g.vaultAgeBoundCapped(vaultA) {
 		t.Fatal("setVaultAgeBoundCapped(true) must engage the cap")
 	}
@@ -43,7 +43,7 @@ func TestVaultAgeBoundCapAndAlarm(t *testing.T) {
 		t.Fatalf("age cap must raise the shared vault-bound-capped alarm at the /age key; raised=%v", spy.set)
 	}
 
-	g.setVaultAgeBoundCapped(spy, vaultA, false)
+	g.setVaultAgeBoundCapped(spy, vaultA, false, "")
 	if g.vaultAgeBoundCapped(vaultA) {
 		t.Fatal("setVaultAgeBoundCapped(false) must release the cap")
 	}
@@ -61,7 +61,7 @@ func TestVaultChunkCountBoundCapAndAlarm(t *testing.T) {
 	vaultA := glid.New()
 	g.SetVaultGuard(vaultA, "many-chunks", []string{"volA"}, 10*gib, "", "")
 
-	g.setVaultChunkCountBoundCapped(spy, vaultA, true)
+	g.setVaultChunkCountBoundCapped(spy, vaultA, true, "")
 	if !g.vaultChunkCountBoundCapped(vaultA) {
 		t.Fatal("setVaultChunkCountBoundCapped(true) must engage the cap")
 	}
@@ -69,7 +69,7 @@ func TestVaultChunkCountBoundCapAndAlarm(t *testing.T) {
 		t.Fatalf("count cap must raise the shared alarm at the /count key; raised=%v", spy.set)
 	}
 
-	g.setVaultChunkCountBoundCapped(spy, vaultA, false)
+	g.setVaultChunkCountBoundCapped(spy, vaultA, false, "")
 	if g.vaultChunkCountBoundCapped(vaultA) {
 		t.Fatal("release must clear the cap")
 	}
@@ -89,8 +89,8 @@ func TestVaultBoundCapsCoexistOnOneVault(t *testing.T) {
 	vaultA := glid.New()
 	g.SetVaultGuard(vaultA, "double-bound", []string{"volA"}, 10*gib, "", "")
 
-	g.setVaultAgeBoundCapped(spy, vaultA, true)
-	g.setVaultChunkCountBoundCapped(spy, vaultA, true)
+	g.setVaultAgeBoundCapped(spy, vaultA, true, "")
+	g.setVaultChunkCountBoundCapped(spy, vaultA, true, "")
 	if !g.vaultAgeBoundCapped(vaultA) || !g.vaultChunkCountBoundCapped(vaultA) {
 		t.Fatal("both bounds must be independently capped")
 	}
@@ -99,7 +99,7 @@ func TestVaultBoundCapsCoexistOnOneVault(t *testing.T) {
 	}
 
 	// Releasing ONE must not clear the other.
-	g.setVaultAgeBoundCapped(spy, vaultA, false)
+	g.setVaultAgeBoundCapped(spy, vaultA, false, "")
 	if g.vaultChunkCountBoundCapped(vaultA) == false {
 		t.Fatal("fixture check: count cap must still be engaged")
 	}
@@ -121,8 +121,8 @@ func TestSetVaultBoundCappedNoOpsWithoutGuardEntry(t *testing.T) {
 	spy := &alertSpy{}
 	unknown := glid.New()
 
-	g.setVaultAgeBoundCapped(spy, unknown, true)
-	g.setVaultChunkCountBoundCapped(spy, unknown, true)
+	g.setVaultAgeBoundCapped(spy, unknown, true, "")
+	g.setVaultChunkCountBoundCapped(spy, unknown, true, "")
 	if g.vaultAgeBoundCapped(unknown) || g.vaultChunkCountBoundCapped(unknown) {
 		t.Fatal("a vault with no guard entry must never read as capped")
 	}
@@ -141,8 +141,8 @@ func TestVaultAdmissionGateAgeAndChunkCountBound(t *testing.T) {
 	vaultAge, vaultCount, vaultRemote := glid.New(), glid.New(), glid.New()
 	g.SetVaultGuard(vaultAge, "age", []string{"volA"}, 10*gib, "", "")
 	g.SetVaultGuard(vaultCount, "count", []string{"volA"}, 10*gib, "", "")
-	g.setVaultAgeBoundCapped(spy, vaultAge, true)
-	g.setVaultChunkCountBoundCapped(spy, vaultCount, true)
+	g.setVaultAgeBoundCapped(spy, vaultAge, true, "")
+	g.setVaultChunkCountBoundCapped(spy, vaultCount, true, "")
 
 	o := &Orchestrator{diskGuard: g}
 	if err := o.vaultAdmissionGate(vaultAge); !errors.Is(err, ErrVaultAgeBound) {
@@ -190,8 +190,8 @@ func TestVaultAdmissionCausesReportsAllBoundCausesTogether(t *testing.T) {
 	spy := &alertSpy{}
 	vaultID := glid.New()
 	g.SetVaultGuard(vaultID, "everything", []string{"volA"}, 10*gib, "", "")
-	g.setVaultAgeBoundCapped(spy, vaultID, true)
-	g.setVaultChunkCountBoundCapped(spy, vaultID, true)
+	g.setVaultAgeBoundCapped(spy, vaultID, true, "")
+	g.setVaultChunkCountBoundCapped(spy, vaultID, true, "")
 
 	o := &Orchestrator{diskGuard: g}
 	causes := o.VaultAdmissionCauses(vaultID)
@@ -216,8 +216,8 @@ func TestRetainVaultGuardsClearsBoundAlarms(t *testing.T) {
 	spy := &alertSpy{}
 	vaultID := glid.New()
 	g.SetVaultGuard(vaultID, "pruned", []string{"volA"}, 10*gib, "", "")
-	g.setVaultAgeBoundCapped(spy, vaultID, true)
-	g.setVaultChunkCountBoundCapped(spy, vaultID, true)
+	g.setVaultAgeBoundCapped(spy, vaultID, true, "")
+	g.setVaultChunkCountBoundCapped(spy, vaultID, true, "")
 	if spy.active() != 2 {
 		t.Fatalf("fixture setup: both alarms must be standing; active=%d", spy.active())
 	}

@@ -25,6 +25,7 @@ const NAVIGATION = new Map<string, string>([
   ["settings/NodesSettings.tsx", "reveal the join token, plus the join form gated separately"],
   ["settings/UsedByStatus.tsx", "cross-links to the entity using this one"],
   ["settings/FormField.tsx", "the input primitives, each gated individually"],
+  ["settings/EligibilitySelect.tsx", "opens the help section that states the eligibility rule"],
   ["inspector/InspectorDialog.tsx", "navigating between nodes and entity types"],
   ["inspector/ModeToggle.tsx", "switching inspector mode"],
   ["inspector/CrossLinkBadge.tsx", "cross-links to a related entity"],

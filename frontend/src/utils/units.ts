@@ -1,27 +1,143 @@
-/** Shared unit formatting and parsing utilities. */
+/**
+ * Shared unit formatting and parsing utilities.
+ *
+ * Display formatters for live values declare a `*_MAX_CHARS` width
+ * contract: the longest string they can emit over their domain. A live
+ * cell reserves that many character cells (see LiveValue), so a value
+ * ticking from "9.9" to "999.9K" never moves its neighbours.
+ */
+
+const PER_SEC = "/s";
+
+/** formatBytes never emits more characters than this for any byte count or rate below 2^64. */
+export const BYTES_MAX_CHARS = 10;
+/** formatBytesPerSec never emits more characters than this. */
+export const BYTES_PER_SEC_MAX_CHARS = BYTES_MAX_CHARS + PER_SEC.length;
 
 /**
  * Format a byte count to a human-readable string (e.g. "1.5 MiB").
  * Binary math with honest IEC labels: GB means 10^9 and GiB means 2^30 —
  * the parsers on both surfaces are strict about it, so dividing by 1024
  * and printing "MB" would mislabel the quantity. Accepts number or bigint.
+ * Units match the backend's units.FormatBytesDisplay; a fractional byte
+ * rate below 1 KiB rounds to whole bytes.
  */
 export function formatBytes(b: bigint | number): string {
   const n = typeof b === "bigint" ? Number(b) : b;
   if (n === 0) return "0 B";
+  if (n >= 1024 ** 6) return `${(n / 1024 ** 6).toFixed(1)} EiB`;
+  if (n >= 1024 ** 5) return `${(n / 1024 ** 5).toFixed(1)} PiB`;
   if (n >= 1024 ** 4) return `${(n / 1024 ** 4).toFixed(1)} TiB`;
   if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GiB`;
   if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MiB`;
   if (n >= 1024) return `${(n / 1024).toFixed(1)} KiB`;
-  return `${n} B`;
+  return `${Math.round(n)} B`;
 }
+
+/** Format a byte rate (e.g. "1.5 MiB/s"). */
+export function formatBytesPerSec(n: number): string {
+  return `${formatBytes(n)}${PER_SEC}`;
+}
+
+/**
+ * Count suffixes, largest first. K/M/B/T are the short-scale names; past
+ * trillion the ladder continues with the SI letters P and E, which agree
+ * with T (tera = trillion) and with the PB/EB byte units shown alongside.
+ * E covers the whole uint64 range (max ≈ 18.4E).
+ */
+const COUNT_SCALES: ReadonlyArray<readonly [bigint, string]> = [
+  [1_000_000_000_000_000_000n, "E"],
+  [1_000_000_000_000_000n, "P"],
+  [1_000_000_000_000n, "T"],
+  [1_000_000_000n, "B"],
+  [1_000_000n, "M"],
+  [1_000n, "K"],
+];
+
+function wholeCount(n: bigint | number | string): bigint | undefined {
+  if (typeof n === "bigint") return n;
+  if (typeof n === "string") {
+    const s = n.trim();
+    return /^\d+$/.test(s) ? BigInt(s) : wholeCount(Number(s));
+  }
+  return Number.isFinite(n) ? BigInt(Math.trunc(n)) : undefined;
+}
+
+/** One decimal of the largest scale the value reaches, rounded half-up in exact integer math. */
+function formatScaledCount(v: bigint): string {
+  let i = COUNT_SCALES.findIndex(([div]) => v >= div);
+  let [div, suffix] = COUNT_SCALES[i]!;
+  let tenths = (v * 10n + div / 2n) / div;
+  if (tenths >= 10_000n && i > 0) {
+    i--;
+    [div, suffix] = COUNT_SCALES[i]!;
+    tenths = (v * 10n + div / 2n) / div;
+  }
+  return `${tenths / 10n}.${tenths % 10n}${suffix}`;
+}
+
+/** formatCount never emits more characters than this for a count within the uint64 range. */
+export const COUNT_MAX_CHARS = 6;
+
+/**
+ * Format a count compactly (e.g. "1.5K", "25.6B", "18.4E"). Exact across the
+ * full uint64 range: from a thousand up the scale and digits come from bigint
+ * math, so values past 2^53 lose nothing and a value that rounds to 1000.0 of
+ * one scale renders as 1.0 of the next. Below a thousand it is locale digits.
+ */
+export function formatCount(n: bigint | number | string): string {
+  const whole = wholeCount(n);
+  if (whole === undefined || whole < 1_000n) return Number(n).toLocaleString();
+  return formatScaledCount(whole);
+}
+
+/**
+ * Format a count rounded to 2 significant figures (e.g. "190K", "2.5B") so
+ * the imprecision of an estimate is visible in the digits themselves —
+ * "188,093" reads like a ground-truth count, "190K" like an approximation.
+ */
+export function formatApproxCount(n: number): string {
+  if (n < 100) return n.toString();
+  const magnitude = 10 ** (Math.floor(Math.log10(n)) - 1);
+  const rounded = Math.round(n / magnitude) * magnitude;
+  if (rounded < 1000) return rounded.toString();
+  const [div, suffix] = COUNT_SCALES.find(([d]) => rounded >= Number(d))!;
+  const v = rounded / Number(div);
+  return v < 10 ? `${v.toFixed(1)}${suffix}` : `${Math.round(v)}${suffix}`;
+}
+
+/** formatRate never emits more characters than this for rates below 999.95T. */
+export const RATE_MAX_CHARS = 6;
+/** formatRatePerSec never emits more characters than this. */
+export const RATE_PER_SEC_MAX_CHARS = RATE_MAX_CHARS + PER_SEC.length;
 
 /** Format a per-second rate to a compact count (e.g. "1.5K"); pair with a "/s" suffix. */
 export function formatRate(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  if (n >= 10) return Math.round(n).toString();
-  return n.toFixed(1);
+  const tenths = n.toFixed(1);
+  if (Number(tenths) < 10) return tenths;
+  if (Math.round(n) < 1_000) return Math.round(n).toString();
+  return formatCount(Math.max(n, 1_000));
+}
+
+/** Format a per-second rate with its unit (e.g. "1.5K/s"). */
+export function formatRatePerSec(n: number): string {
+  return `${formatRate(n)}${PER_SEC}`;
+}
+
+/** Format a count exactly, with the locale's digit grouping (e.g. "6,148"). */
+export function formatExactCount(c: bigint | number): string {
+  return Number(c).toLocaleString();
+}
+
+/** formatExactCount never emits more characters than this for counts below a billion. */
+export const EXACT_COUNT_MAX_CHARS = formatExactCount(999_999_999).length;
+
+/** formatPercent never emits more characters than this for values below 999.95%. */
+export const PERCENT_MAX_CHARS = 6;
+
+/** Format a percentage with one decimal (e.g. "12.5%"). */
+export function formatPercent(n: number): string {
+  return `${n.toFixed(1)}%`;
 }
 
 /**

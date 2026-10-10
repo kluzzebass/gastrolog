@@ -287,8 +287,8 @@ func (o *Orchestrator) retentionSweepAll() {
 			// every peer's admission-gate union refuses the vault
 			// cluster-wide permanently, long after the condition (and the
 			// runner that observed it) is gone.
-			o.SetVaultAgeBoundCapped(runner.vaultID, false)
-			o.SetVaultChunkCountBoundCapped(runner.vaultID, false)
+			o.SetVaultAgeBoundCapped(runner.vaultID, false, "")
+			o.SetVaultChunkCountBoundCapped(runner.vaultID, false, "")
 			delete(o.retention, key)
 		}
 	}
@@ -1092,12 +1092,17 @@ func (r *retentionRunner) checkBoundViolations(rules []retentionRule) {
 		}
 	}
 
+	var disposition string
+	if ageViolated || countViolated {
+		disposition, _ = r.currentDisposition()
+	}
+
 	// Unconditional, even when needsCheck was false (no attached policy
 	// states either dimension): releases any capped state a since-removed
 	// bound may have left standing — nothing else clears it once the
 	// operator drops the last policy that stated it.
-	r.orch.SetVaultAgeBoundCapped(r.vaultID, ageViolated)
-	r.orch.SetVaultChunkCountBoundCapped(r.vaultID, countViolated)
+	r.orch.SetVaultAgeBoundCapped(r.vaultID, ageViolated, disposition)
+	r.orch.SetVaultChunkCountBoundCapped(r.vaultID, countViolated, disposition)
 }
 
 // currentSealedForBoundCheck re-lists the vault's CURRENT sealed chunks for

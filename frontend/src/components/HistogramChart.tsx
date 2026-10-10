@@ -4,6 +4,7 @@ import { echarts } from "./charts/echartsSetup";
 import { useThemeClass } from "../hooks/useThemeClass";
 import type { HistogramData } from "../utils/histogramData";
 import { resolveColor } from "./charts/chartColors";
+import { formatApproxCount } from "../utils/units";
 import { buildColorMap, useHistogramOption } from "../hooks/useHistogramOption";
 import {
   chartReducer,
@@ -61,26 +62,6 @@ function HistogramLegend({
 function formatElapsed(ms: number): string {
   if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
   return `${ms}ms`;
-}
-
-// formatApproxCount rounds to 2 significant figures so the imprecision of
-// an estimate is visible in the digits themselves — "188,093" reads like a
-// ground-truth count, "190K" reads like an approximation.
-function formatApproxCount(n: number): string {
-  if (n < 100) return n.toString();
-  const magnitude = 10 ** (Math.floor(Math.log10(n)) - 1);
-  const rounded = Math.round(n / magnitude) * magnitude;
-  if (rounded < 1000) return rounded.toString();
-  if (rounded < 1_000_000) {
-    const k = rounded / 1000;
-    return k < 10 ? `${k.toFixed(1)}K` : `${Math.round(k)}K`;
-  }
-  if (rounded < 1_000_000_000) {
-    const m = rounded / 1_000_000;
-    return m < 10 ? `${m.toFixed(1)}M` : `${Math.round(m)}M`;
-  }
-  const b = rounded / 1_000_000_000;
-  return b < 10 ? `${b.toFixed(1)}B` : `${Math.round(b)}B`;
 }
 
 export function HistogramChart({

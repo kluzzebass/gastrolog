@@ -70,10 +70,31 @@ func main() {
 
 	app.Version = version
 
+	rootCmd := newRootCommand(logger, slogCaptureCh, captureHandler, filterHandler)
+
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		if ctx.Err() != nil {
+			stop()
+			return // signal-triggered shutdown is not an error
+		}
+		stop()
+		os.Exit(1) //nolint:gocritic // stop() called above; defer is a safety net
+	}
+}
+
+func newRootCommand(
+	logger *slog.Logger,
+	slogCaptureCh chan logging.CapturedRecord,
+	captureHandler *logging.CaptureHandler,
+	filterHandler *logging.ComponentFilterHandler,
+) *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "gastrolog",
 		Short: "Log aggregation service",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := silenceUsageForRuntimeErrors(cmd); err != nil {
+				return err
+			}
 			pprofAddr, _ := cmd.Flags().GetString("pprof")
 			pprofDebug, _ := cmd.Flags().GetBool("pprof-debug")
 			mutexFraction, _ := cmd.Flags().GetInt("pprof-mutex-fraction")
@@ -243,15 +264,24 @@ func main() {
 		cli.NewPauseCommand(),
 		cli.NewResumeCommand(),
 	)
+	return rootCmd
+}
 
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		if ctx.Err() != nil {
-			stop()
-			return // signal-triggered shutdown is not an error
-		}
-		stop()
-		os.Exit(1) //nolint:gocritic // stop() called above; defer is a safety net
+// silenceUsageForRuntimeErrors runs the invocation checks cobra would
+// otherwise defer until after this hook — required flags and flag groups —
+// so those failures still print usage. Flag parsing and Args validation
+// already ran before the hook. Anything that fails after this point is a
+// runtime failure, where a usage block would tell the operator the
+// command was typed wrong.
+func silenceUsageForRuntimeErrors(cmd *cobra.Command) error {
+	if err := cmd.ValidateRequiredFlags(); err != nil {
+		return err
 	}
+	if err := cmd.ValidateFlagGroups(); err != nil {
+		return err
+	}
+	cmd.SilenceUsage = true
+	return nil
 }
 
 func mustString(cmd *cobra.Command, name string) string {

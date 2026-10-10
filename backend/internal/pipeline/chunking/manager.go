@@ -558,14 +558,11 @@ func (m *Manager) PlanCatchUp(ctx context.Context, vaultID glid.GLID) error {
 	return v.planCatchUp(ctx)
 }
 
-// RotateCron runs one leader planner step with the cron rotation trigger set,
-// sealing a non-empty open manifest on schedule. It is the entry point for the
-// orchestrator's shared scheduler; the planner no-ops for non-leaders, so the
-// job can run on every home and self-select the leader.
 // SealOpenManifest seals the vault's open chunk manifest now, regardless of
-// its rotation policy, and reports whether it did. Only the chunking leader
-// acts; a follower, an empty or absent manifest, and an unknown vault all
-// leave the vault-ctl state untouched.
+// its rotation policy, and reports whether it did. An empty or absent manifest
+// reports (false, nil). Only the chunking leader may seal: anywhere else a
+// manifest holding records reports ErrNotLeader, and an unregistered vault
+// reports ErrUnknownVault.
 func (m *Manager) SealOpenManifest(vaultID glid.GLID) (bool, error) {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
@@ -576,6 +573,10 @@ func (m *Manager) SealOpenManifest(vaultID glid.GLID) (bool, error) {
 	return v.sealOpenManifestNow()
 }
 
+// RotateCron runs one leader planner step with the cron rotation trigger set,
+// sealing a non-empty open manifest on schedule. It is the entry point for the
+// orchestrator's shared scheduler; the planner no-ops for non-leaders, so the
+// job can run on every home and self-select the leader.
 func (m *Manager) RotateCron(ctx context.Context, vaultID glid.GLID) error {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
@@ -866,3 +867,7 @@ func (v *vaultChunking) requiredHolders() (required []string, resolved bool) {
 
 // ErrUnknownVault is returned for an unregistered vault.
 var ErrUnknownVault = errors.New("unknown vault")
+
+// ErrNotLeader is returned when an on-demand seal finds records in the open
+// manifest on a home that is not the chunking leader.
+var ErrNotLeader = errors.New("not the chunking leader")

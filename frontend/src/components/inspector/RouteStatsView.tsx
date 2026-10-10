@@ -6,6 +6,10 @@ import { useRouteStats } from "../../api/hooks/useRouteStats";
 import { useRoutes, useVaults } from "../../api/hooks";
 import { idFromBytes, type EntityID } from "../../api/model/id";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
+import { LiveValue } from "../LiveValue";
+import { LIVE_TEXT, type LiveTone } from "../liveValueStyle";
+import { RATE_PER_SEC_MAX_CHARS, formatCount, formatPercent, formatRatePerSec } from "../../utils/units";
+
 interface RouteStatsViewProps {
   dark: boolean;
 }
@@ -29,10 +33,9 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
     routeLabelById.set(r.id, r.displayLabel);
   }
 
-  const unmatchedRate =
-    stats.totalRouted > 0
-      ? ((Number(stats.totalUnmatched) / Number(stats.totalRouted)) * 100).toFixed(1)
-      : "0.0";
+  const unmatchedRate = formatPercent(
+    stats.totalRouted > 0 ? (Number(stats.totalUnmatched) / Number(stats.totalRouted)) * 100 : 0,
+  );
 
   const sorted = [...stats.vaultStats].sort(
     (a, b) => Number(b.recordsMatched) - Number(a.recordsMatched),
@@ -80,7 +83,7 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
             variant={Number(stats.totalUnmatched) > 0 ? "error" : undefined}
             title="Records that matched no route and were discarded (intentional, counted drop) — routed = matched + unmatched"
           />
-          <StatBox label="Unmatched rate" value={`${unmatchedRate}%`} dark={dark} />
+          <StatBox label="Unmatched rate" value={unmatchedRate} dark={dark} />
         </div>
         <div className={`mt-4 pt-3 border-t grid grid-cols-2 gap-4 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
           <RateBox
@@ -129,11 +132,9 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
                   >
                     {label}
                   </span>
-                  <span
-                    className={`font-mono text-right ${c("text-text-muted", "text-light-text-muted")}`}
-                  >
+                  <LiveValue dark={dark} tone="muted">
                     {formatCount(vs.recordsMatched)}
-                  </span>
+                  </LiveValue>
                 </div>
               );
             })}
@@ -169,11 +170,9 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
                 >
                   {routeLabelById.get(route.id) ?? route.id.slice(0, 8)}
                 </span>
-                <span
-                  className={`font-mono text-right ${c("text-text-muted", "text-light-text-muted")}`}
-                >
+                <LiveValue dark={dark} tone="muted">
                   {formatCount(route.recordsMatched)}
-                </span>
+                </LiveValue>
               </div>
             ))}
           </div>
@@ -213,18 +212,23 @@ function RateBox({
         {label}
       </div>
       <div className="flex items-center gap-3">
-        <span className={`text-[1.3em] font-mono font-semibold ${c("text-text-bright", "text-light-text-bright")}`}>
-          {formatCount(instant)}/s
-        </span>
+        <LiveValue
+          dark={dark}
+          align="start"
+          reserve={RATE_PER_SEC_MAX_CHARS}
+          className="text-[1.3em] font-semibold"
+        >
+          {formatRatePerSec(instant)}
+        </LiveValue>
         <span className={c("text-copper/70", "text-copper/60")}>
           <Spark values={history} />
         </span>
       </div>
       <div
-        className={`mt-0.5 text-[0.75em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+        className={`mt-0.5 text-[0.75em] font-mono ${LIVE_TEXT} ${c("text-text-muted", "text-light-text-muted")}`}
         title="Unix-load-style EWMAs (1m/5m/15m) — the sustained-rate figures; the big number and spark show instantaneous burst shape"
       >
-        1m {formatCount(rate?.avg1mPerSec ?? 0)}/s · 5m {formatCount(rate?.avg5mPerSec ?? 0)}/s · 15m {formatCount(rate?.avg15mPerSec ?? 0)}/s
+        1m {formatRatePerSec(rate?.avg1mPerSec ?? 0)} · 5m {formatRatePerSec(rate?.avg5mPerSec ?? 0)} · 15m {formatRatePerSec(rate?.avg15mPerSec ?? 0)}
       </div>
     </div>
   );
@@ -245,9 +249,9 @@ function StatBox({
 }>) {
   const c = useThemeClass(dark);
 
-  let valueColor = c("text-text-bright", "text-light-text-bright");
-  if (variant === "ok") valueColor = "text-severity-info";
-  if (variant === "error") valueColor = "text-severity-error";
+  let tone: LiveTone = "bright";
+  if (variant === "ok") tone = "info";
+  if (variant === "error") tone = "error";
 
   return (
     <div title={title}>
@@ -256,16 +260,9 @@ function StatBox({
       >
         {label}
       </div>
-      <div className={`text-[1.3em] font-mono font-semibold ${valueColor}`}>
+      <LiveValue dark={dark} tone={tone} align="start" className="text-[1.3em] font-semibold">
         {value}
-      </div>
+      </LiveValue>
     </div>
   );
-}
-
-function formatCount(n: bigint | number | string): string {
-  const num = Number(n);
-  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
-  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
-  return num.toLocaleString();
 }
