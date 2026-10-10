@@ -313,3 +313,60 @@ func TestForwardRPCErrorCrossesGRPC(t *testing.T) {
 		t.Errorf("error response carried a %d-byte payload", len(payload))
 	}
 }
+
+// A non-Connect error body is arbitrary bytes, but error_message is a proto3
+// string: the message must be valid UTF-8 for the frame to marshal at all.
+
+const invalidUTF8Body = "chunk \xff\xfe\x80 unreadable: \xc3\x28 bad\n"
+
+const invalidUTF8BodyMessage = "chunk � unreadable: �( bad"
+
+// TestForwardRPCErrorFrameInvalidUTF8PlainText: a plain-text error body with
+// invalid UTF-8 keeps its code and readable text, each invalid sequence
+// replaced with U+FFFD, and the frame marshals.
+func TestForwardRPCErrorFrameInvalidUTF8PlainText(t *testing.T) {
+	frame := forwardThrough(t,
+		rawErrorHandler{status: http.StatusServiceUnavailable, contentType: "text/plain", body: invalidUTF8Body},
+		"/test.Service/Method")
+	assertErrorFrame(t, frame, connect.CodeUnavailable, invalidUTF8BodyMessage)
+	if _, err := proto.Marshal(frame); err != nil {
+		t.Fatalf("error frame does not marshal: %v", err)
+	}
+}
+
+// TestForwardRPCInvalidUTF8ErrorCrossesGRPC: over a real gRPC stream the
+// caller receives the handler's error, not a transport failure.
+func TestForwardRPCInvalidUTF8ErrorCrossesGRPC(t *testing.T) {
+	payload, code, msg := forwardOverGRPC(t,
+		rawErrorHandler{status: http.StatusServiceUnavailable, contentType: "text/plain", body: invalidUTF8Body}, nil)
+	if connect.Code(code) != connect.CodeUnavailable {
+		t.Errorf("code = %v, want unavailable (message %q)", connect.Code(code), msg)
+	}
+	if msg != invalidUTF8BodyMessage {
+		t.Errorf("message = %q, want %q", msg, invalidUTF8BodyMessage)
+	}
+	if len(payload) != 0 {
+		t.Errorf("error response carried a %d-byte payload", len(payload))
+	}
+}
+
+// TestForwardRPCInvalidUTF8PlainTextOverLimitIsNamed: a plain-text body
+// within the limit that outgrows it once each invalid byte becomes U+FFFD is
+// refused by name instead of overflowing the frame.
+func TestForwardRPCInvalidUTF8PlainTextOverLimitIsNamed(t *testing.T) {
+	body := strings.Repeat("a\xff", ForwardRPCMaxResponseBytes/2)
+	payload, code, msg := forwardOverGRPC(t,
+		rawErrorHandler{status: http.StatusServiceUnavailable, contentType: "text/plain", body: body}, nil)
+	if connect.Code(code) != connect.CodeUnavailable {
+		t.Fatalf("code = %v, want unavailable (message %.120q)", connect.Code(code), msg)
+	}
+	want := fmt.Sprintf(
+		"upstream error: HTTP 503 with a decoded error message exceeding ForwardRPCMaxResponseBytes limit of %d bytes",
+		ForwardRPCMaxResponseBytes)
+	if msg != want {
+		t.Errorf("message = %.120q, want %q", msg, want)
+	}
+	if len(payload) != 0 {
+		t.Errorf("error response carried a %d-byte payload", len(payload))
+	}
+}
