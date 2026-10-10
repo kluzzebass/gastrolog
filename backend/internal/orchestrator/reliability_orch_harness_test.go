@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime/pprof"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -1005,6 +1006,36 @@ func (h *orchRelHarness) appendOnLeaderForVault(v vaultSpec, rec chunk.Record) e
 	return leader.orch.AppendToVault(v.id, chunk.ChunkID{}, rec)
 }
 
+// appendBurst appends count records to one vault, all through the node that
+// holds the vault's vault-ctl leadership when the burst starts, and returns that
+// node. Each node's chunk manager has its own active chunk, so a burst that
+// followed leadership record by record would spread across chunks on several
+// nodes whenever the group re-elects mid-burst; sealing one node's chunk would
+// then leave the others Active forever.
+func (h *orchRelHarness) appendBurst(v vaultSpec, prefix string, count int) *orchRelNode {
+	h.t.Helper()
+	writer := h.waitForVaultCtlLeaderForVault(v)
+	now := time.Now()
+	for i := range count {
+		if err := writer.orch.AppendToVault(v.id, chunk.ChunkID{}, chunk.Record{
+			SourceTS: now,
+			IngestTS: now,
+			Raw:      []byte(prefix + "-" + strconv.Itoa(i)),
+		}); err != nil {
+			h.t.Fatalf("%s: append %d: %v", writer.label, i, err)
+		}
+	}
+	return writer
+}
+
+// sealActiveOn seals the chunk manager's active chunk for one vault on one node.
+func (h *orchRelHarness) sealActiveOn(n *orchRelNode, v vaultSpec) {
+	h.t.Helper()
+	if _, err := n.orch.SealActive(v.id); err != nil {
+		h.t.Fatalf("%s: SealActive vault %s: %v", n.label, v.label, err)
+	}
+}
+
 // sealOnLeaderForVault seals the active chunk for a specific vault on
 // that vault's vault-ctl Raft leader.
 func (h *orchRelHarness) sealOnLeaderForVault(v vaultSpec) {
@@ -1188,20 +1219,18 @@ func formatChunkSnapshot(m map[string]map[chunk.ChunkID]bool) string {
 	return string(b)
 }
 
-// appendOnLeader appends a single record through the **vault-ctl Raft
-// leader** (not the placement leader). The vault-ctl Raft group elects its
-// own leader via normal Raft election; appending elsewhere would succeed
-// at AppendToVault but the announcer's vault-ctl Apply would fail with
-// ErrNotLeader (peerConns is nil in this harness, so no forwarder).
+// appendOnLeader appends a single record through whichever node holds vault-ctl
+// leadership at the time of the call, so a sequence of calls follows leadership
+// as it moves. A burst that must land in one chunk uses appendBurst instead.
 func (h *orchRelHarness) appendOnLeader(rec chunk.Record) error {
 	h.t.Helper()
 	leader := h.waitForVaultCtlLeader()
 	return leader.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, rec)
 }
 
-// sealOnLeader seals the active chunk on every instance of the vault, on the
-// vault-ctl Raft leader. Legacy chunk-manager sealing still requires the leader;
-// pipeline chunking proposes CmdSealChunk from any home via the applier forwarder.
+// sealOnLeader seals the chunk manager's active chunk on whichever node holds
+// vault-ctl leadership at the time of the call. Pairs with appendOnLeader; a
+// burst from appendBurst is sealed with sealActiveOn on the node it returned.
 func (h *orchRelHarness) sealOnLeader() {
 	h.t.Helper()
 	leader := h.waitForVaultCtlLeader()

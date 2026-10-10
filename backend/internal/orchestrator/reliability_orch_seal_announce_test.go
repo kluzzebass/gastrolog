@@ -11,7 +11,6 @@ package orchestrator_test
 
 import (
 	"fmt"
-	"strconv"
 	"testing"
 	"time"
 
@@ -40,21 +39,10 @@ func TestOrchRel_SealAnnounceDivergence_ConvergesEveryNode(t *testing.T) {
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
-	now := time.Now()
-	for i := range 15 {
-		if err := h.appendOnLeader(chunk.Record{
-			SourceTS: now,
-			IngestTS: now,
-			Raw:      []byte("announce-divergence-" + strconv.Itoa(i)),
-		}); err != nil {
-			t.Fatalf("append %d: %v", i, err)
-		}
-	}
-
-	leader := h.waitForVaultCtlLeader()
-	inst := leader.orch.FindLocalVaultInstance(h.vaultID)
+	writer := h.appendBurst(h.vaults[0], "announce-divergence", 15)
+	inst := writer.orch.FindLocalVaultInstance(h.vaultID)
 	if inst == nil || inst.Chunks == nil {
-		t.Fatal("vault-ctl leader has no local vault instance")
+		t.Fatalf("%s has no local vault instance", writer.label)
 	}
 	active := inst.Chunks.Active()
 	if active == nil {
@@ -96,7 +84,7 @@ func TestOrchRel_SealAnnounceDivergence_ConvergesEveryNode(t *testing.T) {
 	}
 	saved := getter.GetAnnouncer()
 	if saved == nil {
-		t.Fatal("leader has no announcer wired; the harness is not exercising vault-ctl")
+		t.Fatalf("%s has no announcer wired; the harness is not exercising vault-ctl", writer.label)
 	}
 
 	// Seal with no announcer: local files close and the manifest never hears.
@@ -116,11 +104,11 @@ func TestOrchRel_SealAnnounceDivergence_ConvergesEveryNode(t *testing.T) {
 		}
 	}
 	if meta, err := inst.Chunks.Meta(chunkID); err != nil || !meta.Sealed {
-		t.Fatalf("precondition: chunk is not sealed on the leader's disk (err=%v)", err)
+		t.Fatalf("precondition: chunk is not sealed on the writer's disk (err=%v)", err)
 	}
 
 	if inst.Reconciler == nil {
-		t.Fatal("leader has no lifecycle reconciler")
+		t.Fatalf("%s has no lifecycle reconciler", writer.label)
 	}
 	// The recovery is itself a Raft command, so every voter must converge — a
 	// leader that fixed only its own copy would leave the same bug one layer
@@ -174,17 +162,8 @@ func TestOrchRel_SealAnnounceDivergence_LeavesHealthyClusterAlone(t *testing.T) 
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
-	now := time.Now()
-	for i := range 10 {
-		if err := h.appendOnLeader(chunk.Record{
-			SourceTS: now,
-			IngestTS: now,
-			Raw:      []byte("healthy-announce-" + strconv.Itoa(i)),
-		}); err != nil {
-			t.Fatalf("append %d: %v", i, err)
-		}
-	}
-	h.sealOnLeader()
+	writer := h.appendBurst(h.vaults[0], "healthy-announce", 10)
+	h.sealActiveOn(writer, h.vaults[0])
 	h.eventuallyAllSeeSealedChunk(t)
 
 	leader := h.waitForVaultCtlLeader()

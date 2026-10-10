@@ -2,7 +2,6 @@ package orchestrator_test
 
 import (
 	"fmt"
-	"strconv"
 	"testing"
 	"time"
 
@@ -50,19 +49,10 @@ func TestOrchRel_PipelineVault_RestartResumesStrandWithoutTouchingManifests(t *t
 	// A chunk-manager chunk on the SAME vault. AppendToVault writes through the
 	// chunk manager, which is how a legacy active comes to sit beside pipeline
 	// manifests.
-	leader := h.waitForVaultCtlLeaderForVault(v)
-	now := time.Now()
-	for i := range 20 {
-		if err := h.appendOnLeaderForVault(v, chunk.Record{
-			SourceTS: now, IngestTS: now,
-			Raw: []byte("strand-" + strconv.Itoa(i)),
-		}); err != nil {
-			t.Fatalf("append %d: %v", i, err)
-		}
-	}
-	inst := leader.orch.FindLocalVaultInstance(v.id)
+	writer := h.appendBurst(v, "strand", 20)
+	inst := writer.orch.FindLocalVaultInstance(v.id)
 	if inst == nil || inst.Chunks == nil {
-		t.Fatal("vault-ctl leader has no local vault instance")
+		t.Fatalf("%s has no local vault instance", writer.label)
 	}
 	active := inst.Chunks.Active()
 	if active == nil {
@@ -76,15 +66,15 @@ func TestOrchRel_PipelineVault_RestartResumesStrandWithoutTouchingManifests(t *t
 		t.Fatalf("Seal: %v", err)
 	}
 	if meta, err := inst.Chunks.Meta(strandedID); err != nil || !meta.Sealed {
-		t.Fatalf("premise: chunk not sealed on the leader's disk (err=%v)", err)
+		t.Fatalf("premise: chunk not sealed on the writer's disk (err=%v)", err)
 	}
 
 	// PREMISE, and the check the deleted draft lacked: the FSM must actually
 	// hold this chunk in Sealing, and the pipeline's chunks must be there too.
 	// Without both, a passing assertion below would mean nothing.
-	fsm := h.vaultCtlSubFSM(v, leader.id)
+	fsm := h.vaultCtlSubFSM(v, writer.id)
 	if fsm == nil {
-		t.Fatal("premise: no vault-ctl sub-FSM on the leader")
+		t.Fatalf("premise: no vault-ctl sub-FSM on %s", writer.label)
 	}
 	h.waitProgress("premise: strand visible in the FSM as Sealing", 50*time.Millisecond,
 		func() (string, bool) {
@@ -135,12 +125,12 @@ func TestOrchRel_PipelineVault_RestartResumesStrandWithoutTouchingManifests(t *t
 			h.dumpPipelineState(v)
 		})
 
-	// The resume is what recovered the strand, not some other path: the leader
+	// The resume is what recovered the strand, not some other path: the writer
 	// must hold a post-seal job for it. This is also the control for the
 	// pipeline-side assertion below, which is a negative on the same observable
 	// and would pass against a scheduler that never records anything.
-	if !h.postSealScheduledFor(leader.id, strandedID) {
-		t.Errorf("no post-seal job for the strand on the vault-ctl leader; the strand reached Sealed by some other path")
+	if !h.postSealScheduledFor(writer.id, strandedID) {
+		t.Errorf("no post-seal job for the strand on the node that holds it; the strand reached Sealed by some other path")
 	}
 
 	// The other half. The pipeline's chunks must survive the restore untouched:
