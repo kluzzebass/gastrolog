@@ -1480,10 +1480,9 @@ func TestMultiNode_SearchFanOut(t *testing.T) {
 //   - have its first ts strictly less than the previous page's last ts,
 //   - terminate (HasMore=false) once the full set is drained.
 //
-// Regression coverage for the splitResumeToken bug where local tokens
-// were misrouted as remote (local engine restarted from window edge
-// each page) and remote tokens were misrouted as local on nodes that
-// held a follower replica (remote restarted from window edge each page).
+// Covers resume routing: a vault this node leads must resume from its
+// positions, and a remote vault from the coordinator's cursor — on nodes
+// holding a follower replica too — or each page restarts at the window edge.
 func TestMultiNode_PaginatedReverseSearch(t *testing.T) {
 	t.Parallel()
 	h := setupMultiNode(t, []string{"node-A", "node-B"})

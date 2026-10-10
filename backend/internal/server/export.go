@@ -216,7 +216,7 @@ func (s *QueryServer) runExportJob(
 // cluster. The pipeline consumes the remote stream itself, so only its own
 // working set lands on this node — not a second copy of every remote record.
 func (s *QueryServer) exportPipelineRecords(ctx context.Context, eng *query.Engine, q query.Query, pipeline *querylang.Pipeline, budget *query.Budget) ([]chunk.Record, error) {
-	remoteIter, _, _ := s.collectRemote(ctx, q, nil)
+	remoteIter, _, _ := s.collectRemote(ctx, q)
 	result, err := eng.RunPipelineWithRemote(ctx, q, pipeline, remoteIter, budget)
 	if err != nil {
 		return nil, fmt.Errorf("pipeline execution: %w", err)
@@ -304,7 +304,7 @@ func (s *QueryServer) resolveVaultByID(ctx context.Context, id glid.GLID, target
 // vault that is quietly missing whatever the failed node held, with nothing
 // in the result to say so.
 func (s *QueryServer) drainRemoteRecords(ctx context.Context, q query.Query, budget *query.Budget) ([]chunk.Record, error) {
-	remoteIter, _, _ := s.collectRemote(ctx, q, nil)
+	remoteIter, _, _ := s.collectRemote(ctx, q)
 	if remoteIter == nil {
 		return nil, nil
 	}

@@ -114,7 +114,7 @@ func TestCollectRemote_ReportsContributors(t *testing.T) {
 	v1, v2 := glid.New(), glid.New()
 	qs, _ := newQueryServerWithRemoteVaults(t, &stubQuerySearcher{}, []glid.GLID{v1, v2})
 
-	_, _, contributors := qs.collectRemote(context.Background(), allVaultsQuery(), nil)
+	_, _, contributors := qs.collectRemote(context.Background(), allVaultsQuery())
 	got := map[glid.GLID]bool{}
 	for _, id := range contributors {
 		got[id] = true
@@ -131,7 +131,7 @@ func TestCollectRemote_NoRemoteVaultsEmptyContributors(t *testing.T) {
 	t.Parallel()
 
 	qs, _ := newQueryServerWithRemoteVaults(t, &stubQuerySearcher{}, nil)
-	_, _, contributors := qs.collectRemote(context.Background(), allVaultsQuery(), nil)
+	_, _, contributors := qs.collectRemote(context.Background(), allVaultsQuery())
 	if len(contributors) != 0 {
 		t.Fatalf("contributors = %v, want empty (no remote vaults)", contributors)
 	}

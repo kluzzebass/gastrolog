@@ -134,7 +134,7 @@ func (s *QueryServer) searchContext(
 ) ([]*apiv1.Record, error) {
 	eng := s.orch.LeaderVaultQueryEngine()
 	localIter, _ := eng.Search(ctx, q, nil)
-	remoteIter, _, _ := s.collectRemote(ctx, q, nil)
+	remoteIter, _, _ := s.collectRemote(ctx, q)
 
 	// The context window comes from the client, so the records held while
 	// merging local and remote sides are bounded by the same per-query budget

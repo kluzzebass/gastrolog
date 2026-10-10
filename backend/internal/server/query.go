@@ -188,9 +188,8 @@ func (s *QueryServer) searchDirect(
 	histogramQ := q
 	query.ApplyResumeCursor(&q, resume)
 
-	localResume, remoteTokens := s.splitResumeToken(resume)
-	localIter, getLocalToken := eng.Search(ctx, q, localResume)
-	remoteIter, remoteHist, contributingVaults := s.collectRemote(ctx, q, remoteTokens)
+	localIter, getLocalToken := eng.Search(ctx, q, s.localResumePositions(resume))
+	remoteIter, remoteHist, contributingVaults := s.collectRemote(ctx, q)
 
 	// Histogram is computed only on the FIRST page of a paginated search.
 	var histCh chan []*apiv1.HistogramBucket
@@ -264,33 +263,31 @@ func (s *QueryServer) computePageHistogram(ctx context.Context, eng *query.Engin
 	return mergeHistogramBuckets(localHist, remoteHist)
 }
 
-// splitResumeToken separates a unified resume token into local positions
-// (for eng.Search) and remote opaque blobs (for collectRemote).
-func (s *QueryServer) splitResumeToken(resume *query.ResumeToken) (*query.ResumeToken, map[glid.GLID][]byte) {
+// localResumePositions returns the resume positions for the vaults this node
+// leads, which its own engine continues from. Positions for any other vault
+// are dropped: a remote vault resumes at the coordinator's cursor (carried in
+// q), never at positions — those may have been minted by a different
+// coordinator, and a peer has no use for another node's position blob.
+func (s *QueryServer) localResumePositions(resume *query.ResumeToken) *query.ResumeToken {
 	if resume == nil || len(resume.VaultTokens) == 0 {
-		return nil, nil
+		return nil
 	}
 	localVaults := s.orch.LocalLeaderVaultIDs()
-
-	remoteTokens := make(map[glid.GLID][]byte)
 	var localPositions []query.MultiVaultPosition
 	for vid, tokenData := range resume.VaultTokens {
-		if localVaults[vid] {
-			positions, err := VaultTokenToPositions(tokenData)
-			if err != nil {
-				continue
-			}
-			localPositions = append(localPositions, positions...)
-		} else {
-			remoteTokens[vid] = tokenData
+		if !localVaults[vid] {
+			continue
 		}
+		positions, err := VaultTokenToPositions(tokenData)
+		if err != nil {
+			continue
+		}
+		localPositions = append(localPositions, positions...)
 	}
-
-	var localResume *query.ResumeToken
-	if len(localPositions) > 0 {
-		localResume = &query.ResumeToken{Positions: localPositions}
+	if len(localPositions) == 0 {
+		return nil
 	}
-	return localResume, remoteTokens
+	return &query.ResumeToken{Positions: localPositions}
 }
 
 // buildResumeTokenBytes serializes the resume token for the response,

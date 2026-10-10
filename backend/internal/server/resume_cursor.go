@@ -24,12 +24,13 @@ func (m *emitMark) note(rec chunk.Record) {
 	m.event = rec.EventID
 }
 
-// remoteTokenOrCursor is the resume token a remote vault receives. Remote
-// positions are never carried across pages, so absent a per-vault token the
-// remote gets the coordinator's cursor and nothing else.
-func remoteTokenOrCursor(q query.Query, token []byte) []byte {
-	if token != nil || q.ResumeAfterTS.IsZero() {
-		return token
+// remoteCursorToken is the resume token a remote vault receives: the
+// coordinator's cursor and nothing else. Positions are never forwarded — the
+// remote decodes this field as a full ResumeToken, and positions minted by
+// whichever node coordinated the previous page are not one.
+func remoteCursorToken(q query.Query) []byte {
+	if q.ResumeAfterTS.IsZero() {
+		return nil
 	}
 	return ResumeTokenToProto(&query.ResumeToken{HighwaterTS: q.ResumeAfterTS, HighwaterEvent: q.ResumeAfterEvent})
 }
