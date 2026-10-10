@@ -3,15 +3,16 @@ package routing_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/record"
+	"gastrolog/internal/waittest"
 )
 
 func catchAllTable(vaultIDs ...glid.GLID) *routing.Table {
@@ -28,6 +29,19 @@ func prodOnlyTable(vaultID glid.GLID) *routing.Table {
 		panic(err)
 	}
 	return routing.NewTable([]*routing.Route{r})
+}
+
+// routeProgress snapshots the routing counters, the progress measure for waits
+// on routed records and their acks.
+func routeProgress(mgr *routing.Manager) func() string {
+	return func() string {
+		st := mgr.Stats()
+		var dropped uint64
+		for _, n := range st.PerVaultDropped {
+			dropped += n
+		}
+		return fmt.Sprintf("routed=%d matched=%d unmatched=%d dropped=%d", st.Routed, st.Matched, st.Unmatched, dropped)
+	}
 }
 
 func TestManagerFansOutSamePointer(t *testing.T) {
@@ -109,8 +123,9 @@ func TestManagerUnregisterDuringDeliver(t *testing.T) {
 		close(done)
 	}()
 
-	// Let workers pile up behind the small segmentation buffer.
-	time.Sleep(20 * time.Millisecond)
+	waittest.Progress(t, "routing delivering into the vault", func() (string, bool) {
+		return routeProgress(mgr)(), mgr.Stats().Matched > 0
+	})
 
 	mgr.UnregisterVault(vaultID)
 	close(out) // segmentation closes after routing unregisters
@@ -240,9 +255,7 @@ func TestManagerWorkersProcessConcurrently(t *testing.T) {
 	}
 	close(in)
 
-	start := time.Now()
 	_ = mgr.Run(ctx, in)
-	elapsed := time.Since(start)
 
 	for range 8 {
 		<-out
@@ -250,7 +263,6 @@ func TestManagerWorkersProcessConcurrently(t *testing.T) {
 	if stats := mgr.Stats(); stats.Matched != 8 {
 		t.Errorf("matched = %d, want 8", stats.Matched)
 	}
-	_ = elapsed
 }
 
 func TestManagerBackpressureOnVaultChannel(t *testing.T) {
@@ -291,13 +303,8 @@ func TestManagerBackpressureOnVaultChannel(t *testing.T) {
 		close(inDone)
 	}()
 
-	select {
-	case got2 := <-out:
-		if got2.Record != rec2 {
-			t.Errorf("second record = %p, want %p", got2.Record, rec2)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("routing blocked on full vault channel — expected delivery after read")
+	if got2 := waittest.Recv(t, "second record delivered once the vault channel is read", out, routeProgress(mgr)); got2.Record != rec2 {
+		t.Errorf("second record = %p, want %p", got2.Record, rec2)
 	}
 
 	<-inDone

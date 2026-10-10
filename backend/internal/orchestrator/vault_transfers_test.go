@@ -3,6 +3,7 @@ package orchestrator_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"gastrolog/internal/glid"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
+	"gastrolog/internal/waittest"
 )
 
 // sliceIterator adapts a []chunk.Record into a chunk.RecordIterator.
@@ -348,22 +350,25 @@ func TestImportRecordsEmpty(t *testing.T) {
 
 // --- Drain tests ---
 
-// waitForJob polls the scheduler until the job completes or the timeout expires.
-func waitForJob(t *testing.T, sched *orchestrator.Scheduler, jobID string, timeout time.Duration) orchestrator.JobInfo {
+// waitForJob waits until the job reaches a terminal state, failing when its
+// progress stops moving.
+func waitForJob(t *testing.T, sched *orchestrator.Scheduler, jobID string) orchestrator.JobInfo {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	var snap orchestrator.JobInfo
+	waittest.Progress(t, "job "+jobID+" completes", func() (string, bool) {
 		info, ok := sched.GetJob(jobID)
-		if ok {
-			snap := info.Snapshot()
-			if snap.Progress.Status == orchestrator.JobStatusCompleted || snap.Progress.Status == orchestrator.JobStatusFailed {
-				return snap
-			}
+		if !ok {
+			return "absent", false
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("job %s did not complete within %v", jobID, timeout)
-	return orchestrator.JobInfo{}
+		snap = info.Snapshot()
+		p := snap.Progress
+		if p == nil {
+			return "no progress record", false
+		}
+		done := p.Status == orchestrator.JobStatusCompleted || p.Status == orchestrator.JobStatusFailed
+		return fmt.Sprintf("status=%v chunks=%d/%d records=%d", p.Status, p.ChunksDone, p.ChunksTotal, p.RecordsDone), done
+	})
+	return snap
 }
 
 // drainSetup creates an orchestrator with a single vault, routes, and a mock
@@ -445,7 +450,7 @@ func TestDrainVault_Basic(t *testing.T) {
 		t.Fatal("drain job not found in scheduler")
 	}
 
-	info := waitForJob(t, orch.Scheduler(), jobID, 5*time.Second)
+	info := waitForJob(t, orch.Scheduler(), jobID)
 	if info.Progress.Status != orchestrator.JobStatusCompleted {
 		t.Fatalf("drain job failed: %s", info.Progress.Error)
 	}
@@ -580,7 +585,7 @@ func TestDrainVault_EmptyVault(t *testing.T) {
 		t.Fatal("drain job not found in scheduler")
 	}
 
-	info := waitForJob(t, orch.Scheduler(), jobID, 5*time.Second)
+	info := waitForJob(t, orch.Scheduler(), jobID)
 	if info.Progress.Status != orchestrator.JobStatusCompleted {
 		t.Fatalf("drain job failed: %s", info.Progress.Error)
 	}
@@ -648,7 +653,7 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 		t.Fatal("drain job not found in scheduler")
 	}
 
-	info := waitForJob(t, orch.Scheduler(), jobID, 5*time.Second)
+	info := waitForJob(t, orch.Scheduler(), jobID)
 	if info.Progress.Status != orchestrator.JobStatusFailed {
 		t.Fatalf("expected drain job to fail, got status %d", info.Progress.Status)
 	}

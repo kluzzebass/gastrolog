@@ -15,7 +15,6 @@ import (
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/manifest"
 	"gastrolog/internal/pipeline/chunking"
-	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/query"
 	"gastrolog/internal/record"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -45,37 +44,14 @@ func (o *originFixture) ingestAttributed(t *testing.T, ctx context.Context, n in
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range n {
 		ts := t0.Add(time.Duration(i) * time.Second)
-		rec := record.Record{
+		o.ingest(t, ctx, &record.Record{
 			EventID:  record.EventID{IngestTS: ts},
 			IngestTS: ts,
 			Raw:      []byte(raw),
 			Attrs:    attrs,
-		}
-		ack := make(chan error, 1)
-		select {
-		case o.in <- segmentation.Input{Record: &rec, Ack: ack}:
-		case <-ctx.Done():
-			t.Fatal("ingest cancelled")
-		}
-		select {
-		case err := <-ack:
-			if err != nil {
-				t.Fatalf("ingest ack: %v", err)
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatal("ingest ack timeout")
-		}
+		})
 	}
-
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if entries := o.fsm.ListCompletedSegments(); len(entries) >= 1 {
-			return entries[0].SegmentID
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatal("origin did not publish a completed segment to the FSM")
-	return glid.GLID{}
+	return o.waitFirstPublished(t)
 }
 
 // sealedGLCBFixture is a built pipeline chunk: the sealed FSM entry plus the

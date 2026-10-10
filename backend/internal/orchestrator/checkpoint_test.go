@@ -10,6 +10,7 @@ import (
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/ingestion"
+	"gastrolog/internal/waittest"
 )
 
 // mockCheckpointIngester implements both ingestion.Ingester and ingestion.Checkpointable.
@@ -65,6 +66,17 @@ func (m *mockCheckpointIngester) LoadCheckpoint(data []byte) error {
 	return json.Unmarshal(data, &m.state)
 }
 
+// waitEmitting waits until Run has advanced the cursor to its last record.
+func (m *mockCheckpointIngester) waitEmitting(t *testing.T) {
+	t.Helper()
+	waittest.Progress(t, "checkpoint ingester reaches its last record", func() (string, bool) {
+		m.mu.Lock()
+		cursor := m.state["cursor"]
+		m.mu.Unlock()
+		return "cursor=" + cursor, cursor == "3"
+	})
+}
+
 // TestCheckpointSaveAndLoad verifies that the ingestion manager (driven via
 // the orchestrator) calls SaveCheckpoint on exit and that the orchestrator's
 // OnIngesterCheckpoint callback fires with the saved data.
@@ -93,10 +105,10 @@ func TestCheckpointSaveAndLoad(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	// Give the ingester time to emit records. The ingestion manager's
-	// checkpoint ticker interval is long, but the exit path also saves a
-	// checkpoint — stopping the orchestrator triggers that exit save.
-	time.Sleep(100 * time.Millisecond)
+	// The ingestion manager's checkpoint ticker interval is long, but the exit
+	// path also saves a checkpoint — stopping the orchestrator triggers that
+	// exit save.
+	ing.waitEmitting(t)
 
 	if err := orch.Stop(); err != nil {
 		t.Fatalf("Stop: %v", err)
@@ -146,7 +158,7 @@ func TestCheckpointNotCalledWithoutCallback(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	ing.waitEmitting(t)
 
 	if err := orch.Stop(); err != nil {
 		t.Fatalf("Stop: %v", err)

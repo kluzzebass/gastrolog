@@ -5,12 +5,15 @@ import (
 	"gastrolog/internal/glid"
 	"io"
 	"log/slog"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+	"gastrolog/internal/waittest"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -48,18 +51,16 @@ func makeSingleNodeVaultGroup(t *testing.T, nodeID string) (*raftgroup.Group, *v
 		t.Fatalf("bootstrap: %v", err)
 	}
 
-	// Wait for leadership.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if r.State() == hraft.Leader {
-			break
+	elected := false
+	defer func() {
+		if !elected {
+			_ = r.Shutdown().Error()
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if r.State() != hraft.Leader {
-		_ = r.Shutdown().Error()
-		t.Fatal("did not become leader within 3s")
-	}
+	}()
+	waittest.Progress(t, nodeID+" becomes leader", func() (string, bool) {
+		return raftProgress(r), r.State() == hraft.Leader
+	})
+	elected = true
 
 	g := &raftgroup.Group{Raft: r, FSM: fsm}
 
@@ -124,20 +125,9 @@ func TestVaultCtlLeaderManager_ReconcileAddsMissingMember(t *testing.T) {
 
 	mgr.Start(vaultID, g)
 
-	// Wait for the reconcile pass to add the synthetic peer.
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		future := g.Raft.GetConfiguration()
-		if err := future.Error(); err == nil {
-			for _, srv := range future.Configuration().Servers {
-				if string(srv.ID) == "synthetic-peer" {
-					return // success
-				}
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatal("synthetic peer was not added to Raft configuration within 5s")
+	waitForMember(t, g, "reconcile adds synthetic-peer", true, func(srv hraft.Server) bool {
+		return srv.ID == "synthetic-peer"
+	})
 }
 
 // When a known voter's address changes (e.g. a K8s pod gets a new IP after a
@@ -177,19 +167,9 @@ func TestVaultCtlLeaderManager_ReconcileRefreshesStaleAddress(t *testing.T) {
 
 	mgr.Start(vaultID, leader)
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		future := leader.Raft.GetConfiguration()
-		if err := future.Error(); err == nil {
-			for _, srv := range future.Configuration().Servers {
-				if string(srv.ID) == "peer-rolled" && string(srv.Address) == newAddr {
-					return // success
-				}
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("peer-rolled address was not updated to %s within 5s", newAddr)
+	waitForMember(t, leader, "reconcile refreshes peer-rolled to "+newAddr, true, func(srv hraft.Server) bool {
+		return srv.ID == "peer-rolled" && srv.Address == newAddr
+	})
 }
 
 // TestVaultCtlLeaderManager_ReconcileRemovesExtras verifies that the leader
@@ -226,24 +206,9 @@ func TestVaultCtlLeaderManager_ReconcileRemovesExtras(t *testing.T) {
 
 	mgr.Start(vaultID, leader)
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		future := leader.Raft.GetConfiguration()
-		if err := future.Error(); err == nil {
-			found := false
-			for _, srv := range future.Configuration().Servers {
-				if string(srv.ID) == "doomed" {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return // success
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatal("doomed peer was not removed from Raft configuration within 5s")
+	waitForMember(t, leader, "reconcile removes doomed", false, func(srv hraft.Server) bool {
+		return srv.ID == "doomed"
+	})
 }
 
 // makeTwoNodeVaultGroup builds a 2-node instance Raft cluster using in-memory
@@ -292,26 +257,23 @@ func makeTwoNodeVaultGroup(t *testing.T, id1, id2 string) ([]*raftgroup.Group, f
 		rafts[i] = r
 	}
 
-	// Wait for a leader.
-	deadline := time.Now().Add(5 * time.Second)
 	leaderIdx := -1
-	for time.Now().Before(deadline) && leaderIdx < 0 {
+	defer func() {
+		if leaderIdx < 0 {
+			for _, r := range rafts {
+				_ = r.Shutdown().Error()
+			}
+		}
+	}()
+	waittest.Progress(t, "two-node group elects a leader", func() (string, bool) {
 		for i, r := range rafts {
 			if r.State() == hraft.Leader {
 				leaderIdx = i
-				break
+				return "", true
 			}
 		}
-		if leaderIdx < 0 {
-			time.Sleep(20 * time.Millisecond)
-		}
-	}
-	if leaderIdx < 0 {
-		for _, r := range rafts {
-			_ = r.Shutdown().Error()
-		}
-		t.Fatal("no leader elected within 5s")
-	}
+		return raftProgress(rafts...), false
+	})
 
 	groups := make([]*raftgroup.Group, 2)
 	groups[0] = &raftgroup.Group{Raft: rafts[leaderIdx], FSM: fsms[leaderIdx]}
@@ -345,19 +307,19 @@ func TestVaultCtlLeaderManager_ReconcileNoOpWhenStable(t *testing.T) {
 		{ID: "stable-node", Address: "stable-node"},
 	})
 
-	// Snapshot configuration before reconcile.
-	beforeIdx := g.Raft.GetConfiguration().Index()
+	before := configurationServers(t, g)
 
+	initialPassDone := leadGainedSignal(mgr)
 	mgr.Start(vaultID, g)
 
-	// Give the reconcile pass a moment to run, then verify the
-	// configuration index hasn't changed (no membership writes).
-	time.Sleep(500 * time.Millisecond)
+	// Lead-gained listeners run after the epoch's initial reconcile pass,
+	// which waits on every membership change it issues.
+	waittest.Recv(t, "initial reconcile pass completes", initialPassDone, func() string {
+		return raftProgress(g.Raft)
+	})
 
-	afterIdx := g.Raft.GetConfiguration().Index()
-	if afterIdx != beforeIdx {
-		t.Errorf("configuration index changed from %d to %d; reconcile should have been a no-op",
-			beforeIdx, afterIdx)
+	if after := configurationServers(t, g); !slices.Equal(after, before) {
+		t.Errorf("configuration changed from %+v to %+v; reconcile should have been a no-op", before, after)
 	}
 }
 
@@ -436,41 +398,32 @@ func TestVaultCtlLeaderManager_SetDesiredMembersWakesEpoch(t *testing.T) {
 		{ID: "wake-1", Address: "wake-1"},
 		{ID: "wake-2", Address: "wake-2"},
 	})
+	initialPassDone := leadGainedSignal(mgr)
 	mgr.Start(vaultID, leader)
-	time.Sleep(200 * time.Millisecond)
+	waittest.Recv(t, "initial reconcile pass completes", initialPassDone, func() string {
+		return raftProgress(leader.Raft)
+	})
 
-	// Now fire a real diff. With the wake-on-signal path, the synthetic
-	// peer should land in the configuration within ~1 s. Without it,
-	// convergence would wait for vaultCtlMembershipReconcileSchedule (30 s)
-	// — well past this deadline.
+	// Now fire a real diff. No scheduler runs the periodic membership tick
+	// in this harness, so only the wake signal can drive the reconcile that
+	// adds the synthetic peer.
 	mgr.SetDesiredMembers(vaultID, []hraft.Server{
 		{ID: "wake-1", Address: "wake-1"},
 		{ID: "wake-2", Address: "wake-2"},
 		{ID: "wake-synth", Address: "wake-synth"},
 	})
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		fut := leader.Raft.GetConfiguration()
-		if err := fut.Error(); err == nil {
-			for _, srv := range fut.Configuration().Servers {
-				if srv.ID == "wake-synth" {
-					return
-				}
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatal("synthetic peer did not converge within 2 s — wake signal not driving reconcile")
+	waitForMember(t, leader, "wake signal drives reconcile adding wake-synth", true, func(srv hraft.Server) bool {
+		return srv.ID == "wake-synth"
+	})
 }
 
 // TestVaultCtlLeaderManager_BurstYieldsAndResumes is the regression for the
 // cap-per-pass + signal-rewake path. We submit a desired set with more peers
 // than vaultMembershipMaxPerPass and verify the burst converges fully via
-// multiple short passes driven by the re-fired desiredChanged signal. A
-// regression to the pre-fix "serialize the whole burst" or "wait 30 s for
-// next tick" behavior would fail this test on either correctness (incomplete
-// config) or timing (deadline).
+// multiple short passes driven by the re-fired desiredChanged signal. A pass
+// that serializes the whole burst, or one that waits for the periodic tick
+// (which this harness never runs), leaves the configuration incomplete.
 //
 // vaultMembershipCommitTimeout is shortened so the bail path is fast
 // when individual commits stall on the unreachable synthetic peers
@@ -511,22 +464,12 @@ func TestVaultCtlLeaderManager_BurstYieldsAndResumes(t *testing.T) {
 	mgr.SetDesiredMembers(vaultID, desired)
 	mgr.Start(vaultID, leader)
 
-	// At minimum, the first synthetic peer must converge well inside the
-	// 30 s safety-net window — proving the re-fired signal drives the
-	// next pass without waiting for the periodic tick after the bail.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		fut := leader.Raft.GetConfiguration()
-		if err := fut.Error(); err == nil {
-			for _, srv := range fut.Configuration().Servers {
-				if srv.ID == "burst-synth-0" {
-					return
-				}
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatal("first synthetic peer did not converge within 3 s after burst")
+	// No scheduler runs the periodic membership tick in this harness, so
+	// the first synthetic peer converging proves the re-fired signal drives
+	// the next pass after the bail.
+	waitForMember(t, leader, "re-fired signal converges burst-synth-0", true, func(srv hraft.Server) bool {
+		return srv.ID == "burst-synth-0"
+	})
 }
 
 // transferIfNeeded damping: a misaligned leader must be observed on two
@@ -600,20 +543,54 @@ func TestTransferDampingIsPerVault(t *testing.T) {
 	}
 }
 
-// configHasServer reports whether the given server ID is present in the
-// group's current Raft configuration. Returns (present, ok) — ok is false
-// if the configuration could not be read this poll.
-func configHasServer(g *raftgroup.Group, id hraft.ServerID) (present, ok bool) {
+// raftProgress snapshots the Raft state that moves during an election or a
+// membership change — the progress measure for waits on vault-ctl groups.
+func raftProgress(rafts ...*hraft.Raft) string {
+	parts := make([]string, 0, len(rafts))
+	for _, r := range rafts {
+		s := r.Stats()
+		parts = append(parts, fmt.Sprintf("state=%s term=%s last=%s commit=%s applied=%s config=%s",
+			s["state"], s["term"], s["last_log_index"], s["commit_index"], s["applied_index"],
+			s["latest_configuration"]))
+	}
+	return strings.Join(parts, " | ")
+}
+
+// waitForMember waits until the group's Raft configuration holds (present) or
+// lacks (!present) a server matching match.
+func waitForMember(t *testing.T, g *raftgroup.Group, what string, present bool, match func(hraft.Server) bool) {
+	t.Helper()
+	waittest.Progress(t, what, func() (string, bool) {
+		fut := g.Raft.GetConfiguration()
+		if err := fut.Error(); err != nil {
+			return raftProgress(g.Raft) + " config-error=" + err.Error(), false
+		}
+		return raftProgress(g.Raft), slices.ContainsFunc(fut.Configuration().Servers, match) == present
+	})
+}
+
+// configurationServers returns the servers of the group's latest Raft
+// configuration.
+func configurationServers(t *testing.T, g *raftgroup.Group) []hraft.Server {
+	t.Helper()
 	fut := g.Raft.GetConfiguration()
 	if err := fut.Error(); err != nil {
-		return false, false
+		t.Fatalf("get configuration: %v", err)
 	}
-	for _, srv := range fut.Configuration().Servers {
-		if srv.ID == id {
-			return true, true
+	return fut.Configuration().Servers
+}
+
+// leadGainedSignal returns a channel that receives once a leader epoch on mgr
+// has finished its initial reconcile pass.
+func leadGainedSignal(mgr *vaultCtlLeaderManager) <-chan struct{} {
+	ch := make(chan struct{}, 1)
+	mgr.AddOnLeadGained(func(glid.GLID) {
+		select {
+		case ch <- struct{}{}:
+		default:
 		}
-	}
-	return false, true
+	})
+	return ch
 }
 
 // TestVaultCtlLeaderManager_ConcurrentDesiredChangeDuringReconcileNotLost is
@@ -675,14 +652,9 @@ func TestVaultCtlLeaderManager_ConcurrentDesiredChangeDuringReconcileNotLost(t *
 	// synth was never in the initial config, so its presence proves the
 	// racing wake drove a follow-up pass. A lost wake leaves synth absent
 	// forever (no periodic tick exists in this harness).
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if present, ok := configHasServer(leader, "lostwake-synth"); ok && present {
-			return // success — the concurrent wake was not lost
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatal("synth was never added within 5s — the concurrent desired change was lost (lost-wake regression)")
+	waitForMember(t, leader, "racing wake adds lostwake-synth", true, func(srv hraft.Server) bool {
+		return srv.ID == "lostwake-synth"
+	})
 }
 
 // TestVaultCtlLeaderManager_MembershipConvergesWhileLeaderElsewhere covers the
@@ -723,14 +695,9 @@ func TestVaultCtlLeaderManager_MembershipConvergesWhileLeaderElsewhere(t *testin
 	mgrLeader.SetDesiredMembers(vaultID, desired)
 	mgrFollower.SetDesiredMembers(vaultID, desired)
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if present, ok := configHasServer(leaderGroup, "elsewhere-synth"); ok && present {
-			return // converged via the event path, no tick
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatal("synthetic peer did not converge event-driven within 5s (follower manager should be a no-op, leader converges)")
+	waitForMember(t, leaderGroup, "leader converges elsewhere-synth event-driven", true, func(srv hraft.Server) bool {
+		return srv.ID == "elsewhere-synth"
+	})
 }
 
 // TestVaultCtlLeaderManager_RapidDesiredChurnConvergesToFinal exercises the
@@ -779,12 +746,7 @@ func TestVaultCtlLeaderManager_RapidDesiredChurnConvergesToFinal(t *testing.T) {
 	// Final desired state includes synth.
 	mgr.SetDesiredMembers(vaultID, withSynth)
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if present, ok := configHasServer(leader, "churn-synth"); ok && present {
-			return // converged to the final desired set
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatal("did not converge to final desired set (synth) within 5s — a wake in the burst was lost")
+	waitForMember(t, leader, "group converges to the final desired set with churn-synth", true, func(srv hraft.Server) bool {
+		return srv.ID == "churn-synth"
+	})
 }

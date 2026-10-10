@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"fmt"
 	"gastrolog/internal/glid"
 	"slices"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/system"
+	"gastrolog/internal/waittest"
 )
 
 // fakeSystemLoader implements orchestrator.SystemLoader for tests.
@@ -495,13 +497,9 @@ func TestUnregisterIngesterWhileRunning(t *testing.T) {
 	// Unregister while running stops the ingester via the pipeline reconcile.
 	orch.UnregisterIngester(ingesterID)
 
-	// Verify ingester was stopped.
-	select {
-	case <-recv.stopped:
-		// Good - ingester stopped.
-	case <-time.After(time.Second):
-		t.Fatal("ingester did not stop after UnregisterIngester")
-	}
+	waittest.Recv(t, "ingester stops after UnregisterIngester", recv.stopped, func() string {
+		return fmt.Sprintf("running=%v", orch.IsIngesterRunning(ingesterID))
+	})
 
 	if slices.Contains(orch.ListIngesters(), ingesterID) {
 		t.Error("ingester should have been removed from list")

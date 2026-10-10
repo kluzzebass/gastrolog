@@ -15,7 +15,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/lifecycle"
@@ -182,7 +181,6 @@ func TestTryRetainChunkSkipsEverythingDuringShutdown(t *testing.T) {
 
 	r.tryRetainChunk(fx.sealedID, retentionRule{}, false)
 
-	time.Sleep(50 * time.Millisecond)
 	if s := fx.orch.GetRouteStats(); s.Routed != 0 {
 		t.Errorf("shutdown sweep must not fan out records; ingested=%d", s.Routed)
 	}

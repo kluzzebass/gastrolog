@@ -26,6 +26,7 @@ import (
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/record"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+	"gastrolog/internal/waittest"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -440,146 +441,75 @@ func (h *harness) runIngester(t *testing.T, ing ingestion.Ingester) {
 	})
 }
 
+// appendStats returns segmentation's counters for the harness vault.
+func (h *harness) appendStats() segmentation.AppendStats {
+	for _, st := range h.seg.AppendStats() {
+		if st.VaultID == h.vaultID {
+			return st
+		}
+	}
+	return segmentation.AppendStats{}
+}
+
+// flowProgress snapshots every stage counter between routing and collection,
+// the progress measure for the harness's waits.
+func (h *harness) flowProgress() string {
+	st := h.appendStats()
+	s := fmt.Sprintf("routed=%d appended=%d durable=%d completed=%d published=%d",
+		h.route.Stats().Routed, st.RecordsAppended, st.RecordsDurable, st.SegmentsCompleted, h.pub.count())
+	if h.receipts != nil {
+		s += fmt.Sprintf(" collected=%d", h.receipts.receiptCount())
+	}
+	return s
+}
+
 // waitDurableRecords blocks until want records for the harness vault have
-// survived a group commit, per segmentation's own durable counter. Records
-// cross ingestion, digestion and routing before they reach the writer, so
-// when they land is the machine's business; counting fsyncs instead would
-// also break the moment the harness stopped forcing one commit per record.
-// The failsafe stands in for a wedged pipeline, not for the measurement.
+// survived a group commit, per segmentation's own durable counter. Counting
+// fsyncs instead would break the moment the harness stopped forcing one
+// commit per record.
 func (h *harness) waitDurableRecords(t *testing.T, want uint64) {
 	t.Helper()
-	failsafe := time.Now().Add(30 * time.Second)
-	for {
-		var durable uint64
-		for _, st := range h.seg.AppendStats() {
-			if st.VaultID == h.vaultID {
-				durable = st.RecordsDurable
-			}
-		}
-		if durable >= want {
-			return
-		}
-		if time.Now().After(failsafe) {
-			t.Fatalf("records durable = %d, want >= %d before the failsafe deadline", durable, want)
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waittest.Progress(t, fmt.Sprintf("%d records durable", want), func() (string, bool) {
+		return h.flowProgress(), h.appendStats().RecordsDurable >= want
+	})
 }
 
 func (h *harness) waitPublished(t *testing.T, want int) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if h.pub.count() >= want {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("published %d segments, want >= %d", h.pub.count(), want)
+	waittest.Progress(t, fmt.Sprintf("%d segments published", want), func() (string, bool) {
+		return h.flowProgress(), h.pub.count() >= want
+	})
 }
 
-func (h *harness) waitPublishedStable(t *testing.T, min int) []distribution.Metadata {
+// completedSegments is the number of segments the origin completed. A segment
+// completes inside the group commit, before that commit's records count as
+// durable, so after waitDurableRecords this is the final number distribution
+// must publish.
+func (h *harness) completedSegments(t *testing.T) int {
 	t.Helper()
-	h.waitPublished(t, min)
-	deadline := time.Now().Add(2 * time.Second)
-	var last int
-	for time.Now().Before(deadline) {
-		n := h.pub.count()
-		if n >= min && n == last {
-			return h.pub.all()
-		}
-		last = n
-		time.Sleep(10 * time.Millisecond)
+	n := int(h.appendStats().SegmentsCompleted) //nolint:gosec // test-scale count
+	if n == 0 {
+		t.Fatal("origin completed no segments")
 	}
-	t.Fatalf("published count did not stabilize at >= %d (last %d)", min, last)
-	return nil
+	return n
 }
 
-// waitPublishQuiescent waits until the publish count stops growing for a short
-// window. Segments can still close after OnSync fires; without poll ticks the
-// final publishes trail the last fsync.
-func (h *harness) waitPublishQuiescent(t *testing.T) []distribution.Metadata {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	var last int
-	var stableSince time.Time
-	for time.Now().Before(deadline) {
-		n := h.pub.count()
-		if n > 0 && n == last {
-			if stableSince.IsZero() {
-				stableSince = time.Now()
-			} else if time.Since(stableSince) >= 50*time.Millisecond {
-				return h.pub.all()
-			}
-		} else {
-			last = n
-			stableSince = time.Time{}
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("publish count did not quiesce (last %d)", last)
-	return nil
-}
-
-func (h *harness) waitCollected(t *testing.T, want int) {
+// waitCollectedAll waits until exactly want segments are published and every
+// one is receipted by the remote home, and returns the published metadata.
+func (h *harness) waitCollectedAll(t *testing.T, want int) []distribution.Metadata {
 	t.Helper()
 	if h.receipts == nil {
 		t.Fatal("harness has no collection")
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		n := h.receipts.receiptCount()
-		if n == want {
-			return
-		}
-		if n > want {
-			t.Fatalf("collected %d segments, want %d", n, want)
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("collected %d segments, want %d", h.receipts.receiptCount(), want)
-}
-
-func (h *harness) waitCollectedMatchesPublish(t *testing.T) []distribution.Metadata {
-	t.Helper()
-	if h.receipts == nil {
-		t.Fatal("harness has no collection")
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	waittest.Progress(t, fmt.Sprintf("%d segments published and collected", want), func() (string, bool) {
 		h.collect.Notify(h.vaultID)
-		pubN := h.pub.count()
-		recN := h.receipts.receiptCount()
-		if pubN > 0 && recN == pubN {
-			time.Sleep(50 * time.Millisecond)
-			if h.pub.count() == pubN && h.receipts.receiptCount() == pubN {
-				return h.pub.all()
-			}
+		pubN, recN := h.pub.count(), h.receipts.receiptCount()
+		if pubN > want || recN > want {
+			t.Fatalf("published %d, collected %d: overshoots the %d segments to publish", pubN, recN, want)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("collected %d segments, published %d", h.receipts.receiptCount(), h.pub.count())
-	return nil
-}
-
-func (h *harness) waitCollectedWithRetry(t *testing.T, want int) {
-	t.Helper()
-	if h.collect == nil {
-		t.Fatal("harness has no collection")
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		n := h.receipts.receiptCount()
-		if n == want {
-			return
-		}
-		if n > want {
-			t.Fatalf("collected %d segments, want %d", n, want)
-		}
-		h.collect.Notify(h.vaultID)
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("collected %d segments, want %d", h.receipts.receiptCount(), want)
+		return h.flowProgress(), pubN == want && recN == want
+	})
+	return h.pub.all()
 }
 
 func (h *harness) waitChunkGLCB(t *testing.T, wantRecords uint32) string {
@@ -588,8 +518,7 @@ func (h *harness) waitChunkGLCB(t *testing.T, wantRecords uint32) string {
 		t.Fatal("harness has no chunking")
 	}
 	glcbPath := chunking.ChunkGLCBPath(h.chunkRoot, h.chunkID)
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	waittest.Progress(t, fmt.Sprintf("GLCB with %d records at %s", wantRecords, glcbPath), func() (string, bool) {
 		if _, err := os.Stat(glcbPath); err == nil {
 			blob, err := glcb.OpenMappedBlob(glcbPath)
 			if err != nil {
@@ -597,11 +526,7 @@ func (h *harness) waitChunkGLCB(t *testing.T, wantRecords uint32) string {
 			}
 			count := blob.Meta().RecordCount
 			_ = blob.Close()
-			if count != wantRecords {
-				time.Sleep(10 * time.Millisecond)
-				continue
-			}
-			return glcbPath
+			return fmt.Sprintf("glcb records=%d", count), count == wantRecords
 		}
 		if err := h.chunk.PlanOnce(h.ctx, h.vaultID); err != nil {
 			t.Fatalf("PlanOnce: %v", err)
@@ -611,10 +536,24 @@ func (h *harness) waitChunkGLCB(t *testing.T, wantRecords uint32) string {
 				t.Fatalf("BuildOnce: %v", err)
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
+		return h.chunkProgress(), false
+	})
+	return glcbPath
+}
+
+// chunkProgress snapshots the vault-ctl chunk lifecycle for the harness chunk.
+func (h *harness) chunkProgress() string {
+	s := "open=none"
+	if open := h.fsm.OpenChunk(); open != nil {
+		s = fmt.Sprintf("open refs=%d records=%d", len(open.Refs), open.TotalRecords)
 	}
-	t.Fatalf("GLCB not built at %s", glcbPath)
-	return ""
+	if h.fsm.SealedManifest() != nil {
+		s += " sealed-manifest"
+	}
+	if entry := h.fsm.Get(h.chunkID); entry != nil {
+		s += fmt.Sprintf(" chunk-state=%v", entry.State)
+	}
+	return h.flowProgress() + " " + s
 }
 
 func (h *harness) readCompletedRecords(t *testing.T) []record.Record {
@@ -641,17 +580,13 @@ func (h *harness) readCompletedRecords(t *testing.T) []record.Record {
 
 func (h *harness) waitLocalHeadPromoted(t *testing.T, minPublished, minHead int) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if h.pub.count() >= minPublished {
-			entries, err := os.ReadDir(paths.HeadDir(h.vaultRoot))
-			if err == nil && len(entries) >= minHead {
-				return
-			}
+	waittest.Progress(t, fmt.Sprintf("%d published and %d promoted into local head/", minPublished, minHead), func() (string, bool) {
+		head := 0
+		if entries, err := os.ReadDir(paths.HeadDir(h.vaultRoot)); err == nil {
+			head = len(entries)
 		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("local head promote incomplete: published=%d want>=%d", h.pub.count(), minPublished)
+		return fmt.Sprintf("%s head=%d", h.flowProgress(), head), h.pub.count() >= minPublished && head >= minHead
+	})
 }
 
 func (h *harness) readWorkingRecords(t *testing.T) []record.Record {
@@ -858,7 +793,7 @@ func TestPipelineFullPath(t *testing.T) {
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
 	h.waitDurableRecords(t, 8)
-	published := h.waitCollectedMatchesPublish(t)
+	published := h.waitCollectedAll(t, h.completedSegments(t))
 
 	meta := published[0]
 	if meta.RecordCount == 0 {
@@ -902,20 +837,13 @@ func TestPipelineFullPath(t *testing.T) {
 	// Deterministic seal: drain the planner until every published record's
 	// ref is in the open manifest (RotateCron's trigger fires before pending
 	// refs are added, so sealing early would drop records), then rotate.
-	sealDeadline := time.Now().Add(5 * time.Second)
-	for {
+	waittest.Progress(t, fmt.Sprintf("open manifest holding all %d records", totalRecords), func() (string, bool) {
 		if err := h.chunk.PlanCatchUp(h.ctx, h.vaultID); err != nil {
 			t.Fatalf("PlanCatchUp: %v", err)
 		}
-		if open := h.fsm.OpenChunk(); open != nil && open.TotalRecords == uint64(totalRecords) {
-			break
-		}
-		if time.Now().After(sealDeadline) {
-			open := h.fsm.OpenChunk()
-			t.Fatalf("open manifest never accumulated %d records: %+v", totalRecords, open)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+		open := h.fsm.OpenChunk()
+		return h.chunkProgress(), open != nil && open.TotalRecords == uint64(totalRecords)
+	})
 	if err := h.chunk.RotateCron(h.ctx, h.vaultID); err != nil {
 		t.Fatalf("RotateCron: %v", err)
 	}
@@ -984,7 +912,7 @@ func TestPipelineOpenChunkQueryBeforeSeal(t *testing.T) {
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
 	h.waitDurableRecords(t, 8)
-	published := h.waitCollectedMatchesPublish(t)
+	published := h.waitCollectedAll(t, h.completedSegments(t))
 
 	var totalRecords uint32
 	for _, meta := range published {
@@ -996,20 +924,16 @@ func TestPipelineOpenChunkQueryBeforeSeal(t *testing.T) {
 	// nudges the chain along in case a wake was consumed before collection
 	// finished.
 	var open *vaultctlfsm.OpenChunkManifest
-	planDeadline := time.Now().Add(10 * time.Second)
-	for {
+	waittest.Progress(t, fmt.Sprintf("open manifest covering all %d records", totalRecords), func() (string, bool) {
 		open = h.fsm.OpenChunk()
 		if open != nil && open.TotalRecords == uint64(totalRecords) {
-			break
-		}
-		if time.Now().After(planDeadline) {
-			t.Fatalf("open manifest never covered %d records (open=%+v)", totalRecords, open)
+			return "", true
 		}
 		if err := h.chunk.PlanOnce(h.ctx, h.vaultID); err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		return h.chunkProgress(), false
+	})
 	if h.fsm.SealedManifest() != nil {
 		t.Fatal("chunk must still be open")
 	}
@@ -1063,7 +987,7 @@ func TestPipelineRemotePullFailureThenRecovery(t *testing.T) {
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
 	h.waitDurableRecords(t, 8)
-	published := h.waitCollectedMatchesPublish(t)
+	published := h.waitCollectedAll(t, h.completedSegments(t))
 	headPath := paths.HeadSegment(h.homeRoot, published[0].SegmentID)
 	if _, err := os.Stat(headPath); err != nil {
 		t.Fatalf("head on remote home: %v", err)
@@ -1098,7 +1022,7 @@ func TestPipelineRemoteHomeFollowerBuildsGLCBWithoutSealing(t *testing.T) {
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
 	h.waitDurableRecords(t, 8)
-	published := h.waitCollectedMatchesPublish(t)
+	published := h.waitCollectedAll(t, h.completedSegments(t))
 
 	meta := published[0]
 	openedAt := time.Now().UTC()
@@ -1162,24 +1086,17 @@ func TestPipelineRemoteHomePlannerRequiresLocalHead(t *testing.T) {
 	}
 
 	h.gatePull.allow()
-	h.waitCollectedMatchesPublish(t)
+	h.waitCollectedAll(t, h.completedSegments(t))
 	// Each PlanOnce makes a single planner decision (open manifest, then one
 	// ref per pass); FSM callbacks wake the async chunking worker for the
 	// rest, so poll until refs land.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
+	waittest.Progress(t, "open manifest with refs after collection", func() (string, bool) {
 		if err := h.chunk.PlanOnce(h.ctx, h.vaultID); err != nil {
 			t.Fatal(err)
 		}
 		open := h.fsm.OpenChunk()
-		if open != nil && len(open.Refs) > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("expected open manifest with refs after collection")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		return h.chunkProgress(), open != nil && len(open.Refs) > 0
+	})
 }
 
 // publishedLog implements collection.LogReader from distribution publish metadata.
@@ -1312,23 +1229,17 @@ func TestPipelineFanOutTwoVaults(t *testing.T) {
 	defer func() { _ = ingestMgr.Stop() }()
 
 	// One record fans out to both vaults; wait until each vault's writer
-	// reports it durable. The failsafe stands in for a wedged pipeline.
-	failsafe := time.Now().Add(30 * time.Second)
-	for {
-		durable := 0
+	// reports it durable.
+	waittest.Progress(t, "the record durable in both vaults", func() (string, bool) {
+		byVault := map[glid.GLID]segmentation.AppendStats{}
 		for _, st := range segMgr.AppendStats() {
-			if st.RecordsDurable >= 1 {
-				durable++
-			}
+			byVault[st.VaultID] = st
 		}
-		if durable == 2 {
-			break
-		}
-		if time.Now().After(failsafe) {
-			t.Fatalf("vaults with durable records = %d, want 2 before the failsafe deadline", durable)
-		}
-		time.Sleep(time.Millisecond)
-	}
+		a, b := byVault[vaultA], byVault[vaultB]
+		return fmt.Sprintf("routed=%d A appended=%d durable=%d B appended=%d durable=%d",
+				routeMgr.Stats().Routed, a.RecordsAppended, a.RecordsDurable, b.RecordsAppended, b.RecordsDurable),
+			a.RecordsDurable >= 1 && b.RecordsDurable >= 1
+	})
 
 	for _, root := range []string{rootA, rootB} {
 		entries, err := os.ReadDir(paths.WorkingDir(root))
@@ -1369,7 +1280,9 @@ func TestPipelineUnmatchedNotWritten(t *testing.T) {
 		{Raw: []byte("staging"), Attrs: map[string]string{"env": "staging"}},
 	}})
 
-	time.Sleep(100 * time.Millisecond)
+	waittest.Progress(t, "the record routed", func() (string, bool) {
+		return h.flowProgress(), h.route.Stats().Routed >= 1
+	})
 
 	stats := h.route.Stats()
 	if stats.Matched != 0 || stats.Unmatched != 1 {
@@ -1421,7 +1334,7 @@ func TestPipelineRecoversOrphanedWorkingSegmentAcrossNodes(t *testing.T) {
 		},
 	})
 
-	published := h.waitCollectedMatchesPublish(t)
+	published := h.waitCollectedAll(t, 1)
 	if len(published) != 1 || published[0].SegmentID != orphanID {
 		t.Fatalf("published = %+v, want exactly the recovered orphan %s", published, orphanID)
 	}

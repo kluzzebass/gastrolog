@@ -2,7 +2,6 @@ package orchestrator_test
 
 import (
 	"testing"
-	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
@@ -10,16 +9,22 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
-// receiveChunkEvent waits for a single event on the chunk bus and unwraps
-// the Versioned envelope. Fails the test on timeout.
+// receiveChunkEvent takes the next queued event off the chunk bus and unwraps
+// the Versioned envelope. The bus delivers to subscriber channels before
+// Emit returns, so an event emitted by the test is already queued.
 func receiveChunkEvent(t *testing.T, ch <-chan notify.Versioned[orchestrator.ChunkChangeEvent]) orchestrator.ChunkChangeEvent {
+	t.Helper()
+	return receiveQueued(t, ch).Event
+}
+
+func receiveQueued(t *testing.T, ch <-chan notify.Versioned[orchestrator.ChunkChangeEvent]) notify.Versioned[orchestrator.ChunkChangeEvent] {
 	t.Helper()
 	select {
 	case msg := <-ch:
-		return msg.Event
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for chunk event")
-		return orchestrator.ChunkChangeEvent{}
+		return msg
+	default:
+		t.Fatal("no chunk event queued after the emit returned")
+		return notify.Versioned[orchestrator.ChunkChangeEvent]{}
 	}
 }
 
@@ -173,15 +178,11 @@ func TestChunkBusMonotonicVersion(t *testing.T) {
 
 	var prev uint64
 	for range 3 {
-		select {
-		case msg := <-ch:
-			if msg.Version <= prev {
-				t.Errorf("Version did not advance: got %d after %d", msg.Version, prev)
-			}
-			prev = msg.Version
-		case <-time.After(time.Second):
-			t.Fatal("timed out waiting for event")
+		msg := receiveQueued(t, ch)
+		if msg.Version <= prev {
+			t.Errorf("Version did not advance: got %d after %d", msg.Version, prev)
 		}
+		prev = msg.Version
 	}
 }
 

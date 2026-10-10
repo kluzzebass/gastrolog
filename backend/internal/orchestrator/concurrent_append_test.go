@@ -95,9 +95,8 @@ func TestConcurrentAppendAttrIntegrity(t *testing.T) {
 		_ = cm.Seal()
 	}
 
-	// Wait for background PostSealProcess (compression) to complete.
-	// Jobs run immediately via scheduler; 1s is ample for 20 chunks.
-	time.Sleep(1 * time.Second)
+	// Background PostSealProcess (compression) jobs run on the scheduler.
+	requireIdle(t, orch.Scheduler())
 
 	// Read back ALL records via cursor.
 	metas, _ := cm.List()
@@ -568,7 +567,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	}
 
 	// Wait for drain job.
-	waitForDrainJob(t, orchA, vaultID, 30*time.Second)
+	waitForDrainJob(t, orchA, vaultID)
 	wg.Wait()
 
 	t.Logf("post-drain appends accepted: %d", postDrainAppends.Load())

@@ -15,18 +15,13 @@ import (
 	"os"
 	"sync"
 	"testing"
-	"time"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/distribution"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/segmentation"
+	"gastrolog/internal/waittest"
 )
-
-// upgradeWait bounds a single awaited event in these tests. The waits are
-// event-driven (promotion/attempt channels), never sampled; the bound only
-// turns a wedged pipeline into a test failure instead of a package timeout.
-const upgradeWait = 30 * time.Second
 
 // refusingPublisher rejects every publish with a retryable error — the shape
 // of the orchestrator's no-handle publisher — and signals each attempt.
@@ -104,24 +99,14 @@ func runManager(t *testing.T) (*distribution.Manager, chan segmentation.Complete
 	return mgr, completed
 }
 
-func waitEvent(t *testing.T, ch <-chan struct{}, what string) {
+func waitEvent(t *testing.T, mgr *distribution.Manager, ch <-chan struct{}, what string) {
 	t.Helper()
-	select {
-	case <-ch:
-	case <-time.After(upgradeWait):
-		t.Fatalf("timed out waiting for %s", what)
-	}
+	waittest.Recv(t, what, ch, func() string { return publishProgress(mgr) })
 }
 
-func waitPromoted(t *testing.T, ch <-chan glid.GLID, what string) glid.GLID {
+func waitPromoted(t *testing.T, mgr *distribution.Manager, ch <-chan glid.GLID, what string) glid.GLID {
 	t.Helper()
-	select {
-	case id := <-ch:
-		return id
-	case <-time.After(upgradeWait):
-		t.Fatalf("timed out waiting for %s", what)
-		return glid.Nil
-	}
+	return waittest.Recv(t, what, ch, func() string { return publishProgress(mgr) })
 }
 
 // TestPublisherUpgradeRepublishesRefusedSegments is the core scenario: a
@@ -145,7 +130,7 @@ func TestPublisherUpgradeRepublishesRefusedSegments(t *testing.T) {
 
 	seg := writeCompletedSegment(t, root, vaultID, "refused-then-published")
 	completed <- seg
-	waitEvent(t, refusing.attempts, "fail-closed publish attempt")
+	waitEvent(t, mgr, refusing.attempts, "fail-closed publish attempt")
 
 	if got := mgr.PublishStats(); len(got) != 1 || got[0].Published != 0 {
 		t.Fatalf("PublishStats during no-handle window = %+v, want vault at 0", got)
@@ -164,7 +149,7 @@ func TestPublisherUpgradeRepublishesRefusedSegments(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if id := waitPromoted(t, promoted, "head promotion after publisher upgrade"); id != seg.SegmentID {
+	if id := waitPromoted(t, mgr, promoted, "head promotion after publisher upgrade"); id != seg.SegmentID {
 		t.Fatalf("promoted segment = %s, want %s", id, seg.SegmentID)
 	}
 	headPath := paths.HeadSegment(root, seg.SegmentID)
@@ -216,8 +201,8 @@ func TestRegisterVaultAfterRunPublishesExistingBacklog(t *testing.T) {
 	}
 
 	got := map[glid.GLID]bool{}
-	got[waitPromoted(t, promoted, "first backlog promotion")] = true
-	got[waitPromoted(t, promoted, "second backlog promotion")] = true
+	got[waitPromoted(t, mgr, promoted, "first backlog promotion")] = true
+	got[waitPromoted(t, mgr, promoted, "second backlog promotion")] = true
 	if !got[segA.SegmentID] || !got[segB.SegmentID] {
 		t.Fatalf("promoted %v, want both %s and %s", got, segA.SegmentID, segB.SegmentID)
 	}
@@ -250,7 +235,7 @@ func TestPublisherUpgradeIntoFailingPublisherRecovers(t *testing.T) {
 	}
 	seg := writeCompletedSegment(t, root, vaultID, "upgrade-into-outage")
 	completed <- seg
-	waitEvent(t, refusing.attempts, "fail-closed publish attempt")
+	waitEvent(t, mgr, refusing.attempts, "fail-closed publish attempt")
 
 	// Upgrade while the real publisher is still failing (leaderless window).
 	upgraded := &switchPublisher{open: false, attempts: make(chan struct{}, 1)}
@@ -265,13 +250,13 @@ func TestPublisherUpgradeIntoFailingPublisherRecovers(t *testing.T) {
 	}
 	// The registration wake re-attempts through the new publisher and fails —
 	// proof the segment reached the new registration's retry path.
-	waitEvent(t, upgraded.attempts, "failing attempt on upgraded publisher")
+	waitEvent(t, mgr, upgraded.attempts, "failing attempt on upgraded publisher")
 
 	// Outage ends: leadership-gain wake drains the retries.
 	upgraded.setOpen(true)
 	mgr.NotifyPublishRetry()
 
-	if id := waitPromoted(t, promoted, "promotion after outage recovery"); id != seg.SegmentID {
+	if id := waitPromoted(t, mgr, promoted, "promotion after outage recovery"); id != seg.SegmentID {
 		t.Fatalf("promoted segment = %s, want %s", id, seg.SegmentID)
 	}
 	if n := upgraded.publishes(seg.SegmentID); n != 1 {

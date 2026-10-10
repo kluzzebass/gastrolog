@@ -1,12 +1,9 @@
 package orchestrator
 
-// HasPendingPrefix used to test s.completed[name] as well as s.jobs membership.
-// s.completed is keyed by job ID, so that lookup could never match and the
-// predicate quietly degraded to the membership test. The two agree — the
-// completion path deletes from s.jobs — so nothing was broken, but a helper
-// whose body claims a check it does not perform is how the next reader mistakes
-// it for a dedup guard, which is exactly the shape that produced duplicate S3
-// PUTs. These tests pin the behaviour the name promises.
+// HasPendingPrefix and PendingOnce answer from s.jobs membership: a completed
+// job is deleted from s.jobs, and s.completed is keyed by job ID, not name.
+// These tests pin that both report a running job as pending and a completed
+// one as gone — a dedup decision built on either must see exactly that.
 
 import (
 	"context"
@@ -46,19 +43,16 @@ func TestHasPendingPrefixTracksJobLifecycle(t *testing.T) {
 	}
 
 	close(release)
-	requireIdle(t, sched, 5*time.Second)
+	requireIdle(t, sched)
 
-	// The point of the fix: once the job has completed it is gone from s.jobs,
-	// so this must go false. It did before too — via absence rather than via
-	// the completed[] test the body appeared to be making.
 	if sched.HasPendingPrefix("transition:") {
 		t.Error("a completed job must not report as pending")
 	}
 }
 
-// WaitIdle carried the identical dead lookup. It must still drain one-time
-// jobs, and must not be fooled into returning early while one is running.
-func TestWaitIdleDrainsOneTimeJobs(t *testing.T) {
+// PendingOnce counts a running one-time job until it completes, so a drain on
+// it cannot return early.
+func TestPendingOnceTracksOneTimeJobs(t *testing.T) {
 	t.Parallel()
 	sched, err := newScheduler(slog.Default(), 4, time.Now)
 	if err != nil {
@@ -66,22 +60,35 @@ func TestWaitIdleDrainsOneTimeJobs(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = sched.Stop() })
 
+	if n := sched.PendingOnce(); n != 0 {
+		t.Fatalf("PendingOnce = %d with no jobs, want 0", n)
+	}
+
+	release := make(chan struct{})
+	started := make(chan struct{})
 	done := make(chan struct{})
 	if err := sched.RunOnce("drain-me", func(context.Context) error {
-		time.Sleep(50 * time.Millisecond)
+		close(started)
+		<-release
 		close(done)
 		return nil
 	}); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
 
-	requireIdle(t, sched, 5*time.Second)
+	<-started
+	if n := sched.PendingOnce(); n != 1 {
+		t.Errorf("PendingOnce = %d while the job runs, want 1", n)
+	}
+
+	close(release)
+	requireIdle(t, sched)
 	select {
 	case <-done:
 	default:
-		t.Error("WaitIdle returned while a one-time job was still running")
+		t.Error("requireIdle returned while a one-time job was still running")
 	}
-	if sched.HasPendingPrefix("drain-me") {
-		t.Error("job still pending after WaitIdle")
+	if n := sched.PendingOnce(); n != 0 {
+		t.Errorf("PendingOnce = %d after the drain, want 0", n)
 	}
 }

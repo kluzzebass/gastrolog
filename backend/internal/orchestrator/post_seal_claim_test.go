@@ -13,10 +13,10 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/waittest"
 )
 
 // postSealCountingManager counts PostSealProcess entries and can hold the first
@@ -55,17 +55,14 @@ func TestPostSealDoesNotRunTwiceForOneChunk(t *testing.T) {
 	orch.RegisterVault(NewVault(vaultID, &VaultInstance{VaultID: vaultID, Type: "file", Chunks: cm}))
 
 	orch.schedulePostSeal(vaultID, cm, chunkID)
-	select {
-	case <-cm.started: // the first job is inside PostSealProcess
-	case <-time.After(5 * time.Second):
-		t.Fatal("post-seal never ran: the fixture is not being scheduled")
-	}
+	waittest.Recv(t, "first post-seal job enters PostSealProcess", cm.started,
+		func() string { return jobsProgress(orch.scheduler) })
 
 	// A second path post-seals the same chunk while the first is running.
 	orch.schedulePostSeal(vaultID, cm, chunkID)
 
 	close(cm.release)
-	requireIdle(t, orch.scheduler, 5*time.Second)
+	requireIdle(t, orch.scheduler)
 
 	if got := cm.calls.Load(); got != 1 {
 		t.Errorf("PostSealProcess ran %d times for one chunk, want 1: the GLCB is rebuilt "+
@@ -86,15 +83,15 @@ func TestPostSealRunsAgainAfterTheFirstCompletes(t *testing.T) {
 	orch.RegisterVault(NewVault(vaultID, &VaultInstance{VaultID: vaultID, Type: "file", Chunks: cm}))
 
 	orch.schedulePostSeal(vaultID, cm, chunkID)
-	requireIdle(t, orch.scheduler, 5*time.Second)
+	requireIdle(t, orch.scheduler)
 	select {
 	case <-cm.started:
-	case <-time.After(5 * time.Second):
+	default:
 		t.Fatal("post-seal never ran: the fixture is not being scheduled")
 	}
 
 	orch.schedulePostSeal(vaultID, cm, chunkID)
-	requireIdle(t, orch.scheduler, 5*time.Second)
+	requireIdle(t, orch.scheduler)
 
 	if got := cm.calls.Load(); got != 2 {
 		t.Errorf("PostSealProcess ran %d times across two separate seals, want 2: "+

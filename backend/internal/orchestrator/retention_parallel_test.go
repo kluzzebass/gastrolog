@@ -130,7 +130,6 @@ func TestFireRetentionEventPipelineStopped(t *testing.T) {
 	}
 	r.fireRetentionEvent(fx.sealedID)
 
-	time.Sleep(20 * time.Millisecond)
 	if s := fx.orch.GetRouteStats(); s.Routed != 0 {
 		t.Errorf("stopped pipeline should not ingest records, got Routed=%d", s.Routed)
 	}

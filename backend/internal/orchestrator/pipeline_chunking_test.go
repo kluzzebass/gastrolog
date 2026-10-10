@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
@@ -67,17 +66,9 @@ func copyCompletedToHead(t *testing.T, originRoot, homeRoot string, segID glid.G
 // least one segment ref (Open then AddRef), then returns. Fails on timeout.
 func planUntilOpenRef(t *testing.T, ctx context.Context, mgr *chunking.Manager, fsm *vaultctlfsm.FSM, vaultID glid.GLID) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if err := mgr.PlanOnce(ctx, vaultID); err != nil {
-			t.Fatalf("PlanOnce: %v", err)
-		}
-		if open := fsm.OpenChunk(); open != nil && len(open.Refs) > 0 {
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatal("planner never added a segment ref to the open manifest")
+	planUntil(t, ctx, mgr, fsm, vaultID, "planner adds a segment ref to the open manifest", func(open *vaultctlfsm.OpenChunkManifest) bool {
+		return len(open.Refs) > 0
+	})
 }
 
 // chunkingSpec mirrors the chunking VaultConfig that buildPipelineVaultSpec

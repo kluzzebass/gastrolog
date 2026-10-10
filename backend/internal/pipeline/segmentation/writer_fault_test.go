@@ -9,6 +9,7 @@ package segmentation
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/record"
+	"gastrolog/internal/waittest"
 )
 
 var errInjectedSync = errors.New("injected sync failure")
@@ -98,24 +100,40 @@ func newTestTextLogger(w io.Writer) *slog.Logger {
 	return slog.New(slog.NewTextHandler(w, nil))
 }
 
+// writerProgress snapshots every vault writer's stage counters and the
+// manager's dropped-record count.
+func writerProgress(mgr *Manager) string {
+	var b strings.Builder
+	for _, s := range mgr.AppendStats() {
+		fmt.Fprintf(&b, "vault %s appended=%d durable=%d queue=%d completed=%d; ",
+			s.VaultID, s.RecordsAppended, s.RecordsDurable, s.QueueDepth, s.SegmentsCompleted)
+	}
+	fmt.Fprintf(&b, "dropped=%d", mgr.DroppedRecords())
+	return b.String()
+}
+
 // sendAck submits an ack-bearing input and returns the ack result, failing the
-// test if the ack does not resolve — producers must never hang on a broken
-// writer.
-func sendAck(t *testing.T, in chan<- Input, rec *record.Record) error {
+// test if the writer stops making progress — producers must never hang on a
+// broken writer.
+func sendAck(t *testing.T, mgr *Manager, in chan<- Input, rec *record.Record) error {
 	t.Helper()
 	ack := make(chan error, 1)
-	select {
-	case in <- Input{Record: rec, Ack: ack}:
-	case <-time.After(5 * time.Second):
-		t.Fatal("input queue send blocked: writer is wedged")
-	}
-	select {
-	case err := <-ack:
-		return err
-	case <-time.After(5 * time.Second):
-		t.Fatal("ack never resolved: writer is wedged")
-		return nil
-	}
+	waittest.Progress(t, "input queue accepts the record", func() (string, bool) {
+		select {
+		case in <- Input{Record: rec, Ack: ack}:
+			return "", true
+		default:
+			return writerProgress(mgr), false
+		}
+	})
+	return waittest.Recv(t, "ack resolves", ack, func() string { return writerProgress(mgr) })
+}
+
+func waitDropped(t *testing.T, mgr *Manager, want uint64) {
+	t.Helper()
+	waittest.Progress(t, fmt.Sprintf("%d dropped records", want), func() (string, bool) {
+		return writerProgress(mgr), mgr.DroppedRecords() >= want
+	})
 }
 
 func startManager(t *testing.T, cfg Config, vaultID glid.GLID) (*Manager, chan<- Input) {
@@ -159,13 +177,13 @@ func TestCommitFailureRotatesAndKeepsServing(t *testing.T) {
 			return sf, nil
 		},
 	}
-	_, in := startManager(t, cfg, glid.New())
+	mgr, in := startManager(t, cfg, glid.New())
 
-	if err := sendAck(t, in, testRecord(t)); !errors.Is(err, errInjectedSync) {
+	if err := sendAck(t, mgr, in, testRecord(t)); !errors.Is(err, errInjectedSync) {
 		t.Fatalf("first ack = %v, want injected sync failure", err)
 	}
 	// The writer rotated to a healthy segment inline; the next record lands.
-	if err := sendAck(t, in, testRecord(t)); err != nil {
+	if err := sendAck(t, mgr, in, testRecord(t)); err != nil {
 		t.Fatalf("ack after rotation = %v, want nil", err)
 	}
 	sets, clears := alerts.counts()
@@ -182,11 +200,12 @@ func TestCommitFailureRotatesAndKeepsServing(t *testing.T) {
 func TestReopenFailureDegradesThenRecovers(t *testing.T) {
 	t.Parallel()
 	alerts := &recordingAlerts{}
-	var created atomic.Int32
+	var created, createCalls atomic.Int32
 	var diskFull atomic.Bool
 	cfg := Config{
 		Alerts: alerts,
 		newSegmentFile: func(path string, meta segment.Meta) (segmentFile, error) {
+			createCalls.Add(1)
 			if diskFull.Load() {
 				return nil, errInjectedCreate
 			}
@@ -203,36 +222,27 @@ func TestReopenFailureDegradesThenRecovers(t *testing.T) {
 	mgr, in := startManager(t, cfg, glid.New())
 
 	diskFull.Store(true) // reopen after the sync failure must also fail
-	if err := sendAck(t, in, testRecord(t)); !errors.Is(err, errInjectedSync) {
+	if err := sendAck(t, mgr, in, testRecord(t)); !errors.Is(err, errInjectedSync) {
 		t.Fatalf("first ack = %v, want injected sync failure", err)
 	}
 	// Degraded: ack producers get an immediate nack instead of hanging.
-	if err := sendAck(t, in, testRecord(t)); !errors.Is(err, errWriterDegraded) {
+	if err := sendAck(t, mgr, in, testRecord(t)); !errors.Is(err, errWriterDegraded) {
 		t.Fatalf("degraded ack = %v, want errWriterDegraded", err)
 	}
 	// Fire-and-forget records are dropped but COUNTED, never silent.
 	in <- Input{Record: testRecord(t)}
-	deadline := time.Now().Add(5 * time.Second)
-	for mgr.DroppedRecords() == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("dropped-records counter never incremented for nil-ack record in degraded mode")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitDropped(t, mgr, 1)
 
 	// Disk recovers; the backoff reopen must restore service without any new
-	// input (timer-driven, not traffic-driven).
+	// input (timer-driven, not traffic-driven). Each reopen attempt is a
+	// segment create call; degraded nacks change nothing observable.
 	diskFull.Store(false)
-	deadline = time.Now().Add(10 * time.Second)
-	for {
-		if err := sendAck(t, in, testRecord(t)); err == nil {
-			break
+	waittest.Progress(t, "writer recovers after disk came back", func() (string, bool) {
+		if err := sendAck(t, mgr, in, testRecord(t)); err == nil {
+			return "", true
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("writer never recovered after disk came back")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return fmt.Sprintf("segment create calls=%d %s", createCalls.Load(), writerProgress(mgr)), false
+	})
 	_, clears := alerts.counts()
 	if clears == 0 {
 		t.Fatal("alert never cleared after recovery")
@@ -247,18 +257,12 @@ func TestEncodeFailureCountedAndNonFatal(t *testing.T) {
 	mgr, in := startManager(t, Config{}, glid.New())
 
 	in <- Input{Record: nil} // encode fails: nil record, nil ack → counted drop
-	deadline := time.Now().Add(5 * time.Second)
-	for mgr.DroppedRecords() == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("dropped-records counter never incremented for encode failure")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitDropped(t, mgr, 1)
 
-	if err := sendAck(t, in, nil); err == nil {
+	if err := sendAck(t, mgr, in, nil); err == nil {
 		t.Fatal("ack-bearing encode failure returned nil, want error")
 	}
-	if err := sendAck(t, in, testRecord(t)); err != nil {
+	if err := sendAck(t, mgr, in, testRecord(t)); err != nil {
 		t.Fatalf("healthy record after encode failures = %v, want nil", err)
 	}
 	if got := mgr.DroppedRecords(); got != 1 {
@@ -307,13 +311,9 @@ func TestShutdownFlushFailureLogged(t *testing.T) {
 	// Wait for the record loop to consume (and append) the input; otherwise
 	// UnregisterVault can race Run and stop a writer that never started,
 	// flushing an empty segment with nothing to fail.
-	deadline := time.Now().Add(5 * time.Second)
-	for len(in) > 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("record loop never consumed the input")
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
+	waittest.Progress(t, "record loop consumes the input", func() (string, bool) {
+		return writerProgress(mgr), len(in) == 0
+	})
 	mgr.UnregisterVault(vaultID) // stop() → final commit fails → must log
 	cancel()
 	<-done
@@ -334,7 +334,7 @@ func TestAppendStatsCounters(t *testing.T) {
 
 	const n = 5
 	for range n {
-		if err := sendAck(t, in, testRecord(t)); err != nil {
+		if err := sendAck(t, mgr, in, testRecord(t)); err != nil {
 			t.Fatalf("append: %v", err)
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"gastrolog/internal/pipeline/collection"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+	"gastrolog/internal/waittest"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -85,18 +87,37 @@ func (r *recordingReceipts) CommitHolderReceipts(_ context.Context, _ glid.GLID,
 	return nil
 }
 
-// waitReceipts blocks until r has recorded want receipts. The failsafe stands
-// in for a wedged pass, not for the measurement: a slow machine finishes
-// late instead of failing.
-func waitReceipts(t *testing.T, r *recordingReceipts, want int) {
-	t.Helper()
-	failsafe := time.Now().Add(30 * time.Second)
-	for r.count() < want {
-		if time.Now().After(failsafe) {
-			t.Fatalf("receipts = %d, want %d before the failsafe deadline", r.count(), want)
-		}
-		time.Sleep(time.Millisecond)
+// collectProgress snapshots the manager's per-vault collection counters.
+func collectProgress(mgr *collection.Manager) string {
+	var b strings.Builder
+	for _, s := range mgr.CollectStats() {
+		fmt.Fprintf(&b, "vault %s records=%d bytes=%d; ", s.VaultID, s.CollectedRecords, s.CollectedBytes)
 	}
+	return b.String()
+}
+
+// waitReceipts blocks until r has recorded want receipts.
+func waitReceipts(t *testing.T, mgr *collection.Manager, r *recordingReceipts, want int) {
+	t.Helper()
+	waittest.Progress(t, fmt.Sprintf("%d holder receipts", want), func() (string, bool) {
+		n := r.count()
+		return fmt.Sprintf("receipts=%d %s", n, collectProgress(mgr)), n >= want
+	})
+}
+
+// waitRolled blocks until a collect pass has rolled l, which only a running
+// worker's pass does in tests that never call CollectOnce first.
+func waitRolled(t *testing.T, l *staticLog) {
+	t.Helper()
+	waittest.Progress(t, "worker pass rolls the assignment log", func() (string, bool) {
+		n := l.rollCount()
+		return fmt.Sprintf("rolls=%d", n), n > 0
+	})
+}
+
+func headExists(root string, segID glid.GLID) bool {
+	_, err := os.Stat(paths.HeadSegment(root, segID))
+	return err == nil
 }
 
 func (r *recordingReceipts) count() int {
@@ -302,19 +323,23 @@ func TestRunCollectsOnNotify(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		pull.Put(segID, writeSegmentBytes(t, vaultID, segID, "async collect"))
-		log.setAssigned(collection.AssignedSegment{
-			VaultID:   vaultID,
-			SegmentID: segID,
-		})
-		mgr.Notify(vaultID)
-		time.Sleep(20 * time.Millisecond)
-		cancel()
-	}()
+	defer cancel()
+	runErr := make(chan error, 1)
+	go func() { runErr <- mgr.Run(ctx) }()
 
-	if err := mgr.Run(ctx); err != nil && err != context.Canceled {
+	// The startup pass has rolled the still-empty log, so only a pass the
+	// Notify triggers can see the assignment.
+	waitRolled(t, log)
+	pull.Put(segID, writeSegmentBytes(t, vaultID, segID, "async collect"))
+	log.setAssigned(collection.AssignedSegment{
+		VaultID:   vaultID,
+		SegmentID: segID,
+	})
+	mgr.Notify(vaultID)
+	waitReceipts(t, mgr, receipts, 1)
+
+	cancel()
+	if err := <-runErr; err != nil && err != context.Canceled {
 		t.Fatalf("Run: %v", err)
 	}
 	if receipts.count() != 1 {
@@ -333,10 +358,6 @@ func TestRunCollectsOnPublishCompletedSegment(t *testing.T) {
 	pull := newMemoryPull()
 	pull.Put(segID, writeSegmentBytes(t, vaultID, segID, "fsm collect"))
 	log := &staticLog{}
-	log.setAssigned(collection.AssignedSegment{
-		VaultID:   vaultID,
-		SegmentID: segID,
-	})
 	receipts := &recordingReceipts{}
 
 	mgr := collection.New(collection.Config{})
@@ -350,23 +371,31 @@ func TestRunCollectsOnPublishCompletedSegment(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		applyPublish(t, fsm, vaultctlfsm.CompletedSegmentEntry{
-			SegmentID:     segID,
-			RecordCount:   1,
-			ByteSize:      64,
-			FirstIngestTS: now,
-			LastIngestTS:  now,
-			Checksum:      9,
-			OriginNodeID:  "origin",
-			PublishedAt:   now,
-		})
-		time.Sleep(20 * time.Millisecond)
-		cancel()
-	}()
+	defer cancel()
+	runErr := make(chan error, 1)
+	go func() { runErr <- mgr.Run(ctx) }()
 
-	if err := mgr.Run(ctx); err != nil && err != context.Canceled {
+	// The startup pass has rolled the still-empty log, so only a pass the
+	// publish callback triggers can see the assignment.
+	waitRolled(t, log)
+	log.setAssigned(collection.AssignedSegment{
+		VaultID:   vaultID,
+		SegmentID: segID,
+	})
+	applyPublish(t, fsm, vaultctlfsm.CompletedSegmentEntry{
+		SegmentID:     segID,
+		RecordCount:   1,
+		ByteSize:      64,
+		FirstIngestTS: now,
+		LastIngestTS:  now,
+		Checksum:      9,
+		OriginNodeID:  "origin",
+		PublishedAt:   now,
+	})
+	waitReceipts(t, mgr, receipts, 1)
+
+	cancel()
+	if err := <-runErr; err != nil && err != context.Canceled {
 		t.Fatalf("Run: %v", err)
 	}
 	if receipts.count() != 1 {
@@ -443,7 +472,7 @@ func TestCollectOnceWaitersShareWorkerPass(t *testing.T) {
 	// coalescing failure that never happened. It also proves the worker is
 	// running, so the CollectOnce calls below exercise the coalescing path
 	// rather than each falling back to a direct pass.
-	waitReceipts(t, receipts, 1)
+	waitReceipts(t, mgr, receipts, 1)
 
 	log.setAssigned(collection.AssignedSegment{VaultID: vaultID, SegmentID: seg2})
 	slow.pulls.Store(0)
@@ -550,8 +579,11 @@ func TestCollectOnceWaiterWaitsForFreshPass(t *testing.T) {
 		done <- result{err: err, seg2Pulled: gated.pulledSegment(seg2)}
 	}()
 
-	// Let the CollectOnce waiter register while the first pass is still frozen.
-	time.Sleep(100 * time.Millisecond)
+	// The CollectOnce waiter registers while the first pass is still frozen.
+	waittest.Progress(t, "CollectOnce waiter queued behind the frozen pass", func() (string, bool) {
+		n := mgr.PendingCollectWaiters(vaultID)
+		return fmt.Sprintf("pending waiters=%d", n), n > 0
+	})
 	close(gated.release)
 
 	res := <-done
@@ -681,16 +713,10 @@ func TestRunConvergesPreHeadOrphanAtStartup(t *testing.T) {
 		<-done
 	})
 
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if _, err := os.Stat(paths.HeadSegment(root, segID)); err == nil && receipts.count() == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("startup pass never converged pre-head orphan: receipts = %d", receipts.count())
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waittest.Progress(t, "startup pass converges the pre-head orphan", func() (string, bool) {
+		head, n := headExists(root, segID), receipts.count()
+		return fmt.Sprintf("rolls=%d head=%v receipts=%d %s", log.rollCount(), head, n, collectProgress(mgr)), head && n == 1
+	})
 }
 
 // TestCollectOnceRepullsCorruptPreHeadOrphan: a crash-orphaned pre-head file
@@ -970,16 +996,12 @@ func TestRunRepullsAfterChecksumMismatch(t *testing.T) {
 		<-done
 	})
 
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if got, err := os.ReadFile(paths.HeadSegment(root, segID)); err == nil && bytes.Equal(got, right) && receipts.count() == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("checksum-mismatch pull never retried to convergence: receipts = %d", receipts.count())
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waittest.Progress(t, "checksum-mismatch pull retries to convergence", func() (string, bool) {
+		got, err := os.ReadFile(paths.HeadSegment(root, segID))
+		head := err == nil && bytes.Equal(got, right)
+		n := receipts.count()
+		return fmt.Sprintf("bad pulls left=%d head=%v receipts=%d", pull.bad.Load(), head, n), head && n == 1
+	})
 }
 
 // TestCollectSegmentsVerifiesPublishedChecksum: the targeted path (chunking
@@ -1053,17 +1075,19 @@ func TestRunTwiceReturnsErrAlreadyRunning(t *testing.T) {
 	t.Parallel()
 	mgr := collection.New(collection.Config{})
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		_ = mgr.Run(ctx)
-		close(done)
-	}()
-	time.Sleep(20 * time.Millisecond)
-	if err := mgr.Run(ctx); err != collection.ErrAlreadyRunning {
-		t.Fatalf("Run() = %v, want ErrAlreadyRunning", err)
+	defer cancel()
+	// Two concurrent Runs: the loser returns at once, the winner only on cancel.
+	results := make(chan error, 2)
+	for range 2 {
+		go func() { results <- mgr.Run(ctx) }()
+	}
+	if err := waittest.Recv(t, "losing Run returns", results, nil); err != collection.ErrAlreadyRunning {
+		t.Fatalf("first Run to return = %v, want ErrAlreadyRunning", err)
 	}
 	cancel()
-	<-done
+	if err := <-results; err != context.Canceled {
+		t.Fatalf("winning Run = %v, want context.Canceled", err)
+	}
 }
 
 func TestRegisterVaultRequiresDependencies(t *testing.T) {
@@ -1139,29 +1163,13 @@ func TestDeferredPassRetriesWithoutNewEvents(t *testing.T) {
 
 	// The worker's startup pass is the only external trigger; the failed
 	// pulls must be retried by the manager itself.
-	headPath := paths.HeadSegment(root, segID)
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if _, err := os.Stat(headPath); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("deferred collect pass never retried: segment missing from head/ with no new publish events")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 	// head/ appears mid-pass; the receipt batch and OnPassComplete land at
-	// pass end — wait rather than asserting instantly.
-	for {
-		if receipts.count() == 1 && passComplete.Load() > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("after retry: receipts = %d (want 1), passComplete = %d (want > 0)",
-				receipts.count(), passComplete.Load())
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	// pass end.
+	waittest.Progress(t, "deferred collect pass retries to completion", func() (string, bool) {
+		head, n, passes := headExists(root, segID), receipts.count(), passComplete.Load()
+		return fmt.Sprintf("failures left=%d head=%v receipts=%d passComplete=%d", pull.failures.Load(), head, n, passes),
+			head && n == 1 && passes > 0
+	})
 }
 
 // TestPartialPassStillSignalsProgress pins OnPassComplete for passes that
@@ -1213,11 +1221,9 @@ func TestPartialPassStillSignalsProgress(t *testing.T) {
 		<-done
 	})
 
-	select {
-	case <-passComplete:
-	case <-time.After(10 * time.Second):
-		t.Fatal("OnPassComplete suppressed for a pass that made partial progress")
-	}
+	waittest.Recv(t, "OnPassComplete for a pass that made partial progress", passComplete, func() string {
+		return fmt.Sprintf("rolls=%d receipts=%d %s", log.rollCount(), receipts.count(), collectProgress(mgr))
+	})
 	if _, err := os.Stat(paths.HeadSegment(root, okID)); err != nil {
 		t.Fatalf("collected segment missing from head/: %v", err)
 	}
@@ -1306,11 +1312,9 @@ func TestPartialPassFiresOnPassCompleteOnce(t *testing.T) {
 
 	// The pass that landed ok1/ok2 must wake chunking despite the joined
 	// pull error for bad.
-	select {
-	case <-fired:
-	case <-time.After(10 * time.Second):
-		t.Fatal("OnPassComplete suppressed for a pass that made partial progress")
-	}
+	waittest.Recv(t, "OnPassComplete for a pass that made partial progress", fired, func() string {
+		return fmt.Sprintf("rolls=%d receipts=%d %s", log.rollCount(), receipts.count(), collectProgress(mgr))
+	})
 	// Force one more full pass and wait for its afterCollectPass: ok1/ok2
 	// are receipted and present (skip), bad still fails, so the pass makes
 	// no progress and must NOT re-fire the wake. CollectOnce completes only
@@ -1374,11 +1378,9 @@ func TestFullyFailedPassDoesNotFireOnPassComplete(t *testing.T) {
 	// The first pull attempt proves the worker's startup pass is running, so
 	// CollectOnce below takes the worker-pass path (afterCollectPass runs
 	// before its waiter completes).
-	select {
-	case <-pull.started:
-	case <-time.After(10 * time.Second):
-		t.Fatal("startup collect pass never attempted a pull")
-	}
+	waittest.Recv(t, "startup collect pass attempts a pull", pull.started, func() string {
+		return fmt.Sprintf("rolls=%d", log.rollCount())
+	})
 	if err := mgr.CollectOnce(ctx, vaultID); err == nil {
 		t.Fatal("fully-failed pass reported success")
 	}
@@ -1455,13 +1457,10 @@ func TestCollectSegmentsDoesNotWaitForFullPass(t *testing.T) {
 	go func() {
 		targetDone <- mgr.CollectSegments(context.Background(), vaultID, []glid.GLID{targetSeg})
 	}()
-	select {
-	case err := <-targetDone:
-		if err != nil {
-			t.Fatalf("CollectSegments: %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("CollectSegments blocked behind the in-flight full pass")
+	if err := waittest.Recv(t, "CollectSegments alongside the frozen full pass", targetDone, func() string {
+		return fmt.Sprintf("target head=%v %s", headExists(root, targetSeg), collectProgress(mgr))
+	}); err != nil {
+		t.Fatalf("CollectSegments: %v", err)
 	}
 	if _, err := os.Stat(paths.HeadSegment(root, targetSeg)); err != nil {
 		t.Fatalf("targeted segment not in head/: %v", err)
@@ -1611,13 +1610,7 @@ func TestRewireVaultFSMRebindsLiveDeps(t *testing.T) {
 	// Wait for the worker's startup pass (its Roll on the stale log) before
 	// touching the manager: observing the worker's own action is the
 	// happens-before edge the other Run+CollectOnce tests use too.
-	deadline := time.Now().Add(10 * time.Second)
-	for staleLog.rollCount() == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("worker startup pass never rolled the stale log")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitRolled(t, staleLog)
 
 	if err := mgr.RewireVaultFSM(vaultID, collection.VaultConfig{
 		Log: liveLog, Pull: livePull, Receipts: liveReceipts, FSM: liveFSM,
@@ -1650,11 +1643,9 @@ func TestRewireVaultFSMRebindsLiveDeps(t *testing.T) {
 
 	// OnPassComplete fires only for passes that made progress; the empty
 	// pre-publish passes stay silent, so this is the publish-driven pass.
-	select {
-	case <-passComplete:
-	case <-time.After(10 * time.Second):
-		t.Fatal("publish on the rewired (live) FSM never triggered a collect pass")
-	}
+	waittest.Recv(t, "collect pass triggered by a publish on the rewired (live) FSM", passComplete, func() string {
+		return fmt.Sprintf("live rolls=%d live receipts=%d %s", liveLog.rollCount(), liveReceipts.count(), collectProgress(mgr))
+	})
 	if _, err := os.Stat(paths.HeadSegment(root, segID)); err != nil {
 		t.Fatalf("segment missing from head/ after live-FSM publish: %v", err)
 	}

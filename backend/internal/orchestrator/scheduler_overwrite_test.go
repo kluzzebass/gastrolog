@@ -8,28 +8,21 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
+
+	"gastrolog/internal/waittest"
 )
 
 // awaitNotifications blocks until the scheduler has fired n job-change events.
-//
-// The bound is a deadlock backstop, not the synchronisation: each event is
-// waited FOR, so a loaded machine simply waits longer. The first version of
-// these tests inverted that — it slept, or called the WaitIdle helper (which
-// returns nothing, so a timeout there is indistinguishable from success) and
-// then read a counter. Under full-suite load the wait expired, the assertion
-// ran against a half-finished scheduler, and the test failed while passing 20/20
-// in isolation.
+// Each event is waited for, so a loaded machine simply waits longer; the
+// assertions that follow run against the state the events announce.
 func awaitNotifications(t *testing.T, ch <-chan struct{}, n int, what string) {
 	t.Helper()
 	for i := range n {
-		select {
-		case <-ch:
-		case <-time.After(30 * time.Second):
-			t.Fatalf("timed out waiting for %s: got %d of %d job-change events", what, i, n)
-		}
+		waittest.Recv(t, fmt.Sprintf("%s (job-change event %d of %d)", what, i+1, n), ch, nil)
 	}
 }
 
@@ -93,8 +86,8 @@ func TestOverwrittenOneTimeJobsBothComplete(t *testing.T) {
 }
 
 // The registry entry must not be retired by a job that no longer owns the name:
-// doing so made WaitIdle and HasPendingPrefix report idle while a job was still
-// running, which is what the test-drain primitives rely on being false.
+// doing so makes PendingOnce and HasPendingPrefix report idle while a job is
+// still running, which is what the test-drain primitives rely on being false.
 func TestOverwrittenJobDoesNotRetireTheLiveEntry(t *testing.T) {
 	t.Parallel()
 	sched, err := newScheduler(slog.Default(), 4, time.Now)
@@ -142,8 +135,7 @@ func TestOverwrittenJobDoesNotRetireTheLiveEntry(t *testing.T) {
 
 	// completeOneTimeJob drops the registry entry under the lock and fires the
 	// notification after releasing it, so once the event lands the name is
-	// already retired — waiting on it is sound where WaitIdle's silent timeout
-	// was not.
+	// already retired.
 	close(releaseSecond)
 	awaitNotifications(t, notified, 1, "the second job's completion")
 	if sched.HasPendingPrefix(name) {
