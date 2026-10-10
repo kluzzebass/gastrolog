@@ -68,6 +68,28 @@ func TestNoAlarmDetailFormatsATruncatedID(t *testing.T) {
 // string constants for resolving a non-literal type ID.
 func forEachRaiseSite(t *testing.T, fn func(where string, args []ast.Expr, consts map[string]string)) {
 	t.Helper()
+	forEachSourcePackage(t, func(fset *token.FileSet, pkg *ast.Package) {
+		consts := stringConsts(pkg)
+		for _, file := range pkg.Files {
+			ast.Inspect(file, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok || sel.Sel.Name != "Raise" || len(call.Args) != 3 {
+					return true
+				}
+				fn(sourcePosition(fset, call.Pos()), call.Args, consts)
+				return true
+			})
+		}
+	})
+}
+
+// forEachSourcePackage parses every non-test package in the backend tree.
+func forEachSourcePackage(t *testing.T, fn func(fset *token.FileSet, pkg *ast.Package)) {
+	t.Helper()
 
 	root, err := filepath.Abs("../..")
 	if err != nil {
@@ -101,25 +123,14 @@ func forEachRaiseSite(t *testing.T, fn func(where string, args []ast.Expr, const
 			continue
 		}
 		for _, pkg := range pkgs {
-			consts := stringConsts(pkg)
-			for _, file := range pkg.Files {
-				ast.Inspect(file, func(n ast.Node) bool {
-					call, ok := n.(*ast.CallExpr)
-					if !ok {
-						return true
-					}
-					sel, ok := call.Fun.(*ast.SelectorExpr)
-					if !ok || sel.Sel.Name != "Raise" || len(call.Args) != 3 {
-						return true
-					}
-					pos := fset.Position(call.Pos())
-					where := filepath.Base(filepath.Dir(pos.Filename)) + "/" + filepath.Base(pos.Filename) + ":" + strconv.Itoa(pos.Line)
-					fn(where, call.Args, consts)
-					return true
-				})
-			}
+			fn(fset, pkg)
 		}
 	}
+}
+
+func sourcePosition(fset *token.FileSet, p token.Pos) string {
+	pos := fset.Position(p)
+	return filepath.Base(filepath.Dir(pos.Filename)) + "/" + filepath.Base(pos.Filename) + ":" + strconv.Itoa(pos.Line)
 }
 
 // scanRaiseSites returns type ID -> first location, plus the locations whose

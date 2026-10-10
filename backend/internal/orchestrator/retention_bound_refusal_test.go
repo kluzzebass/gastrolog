@@ -13,6 +13,7 @@ package orchestrator
 
 import (
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -355,6 +356,96 @@ func TestCheckBoundViolationsDeferralAlarmCoexistsWithRefusal(t *testing.T) {
 	if err := r.orch.vaultAdmissionGate(vaultID); err == nil {
 		t.Fatal("admission must still be refused while both alarms stand")
 	}
+
+	detail, _ := spy.detail(alarmVaultBoundCapped + ":" + vaultID.String() + "/age")
+	if !strings.Contains(detail, "the "+alarmRetentionDeferred+" alarm stands for this vault") {
+		t.Fatalf("on a route disposition the capped detail must send the operator to %s, which is standing: %q", alarmRetentionDeferred, detail)
+	}
+}
+
+// A delete-disposition vault cannot defer, so retention-deferred never stands
+// beside vault-bound-capped there. Under steady ingest the bound is
+// re-violated by a chunk crossing it between the sweep's evaluation and its
+// post-sweep re-check; the capped detail must say why without sending the
+// operator to an alarm that cannot appear.
+func TestBoundCappedOnDeleteDispositionNeverPointsAtDeferral(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	cm := newBoundFakeChunkManager()
+	r, g, spy := newBoundRunnerFixtureWithManager(t, vaultID, cm)
+	r.disposition = system.RetentionDispositionDelete
+
+	// Each sweep reads the clock twice: once to evaluate the policy, once
+	// for the post-sweep re-check. Two minutes pass between them.
+	const step = 2 * time.Minute
+	var clockMu sync.Mutex
+	clock := time.Now()
+	r.now = func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		now := clock
+		clock = clock.Add(step)
+		return now
+	}
+	nextEvaluation := func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		return clock
+	}
+
+	const bound = time.Hour
+	agePolicy := chunk.NewTTLRetentionPolicy(bound)
+	rules := []retentionRule{{policy: agePolicy, refuse: true, agePolicy: agePolicy}}
+	key := alarmVaultBoundCapped + ":" + vaultID.String() + "/age"
+
+	for sweep := 1; sweep <= retentionDeferralAlarmAfter+1; sweep++ {
+		crossing := sealedChunkMeta(nextEvaluation().Add(-bound + step/2))
+		cm.listMu.Lock()
+		cm.byID[crossing.ID] = crossing
+		cm.listMu.Unlock()
+
+		r.sweep(rules)
+
+		if !g.vaultAgeBoundCapped(vaultID) {
+			t.Fatalf("sweep %d: a chunk crossing the bound during the sweep must leave it capped", sweep)
+		}
+		if spy.has(alarmRetentionDeferred + ":" + vaultID.String()) {
+			t.Fatalf("sweep %d: the delete disposition never defers, so %s must not raise", sweep, alarmRetentionDeferred)
+		}
+	}
+
+	detail, ok := spy.detail(key)
+	if !ok {
+		t.Fatal("vault-bound-capped must be standing")
+	}
+	if !strings.Contains(detail, "no "+alarmRetentionDeferred+" alarm accompanies this one") {
+		t.Fatalf("on the delete disposition the capped detail must not send the operator to %s: %q", alarmRetentionDeferred, detail)
+	}
+}
+
+func TestBoundCappedFollowUpByDisposition(t *testing.T) {
+	t.Parallel()
+	pointsAtDeferral := "the " + alarmRetentionDeferred + " alarm stands for this vault"
+	for _, c := range []struct {
+		disposition string
+		want        string
+	}{
+		{system.RetentionDispositionRoute, pointsAtDeferral},
+		{system.RetentionDispositionTransfer, pointsAtDeferral},
+		{system.RetentionDispositionDelete, "never defers"},
+		{"", "never defers"},
+	} {
+		if got := boundCappedFollowUp(c.disposition); !strings.Contains(got, c.want) {
+			t.Errorf("boundCappedFollowUp(%q) = %q, want it to contain %q", c.disposition, got, c.want)
+		}
+	}
+}
+
+func (s *alertSpy) detail(id string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.set[id]
+	return d, ok
 }
 
 // TestCheckBoundViolationsRestartDoesNotCarryOverState pins the restart
@@ -425,8 +516,8 @@ func TestRetentionSweepAllReleasesBoundCapsOnLeadershipLoss(t *testing.T) {
 	vaultID := glid.New()
 	g.SetVaultGuard(vaultID, "deposed", []string{"volA"}, 10*gib, "", "")
 	o.diskGuard = g
-	g.setVaultAgeBoundCapped(spy, vaultID, true)
-	g.setVaultChunkCountBoundCapped(spy, vaultID, true)
+	g.setVaultAgeBoundCapped(spy, vaultID, true, "")
+	g.setVaultChunkCountBoundCapped(spy, vaultID, true, "")
 	if !g.vaultAgeBoundCapped(vaultID) || !g.vaultChunkCountBoundCapped(vaultID) {
 		t.Fatal("fixture setup: both bounds must start capped")
 	}
