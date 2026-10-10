@@ -13,6 +13,7 @@ import (
 
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gastrolog/internal/blobstore"
@@ -25,6 +26,7 @@ import (
 	"gastrolog/internal/query"
 	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
+	"gastrolog/internal/waittest"
 )
 
 // syntheticPlacements creates a Placements slice with a leader using a synthetic storage ID.
@@ -762,40 +764,27 @@ func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestN
 	// Drain post-seal + replication jobs for the newly-sealed chunk.
 	// A late ImportSealedChunk would recreate the chunk on a follower
 	// after the transition delete has fired.
-	requireIdle(t, leaderNode.orch.Scheduler(), 30*time.Second)
+	requireIdle(t, leaderNode.orch.Scheduler())
 }
 
 // assertVaultDirEmpty verifies that an instance's filesystem directory contains no
 // chunk subdirectories on ANY node. This goes below the chunk manager API —
 // it checks the actual filesystem to catch silent delete failures, leaked
-// directories, and stale files.
+// directories, and stale files. Chunk deletion is asynchronous, so it waits
+// for the directories to go, failing when the remaining set stops changing.
 func (h *clusterHarness) assertVaultDirEmpty(t *testing.T, vaultIdx int) {
 	t.Helper()
-	// Poll briefly — async chunk deletion may lag under CPU contention.
-	deadline := time.Now().Add(60 * time.Second)
-	for {
-		allEmpty := true
+	waittest.Progress(t, fmt.Sprintf("vault %d chunk directories removed on every node", vaultIdx), func() (string, bool) {
+		var remaining []string
 		for _, nid := range h.allNodeIDs() {
-			if len(h.chunkDirsOnNode(nid, vaultIdx)) > 0 {
-				allEmpty = false
-				break
+			if dirs := h.chunkDirsOnNode(nid, vaultIdx); len(dirs) > 0 {
+				slices.Sort(dirs)
+				remaining = append(remaining, fmt.Sprintf("%s=%v", nid, dirs))
 			}
 		}
-		if allEmpty {
-			return
-		}
-		if time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	for _, nid := range h.allNodeIDs() {
-		chunkDirs := h.chunkDirsOnNode(nid, vaultIdx)
-		if len(chunkDirs) > 0 {
-			t.Errorf("vault %d on %s: %d chunk directories still on disk: %v",
-				vaultIdx, nid, len(chunkDirs), chunkDirs)
-		}
-	}
+		slices.Sort(remaining)
+		return strings.Join(remaining, "; "), len(remaining) == 0
+	})
 }
 
 func (h *clusterHarness) chunkDirsOnNode(nid string, vaultIdx int) []string {
@@ -834,29 +823,26 @@ func (h *clusterHarness) listChunkDirsOnNode(t *testing.T, nodeID string, vaultI
 // Multi-node drain tests
 // ==========================================================================
 
-// waitForDrainJob polls the scheduler until the drain job completes or times out.
-// Uses ListJobs which returns snapshots — no race with the scheduler goroutine.
-func waitForDrainJob(t *testing.T, orch *Orchestrator, vaultID glid.GLID, timeout time.Duration) {
+// waitForDrainJob waits until the vault's drain job completes, failing when the
+// job fails or the scheduler's jobs stop making progress.
+func waitForDrainJob(t *testing.T, orch *Orchestrator, vaultID glid.GLID) {
 	t.Helper()
 	jobName := "drain:" + vaultID.String()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		// ListJobs returns snapshot copies under the scheduler's lock.
+	waittest.Progress(t, "drain job "+jobName+" completes", func() (string, bool) {
 		for _, j := range orch.Scheduler().ListJobs() {
 			if j.Name != jobName {
 				continue
 			}
-			snap := j.Snapshot()
-			if snap.Progress != nil && snap.Progress.Status == JobStatusCompleted {
-				return
+			p := j.Snapshot().Progress
+			if p != nil && p.Status == JobStatusFailed {
+				t.Fatalf("drain job failed: %s", p.Error)
 			}
-			if snap.Progress != nil && snap.Progress.Status == JobStatusFailed {
-				t.Fatalf("drain job failed: %s", snap.Progress.Error)
+			if p != nil && p.Status == JobStatusCompleted {
+				return "", true
 			}
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("drain job did not complete within %s", timeout)
+		return jobsProgress(orch.Scheduler()), false
+	})
 }
 
 // TestClusterDrainVaultRecordsArriveOnDestination drains a file-backed vault
@@ -872,34 +858,48 @@ func waitForDrainJob(t *testing.T, orch *Orchestrator, vaultID glid.GLID, timeou
 // policy from system. Regression test for a gap where applyRotationPolicy was
 // only called in buildInstance but not buildInstanceForStorage.
 
-// waitForTransitions polls until all transition:* jobs in the scheduler
-// have completed. Transitions run as one-shot scheduler jobs, so tests
-// that call sweep() need to wait.
-func waitForTransitions(t *testing.T, orch *Orchestrator, timeout time.Duration) {
+// requireIdle waits until the scheduler has no one-time jobs pending, failing
+// when its jobs stop making progress.
+func requireIdle(t *testing.T, sched *Scheduler) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if !orch.scheduler.HasPendingPrefix("transition:") {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("transition jobs did not complete within timeout")
+	waittest.Progress(t, "scheduler drains its one-time jobs", func() (string, bool) {
+		return jobsProgress(sched), sched.PendingOnce() == 0
+	})
 }
 
-// requireIdle drains the scheduler's one-time jobs and FAILS if the budget
-// expires first.
-//
-// Every WaitIdle call site in this package used to discard the outcome, so a
-// scheduler that had not finished draining looked exactly like one that had.
-// That is a test which reports success for a state it never reached; under
-// full-suite load it becomes a test which reports failure for a bug that is not
-// there. Route drains through here so a blown budget says so.
-func requireIdle(t *testing.T, sched *Scheduler, budget time.Duration) {
-	t.Helper()
-	if !sched.WaitIdle(budget) {
-		t.Fatalf("scheduler still had one-time jobs pending after %s", budget)
+// pipelineProgress snapshots the ingest pipeline's stage counters per vault,
+// the progress measure for waits on ingested records.
+func pipelineProgress(orch *Orchestrator) string {
+	parts := []string{fmt.Sprintf("routed=%d", orch.pipeline.RouteStats().Routed)}
+	for _, st := range orch.pipeline.AppendStats() {
+		parts = append(parts, fmt.Sprintf("%s queued=%d appended=%d durable=%d completed=%d",
+			st.VaultID, st.QueueDepth, st.RecordsAppended, st.RecordsDurable, st.SegmentsCompleted))
 	}
+	for _, st := range orch.pipeline.PublishStats() {
+		parts = append(parts, fmt.Sprintf("%s published=%d", st.VaultID, st.Published))
+	}
+	for _, st := range orch.pipeline.CollectStats() {
+		parts = append(parts, fmt.Sprintf("%s collected-records=%d", st.VaultID, st.CollectedRecords))
+	}
+	slices.Sort(parts[1:])
+	return strings.Join(parts, "; ")
+}
+
+// jobsProgress snapshots every scheduled job — name, last run, and live
+// progress — the progress measure for waits on scheduled work.
+func jobsProgress(sched *Scheduler) string {
+	jobs := sched.ListJobs()
+	lines := make([]string, 0, len(jobs)+1)
+	lines = append(lines, fmt.Sprintf("pending-once=%d", sched.PendingOnce()))
+	for _, j := range jobs {
+		s := fmt.Sprintf("%s last=%d", j.Name, j.LastRun.UnixNano())
+		if p := j.Snapshot().Progress; p != nil {
+			s += fmt.Sprintf(" status=%v chunks=%d/%d records=%d err=%q", p.Status, p.ChunksDone, p.ChunksTotal, p.RecordsDone, p.Error)
+		}
+		lines = append(lines, s)
+	}
+	slices.Sort(lines[1:])
+	return strings.Join(lines, "; ")
 }
 
 // testClock is an advanceable time source safe to hand to the orchestrator.

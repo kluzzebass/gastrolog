@@ -359,7 +359,8 @@ configure() {
   # the cluster.
   $GLOG config vault create --addr "$S" --name "first-vault" \
     --type file --storage-class 1 --replication-factor "$NODES" \
-    --rotation-policy "1M-1m" --retention-policy "1h-retain" 2>&1 | sed 's/^/  /'
+    --rotation-policy "1M-1m" --retention-policy "1h-retain" \
+    --retention-disposition route 2>&1 | sed 's/^/  /'
   $GLOG config vault create --addr "$S" --name "second-vault" \
     --type file --storage-class 1 --replication-factor "$NODES" \
     --cloud-service "S3" \

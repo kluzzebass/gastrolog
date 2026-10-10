@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"fmt"
 	"net"
 	"path/filepath"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"gastrolog/internal/raftwal"
 	"gastrolog/internal/vaultraft"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+	"gastrolog/internal/waittest"
 
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
@@ -89,7 +91,7 @@ func TestCreateGroupRestoreWithInstanceDoesNotDeadlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bootstrap CreateGroup: %v", err)
 	}
-	waitForRaftLeader(t, g1, 5*time.Second)
+	waitForRaftLeader(t, g1)
 
 	now := time.Now().UTC()
 	chunkID := chunk.ChunkID(glid.New())
@@ -131,34 +133,22 @@ func TestCreateGroupRestoreWithInstanceDoesNotDeadlock(t *testing.T) {
 		done <- err
 	}()
 
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("restore CreateGroup: %v", err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("CreateGroup deadlocked during snapshot restore with registered instance")
+	if err := waittest.Recv(t, "restore CreateGroup with a registered instance returns", done, nil); err != nil {
+		t.Fatalf("restore CreateGroup: %v", err)
 	}
 
-	// Deferred after-restore should complete without hanging the test.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, loaded := orch.ctlRestorePending.Load(vaultID); !loaded {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("timed out waiting for deferred after-restore pass")
+	waittest.Progress(t, "deferred after-restore pass completes", func() (string, bool) {
+		_, pending := orch.ctlRestorePending.Load(vaultID)
+		return fmt.Sprintf("pending=%v", pending), !pending
+	})
 }
 
-func waitForRaftLeader(t *testing.T, g *raftgroup.Group, timeout time.Duration) {
+// waitForRaftLeader waits for g to elect a leader, failing when raft state,
+// term and log index stop changing.
+func waitForRaftLeader(t *testing.T, g *raftgroup.Group) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if g.Raft.Leader() != "" {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("timed out waiting for raft leader")
+	waittest.Progress(t, "raft group elects a leader", func() (string, bool) {
+		st := g.Raft.Stats()
+		return fmt.Sprintf("state=%s term=%s last_log=%s", st["state"], st["term"], st["last_log_index"]), g.Raft.Leader() != ""
+	})
 }

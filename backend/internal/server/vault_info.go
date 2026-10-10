@@ -55,78 +55,108 @@ func (s *VaultServer) GetVault(
 	return connect.NewResponse(&apiv1.GetVaultResponse{Vault: info}), nil
 }
 
-// GetStats returns overall statistics for a vault.
+// GetStats returns cluster-wide figures for every vault, or for the one named
+// in the request. Each vault is counted once from its manifest, so a vault
+// homed on N nodes reports its chunk set once rather than N copies, and every
+// vault-ctl voter answers the same.
 func (s *VaultServer) GetStats(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetStatsRequest],
 ) (*connect.Response[apiv1.GetStatsResponse], error) {
-	vaults, err := s.resolveVaultIDs(req.Msg.Vault)
+	vaults, err := s.statsVaultIDs(ctx, req.Msg.Vault)
 	if err != nil {
 		return nil, err
 	}
 
-	// Separate local from remote so each gets the right stats source.
-	localIDs := s.orch.ListVaults()
-	localSet := make(map[glid.GLID]struct{}, len(localIDs))
-	for _, id := range localIDs {
-		localSet[id] = struct{}{}
-	}
-
 	resp := &apiv1.GetStatsResponse{}
-
 	for _, vaultID := range vaults {
-		if _, local := localSet[vaultID]; !local {
-			continue // handled below via peer broadcasts
-		}
-		vaultMetas, err := s.orch.ListAllChunkMetas(vaultID)
-		if err != nil {
+		stat := s.vaultStats(ctx, vaultID)
+		if stat == nil {
 			continue
 		}
-		metas := make([]chunk.ChunkMeta, len(vaultMetas))
-		for i, tm := range vaultMetas {
-			metas[i] = tm.ChunkMeta
-		}
 		resp.TotalVaults++
-		vaultStat := s.buildVaultStats(ctx, vaultID, metas)
-		s.accumulateGlobalStats(resp, vaultStat, metas)
-		resp.VaultStats = append(resp.VaultStats, vaultStat)
+		resp.TotalChunks += stat.ChunkCount
+		resp.TotalRecords += stat.RecordCount
+		resp.TotalBytes += stat.DataBytes
+		resp.SealedChunks += stat.SealedChunks
+		if stat.OldestRecord != nil {
+			updateTimeBounds(&resp.OldestRecord, stat.OldestRecord.AsTime(), (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.Before(b) })
+		}
+		if stat.NewestRecord != nil {
+			updateTimeBounds(&resp.NewestRecord, stat.NewestRecord.AsTime(), (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.After(b) })
+		}
+		resp.VaultStats = append(resp.VaultStats, stat)
 	}
-
-	// Include remote vaults from peer broadcasts.
-	// When no vault filter was provided, pass nil so all remote vaults are included.
-	var remoteFilter []glid.GLID
-	if req.Msg.Vault != "" {
-		remoteFilter = vaults
-	}
-	s.accumulateRemoteVaultStats(ctx, localIDs, resp, remoteFilter)
 
 	s.fillProcessMetrics(resp)
 
 	return connect.NewResponse(resp), nil
 }
 
-func (s *VaultServer) resolveVaultIDs(vaultFilter string) ([]glid.GLID, error) {
+// statsVaultIDs resolves the vaults GetStats reports on: the named vault, or
+// every configured vault plus any registered here ahead of its config entry.
+func (s *VaultServer) statsVaultIDs(ctx context.Context, vaultFilter string) ([]glid.GLID, error) {
+	if vaultFilter != "" {
+		return s.namedStatsVault(ctx, vaultFilter)
+	}
 	localVaults := s.orch.ListVaults()
-	if vaultFilter == "" {
+	if s.cfgStore == nil {
 		return localVaults, nil
 	}
+	allCfg, err := s.cfgStore.ListVaults(ctx)
+	if err != nil {
+		return nil, errInternal(err)
+	}
+	ids := make([]glid.GLID, 0, len(allCfg))
+	seen := make(map[glid.GLID]struct{}, len(allCfg))
+	for _, vc := range allCfg {
+		seen[vc.ID] = struct{}{}
+		ids = append(ids, vc.ID)
+	}
+	for _, id := range localVaults {
+		if _, ok := seen[id]; !ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+func (s *VaultServer) namedStatsVault(ctx context.Context, vaultFilter string) ([]glid.GLID, error) {
 	vaultID, connErr := parseUUID(vaultFilter)
 	if connErr != nil {
 		return nil, connErr
 	}
-	// Local vault — fast path.
-	if slices.Contains(localVaults, vaultID) {
+	if slices.Contains(s.orch.ListVaults(), vaultID) {
 		return []glid.GLID{vaultID}, nil
 	}
-	// Check config store for remote vaults.
 	if s.cfgStore != nil {
-		if cfg, err := s.cfgStore.GetVault(context.Background(), vaultID); err == nil && cfg != nil {
+		if cfg, err := s.cfgStore.GetVault(ctx, vaultID); err == nil && cfg != nil {
 			return []glid.GLID{vaultID}, nil
 		}
 	}
 	return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
 }
 
+// vaultStats returns the vault's figures from its manifest. A node that can
+// read no manifest for the vault falls back to a peer's broadcast, which
+// describes that peer's own copy. Nil when neither source has the vault.
+func (s *VaultServer) vaultStats(ctx context.Context, vaultID glid.GLID) *apiv1.VaultStats {
+	metas, err := s.orch.ListClusterChunkMetasIncludingOpen(vaultID)
+	if err == nil {
+		return s.buildVaultStats(ctx, vaultID, metas)
+	}
+	if !errors.Is(err, orchestrator.ErrNoVaultManifest) && !errors.Is(err, orchestrator.ErrVaultNotFound) {
+		return nil
+	}
+	if s.peerStats == nil {
+		return nil
+	}
+	return s.peerStats.FindVaultStats(vaultID.String())
+}
+
+// buildVaultStats sums a vault's chunk set. DataBytes is the logical size of
+// its records, one copy of each chunk: replica copies, indexes, and local disk
+// use are per-node facts that a cluster-wide figure does not carry.
 func (s *VaultServer) buildVaultStats(ctx context.Context, vaultID glid.GLID, metas []chunk.ChunkMeta) *apiv1.VaultStats {
 	stat := &apiv1.VaultStats{
 		Id:         vaultID.ToProto(),
@@ -144,43 +174,11 @@ func (s *VaultServer) buildVaultStats(ctx context.Context, vaultID glid.GLID, me
 			stat.ActiveChunks++
 		}
 		stat.RecordCount += meta.RecordCount
-		s.accumulateChunkBytes(stat, vaultID, meta)
+		stat.DataBytes += meta.Bytes
 		updateTimeBounds(&stat.OldestRecord, meta.WriteStart, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.Before(b) })
 		updateTimeBounds(&stat.NewestRecord, meta.WriteEnd, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.After(b) })
 	}
 	return stat
-}
-
-func (s *VaultServer) accumulateChunkBytes(stat *apiv1.VaultStats, vaultID glid.GLID, meta chunk.ChunkMeta) {
-	// An evicted cloud-backed chunk has nothing local to reclaim — it must
-	// not fall back to logical Bytes (the object still exists in the cloud
-	// store, at CloudBytes, a currency this local-disk stat never touches).
-	// Same rule as chunk.DiskClaim.
-	if meta.CloudBacked && meta.DiskBytes == 0 {
-		return
-	}
-	if meta.DiskBytes > 0 {
-		stat.DataBytes += meta.DiskBytes
-		return
-	}
-	stat.DataBytes += meta.Bytes
-	if sizes, err := s.orch.IndexSizes(vaultID, meta.ID); err == nil {
-		for _, size := range sizes {
-			stat.IndexBytes += size
-		}
-	}
-}
-
-func (s *VaultServer) accumulateGlobalStats(resp *apiv1.GetStatsResponse, stat *apiv1.VaultStats, metas []chunk.ChunkMeta) {
-	resp.TotalChunks += int64(len(metas))
-	resp.TotalRecords += stat.RecordCount
-	resp.TotalBytes += stat.DataBytes + stat.IndexBytes
-	resp.SealedChunks += stat.SealedChunks
-
-	for _, meta := range metas {
-		updateTimeBounds(&resp.OldestRecord, meta.WriteStart, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.Before(b) })
-		updateTimeBounds(&resp.NewestRecord, meta.WriteEnd, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.After(b) })
-	}
 }
 
 func updateTimeBounds(field **timestamppb.Timestamp, ts time.Time, asTime func(*timestamppb.Timestamp) time.Time, isBetter func(time.Time, time.Time) bool) {
@@ -209,60 +207,6 @@ func (s *VaultServer) fillProcessMetrics(resp *apiv1.GetStatsResponse) {
 	}
 }
 
-// accumulateRemoteVaultStats adds stats from remote vaults (via peer broadcasts)
-// to the GetStats response. localVaults are skipped (already counted).
-// If filter is non-empty, only the specified vaults are included.
-func (s *VaultServer) accumulateRemoteVaultStats(ctx context.Context, localVaults []glid.GLID, resp *apiv1.GetStatsResponse, filter []glid.GLID) {
-	if s.cfgStore == nil || s.peerStats == nil {
-		return
-	}
-	allCfg, err := s.cfgStore.ListVaults(ctx)
-	if err != nil {
-		return
-	}
-
-	localSet := make(map[glid.GLID]struct{}, len(localVaults))
-	for _, id := range localVaults {
-		localSet[id] = struct{}{}
-	}
-
-	// If a filter was provided, only include those specific remote vaults.
-	var wantedSet map[glid.GLID]struct{}
-	if len(filter) > 0 {
-		wantedSet = make(map[glid.GLID]struct{}, len(filter))
-		for _, id := range filter {
-			wantedSet[id] = struct{}{}
-		}
-	}
-
-	for _, vc := range allCfg {
-		if _, local := localSet[vc.ID]; local {
-			continue
-		}
-		if wantedSet != nil {
-			if _, wanted := wantedSet[vc.ID]; !wanted {
-				continue
-			}
-		}
-		vs := s.peerStats.FindVaultStats(vc.ID.String())
-		if vs == nil {
-			continue
-		}
-		resp.TotalVaults++
-		resp.TotalChunks += vs.ChunkCount
-		resp.TotalRecords += vs.RecordCount
-		resp.TotalBytes += vs.DataBytes + vs.IndexBytes
-		resp.SealedChunks += vs.SealedChunks
-		resp.VaultStats = append(resp.VaultStats, vs)
-		if vs.OldestRecord != nil {
-			updateTimeBounds(&resp.OldestRecord, vs.OldestRecord.AsTime(), (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.Before(b) })
-		}
-		if vs.NewestRecord != nil {
-			updateTimeBounds(&resp.NewestRecord, vs.NewestRecord.AsTime(), (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.After(b) })
-		}
-	}
-}
-
 // allVaultInfos returns VaultInfo for every vault known to the config store,
 // enriched with runtime stats from the local orchestrator or peer broadcasts.
 // Vaults registered locally but missing from the config store (e.g. single-node
@@ -282,7 +226,7 @@ func (s *VaultServer) allVaultInfos(ctx context.Context) []*apiv1.VaultInfo {
 			seen := make(map[glid.GLID]struct{}, len(allCfg))
 			for _, vc := range allCfg {
 				seen[vc.ID] = struct{}{}
-				infos = append(infos, s.vaultInfoFromConfig(vc, localSet))
+				infos = append(infos, s.vaultInfoFromConfig(ctx, vc, localSet))
 			}
 			// Include local vaults not yet in the config store (race during creation).
 			for _, id := range localIDs {
@@ -314,7 +258,7 @@ func (s *VaultServer) buildVaultInfo(ctx context.Context, id glid.GLID) *apiv1.V
 	if s.cfgStore != nil {
 		cfg, err := s.cfgStore.GetVault(ctx, id)
 		if err == nil && cfg != nil {
-			return s.vaultInfoFromConfig(*cfg, localSet)
+			return s.vaultInfoFromConfig(ctx, *cfg, localSet)
 		}
 	}
 
@@ -326,26 +270,23 @@ func (s *VaultServer) buildVaultInfo(ctx context.Context, id glid.GLID) *apiv1.V
 	return nil
 }
 
-// vaultInfoFromConfig builds a VaultInfo from a config store entry, enriching
-// with runtime stats from the local orchestrator (if local) or peer broadcasts
-// (if remote).
-func (s *VaultServer) vaultInfoFromConfig(cfg system.VaultConfig, localSet map[glid.GLID]struct{}) *apiv1.VaultInfo {
+// vaultInfoFromConfig builds a VaultInfo from a config store entry, with the
+// vault's chunk and record counts from the same source as GetStats.
+func (s *VaultServer) vaultInfoFromConfig(ctx context.Context, cfg system.VaultConfig, localSet map[glid.GLID]struct{}) *apiv1.VaultInfo {
 	info := &apiv1.VaultInfo{
 		Id:      cfg.ID.ToProto(),
 		Name:    cfg.Name,
 		Enabled: cfg.Enabled,
 	}
 
-	// Enrich with runtime stats. Local instances are authoritative; peer
-	// broadcast stats are only used for purely remote vaults where we
-	// have no local data. Mixing the two double-counts shared instances.
-	_, registered := localSet[cfg.ID]
-	if registered {
+	if _, registered := localSet[cfg.ID]; registered {
 		info.Enabled = s.orch.IsVaultEnabled(cfg.ID)
-		s.enrichLocalVaultInfo(info, cfg.ID)
 	} else {
 		info.Remote = true
-		s.enrichRemoteVaultInfo(info, cfg.ID)
+	}
+	if stat := s.vaultStats(ctx, cfg.ID); stat != nil {
+		info.ChunkCount = stat.ChunkCount
+		info.RecordCount = stat.RecordCount
 	}
 	s.fillAdmissionRefused(info, cfg.ID)
 
@@ -396,29 +337,6 @@ func admissionCauseToProto(c orchestrator.VaultAdmissionCause) apiv1.VaultAdmiss
 	}
 }
 
-func (s *VaultServer) enrichLocalVaultInfo(info *apiv1.VaultInfo, id glid.GLID) {
-	metas, err := s.orch.ListAllChunkMetas(id)
-	if err != nil {
-		return
-	}
-	info.ChunkCount = int64(len(metas))
-	for _, m := range metas {
-		info.RecordCount += m.RecordCount
-	}
-}
-
-func (s *VaultServer) enrichRemoteVaultInfo(info *apiv1.VaultInfo, id glid.GLID) {
-	if s.peerStats == nil {
-		return
-	}
-	vs := s.peerStats.FindVaultStats(id.String())
-	if vs == nil {
-		return
-	}
-	info.RecordCount += vs.RecordCount
-	info.ChunkCount += vs.ChunkCount
-}
-
 // vaultInfoFromLocal builds a VaultInfo purely from the local orchestrator.
 // Used as fallback when the config store is unavailable or missing the entry.
 func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id glid.GLID) *apiv1.VaultInfo {
@@ -427,16 +345,12 @@ func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id glid.GLID) *api
 		Enabled: s.orch.IsVaultEnabled(id),
 	}
 
-	// Try to get name from config store even in fallback path.
-	if cfg, err := s.getFullVaultConfig(ctx, id); err == nil {
+	if stat := s.vaultStats(ctx, id); stat != nil {
+		info.Name = stat.Name
+		info.ChunkCount = stat.ChunkCount
+		info.RecordCount = stat.RecordCount
+	} else if cfg, err := s.getFullVaultConfig(ctx, id); err == nil {
 		info.Name = cfg.Name
-	}
-
-	if metas, err := s.orch.ListLocalChunkMetas(id); err == nil {
-		info.ChunkCount = int64(len(metas))
-		for _, m := range metas {
-			info.RecordCount += m.RecordCount
-		}
 	}
 	s.fillAdmissionRefused(info, id)
 

@@ -19,6 +19,7 @@ package orchestrator_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/pipeline/ingestion"
+	"gastrolog/internal/waittest"
 )
 
 // blockedDigester holds every record until release is closed, pinning the
@@ -64,15 +66,23 @@ func (f *saturatingIngester) Run(ctx context.Context, out chan<- ingestion.Inges
 	}
 }
 
-func expectAlive(t *testing.T, events <-chan bool, want bool) {
-	t.Helper()
-	select {
-	case got := <-events:
-		if got != want {
-			t.Fatalf("alive event = %v, want %v", got, want)
+// ingesterProgress snapshots the shared IngesterStats of id, the progress
+// measure for waits on that ingester's runs.
+func ingesterProgress(orch *orchestrator.Orchestrator, id glid.GLID) func() string {
+	return func() string {
+		st := orch.GetIngesterStats(id)
+		if st == nil {
+			return "no stats"
 		}
-	case <-time.After(10 * time.Second):
-		t.Fatalf("timed out waiting for alive=%v event", want)
+		return fmt.Sprintf("ingested=%d errors=%d alive=%v",
+			st.MessagesIngested.Load(), st.Errors.Load(), st.Alive.Load())
+	}
+}
+
+func expectAlive(t *testing.T, events <-chan bool, want bool, progress func() string) {
+	t.Helper()
+	if got := waittest.Recv(t, fmt.Sprintf("alive=%v event", want), events, progress); got != want {
+		t.Fatalf("alive event = %v, want %v", got, want)
 	}
 }
 
@@ -110,13 +120,14 @@ func TestIngesterRebuildUnderSaturationKeepsAliveTruth(t *testing.T) {
 	}
 
 	id := glid.New()
+	progress := ingesterProgress(orch, id)
 	first := &saturatingIngester{sent: make(chan struct{}, 64)}
 	if err := orch.ReconcileIngesters(saturatedFloodDesired(id, "1", func() (ingestion.Ingester, error) {
 		return first, nil
 	})); err != nil {
 		t.Fatalf("first reconcile: %v", err)
 	}
-	expectAlive(t, aliveCh, true)
+	expectAlive(t, aliveCh, true, progress)
 
 	// Saturate deterministically. Absorption capacity of the chain: the 4
 	// digestion workers hold one record each (pinned in Digest), the
@@ -124,18 +135,10 @@ func TestIngesterRebuildUnderSaturationKeepsAliveTruth(t *testing.T) {
 	// holds 1 (blocked in the queue send), and the adapter holds 1 (blocked
 	// forwarding to the pump). Exactly 7 sends complete; the 8th parks the
 	// run mid-send, wakeable only by cancellation — the field state.
-	for range 7 {
-		select {
-		case <-first.sent:
-		case <-time.After(10 * time.Second):
-			t.Fatal("pipeline did not absorb the expected sends (did a stage capacity change?)")
-		}
+	for i := range 7 {
+		waittest.Recv(t, fmt.Sprintf("pipeline absorbs send %d of 7 (did a stage capacity change?)", i+1), first.sent, progress)
 	}
-	select {
-	case <-dig.entered:
-	case <-time.After(10 * time.Second):
-		t.Fatal("no record reached the digester")
-	}
+	waittest.Recv(t, "a record reaches the digester", dig.entered, progress)
 
 	// Rebuild under saturation: param change forces stop+start on the same
 	// shared IngesterStats.
@@ -149,8 +152,8 @@ func TestIngesterRebuildUnderSaturationKeepsAliveTruth(t *testing.T) {
 	// Ordering is the fix: the old run's alive-false must land strictly
 	// before the new run's alive-true. Pre-fix the stream ended
 	// true,false — and IsIngesterRunning lied until the next rebuild.
-	expectAlive(t, aliveCh, false)
-	expectAlive(t, aliveCh, true)
+	expectAlive(t, aliveCh, false, progress)
+	expectAlive(t, aliveCh, true, progress)
 	if !orch.IsIngesterRunning(id) {
 		t.Fatal("rebuilt ingester must report running (stale alive-false clobbered the successor)")
 	}
@@ -165,7 +168,7 @@ func TestIngesterRebuildUnderSaturationKeepsAliveTruth(t *testing.T) {
 	if err := orch.ReconcileIngesters(nil); err != nil {
 		t.Fatalf("removal reconcile: %v", err)
 	}
-	expectAlive(t, aliveCh, false)
+	expectAlive(t, aliveCh, false, progress)
 	if orch.IsIngesterRunning(id) {
 		t.Fatal("removed ingester must report not running")
 	}
@@ -211,13 +214,10 @@ func TestIngesterAliveFalseDuringRetryBackoff(t *testing.T) {
 
 	// Attempt runs (alive toggles true then false on the run's failure);
 	// the manager then consults the retry delay and parks for an hour.
-	expectAlive(t, aliveCh, true)
-	expectAlive(t, aliveCh, false)
-	select {
-	case <-delayCalled:
-	case <-time.After(10 * time.Second):
-		t.Fatal("retry delay was never consulted")
-	}
+	progress := ingesterProgress(orch, id)
+	expectAlive(t, aliveCh, true, progress)
+	expectAlive(t, aliveCh, false, progress)
+	waittest.Recv(t, "retry delay is consulted", delayCalled, progress)
 	if orch.IsIngesterRunning(id) {
 		t.Fatal("failing ingester must report not running during retry backoff")
 	}

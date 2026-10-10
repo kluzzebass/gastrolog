@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"fmt"
 	"gastrolog/internal/glid"
 	"sync"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/pipeline/routing"
+	"gastrolog/internal/waittest"
 )
 
 // pressureAwareIngester is a test ingester that implements
@@ -64,6 +66,15 @@ func (p *pressureAwareIngester) Run(ctx context.Context, _ chan<- ingestion.Inge
 	}
 }
 
+// pressureProgress snapshots the pressure gate level and the ingest queue
+// fill it probes, the progress measure for waits on pressure behavior.
+func pressureProgress(orch *orchestrator.Orchestrator) func() string {
+	return func() string {
+		return fmt.Sprintf("level=%v depth=%d/%d",
+			orch.PressureGate().Level(), orch.IngestQueueDepth(), orch.IngestQueueCapacity())
+	}
+}
+
 // TestPressureGateInjectedIntoPressureAwareIngester verifies that the
 // orchestrator calls SetPressureGate on any ingester implementing the
 // ingestion.PressureAware interface, before Run is invoked.
@@ -80,11 +91,7 @@ func TestPressureGateInjectedIntoPressureAwareIngester(t *testing.T) {
 	defer func() { _ = orch.Stop() }()
 
 	// SetPressureGate must have fired before Run.
-	select {
-	case <-ing.gateSetCh:
-	case <-time.After(time.Second):
-		t.Fatal("SetPressureGate was not called within 1s of Start")
-	}
+	waittest.Recv(t, "SetPressureGate is called after Start", ing.gateSetCh, pressureProgress(orch))
 
 	// Gate must be non-nil.
 	if ing.gate == nil {
@@ -115,11 +122,9 @@ func TestPressureGateStartsInNormalState(t *testing.T) {
 	defer func() { _ = orch.Stop() }()
 
 	// Wait until the ingester has completed at least one Wait/cycle.
-	select {
-	case <-ing.releasedCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("ingester did not complete a cycle within 2s — gate may be blocking at startup")
-	}
+	progress := pressureProgress(orch)
+	waittest.Recv(t, "ingester completes a gate Wait cycle (gate may be blocking at startup)", ing.releasedCh,
+		func() string { return fmt.Sprintf("wait-calls=%d %s", ing.waitCalls.Load(), progress()) })
 
 	if orch.PressureGate().Level() != chanwatch.PressureNormal {
 		t.Errorf("gate level at steady state: got %v, want normal", orch.PressureGate().Level())
@@ -168,23 +173,16 @@ func TestPressureGateFiresTransitionCallbacks(t *testing.T) {
 		return int(fill.Load()), 100
 	})
 
-	// The gate runs on a 200ms interval; wait long enough for two ticks.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	// The gate ticks on an interval; the probe is read on the next tick.
+	waittest.Progress(t, "gate fires a transition callback", func() (string, bool) {
 		mu.Lock()
 		n := len(transitions)
 		mu.Unlock()
-		if n >= 1 {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		return fmt.Sprintf("transitions=%d level=%v", n, gate.Level()), n >= 1
+	})
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(transitions) == 0 {
-		t.Fatal("expected at least one transition, got 0")
-	}
 	if transitions[0].To != chanwatch.PressureCritical {
 		t.Errorf("first transition: got %v, want critical", transitions[0].To)
 	}
@@ -255,22 +253,12 @@ func TestPressureGateElevatesOnSupervisorQueueFill(t *testing.T) {
 	}
 	defer func() { _ = orch.Stop() }()
 
-	select {
-	case <-flood.started:
-	case <-time.After(time.Second):
-		t.Fatal("flood ingester did not start")
-	}
+	progress := pressureProgress(orch)
+	waittest.Recv(t, "flood ingester starts", flood.started, progress)
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if orch.PressureGate().Level() > chanwatch.PressureNormal {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	t.Fatalf("gate level = %v at depth %d/%d, want elevated or critical",
-		orch.PressureGate().Level(), orch.IngestQueueDepth(), orch.IngestQueueCapacity())
+	waittest.Progress(t, "gate elevates above normal under queue fill", func() (string, bool) {
+		return progress(), orch.PressureGate().Level() > chanwatch.PressureNormal
+	})
 }
 
 // TestPressureGateBlocksIngesterUnderSupervisorQueueFill verifies gate.Wait
@@ -288,28 +276,13 @@ func TestPressureGateBlocksIngesterUnderSupervisorQueueFill(t *testing.T) {
 	}
 	defer func() { _ = orch.Stop() }()
 
-	select {
-	case <-pa.gateSetCh:
-	case <-time.After(time.Second):
-		t.Fatal("SetPressureGate was not called")
-	}
-	select {
-	case <-flood.started:
-	case <-time.After(time.Second):
-		t.Fatal("flood ingester did not start")
-	}
+	progress := pressureProgress(orch)
+	waittest.Recv(t, "SetPressureGate is called", pa.gateSetCh, progress)
+	waittest.Recv(t, "flood ingester starts", flood.started, progress)
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if orch.PressureGate().Level() > chanwatch.PressureNormal {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if orch.PressureGate().Level() <= chanwatch.PressureNormal {
-		t.Fatalf("gate never elevated; depth %d/%d",
-			orch.IngestQueueDepth(), orch.IngestQueueCapacity())
-	}
+	waittest.Progress(t, "gate elevates above normal under queue fill", func() (string, bool) {
+		return progress(), orch.PressureGate().Level() > chanwatch.PressureNormal
+	})
 
 	gate := orch.PressureGate()
 	waitCtx, waitCancel := context.WithTimeout(context.Background(), 400*time.Millisecond)

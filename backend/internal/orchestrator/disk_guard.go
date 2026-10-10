@@ -664,7 +664,8 @@ func boundCappedFollowUp(disposition string) string {
 			disposition, retentionDeferralAlarmAfter, alarmRetentionDeferred)
 	default:
 		return fmt.Sprintf("This vault's retention disposition is delete, which never defers, so no %s alarm accompanies this one: "+
-			"the chunks still past the bound crossed it after the sweep evaluated it, or were still being deleted when the sweep re-checked.",
+			"the chunks still past the bound crossed it after the sweep evaluated it, or their deletes failed to commit. "+
+			"A chunk whose delete is committed no longer counts, even while nodes are still acknowledging it.",
 			alarmRetentionDeferred)
 	}
 }

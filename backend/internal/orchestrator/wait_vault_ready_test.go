@@ -3,12 +3,14 @@ package orchestrator_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
-	"time"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/waittest"
 )
 
 // notReadyVault builds a registered-but-not-ready vault: a non-nil instance
@@ -66,13 +68,8 @@ func TestWaitVaultReady_BecomesReady(t *testing.T) {
 	// Drive the readiness transition explicitly.
 	orch.RegisterVault(orchestrator.NewVault(id, nil))
 
-	select {
-	case err := <-errCh:
-		if err != nil {
-			t.Fatalf("WaitVaultReady after registration: %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("WaitVaultReady did not wake after vault registration")
+	if err := waittest.Recv(t, "WaitVaultReady wakes after vault registration", errCh, nil); err != nil {
+		t.Fatalf("WaitVaultReady after registration: %v", err)
 	}
 }
 
@@ -90,13 +87,8 @@ func TestWaitVaultReady_NeverReady_CtxCancel(t *testing.T) {
 
 	cancel() // caller gives up
 
-	select {
-	case err := <-errCh:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("expected context.Canceled, got %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("WaitVaultReady did not return after ctx cancel")
+	if err := waittest.Recv(t, "WaitVaultReady returns after ctx cancel", errCh, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
 
@@ -119,23 +111,14 @@ func TestWaitVaultReady_DeletedWhileWaiting(t *testing.T) {
 
 	// Wait until the waiter has evaluated readiness at least once and thus
 	// observed the vault present. Then remove it — deterministic ordering.
-	select {
-	case <-checked:
-	case <-time.After(10 * time.Second):
-		t.Fatal("waiter never evaluated readiness")
-	}
+	waittest.Recv(t, "waiter evaluates readiness", checked, nil)
 
 	if err := orch.UnregisterVault(id); err != nil {
 		t.Fatalf("UnregisterVault: %v", err)
 	}
 
-	select {
-	case err := <-errCh:
-		if !errors.Is(err, orchestrator.ErrVaultNotFound) {
-			t.Fatalf("expected ErrVaultNotFound after deletion, got %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("WaitVaultReady hung after vault deletion")
+	if err := waittest.Recv(t, "WaitVaultReady returns after vault deletion", errCh, nil); !errors.Is(err, orchestrator.ErrVaultNotFound) {
+		t.Fatalf("expected ErrVaultNotFound after deletion, got %v", err)
 	}
 }
 
@@ -153,11 +136,13 @@ func TestWaitVaultReady_ConcurrentWaiters(t *testing.T) {
 	const n = 32
 	var wg sync.WaitGroup
 	results := make([]error, n)
+	var woken atomic.Int32
 	wg.Add(n)
 	for i := range n {
 		go func() {
 			defer wg.Done()
 			results[i] = orch.WaitVaultReady(ctx, id)
+			woken.Add(1)
 		}()
 	}
 
@@ -166,11 +151,9 @@ func TestWaitVaultReady_ConcurrentWaiters(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("not all concurrent waiters woke after registration")
-	}
+	waittest.Recv(t, "every concurrent waiter wakes after registration", done, func() string {
+		return fmt.Sprintf("woken=%d/%d", woken.Load(), n)
+	})
 
 	for i, err := range results {
 		if err != nil {

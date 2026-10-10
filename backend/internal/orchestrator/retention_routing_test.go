@@ -2,15 +2,16 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"testing"
-	"time"
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/system"
+	"gastrolog/internal/waittest"
 )
 
 // dispositionFixture wires a source vault holding a sealed chunk plus a started
@@ -119,19 +120,14 @@ func seedSealedSourceVault(t *testing.T, orch *Orchestrator, sourceID glid.GLID,
 	return cm
 }
 
-// waitForRouteStats polls the orchestrator's pipeline routing counters until
-// cond is satisfied or the deadline elapses (the routing workers process
-// submitted records asynchronously).
+// waitForRouteStats waits until the orchestrator's pipeline routing counters
+// satisfy cond, failing when the pipeline's stage counters stop moving.
 func waitForRouteStats(t *testing.T, orch *Orchestrator, what string, cond func(*RouteStats) bool) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if cond(orch.GetRouteStats()) {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s (stats=%+v)", what, orch.GetRouteStats())
+	waittest.Progress(t, what, func() (string, bool) {
+		s := orch.GetRouteStats()
+		return fmt.Sprintf("%+v; %s", *s, pipelineProgress(orch)), cond(s)
+	})
 }
 
 // TestFireRetentionEventStreamsThroughPipeline verifies that firing a retention
@@ -285,11 +281,11 @@ func TestRetentionDispositionEmptyTreatedAsDelete(t *testing.T) {
 	assertNoRetentionFanOut(t, fx.orch, "empty disposition")
 }
 
-// assertNoRetentionFanOut gives the pipeline a brief grace window then asserts
-// that nothing was submitted to routing (no ingest, no match).
+// assertNoRetentionFanOut asserts that nothing was submitted to routing (no
+// ingest, no match). A retention submit returns only after routing has counted
+// the record, so the counters are final once the disposition call returns.
 func assertNoRetentionFanOut(t *testing.T, orch *Orchestrator, what string) {
 	t.Helper()
-	time.Sleep(50 * time.Millisecond)
 	if s := orch.GetRouteStats(); s.Routed != 0 {
 		t.Errorf("%s must skip pipeline fan-out, but %d records were ingested", what, s.Routed)
 	}
@@ -344,8 +340,8 @@ func TestTryRetainChunkSkipsDispositionWhenAlreadyPending(t *testing.T) {
 		r.tryRetainChunk(fx.sealedID, retentionRule{}, true)
 	}()
 
-	// Give the pipeline a grace window; the matched count must stay at 3.
-	time.Sleep(50 * time.Millisecond)
+	// A retention submit returns only after routing has counted the record,
+	// so the matched count is final once tryRetainChunk returns.
 	if s := fx.orch.GetRouteStats(); s.Matched != 3 {
 		t.Errorf("second sweep (alreadyPending=true) MUST NOT re-route; matched grew from 3 to %d (the storage-eating cascade bug)", s.Matched)
 	}

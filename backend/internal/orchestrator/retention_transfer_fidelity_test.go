@@ -91,7 +91,7 @@ func newSingleNodeVaultCtlOrch(t *testing.T, vaultID glid.GLID) (*Orchestrator, 
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
 	}
-	waitForRaftLeader(t, g, 5*time.Second)
+	waitForRaftLeader(t, g)
 
 	orch, err := New(Config{})
 	if err != nil {

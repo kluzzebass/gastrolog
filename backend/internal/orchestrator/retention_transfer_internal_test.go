@@ -10,6 +10,7 @@ package orchestrator
 // and deterministically without standing up Raft.
 
 import (
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -21,6 +22,7 @@ import (
 	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+	"gastrolog/internal/waittest"
 )
 
 // ackHolder applies AckChunkHolderCommand to fsm for chunkID/nodeID via the
@@ -81,13 +83,11 @@ func TestWaitForDestHoldersSucceedsAfterProgressTicks(t *testing.T) {
 	ackHolder(fsm, id, "node-B")
 	tick <- time.Now()
 
-	select {
-	case ok := <-done:
-		if !ok {
-			t.Fatal("want success once holders reach need via injected ticks")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("waitForDestHolders did not return after injected progress ticks")
+	ok := waittest.Recv(t, "waitForDestHolders returns after injected progress ticks", done, func() string {
+		return fmt.Sprintf("unread-ticks=%d", len(tick))
+	})
+	if !ok {
+		t.Fatal("want success once holders reach need via injected ticks")
 	}
 }
 
@@ -113,13 +113,8 @@ func TestWaitForDestHoldersStallsAfterMaxTicksWithNoProgress(t *testing.T) {
 		tick <- time.Now()
 	}
 
-	select {
-	case ok := <-done:
-		if ok {
-			t.Fatal("want stall-abort (false) when no new holder arrives within the stall window")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("waitForDestHolders did not return after exhausting the stall window")
+	if waittest.Recv(t, "waitForDestHolders returns after exhausting the stall ticks", done, nil) {
+		t.Fatal("want stall-abort (false) when no new holder arrives within the stall window")
 	}
 }
 

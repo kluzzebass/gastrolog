@@ -184,7 +184,7 @@ func TestSealResumeDoesNotSpendBudgetWhilePostSealIsInFlight(t *testing.T) {
 
 	// Let it finish and drain, then the budget applies as normal.
 	close(release)
-	requireIdle(t, orch.scheduler, postSealDrainBudget)
+	requireIdle(t, orch.scheduler)
 
 	for range maxSealResumeAttempts * 3 {
 		rec.ReconcileTick()

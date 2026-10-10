@@ -7,21 +7,36 @@ import (
 	"time"
 )
 
-func drainSubscription(t *testing.T, sub *JobSubscription, want int, timeout time.Duration) []JobEvent {
-	t.Helper()
+// drainSubscription takes up to want events already queued on sub. Publish
+// delivers to every subscriber's buffer before it returns, so whatever a
+// returned Publish delivered is queued.
+func drainSubscription(sub *JobSubscription, want int) []JobEvent {
 	var got []JobEvent
-	deadline := time.Now().Add(timeout)
-	for len(got) < want && time.Now().Before(deadline) {
+	for len(got) < want {
 		select {
 		case evt, ok := <-sub.Events():
 			if !ok {
 				return got
 			}
 			got = append(got, evt)
-		case <-time.After(20 * time.Millisecond):
+		default:
+			return got
 		}
 	}
 	return got
+}
+
+// requireClosed asserts sub's channel is already closed.
+func requireClosed(t *testing.T, sub *JobSubscription, what string) {
+	t.Helper()
+	select {
+	case _, ok := <-sub.Events():
+		if ok {
+			t.Errorf("%s: expected channel closed, got a value", what)
+		}
+	default:
+		t.Fatalf("%s: channel not closed", what)
+	}
 }
 
 func ev(kind JobEventKind, name string) JobEvent {
@@ -36,7 +51,7 @@ func TestJobEventBroker_SingleSubscriber(t *testing.T) {
 	defer cancel()
 
 	b.Publish(ev(JobEventScheduled, "job-a"))
-	got := drainSubscription(t, sub, 1, time.Second)
+	got := drainSubscription(sub, 1)
 	if len(got) != 1 || got[0].Kind != JobEventScheduled || got[0].Job.Name != "job-a" {
 		t.Errorf("unexpected events: %+v", got)
 	}
@@ -54,8 +69,8 @@ func TestJobEventBroker_FanOut(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		b.Publish(ev(JobEventScheduled, "job"))
 	}
-	gotA := drainSubscription(t, sa, 3, time.Second)
-	gotB := drainSubscription(t, sb, 3, time.Second)
+	gotA := drainSubscription(sa, 3)
+	gotB := drainSubscription(sb, 3)
 	if len(gotA) != 3 || len(gotB) != 3 {
 		t.Errorf("fan-out counts: A=%d B=%d, want 3 each", len(gotA), len(gotB))
 	}
@@ -83,8 +98,8 @@ func TestJobEventBroker_SlowSubscriberDropsRatherThanBlocks(t *testing.T) {
 		t.Errorf("Publish stalled (slow subscriber blocked others): %v for %d events", elapsed, total)
 	}
 
-	// Fast subscriber still receives — drain what's in its buffer quickly.
-	gotFast := drainSubscription(t, fast, 4, time.Second)
+	// Fast subscriber still receives — drain what's in its buffer.
+	gotFast := drainSubscription(fast, 4)
 	if len(gotFast) == 0 {
 		t.Error("fast subscriber received nothing")
 	}
@@ -103,14 +118,7 @@ func TestJobEventBroker_CancelClosesChannel(t *testing.T) {
 
 	cancel()
 
-	select {
-	case _, ok := <-sub.Events():
-		if ok {
-			t.Error("expected channel closed, got a value")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("channel not closed after cancel")
-	}
+	requireClosed(t, sub, "after cancel")
 }
 
 // TestJobEventBroker_CancelTwiceSafe verifies double-cancel is a no-op.
@@ -139,14 +147,7 @@ func TestJobEventBroker_Close(t *testing.T) {
 
 	b.Close()
 
-	select {
-	case _, ok := <-sub.Events():
-		if ok {
-			t.Error("expected closed channel")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("channel not closed after broker.Close")
-	}
+	requireClosed(t, sub, "after broker.Close")
 
 	// Publish after Close is a no-op.
 	b.Publish(ev(JobEventScheduled, "post-close"))
@@ -154,14 +155,7 @@ func TestJobEventBroker_Close(t *testing.T) {
 	// Subscribe after Close returns an already-closed channel.
 	late, cancelLate := b.Subscribe()
 	defer cancelLate()
-	select {
-	case _, ok := <-late.Events():
-		if ok {
-			t.Error("expected late subscription's channel to be closed")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("late subscription channel not closed")
-	}
+	requireClosed(t, late, "late subscription")
 }
 
 // TestJobEventBroker_ConcurrentPublishSubscribe hammers the broker from
@@ -183,17 +177,8 @@ func TestJobEventBroker_ConcurrentPublishSubscribe(t *testing.T) {
 		go func(sub *JobSubscription, counter *atomic.Int64, cancel func()) {
 			defer wg.Done()
 			defer cancel()
-			timeout := time.After(3 * time.Second)
-			for {
-				select {
-				case _, ok := <-sub.Events():
-					if !ok {
-						return
-					}
-					counter.Add(1)
-				case <-timeout:
-					return
-				}
+			for range sub.Events() {
+				counter.Add(1)
 			}
 		}(sub, received[i], cancel)
 	}
@@ -211,8 +196,8 @@ func TestJobEventBroker_ConcurrentPublishSubscribe(t *testing.T) {
 	}
 	pubWG.Wait()
 
-	// Give subscribers a chance to drain.
-	time.Sleep(200 * time.Millisecond)
+	// Close lets each subscriber drain its buffer before it sees the channel
+	// closed and exits.
 	b.Close()
 	wg.Wait()
 

@@ -226,35 +226,20 @@ func (s *Scheduler) HasPendingPrefix(prefix string) bool {
 	return false
 }
 
-// WaitIdle blocks until all one-time jobs (RunOnce / Submit) have completed,
-// reporting whether it got there before the timeout. Used in tests to drain
-// async post-seal / replication work before asserting.
-//
-// The bool is the point: this returned nothing, so a caller that ran out of
-// budget was indistinguishable from one that drained, and every test using it
-// asserted against a half-finished scheduler on a loaded machine — passing
-// alone, failing in the full suite. Callers in this package should go through
-// requireIdle rather than reading the bool by hand.
-func (s *Scheduler) WaitIdle(timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		s.mu.Lock()
-		pending := 0
-		// Same as HasPendingPrefix: a completed job is gone from s.jobs, and
-		// s.completed is keyed by job ID rather than name, so testing it here
-		// could never match.
-		for name := range s.jobs {
-			if sched, ok := s.schedules[name]; ok && sched == "once" {
-				pending++
-			}
+// PendingOnce counts one-time jobs (RunOnce / Submit) not yet completed.
+func (s *Scheduler) PendingOnce() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending := 0
+	// Same as HasPendingPrefix: a completed job is gone from s.jobs, and
+	// s.completed is keyed by job ID rather than name, so testing it here
+	// could never match.
+	for name := range s.jobs {
+		if sched, ok := s.schedules[name]; ok && sched == "once" {
+			pending++
 		}
-		s.mu.Unlock()
-		if pending == 0 {
-			return true
-		}
-		time.Sleep(10 * time.Millisecond)
 	}
-	return false
+	return pending
 }
 
 // MaxConcurrent returns the current concurrency limit.

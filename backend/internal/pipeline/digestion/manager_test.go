@@ -3,6 +3,7 @@ package digestion_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/record"
+	"gastrolog/internal/waittest"
 )
 
 type enrichDigester struct {
@@ -288,17 +290,9 @@ func TestManagerBackpressure(t *testing.T) {
 	<-out
 	<-out
 
-	done := make(chan struct{})
-	go func() {
-		<-out
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("third output arrived before queue had capacity")
-	}
+	waittest.Recv(t, "third output once the queue has capacity", out, func() string {
+		return fmt.Sprintf("input queued=%d", len(in))
+	})
 
 	close(in)
 	for range out {

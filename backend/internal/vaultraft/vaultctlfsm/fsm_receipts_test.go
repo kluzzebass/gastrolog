@@ -61,6 +61,36 @@ func TestRequestDeleteAddsPending(t *testing.T) {
 	}
 }
 
+// TestPendingDeleteIDsTracksInFlightDeletes pins that the ID listing names
+// exactly the deletes still awaiting acks: an entry joins on request and
+// leaves on its final ack, while a delete with acks outstanding stays.
+func TestPendingDeleteIDsTracksInFlightDeletes(t *testing.T) {
+	t.Parallel()
+
+	f := New()
+	if got := f.PendingDeleteIDs(); len(got) != 0 {
+		t.Fatalf("fresh FSM: PendingDeleteIDs = %v, want none", got)
+	}
+	acked, owed := chunk.NewChunkID(), chunk.NewChunkID()
+	now := time.Now()
+	for _, id := range []chunk.ChunkID{acked, owed} {
+		if err := f.Apply(&hraft.Log{Data: MarshalRequestDelete(id, now, "retention-ttl", []string{"node-A", "node-B"})}); err != nil {
+			t.Fatalf("apply request delete: %v", err)
+		}
+	}
+	for _, ack := range []struct {
+		id   chunk.ChunkID
+		node string
+	}{{acked, "node-A"}, {acked, "node-B"}, {owed, "node-A"}} {
+		if err := f.Apply(&hraft.Log{Data: MarshalAckDelete(ack.id, ack.node)}); err != nil {
+			t.Fatalf("apply ack: %v", err)
+		}
+	}
+	if got := f.PendingDeleteIDs(); !reflect.DeepEqual(got, []chunk.ChunkID{owed}) {
+		t.Fatalf("PendingDeleteIDs = %v, want only the delete still owed by node-B %v", got, owed)
+	}
+}
+
 func TestRequestDeleteIdempotent(t *testing.T) {
 	t.Parallel()
 

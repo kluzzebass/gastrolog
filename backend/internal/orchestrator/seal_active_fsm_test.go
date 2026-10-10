@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"log/slog"
 	"testing"
-	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
@@ -11,12 +10,6 @@ import (
 
 	hraft "github.com/hashicorp/raft"
 )
-
-// postSealDrainBudget bounds the scheduler drain these tests use to wait out
-// the async post-seal job. It is a give-up budget, not a timing assertion:
-// the job is in-process and finishes in milliseconds, and a test that needs
-// the whole budget has found a wedge, not a slow machine.
-const postSealDrainBudget = 30 * time.Second
 
 // directCtlApplier applies vault-ctl commands straight to a local FSM,
 // standing in for the Raft round trip. Announcer.apply swallows errors, so
@@ -93,7 +86,7 @@ func TestSealActivePromotesFSMEntryToSealed(t *testing.T) {
 	// The Sealing → Sealed half of the transition rides the post-seal job
 	// (GLCB assembly, then AnnounceSeal). Drain the scheduler rather than
 	// asserting on the intermediate state.
-	requireIdle(t, orch.scheduler, postSealDrainBudget)
+	requireIdle(t, orch.scheduler)
 
 	if got := fsmState(t, fsm, chunkID); got != chunk.ChunkStateSealed {
 		t.Fatalf("post-seal FSM state = %s, want sealed (entry stranded mid-seal)", got)
@@ -129,7 +122,7 @@ func TestSealActiveWithoutVaultCtlGroupIsNoop(t *testing.T) {
 	if sealed != 1 {
 		t.Fatalf("SealActive sealed %d vaults, want 1", sealed)
 	}
-	requireIdle(t, orch.scheduler, postSealDrainBudget)
+	requireIdle(t, orch.scheduler)
 
 	metas, err := inst.Chunks.List()
 	if err != nil {
@@ -159,7 +152,7 @@ func TestLocalTeardownSealDoesNotStrandManifestEntry(t *testing.T) {
 	}
 
 	orch.sealAndDeleteAllChunks(vaultInst, "teardown-test", vaultID)
-	requireIdle(t, orch.scheduler, postSealDrainBudget)
+	requireIdle(t, orch.scheduler)
 
 	if got := fsmState(t, fsm, chunkID); got != chunk.ChunkStateActive {
 		t.Fatalf("post-teardown FSM state = %s, want active — a local teardown must not "+

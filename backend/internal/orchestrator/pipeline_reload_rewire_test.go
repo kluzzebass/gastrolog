@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
@@ -61,7 +60,7 @@ func singleNodeVaultCtlGroup(t *testing.T, nodeID string, vaultID glid.GLID) *ra
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
 	}
-	waitForRaftLeader(t, g, 5*time.Second)
+	waitForRaftLeader(t, g)
 	return mgr
 }
 

@@ -2,6 +2,7 @@ package chunking_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+	"gastrolog/internal/waittest"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -187,7 +189,7 @@ func TestPurgeStaleHeadCatchUpDropsOrphans(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(50 * time.Millisecond)
+	waitHeadPurged(t, mgr, vaultID, home, orphan)
 	cancel()
 	wg.Wait()
 
@@ -230,19 +232,19 @@ func TestReleaseSegmentsPurgesHeadOnFSMCallback(t *testing.T) {
 	})
 
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalReleaseSegments([]glid.GLID{segID}))
-	// The ReleaseSegments callback is wake-only (purging on the Raft apply
-	// goroutine deadlocked teardown); the worker's release branch performs
-	// the purge — poll instead of asserting synchronously.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if _, err := os.Stat(paths.HeadSegment(home, segID)); os.IsNotExist(err) {
-			break
-		}
-		if time.Now().After(deadline) {
-			assertHeadMissing(t, home, segID)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	// The ReleaseSegments callback only wakes the worker; the worker's release
+	// branch performs the purge.
+	waitHeadPurged(t, mgr, vaultID, home, segID)
+}
+
+// waitHeadPurged waits for the chunking worker to remove segment id from head/.
+func waitHeadPurged(t *testing.T, mgr *chunking.Manager, vaultID glid.GLID, root string, id glid.GLID) {
+	t.Helper()
+	waittest.Progress(t, fmt.Sprintf("head %s purged", id), func() (string, bool) {
+		_, err := os.Stat(paths.HeadSegment(root, id))
+		gone := os.IsNotExist(err)
+		return fmt.Sprintf("%s head-gone=%t", stageProgress(mgr, vaultID), gone), gone
+	})
 }
 
 func assertHeadMissing(t *testing.T, root string, id glid.GLID) {

@@ -16,6 +16,7 @@ import { LIVE_TEXT } from "../liveValueStyle";
 import { Spark } from "../Spark";
 // eslint-disable-next-line no-restricted-imports -- ThroughputRate is a passthrough stats type; no model wrap planned
 import type { ThroughputRate } from "../../api/gen/gastrolog/v1/vault_pb";
+import { type ClusterVaultStats, summarizeCluster } from "./clusterSummary";
 
 /**
  * System stats view for a single node, using gossip-broadcast NodeStats.
@@ -313,51 +314,27 @@ function formatUptime(seconds: bigint): string {
 
 // ---- Cluster aggregate view ----
 
+const UNKNOWN = "—";
+
 /**
- * Aggregated cluster-wide summary. Sums stats across all nodes using
- * gossip-broadcast NodeStats — no extra RPCs needed.
+ * Cluster-wide summary. Vault holdings come from the cluster vault stats,
+ * which count each vault once; resources, throughput, and queue depth are
+ * per-node quantities summed across the gossip-broadcast NodeStats.
  */
 export function ClusterSummaryView({
   nodes,
+  vaultStats,
+  configuredVaults,
   dark,
-}: Readonly<{ nodes: ClusterNode[]; dark: boolean }>) {
-  let totalVaults = 0;
-  let totalRecords = 0;
-  let totalBytes = 0;
-  let totalChunks = 0;
-  let totalCpu = 0;
-  let totalRss = 0;
-  let totalHeapAlloc = 0;
-  let totalGoroutines = 0;
-  let totalQueueDepth = 0;
-  let totalQueueCapacity = 0;
-  let totalRoutedRate = 0;
-  let totalMatchedRate = 0;
-  let totalAppendRate = 0;
-  let totalAppendBytesRate = 0;
-  let leaderName = "";
-
-  for (const node of nodes) {
-    if (node.isLeader) leaderName = node.name || encode(node.id);
-    const s = node.stats;
-    if (!s) continue;
-    totalCpu += s.cpuPercent;
-    totalRss += Number(s.memoryRss);
-    totalHeapAlloc += Number(s.memoryHeapAlloc);
-    totalGoroutines += s.goroutines;
-    totalQueueDepth += s.ingestQueueDepth;
-    totalQueueCapacity += s.ingestQueueCapacity;
-    totalRoutedRate += s.routeRouted?.instantPerSec ?? 0;
-    totalMatchedRate += s.routeMatched?.instantPerSec ?? 0;
-    for (const v of s.vaults) {
-      totalVaults++;
-      totalRecords += Number(v.recordCount);
-      totalBytes += Number(v.dataBytes);
-      totalChunks += Number(v.chunkCount);
-      totalAppendRate += v.appendRecords?.instantPerSec ?? 0;
-      totalAppendBytesRate += v.appendBytes?.instantPerSec ?? 0;
-    }
-  }
+}: Readonly<{
+  nodes: ClusterNode[];
+  vaultStats: ClusterVaultStats | null | undefined;
+  configuredVaults: number;
+  dark: boolean;
+}>) {
+  const c = useThemeClass(dark);
+  const summary = summarizeCluster(nodes, vaultStats, configuredVaults);
+  const holdings = summary.holdings;
 
   return (
     <div className="flex flex-col gap-4">
@@ -366,12 +343,17 @@ export function ClusterSummaryView({
         <CompactSectionLabel label="Cluster" dark={dark} />
         <div className="grid grid-cols-2 gap-x-6 gap-y-1">
           <CompactStatRow label="Nodes" value={nodes.length.toString()} mono dark={dark} />
-          <CompactStatRow label="Leader" value={leaderName || "none"} dark={dark} />
-          <CompactStatRow label="Vaults" value={totalVaults.toLocaleString()} mono dark={dark} />
-          <CompactStatRow label="Records" value={totalRecords.toLocaleString()} mono dark={dark} />
-          <CompactStatRow label="Data" value={formatBytes(totalBytes)} mono dark={dark} />
-          <CompactStatRow label="Chunks" value={totalChunks.toLocaleString()} mono dark={dark} />
+          <CompactStatRow label="Leader" value={summary.leaderName || "none"} dark={dark} />
+          <CompactStatRow label="Vaults" value={(holdings?.vaults ?? configuredVaults).toLocaleString()} mono dark={dark} />
+          <CompactStatRow label="Records" value={holdings ? holdings.records.toLocaleString() : UNKNOWN} mono dark={dark} />
+          <CompactStatRow label="Data" value={holdings ? formatBytes(holdings.bytes) : UNKNOWN} mono dark={dark} />
+          <CompactStatRow label="Chunks" value={holdings ? holdings.chunks.toLocaleString() : UNKNOWN} mono dark={dark} />
         </div>
+        {holdings && holdings.reporting < holdings.vaults && (
+          <p className={`mt-1.5 text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>
+            Records, data, and chunks cover {holdings.reporting} of {holdings.vaults} vaults.
+          </p>
+        )}
       </section>
 
       {/* Cluster throughput: summed rolling-window rates */}
@@ -379,10 +361,10 @@ export function ClusterSummaryView({
       <section>
         <CompactSectionLabel label="Throughput" dark={dark} />
         <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-          <CompactStatRow label="Routed" value={formatRatePerSec(totalRoutedRate)} mono dark={dark} />
-          <CompactStatRow label="Matched" value={formatRatePerSec(totalMatchedRate)} mono dark={dark} />
-          <CompactStatRow label="Appended" value={formatRatePerSec(totalAppendRate)} mono dark={dark} />
-          <CompactStatRow label="Append data" value={formatBytesPerSec(totalAppendBytesRate)} mono dark={dark} />
+          <CompactStatRow label="Routed" value={formatRatePerSec(summary.routedPerSec)} mono dark={dark} />
+          <CompactStatRow label="Matched" value={formatRatePerSec(summary.matchedPerSec)} mono dark={dark} />
+          <CompactStatRow label="Appended" value={formatRatePerSec(summary.appendedPerSec)} mono dark={dark} />
+          <CompactStatRow label="Append data" value={formatBytesPerSec(summary.appendedBytesPerSec)} mono dark={dark} />
         </div>
       </section>
 
@@ -391,15 +373,15 @@ export function ClusterSummaryView({
       <section>
         <CompactSectionLabel label="Combined Resources" dark={dark} />
         <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-          <CompactStatRow label="CPU" value={formatPercent(totalCpu)} mono dark={dark} />
-          <CompactStatRow label="Goroutines" value={totalGoroutines.toLocaleString()} mono dark={dark} />
-          <CompactStatRow label="RSS" value={formatBytes(totalRss)} mono dark={dark} />
-          <CompactStatRow label="Heap Alloc" value={formatBytes(totalHeapAlloc)} mono dark={dark} />
+          <CompactStatRow label="CPU" value={formatPercent(summary.cpuPercent)} mono dark={dark} />
+          <CompactStatRow label="Goroutines" value={summary.goroutines.toLocaleString()} mono dark={dark} />
+          <CompactStatRow label="RSS" value={formatBytes(summary.rssBytes)} mono dark={dark} />
+          <CompactStatRow label="Heap Alloc" value={formatBytes(summary.heapAllocBytes)} mono dark={dark} />
         </div>
       </section>
 
       {/* Aggregate ingest queue */}
-      {totalQueueCapacity > 0 && (
+      {summary.ingestQueueCapacity > 0 && (
         <>
           <CompactDivider dark={dark} />
           <section>
@@ -407,7 +389,7 @@ export function ClusterSummaryView({
             <div className="grid grid-cols-2 gap-x-6 gap-y-1">
               <CompactStatRow
                 label="Depth"
-                value={`${totalQueueDepth.toLocaleString()} / ${totalQueueCapacity.toLocaleString()}`}
+                value={`${summary.ingestQueueDepth.toLocaleString()} / ${summary.ingestQueueCapacity.toLocaleString()}`}
                 mono
                 dark={dark}
               />

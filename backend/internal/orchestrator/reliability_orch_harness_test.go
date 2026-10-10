@@ -102,9 +102,10 @@ type orchRelHarness struct {
 	// segment complete policy, and a record-count chunk rotation policy on every
 	// vault so ingest converges to sealed GLCBs quickly in tests.
 	pipeline *pipelineClusterOpts
-	// routeVaultIdxs lists vaults (indexes into h.vaults) that get an
-	// enabled match-all route seeded in the shared config.
-	routeVaultIdxs []int
+	// matchAllRoutes holds one entry per enabled match-all route seeded in
+	// the shared config: the route's destination vaults, as indexes into
+	// h.vaults.
+	matchAllRoutes [][]int
 	// nilConfigBootIdxs marks nodes (by index into h.nodeIDs) that boot the
 	// fresh-joiner way: ApplyConfig(nil) at startNode, config arriving only
 	// through the test-driven dispatcher-equivalent fan-out.
@@ -181,11 +182,13 @@ func withPipelineCluster(completePolicy segmentation.CompletePolicy, chunkMaxRec
 }
 
 // withMatchAllRoute seeds an enabled match-all ("*") route targeting the
-// vault at the given index into h.vaults (0 = default vault). Records
-// submitted through the pipeline routing path fan out to that vault.
-func withMatchAllRoute(vaultIdx int) orchRelOption {
+// vaults at the given indexes into h.vaults (0 = default vault). Records
+// submitted through the pipeline routing path fan out to every one of them.
+// The first matching route wins, so several vaults that must all receive
+// every record belong in one call, not one call each.
+func withMatchAllRoute(vaultIdxs ...int) orchRelOption {
 	return func(h *orchRelHarness) {
-		h.routeVaultIdxs = append(h.routeVaultIdxs, vaultIdx)
+		h.matchAllRoutes = append(h.matchAllRoutes, vaultIdxs)
 	}
 }
 
@@ -606,21 +609,26 @@ func (h *orchRelHarness) seedSharedConfig() {
 
 	// Match-all routes (withMatchAllRoute): records entering the pipeline
 	// routing stage on any node fan out to the targeted vault.
-	for _, idx := range h.routeVaultIdxs {
-		if idx < 0 || idx >= len(h.vaults) {
-			h.t.Fatalf("withMatchAllRoute: invalid vault index %d (have %d vaults)", idx, len(h.vaults))
+	for _, idxs := range h.matchAllRoutes {
+		name := "orch-rel-route-"
+		destinations := make([]glid.GLID, 0, len(idxs))
+		for _, idx := range idxs {
+			if idx < 0 || idx >= len(h.vaults) {
+				h.t.Fatalf("withMatchAllRoute: invalid vault index %d (have %d vaults)", idx, len(h.vaults))
+			}
+			name += h.vaults[idx].label
+			destinations = append(destinations, h.vaults[idx].id)
 		}
-		v := h.vaults[idx]
 		if err := h.cfgStore.PutRoute(ctx, system.RouteConfig{
 			ID:   glid.New(),
-			Name: "orch-rel-route-" + v.label,
+			Name: name,
 			Stages: []system.RouteStage{
 				{Match: &system.MatchStage{Expression: "*"}},
 			},
-			Destinations: []glid.GLID{v.id},
+			Destinations: destinations,
 			Enabled:      true,
 		}); err != nil {
-			h.t.Fatalf("PutRoute %s: %v", v.label, err)
+			h.t.Fatalf("PutRoute %s: %v", name, err)
 		}
 	}
 }

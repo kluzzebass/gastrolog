@@ -3,10 +3,13 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
 	"time"
+
+	"gastrolog/internal/waittest"
 )
 
 func newQuietScheduler(t *testing.T) *Scheduler {
@@ -18,20 +21,15 @@ func newQuietScheduler(t *testing.T) *Scheduler {
 	return s
 }
 
-func collectEvents(t *testing.T, sub *JobSubscription, want int, timeout time.Duration) []JobEvent {
+func collectEvents(t *testing.T, sub *JobSubscription, want int) []JobEvent {
 	t.Helper()
 	var got []JobEvent
-	deadline := time.After(timeout)
 	for len(got) < want {
-		select {
-		case evt, ok := <-sub.Events():
-			if !ok {
-				return got
-			}
-			got = append(got, evt)
-		case <-deadline:
-			t.Fatalf("timed out after %v waiting for %d events; got %d: %+v", timeout, want, len(got), got)
+		evt := waittest.Recv(t, fmt.Sprintf("job event %d of %d", len(got)+1, want), sub.Events(), nil)
+		if evt.Kind == 0 {
+			return got
 		}
+		got = append(got, evt)
 	}
 	return got
 }
@@ -49,7 +47,7 @@ func TestScheduler_Events_RunOnce(t *testing.T) {
 	}
 	<-done
 
-	evts := collectEvents(t, sub, 2, 2*time.Second)
+	evts := collectEvents(t, sub, 2)
 	if evts[0].Kind != JobEventScheduled {
 		t.Errorf("event[0] kind=%v, want Scheduled", evts[0].Kind)
 	}
@@ -77,7 +75,7 @@ func TestScheduler_Events_Submit(t *testing.T) {
 	})
 	<-start
 
-	evts := collectEvents(t, sub, 3, 2*time.Second)
+	evts := collectEvents(t, sub, 3)
 	kinds := []JobEventKind{evts[0].Kind, evts[1].Kind, evts[2].Kind}
 	want := []JobEventKind{JobEventScheduled, JobEventStarted, JobEventCompleted}
 	for i, k := range want {
@@ -102,7 +100,7 @@ func TestScheduler_Events_SubmitFailure(t *testing.T) {
 		p.Fail(time.Now(), "simulated")
 	})
 
-	evts := collectEvents(t, sub, 3, 2*time.Second)
+	evts := collectEvents(t, sub, 3)
 	want := []JobEventKind{JobEventScheduled, JobEventStarted, JobEventFailed}
 	for i, k := range want {
 		if evts[i].Kind != k {
@@ -126,8 +124,8 @@ func TestScheduler_Events_MultipleSubscribers(t *testing.T) {
 	}
 	<-done
 
-	gotA := collectEvents(t, subA, 2, 2*time.Second)
-	gotB := collectEvents(t, subB, 2, 2*time.Second)
+	gotA := collectEvents(t, subA, 2)
+	gotB := collectEvents(t, subB, 2)
 	if len(gotA) != 2 || len(gotB) != 2 {
 		t.Errorf("counts: A=%d B=%d, want 2 each", len(gotA), len(gotB))
 	}
@@ -146,15 +144,8 @@ func TestScheduler_Events_OnJobChange_StillFires(t *testing.T) {
 	})
 
 	// Submit → Running (SetRunning fires onJobChange) → completion fires again.
-	seen := 0
-	timeout := time.After(2 * time.Second)
-	for seen < 2 {
-		select {
-		case <-changed:
-			seen++
-		case <-timeout:
-			t.Fatalf("onJobChange fired only %d time(s), want >= 2", seen)
-		}
+	for i := range 2 {
+		waittest.Recv(t, fmt.Sprintf("onJobChange call %d of 2", i+1), changed, nil)
 	}
 }
 
@@ -178,7 +169,7 @@ func TestScheduler_Events_RunOnceFailureEmitsFailed(t *testing.T) {
 		t.Fatalf("RunOnce: %v", err)
 	}
 
-	evts := collectEvents(t, sub, 2, 2*time.Second)
+	evts := collectEvents(t, sub, 2)
 	if evts[1].Kind != JobEventFailed {
 		t.Errorf("a RunOnce task that returned an error emitted %v, want Failed", evts[1].Kind)
 	}

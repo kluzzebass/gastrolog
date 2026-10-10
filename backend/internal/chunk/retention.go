@@ -8,7 +8,8 @@ import (
 // VaultState is an immutable snapshot of all sealed chunks in a vault.
 // It contains all information needed to make retention decisions without IO.
 type VaultState struct {
-	// Chunks contains metadata for all sealed chunks, sorted by WriteStart ascending (oldest first).
+	// Chunks contains metadata for all sealed chunks, in any order. A policy
+	// that keeps the newest chunks orders them itself (oldestFirst).
 	Chunks []ChunkMeta
 
 	// Now is the current wall-clock time.
@@ -144,16 +145,16 @@ func (p *SizeRetentionPolicy) Apply(state VaultState) []ChunkID {
 		return nil
 	}
 
+	chunks := oldestFirst(state.Chunks)
+
 	// Sum from newest to oldest, mark everything beyond budget for deletion.
 	var budget int64
 	keep := make(map[ChunkID]struct{})
 
-	// Walk backwards (newest first). A chunk with no computed claim (or a
-	// claim of 0, e.g. an evicted cloud-backed chunk) always fits and is
-	// always kept — deleting it would reclaim nothing, so the trigger has
-	// no reason to touch it.
-	for i := range slices.Backward(state.Chunks) {
-		meta := state.Chunks[i]
+	// A chunk with no computed claim (or a claim of 0, e.g. an evicted
+	// cloud-backed chunk) always fits and is always kept — deleting it would
+	// reclaim nothing, so the trigger has no reason to touch it.
+	for _, meta := range slices.Backward(chunks) {
 		claim := state.Claims[meta.ID]
 		if budget+claim <= p.maxBytes {
 			budget += claim
@@ -162,7 +163,7 @@ func (p *SizeRetentionPolicy) Apply(state VaultState) []ChunkID {
 	}
 
 	var result []ChunkID
-	for _, meta := range state.Chunks {
+	for _, meta := range chunks {
 		if _, ok := keep[meta.ID]; !ok {
 			result = append(result, meta.ID)
 		}
@@ -187,14 +188,28 @@ func (p *CountRetentionPolicy) Apply(state VaultState) []ChunkID {
 		return nil
 	}
 
-	// Chunks are sorted oldest first; delete the excess from the front.
-	excess := len(state.Chunks) - p.maxChunks
+	chunks := oldestFirst(state.Chunks)
+	excess := len(chunks) - p.maxChunks
 	result := make([]ChunkID, excess)
 	for i := range excess {
-		result[i] = state.Chunks[i].ID
+		result[i] = chunks[i].ID
 	}
 
 	return result
+}
+
+// oldestFirst returns a copy of chunks ordered by WriteStart ascending, ties
+// broken by chunk ID (creation order), so the count and size policies pick
+// the same chunks however the caller assembled the list.
+func oldestFirst(chunks []ChunkMeta) []ChunkMeta {
+	out := slices.Clone(chunks)
+	slices.SortFunc(out, func(a, b ChunkMeta) int {
+		if c := a.WriteStart.Compare(b.WriteStart); c != 0 {
+			return c
+		}
+		return a.ID.Compare(b.ID)
+	})
+	return out
 }
 
 // NeverRetainPolicy is a retention policy that never deletes anything.

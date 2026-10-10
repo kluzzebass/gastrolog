@@ -1591,6 +1591,9 @@ func (x *GetStatsRequest) GetVault() string {
 	return ""
 }
 
+// The vault figures count each vault once from its manifest, however many
+// nodes hold a copy, so every node reports the same totals. total_bytes is the
+// logical size of the records: one copy of each chunk, no indexes.
 type GetStatsResponse struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	TotalVaults        int64                  `protobuf:"varint,1,opt,name=total_vaults,json=totalVaults,proto3" json:"total_vaults,omitempty"`

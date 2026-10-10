@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/record"
+	"gastrolog/internal/waittest"
 )
 
 // syncBuffer is an io.Writer tests can poll while the manager's pull loop
@@ -56,6 +59,18 @@ func (p *recordingPublisher) count() int {
 	return len(p.published)
 }
 
+func (p *recordingPublisher) publishesOf(segID glid.GLID) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	n := 0
+	for _, meta := range p.published {
+		if meta.SegmentID == segID {
+			n++
+		}
+	}
+	return n
+}
+
 func (p *recordingPublisher) last() distribution.Metadata {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -63,6 +78,24 @@ func (p *recordingPublisher) last() distribution.Metadata {
 		return distribution.Metadata{}
 	}
 	return p.published[len(p.published)-1]
+}
+
+// publishProgress snapshots the manager's per-vault publish counters.
+func publishProgress(mgr *distribution.Manager) string {
+	var b strings.Builder
+	for _, s := range mgr.PublishStats() {
+		fmt.Fprintf(&b, "vault %s published=%d; ", s.VaultID, s.Published)
+	}
+	return b.String()
+}
+
+// waitPublished waits until pub has recorded want publishes.
+func waitPublished(t *testing.T, mgr *distribution.Manager, pub *recordingPublisher, want int) {
+	t.Helper()
+	waittest.Progress(t, fmt.Sprintf("%d segments published", want), func() (string, bool) {
+		n := pub.count()
+		return fmt.Sprintf("recorded=%d %s", n, publishProgress(mgr)), n >= want
+	})
 }
 
 func writeCompletedSegment(t *testing.T, vaultRoot string, vaultID glid.GLID, raw string) segmentation.CompletedSegment {
@@ -355,7 +388,7 @@ func TestRunConsumesCompletedChannel(t *testing.T) {
 	})
 
 	completed <- writeCompletedSegment(t, root, vaultID, "async")
-	time.Sleep(50 * time.Millisecond)
+	waitPublished(t, mgr, pub, 1)
 
 	if pub.count() != 1 {
 		t.Fatalf("published %d metadata entries", pub.count())
@@ -394,13 +427,7 @@ func TestRescanPublishesStrandedSegments(t *testing.T) {
 		<-done
 	})
 
-	deadline := time.Now().Add(10 * time.Second)
-	for pub.count() == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("stranded segment was never published by rescan")
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	waitPublished(t, mgr, pub, 1)
 	if got := pub.last(); got.SegmentID != seg.SegmentID || got.RecordCount != 1 {
 		t.Fatalf("published meta = %+v", got)
 	}
@@ -422,7 +449,9 @@ func TestRescanSkipsChannelDeliveredSegments(t *testing.T) {
 	root := t.TempDir()
 	pub := &recordingPublisher{}
 
-	mgr, _ := distribution.New(distribution.Config{})
+	// One publish worker drains the publish queue in order, so a later
+	// enqueue publishes only after everything enqueued before it.
+	mgr, _ := distribution.New(distribution.Config{PublishWorkers: 1})
 	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{
 		Publisher: pub,
 	}); err != nil {
@@ -442,19 +471,32 @@ func TestRescanSkipsChannelDeliveredSegments(t *testing.T) {
 	})
 
 	// Non-holder: the file stays in completed/ where the rescan can see it.
-	completed <- writeCompletedSegment(t, root, vaultID, "once")
+	once := writeCompletedSegment(t, root, vaultID, "once")
+	completed <- once
+	waitPublished(t, mgr, pub, 1)
 
-	// Cover at least one full rescan interval.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if n := pub.count(); n > 1 {
-			t.Fatalf("published %d times, want exactly 1", n)
-		}
-		time.Sleep(100 * time.Millisecond)
+	// A segment only the rescan can find: its publish proves a rescan pass
+	// ran over completed/ while "once" sat there.
+	marker := writeCompletedSegment(t, root, vaultID, "rescan-marker")
+	mgr.NotifyStranded()
+	waitSegmentPublished(t, mgr, pub, marker.SegmentID, "rescan marker")
+
+	// Publish ingress reads the channel only between rescan passes, so the
+	// fence enqueues after anything that pass enqueued and publishes after it.
+	fence := writeCompletedSegment(t, root, vaultID, "fence")
+	completed <- fence
+	waitSegmentPublished(t, mgr, pub, fence.SegmentID, "fence")
+
+	if n := pub.publishesOf(once.SegmentID); n != 1 {
+		t.Fatalf("channel-delivered segment published %d times, want exactly 1", n)
 	}
-	if pub.count() != 1 {
-		t.Fatalf("published %d times, want 1", pub.count())
-	}
+}
+
+func waitSegmentPublished(t *testing.T, mgr *distribution.Manager, pub *recordingPublisher, segID glid.GLID, what string) {
+	t.Helper()
+	waittest.Progress(t, what+" segment published", func() (string, bool) {
+		return fmt.Sprintf("recorded=%d %s", pub.count(), publishProgress(mgr)), pub.publishesOf(segID) > 0
+	})
 }
 
 type errPublisher struct{ err error }
@@ -488,14 +530,14 @@ func TestPublishRetryDrainsOnNotify(t *testing.T) {
 
 	seg := writeCompletedSegment(t, root, vaultID, "retry-me")
 	completed <- seg
-	deadline := time.Now().Add(2 * time.Second)
-	for pub.successes() == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("publish never retried after NotifyPublishRetry")
+	waittest.Progress(t, "publish retried after NotifyPublishRetry", func() (string, bool) {
+		attempts, ok := pub.counts()
+		if ok > 0 {
+			return "", true
 		}
 		mgr.NotifyPublishRetry()
-		time.Sleep(10 * time.Millisecond)
-	}
+		return fmt.Sprintf("attempts=%d successes=%d", attempts, ok), false
+	})
 }
 
 type flakyRetryPublisher struct {
@@ -515,10 +557,10 @@ func (p *flakyRetryPublisher) Publish(context.Context, distribution.Metadata) er
 	return nil
 }
 
-func (p *flakyRetryPublisher) successes() int {
+func (p *flakyRetryPublisher) counts() (attempts, successes int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.ok
+	return p.attempt, p.ok
 }
 
 func TestPublishCompletedKeepsSegmentOnPublisherError(t *testing.T) {
@@ -620,17 +662,19 @@ func TestRunTwiceReturnsErrAlreadyRunning(t *testing.T) {
 	mgr, _ := distribution.New(distribution.Config{})
 	completed := make(chan segmentation.CompletedSegment)
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		_ = mgr.Run(ctx, completed)
-		close(done)
-	}()
-	time.Sleep(20 * time.Millisecond)
-	if err := mgr.Run(ctx, completed); !errors.Is(err, distribution.ErrAlreadyRunning) {
-		t.Fatalf("Run() = %v, want ErrAlreadyRunning", err)
+	defer cancel()
+	// Two concurrent Runs: the loser returns at once, the winner only on cancel.
+	results := make(chan error, 2)
+	for range 2 {
+		go func() { results <- mgr.Run(ctx, completed) }()
+	}
+	if err := waittest.Recv(t, "losing Run returns", results, nil); !errors.Is(err, distribution.ErrAlreadyRunning) {
+		t.Fatalf("first Run to return = %v, want ErrAlreadyRunning", err)
 	}
 	cancel()
-	<-done
+	if err := <-results; !errors.Is(err, context.Canceled) {
+		t.Fatalf("winning Run = %v, want context.Canceled", err)
+	}
 }
 
 func TestRunPullViaChannel(t *testing.T) {
@@ -656,25 +700,38 @@ func TestRunPullViaChannel(t *testing.T) {
 
 	seg := writeCompletedSegment(t, root, vaultID, "async-pull")
 	completed <- seg
-	time.Sleep(50 * time.Millisecond)
+	// Staging registers the segment for pulls before its publish.
+	waitPublished(t, mgr, pub, 1)
 
 	var buf syncBuffer
 	pullIn <- distribution.PullRequest{
 		VaultID: vaultID, SegmentID: seg.SegmentID, Dest: &buf,
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if bytes.Contains(buf.bytes(), []byte("async-pull")) {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("pull payload = %q", buf.bytes())
+	waitPullPayload(t, &buf, "async-pull")
+}
+
+// waitPullPayload waits until the pull loop has streamed a payload containing
+// want into buf.
+func waitPullPayload(t *testing.T, buf *syncBuffer, want string) {
+	t.Helper()
+	waittest.Progress(t, fmt.Sprintf("pull payload containing %q", want), func() (string, bool) {
+		got := buf.bytes()
+		return fmt.Sprintf("streamed %d bytes", len(got)), bytes.Contains(got, []byte(want))
+	})
 }
 
 func TestRunPullUnknownVaultIsNoOp(t *testing.T) {
 	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
 	mgr, pullIn := distribution.New(distribution.Config{})
+	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{Publisher: &recordingPublisher{}}); err != nil {
+		t.Fatal(err)
+	}
+	seg := writeCompletedSegment(t, root, vaultID, "served-after-unknown")
+	if err := mgr.PublishCompleted(context.Background(), seg); err != nil {
+		t.Fatal(err)
+	}
 	completed := make(chan segmentation.CompletedSegment)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -690,7 +747,13 @@ func TestRunPullUnknownVaultIsNoOp(t *testing.T) {
 	pullIn <- distribution.PullRequest{
 		VaultID: glid.New(), SegmentID: glid.New(), Dest: &bytes.Buffer{},
 	}
-	time.Sleep(50 * time.Millisecond)
+	// The pull loop serves requests in order: a later pull being served
+	// proves the unknown-vault request was handled without wedging the loop.
+	var buf syncBuffer
+	pullIn <- distribution.PullRequest{
+		VaultID: vaultID, SegmentID: seg.SegmentID, Dest: &buf,
+	}
+	waitPullPayload(t, &buf, "served-after-unknown")
 }
 
 func TestPromoteToHeadMissingSource(t *testing.T) {
@@ -737,10 +800,15 @@ func TestStreamSegmentGoneDuringPull(t *testing.T) {
 }
 
 type blockingPublisher struct {
+	entered chan struct{} // receives one value per Publish call
 	release chan struct{}
 }
 
 func (p *blockingPublisher) Publish(ctx context.Context, _ distribution.Metadata) error {
+	select {
+	case p.entered <- struct{}{}:
+	default:
+	}
 	select {
 	case <-p.release:
 		return nil
@@ -755,7 +823,7 @@ func TestPullServedWhilePublishBlocked(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
 	root := t.TempDir()
-	pub := &blockingPublisher{release: make(chan struct{})}
+	pub := &blockingPublisher{entered: make(chan struct{}, 1), release: make(chan struct{})}
 
 	mgr, _ := distribution.New(distribution.Config{})
 	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{
@@ -778,7 +846,8 @@ func TestPullServedWhilePublishBlocked(t *testing.T) {
 	})
 
 	completed <- seg
-	time.Sleep(50 * time.Millisecond)
+	// Staging registers the segment for pulls before its publish begins.
+	waittest.Recv(t, "publish in flight", pub.entered, func() string { return publishProgress(mgr) })
 
 	var buf bytes.Buffer
 	if err := mgr.ServePull(distribution.PullRequest{
@@ -791,5 +860,8 @@ func TestPullServedWhilePublishBlocked(t *testing.T) {
 	}
 
 	close(pub.release)
-	time.Sleep(50 * time.Millisecond)
+	waittest.Progress(t, "released publish commits", func() (string, bool) {
+		stats := mgr.PublishStats()
+		return publishProgress(mgr), len(stats) == 1 && stats[0].Published == 1
+	})
 }

@@ -154,6 +154,16 @@ The response flows back through the interceptor, which deserializes it
 using a type-safe `WrapResponse` function (generic over the response
 proto type via `NewRespWrapper[T]`).
 
+When the handler fails, the mux answers with a Connect JSON error body
+(`{"code","message"}`). The receiving node decodes it and sends the
+handler's Connect code and bare message as the frame's `error_code` and
+`error_message`; the interceptor on the calling node rebuilds the same
+Connect error, so a caller on any node sees exactly what a caller on the
+owner sees. The HTTP status is only a fallback for a body that is not a
+Connect error (the mux's plain-text 404, a draining server's 503): several
+Connect codes share one status, so the status alone cannot name the code.
+Error details are not carried.
+
 ### RouteFanOut — handler-managed
 
 ```mermaid

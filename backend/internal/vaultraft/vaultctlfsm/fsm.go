@@ -825,7 +825,7 @@ func (f *FSM) ListIncludingPipelineManifest() []ManifestEntry {
 	return out
 }
 
-// List returns all chunk metadata, sorted by WriteStart ascending.
+// List returns all chunk metadata, in no particular order.
 func (f *FSM) List() []ManifestEntry {
 	f.mu.RLock()
 	defer f.mu.RUnlock()

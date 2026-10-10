@@ -131,7 +131,7 @@ func TestLostBeginSealAnnounceLeavesChunkSealedLocallyButActiveInFSM(t *testing.
 	if sealed != 1 {
 		t.Fatalf("SealActive sealed %d, want 1", sealed)
 	}
-	requireIdle(t, orch.scheduler, postSealDrainBudget)
+	requireIdle(t, orch.scheduler)
 
 	// The three observations from that capture.
 	local, err := orch.vaults[vaultID].Instance.Chunks.Meta(chunkID)
@@ -177,7 +177,7 @@ func TestLostSealAnnounceIsReAnnouncedOnceApplyRecovers(t *testing.T) {
 	if _, err := orch.SealActive(vaultID); err != nil {
 		t.Fatalf("SealActive: %v", err)
 	}
-	requireIdle(t, orch.scheduler, postSealDrainBudget)
+	requireIdle(t, orch.scheduler)
 
 	// Apply works again — the transient is over.
 	applier.setFailing(false)
@@ -219,7 +219,7 @@ func TestReAnnouncedSealCarriesTheLocalMetadata(t *testing.T) {
 	if _, err := orch.SealActive(vaultID); err != nil {
 		t.Fatalf("SealActive: %v", err)
 	}
-	requireIdle(t, orch.scheduler, postSealDrainBudget)
+	requireIdle(t, orch.scheduler)
 	applier.setFailing(false)
 
 	local, err := orch.vaults[vaultID].Instance.Chunks.Meta(chunkID)

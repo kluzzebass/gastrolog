@@ -16,6 +16,7 @@ import (
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/record"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+	"gastrolog/internal/waittest"
 
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/protobuf/proto"
@@ -99,13 +100,14 @@ func TestLeaderPlannerOpensAndAddsRefOnPublish(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(t.Context())
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		publishSegment(t, fsm, segID, pubAt, 2, base, base.Add(time.Second))
-		time.Sleep(50 * time.Millisecond)
-		cancel()
-	}()
-	if err := mgr.Run(ctx); err != nil && err != context.Canceled {
+	defer cancel()
+	runErr := make(chan error, 1)
+	go func() { runErr <- mgr.Run(ctx) }()
+
+	publishSegment(t, fsm, segID, pubAt, 2, base, base.Add(time.Second))
+	waitOpenRecords(t, mgr, vaultID, fsm, 2)
+	cancel()
+	if err := <-runErr; err != nil && err != context.Canceled {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -122,6 +124,20 @@ func TestLeaderPlannerOpensAndAddsRefOnPublish(t *testing.T) {
 	if open.Refs[0].FirstRecordNumber != 0 || open.Refs[0].LastRecordNumber != 1 {
 		t.Fatalf("ref = [%d,%d], want [0,1]", open.Refs[0].FirstRecordNumber, open.Refs[0].LastRecordNumber)
 	}
+}
+
+// waitOpenRecords waits for the running worker's planner to put wantRecords
+// records into the open manifest.
+func waitOpenRecords(t *testing.T, mgr *chunking.Manager, vaultID glid.GLID, fsm *vaultctlfsm.FSM, wantRecords uint64) {
+	t.Helper()
+	waittest.Progress(t, fmt.Sprintf("open manifest holding %d records", wantRecords), func() (string, bool) {
+		open := fsm.OpenChunk()
+		if open == nil {
+			return stageProgress(mgr, vaultID) + " open=none", false
+		}
+		return fmt.Sprintf("%s open refs=%d records=%d", stageProgress(mgr, vaultID), len(open.Refs), open.TotalRecords),
+			open.TotalRecords >= wantRecords
+	})
 }
 
 func planUntilSealed(t *testing.T, mgr *chunking.Manager, vaultID glid.GLID, fsm *vaultctlfsm.FSM) *vaultctlfsm.OpenChunkManifest {
@@ -546,11 +562,13 @@ func TestLeaderPlannerReplicatedManifestSequence(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(t.Context())
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		cancel()
-	}()
-	if err := mgr.Run(ctx); err != nil && err != context.Canceled {
+	defer cancel()
+	runErr := make(chan error, 1)
+	go func() { runErr <- mgr.Run(ctx) }()
+
+	waitOpenRecords(t, mgr, vaultID, fsmLeader, 2)
+	cancel()
+	if err := <-runErr; err != nil && err != context.Canceled {
 		t.Fatalf("Run: %v", err)
 	}
 

@@ -10,6 +10,7 @@ import (
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/record"
+	"gastrolog/internal/waittest"
 )
 
 // runRouter starts a routing manager over a single buffered input and returns once
@@ -58,13 +59,8 @@ func TestRouteAckJoinWaitsForAllVaults(t *testing.T) {
 	}
 
 	gotB.Ack <- nil
-	select {
-	case err := <-parent:
-		if err != nil {
-			t.Fatalf("source ack error: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("source ack did not fire after all vaults committed")
+	if err := waittest.Recv(t, "source ack after all vaults committed", parent, routeProgress(mgr)); err != nil {
+		t.Fatalf("source ack error: %v", err)
 	}
 }
 
@@ -95,13 +91,8 @@ func TestRouteAckJoinFirstErrorWins(t *testing.T) {
 	(<-chA).Ack <- boom
 	(<-chB).Ack <- nil
 
-	select {
-	case err := <-parent:
-		if !errors.Is(err, boom) {
-			t.Fatalf("source ack error = %v, want %v", err, boom)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("source ack did not fire")
+	if err := waittest.Recv(t, "source ack", parent, routeProgress(mgr)); !errors.Is(err, boom) {
+		t.Fatalf("source ack error = %v, want %v", err, boom)
 	}
 }
 
@@ -130,13 +121,8 @@ func TestRouteSingleVaultAckPassthrough(t *testing.T) {
 		t.Fatal("single target must carry the source ack")
 	}
 	got.Ack <- nil
-	select {
-	case err := <-parent:
-		if err != nil {
-			t.Fatalf("source ack error: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("source ack did not fire")
+	if err := waittest.Recv(t, "source ack", parent, routeProgress(mgr)); err != nil {
+		t.Fatalf("source ack error: %v", err)
 	}
 }
 
@@ -161,13 +147,8 @@ func TestRouteUnmatchedResolvesAck(t *testing.T) {
 	close(in)
 	runRouter(t, mgr, in)
 
-	select {
-	case err := <-parent:
-		if err != nil {
-			t.Fatalf("unmatched ack error: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("unmatched record did not resolve its ack")
+	if err := waittest.Recv(t, "unmatched record's source ack", parent, routeProgress(mgr)); err != nil {
+		t.Fatalf("unmatched ack error: %v", err)
 	}
 	if len(out) != 0 {
 		t.Fatalf("unmatched record should not be delivered, got %d", len(out))

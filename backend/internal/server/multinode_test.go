@@ -1,7 +1,6 @@
 package server_test
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"gastrolog/internal/system/configfabric"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -32,6 +30,7 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/server"
+	"gastrolog/internal/server/routing"
 	"gastrolog/internal/system"
 
 	"connectrpc.com/connect"
@@ -82,9 +81,6 @@ type multiNodeHarness struct {
 	// alerts is each node's alert.Collector; populated only with
 	// WithClusterStats.
 	alerts map[string]*alert.Collector
-	// routingFwd is the in-process ForwardRPC stand-in; tests can remove a
-	// node's handler to simulate an unreachable raiser.
-	routingFwd *directUnaryForwarder
 	// remoteSearcher is the in-process ForwardSearch stand-in; tests can
 	// remove a node from it to simulate a search fan-out that fails.
 	remoteSearcher *directRemoteSearcher
@@ -362,7 +358,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	// stats collectors below) was built earlier, before node creation — see
 	// that block's comment.
 
-	routingFwd := newDirectUnaryForwarder(t, nodes, coordinatorID, vaultsDir)
+	routingFwd := newClusterForwarder(t, nodes, coordinatorID, vaultsDir)
 
 	coordNode := nodes[coordinatorID]
 	srvCfg := server.Config{
@@ -439,7 +435,6 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		peerVaultStats:    peerVaultStats,
 		peerStorageStats:  peerStorageStats,
 		alerts:            alertsByNode,
-		routingFwd:        routingFwd,
 		remoteSearcher:    remoteSearcher,
 	}
 }
@@ -1271,63 +1266,40 @@ func (d *directRemoteIndexer) GetIndexes(_ context.Context, nodeID string, req *
 	return &gastrologv1.ForwardGetIndexesResponse{Sealed: report.Sealed, Indexes: indexes}, nil
 }
 
-// directUnaryForwarder implements routing.UnaryForwarder for multi-node tests
-// by dispatching through in-process Connect muxes on each remote node.
-type directUnaryForwarder struct {
-	handlers map[string]http.Handler // nodeID → Connect mux handler
-}
-
-func newDirectUnaryForwarder(t *testing.T, nodes map[string]multinodeTestNode, coordinatorID, vaultsDir string) *directUnaryForwarder {
+// newClusterForwarder returns the production ForwardRPC client for selfID.
+// Every other harness node runs a real cluster gRPC server on loopback whose
+// ForwardRPC handler dispatches into that node's internal Connect mux — no
+// auth, no routing interceptor, its own config store — so a forwarded call
+// crosses the same frame encoding and error translation as in production.
+func newClusterForwarder(t *testing.T, nodes map[string]multinodeTestNode, selfID, vaultsDir string) *routing.Forwarder {
 	t.Helper()
-	handlers := make(map[string]http.Handler)
+	addrs := make(map[string]string, len(nodes))
 	for id, node := range nodes {
-		if id == coordinatorID {
+		if id == selfID {
 			continue
 		}
-		// BuildInternalHandler returns a mux with NoAuthInterceptor and
-		// NO routing interceptor — same as the real ForwardRPC dispatch path.
-		// The remote server reads its own node's config store, as in
-		// production.
 		remoteSrv := server.New(node.orch, node.store, orchestrator.Factories{VaultsDir: vaultsDir}, nil, server.Config{
 			NodeID: id,
 			NoAuth: true,
 		})
-		handlers[id] = remoteSrv.BuildInternalHandler()
+		cs, err := cluster.New(cluster.Config{ClusterAddr: "127.0.0.1:0", NodeID: id})
+		if err != nil {
+			t.Fatalf("cluster server for %s: %v", id, err)
+		}
+		cs.Transport()
+		cs.SetInternalHandler(remoteSrv.BuildInternalHandler())
+		if err := cs.Start(); err != nil {
+			t.Fatalf("start cluster server for %s: %v", id, err)
+		}
+		t.Cleanup(cs.Stop)
+		addrs[id] = cs.Addr()
 	}
-	return &directUnaryForwarder{handlers: handlers}
-}
-
-func (d *directUnaryForwarder) ForwardUnary(ctx context.Context, nodeID, procedure string, reqPayload []byte) ([]byte, error) {
-	handler, ok := d.handlers[nodeID]
-	if !ok {
-		return nil, fmt.Errorf("unknown node: %s", nodeID)
-	}
-
-	// Build an HTTP request exactly as the real ForwardRPC handler does.
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", procedure, bytes.NewReader(reqPayload))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/proto")
-	httpReq.Header.Set("Connect-Protocol-Version", "1")
-
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httpReq)
-
-	resp := rec.Result()
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		var errBuf [4096]byte
-		n, _ := resp.Body.Read(errBuf[:])
-		return nil, fmt.Errorf("forward to %s: HTTP %d: %s", nodeID, resp.StatusCode, string(errBuf[:n]))
-	}
-
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(resp.Body); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
+	peers := cluster.NewStaticPeerConns(selfID, func(id string) (string, bool) {
+		addr, ok := addrs[id]
+		return addr, ok
+	})
+	t.Cleanup(func() { _ = peers.Close() })
+	return routing.NewForwarder(peers)
 }
 
 // ---------------------------------------------------------------------------

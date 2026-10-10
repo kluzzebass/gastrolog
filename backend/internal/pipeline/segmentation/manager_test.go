@@ -2,8 +2,10 @@ package segmentation_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/record"
+	"gastrolog/internal/waittest"
 )
 
 func sampleRecord(seq uint32, ts time.Time) *record.Record {
@@ -49,16 +52,40 @@ func startManager(t *testing.T, cfg segmentation.Config, register func(t *testin
 	return mgr, completed
 }
 
-func waitSync(t *testing.T, syncs *atomic.Uint32, want uint32) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if syncs.Load() >= want {
-			return
+// appendProgress snapshots every vault writer's stage counters and the
+// manager's dropped-record count.
+func appendProgress(mgr *segmentation.Manager) func() string {
+	return func() string {
+		var b strings.Builder
+		for _, s := range mgr.AppendStats() {
+			fmt.Fprintf(&b, "vault %s appended=%d durable=%d queue=%d completed=%d; ",
+				s.VaultID, s.RecordsAppended, s.RecordsDurable, s.QueueDepth, s.SegmentsCompleted)
 		}
-		time.Sleep(time.Millisecond)
+		fmt.Fprintf(&b, "dropped=%d", mgr.DroppedRecords())
+		return b.String()
 	}
-	t.Fatalf("sync count = %d, want >= %d", syncs.Load(), want)
+}
+
+func waitSync(t *testing.T, mgr *segmentation.Manager, syncs *atomic.Uint32, want uint32) {
+	t.Helper()
+	progress := appendProgress(mgr)
+	waittest.Progress(t, fmt.Sprintf("%d fsyncs", want), func() (string, bool) {
+		n := syncs.Load()
+		return fmt.Sprintf("syncs=%d %s", n, progress()), n >= want
+	})
+}
+
+func waitDurable(t *testing.T, mgr *segmentation.Manager, vaultID glid.GLID, want uint64) {
+	t.Helper()
+	progress := appendProgress(mgr)
+	waittest.Progress(t, fmt.Sprintf("%d records durable", want), func() (string, bool) {
+		for _, s := range mgr.AppendStats() {
+			if s.VaultID == vaultID && s.RecordsDurable >= want {
+				return "", true
+			}
+		}
+		return progress(), false
+	})
 }
 
 func TestManagerAppendsToWorkingSegment(t *testing.T) {
@@ -68,7 +95,7 @@ func TestManagerAppendsToWorkingSegment(t *testing.T) {
 
 	var syncs atomic.Uint32
 	var in chan<- segmentation.Input
-	_, _ = startManager(t, segmentation.Config{
+	mgr, _ := startManager(t, segmentation.Config{
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
 		OnSync:          func() { syncs.Add(1) },
@@ -83,7 +110,7 @@ func TestManagerAppendsToWorkingSegment(t *testing.T) {
 
 	ts := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
 	in <- segmentation.Input{Record: sampleRecord(0, ts)}
-	waitSync(t, &syncs, 1)
+	waitSync(t, mgr, &syncs, 1)
 
 	entries, err := os.ReadDir(paths.WorkingDir(dir))
 	if err != nil {
@@ -119,7 +146,7 @@ func TestManagerGroupSyncBatchesFsync(t *testing.T) {
 
 	var syncs atomic.Uint32
 	var in chan<- segmentation.Input
-	_, _ = startManager(t, segmentation.Config{
+	mgr, _ := startManager(t, segmentation.Config{
 		SyncBatchSize:   4,
 		SyncBatchWindow: time.Hour,
 		OnSync:          func() { syncs.Add(1) },
@@ -136,7 +163,7 @@ func TestManagerGroupSyncBatchesFsync(t *testing.T) {
 	for i := range 4 {
 		in <- segmentation.Input{Record: sampleRecord(uint32(i), ts.Add(time.Duration(i)*time.Millisecond))}
 	}
-	waitSync(t, &syncs, 1)
+	waitSync(t, mgr, &syncs, 1)
 	if syncs.Load() != 1 {
 		t.Fatalf("sync count = %d, want 1 batch fsync for 4 records", syncs.Load())
 	}
@@ -148,7 +175,7 @@ func TestManagerCompletesOnSize(t *testing.T) {
 	vaultID := glid.New()
 
 	var in chan<- segmentation.Input
-	_, completed := startManager(t, segmentation.Config{
+	mgr, completed := startManager(t, segmentation.Config{
 		CompletePolicy:  segmentation.CompletePolicy{MaxBytes: 256},
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
@@ -167,33 +194,29 @@ func TestManagerCompletesOnSize(t *testing.T) {
 		in <- segmentation.Input{Record: sampleRecord(uint32(i), ts.Add(time.Duration(i)*time.Millisecond))}
 	}
 
-	select {
-	case seg := <-completed:
-		if seg.VaultID != vaultID {
-			t.Fatalf("vault = %s", seg.VaultID)
-		}
-		if seg.Header.Flags&segment.FlagComplete == 0 {
-			t.Error("expected FlagComplete on closed segment")
-		}
-		if _, err := os.Stat(seg.Path); err != nil {
-			t.Fatalf("completed path: %v", err)
-		}
-		if _, err := os.Stat(paths.WorkingSegment(dir, seg.SegmentID)); !os.IsNotExist(err) {
-			t.Fatalf("working copy should be gone: %v", err)
-		}
-		sf, err := segment.Open(seg.Path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer sf.Close()
-		if sf.Header().RecordCount == 0 {
-			t.Fatal("completed segment has no records")
-		}
-		if sf.Header().IndexOffset == 0 {
-			t.Fatal("completed segment missing EventID index")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for completed segment")
+	seg := waittest.Recv(t, "size-completed segment", completed, appendProgress(mgr))
+	if seg.VaultID != vaultID {
+		t.Fatalf("vault = %s", seg.VaultID)
+	}
+	if seg.Header.Flags&segment.FlagComplete == 0 {
+		t.Error("expected FlagComplete on closed segment")
+	}
+	if _, err := os.Stat(seg.Path); err != nil {
+		t.Fatalf("completed path: %v", err)
+	}
+	if _, err := os.Stat(paths.WorkingSegment(dir, seg.SegmentID)); !os.IsNotExist(err) {
+		t.Fatalf("working copy should be gone: %v", err)
+	}
+	sf, err := segment.Open(seg.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sf.Close()
+	if sf.Header().RecordCount == 0 {
+		t.Fatal("completed segment has no records")
+	}
+	if sf.Header().IndexOffset == 0 {
+		t.Fatal("completed segment missing EventID index")
 	}
 }
 
@@ -227,25 +250,17 @@ func TestManagerCountsSegmentsCompleted(t *testing.T) {
 	}
 	// Drain two completions to know rotation happened.
 	for range 2 {
-		select {
-		case <-completed:
-		case <-time.After(2 * time.Second):
-			t.Fatal("timed out waiting for completed segments")
-		}
+		waittest.Recv(t, "completed segment", completed, appendProgress(mgr))
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		stats := mgr.AppendStats()
-		if len(stats) == 1 && stats[0].SegmentsCompleted >= 2 {
-			if stats[0].VaultID != vaultID {
-				t.Fatalf("stats vault = %s, want %s", stats[0].VaultID, vaultID)
-			}
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
+	// The counter increments before the completion is announced.
+	stats := mgr.AppendStats()
+	if len(stats) != 1 || stats[0].SegmentsCompleted < 2 {
+		t.Fatalf("SegmentsCompleted after two announced completions: %+v, want one vault at >= 2", stats)
 	}
-	t.Fatalf("SegmentsCompleted never reached 2: %+v", mgr.AppendStats())
+	if stats[0].VaultID != vaultID {
+		t.Fatalf("stats vault = %s, want %s", stats[0].VaultID, vaultID)
+	}
 }
 
 func TestManagerCompletesOnAge(t *testing.T) {
@@ -258,7 +273,7 @@ func TestManagerCompletesOnAge(t *testing.T) {
 	clock.Store(now.UnixNano())
 
 	var in chan<- segmentation.Input
-	_, completed := startManager(t, segmentation.Config{
+	mgr, completed := startManager(t, segmentation.Config{
 		CompletePolicy:  segmentation.CompletePolicy{MaxAge: time.Minute},
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
@@ -276,16 +291,12 @@ func TestManagerCompletesOnAge(t *testing.T) {
 	})
 
 	in <- segmentation.Input{Record: sampleRecord(0, now)}
-	time.Sleep(20 * time.Millisecond)
+	waitDurable(t, mgr, vaultID, 1)
 
 	clock.Add(int64(time.Minute))
 
 	in <- segmentation.Input{Record: sampleRecord(1, now.Add(time.Second))}
-	select {
-	case <-completed:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for age-based completion")
-	}
+	waittest.Recv(t, "age-based completion", completed, appendProgress(mgr))
 }
 
 func TestManagerPerVaultIsolation(t *testing.T) {
@@ -297,7 +308,7 @@ func TestManagerPerVaultIsolation(t *testing.T) {
 
 	var syncs atomic.Uint32
 	var inA, inB chan<- segmentation.Input
-	_, _ = startManager(t, segmentation.Config{
+	mgr, _ := startManager(t, segmentation.Config{
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
 		OnSync:          func() { syncs.Add(1) },
@@ -317,7 +328,7 @@ func TestManagerPerVaultIsolation(t *testing.T) {
 	ts := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
 	inA <- segmentation.Input{Record: sampleRecord(0, ts)}
 	inB <- segmentation.Input{Record: sampleRecord(0, ts.Add(time.Second))}
-	waitSync(t, &syncs, 2)
+	waitSync(t, mgr, &syncs, 2)
 
 	for _, dir := range []string{dirA, dirB} {
 		entries, err := os.ReadDir(paths.WorkingDir(dir))
@@ -335,22 +346,28 @@ func TestManagerDoesNotCompleteEmptySegment(t *testing.T) {
 	dir := t.TempDir()
 	vaultID := glid.New()
 
-	_, completed := startManager(t, segmentation.Config{
+	mgr, completed := segmentation.New(segmentation.Config{
 		CompletePolicy:  segmentation.CompletePolicy{MaxBytes: 64},
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
 		CompletedCap:    1,
-	}, func(t *testing.T, mgr *segmentation.Manager) {
-		t.Helper()
-		if _, err := mgr.RegisterVault(vaultID, dir, segmentation.VaultConfig{}); err != nil {
-			t.Fatal(err)
-		}
 	})
+	if _, err := mgr.RegisterVault(vaultID, dir, segmentation.VaultConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx)
+		close(done)
+	}()
+	cancel()
+	<-done
 
-	select {
-	case seg := <-completed:
+	// Run closes the channel on exit after the final flush, so this sees every
+	// completion of the manager's lifetime, shutdown included.
+	if seg, ok := <-completed; ok {
 		t.Fatalf("unexpected completed segment: %+v", seg)
-	case <-time.After(100 * time.Millisecond):
 	}
 }
 
@@ -372,7 +389,6 @@ func TestManagerRunTwice(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(20 * time.Millisecond)
 	cancel()
 	<-done
 
@@ -387,13 +403,33 @@ func TestManagerRegisterDuringRun(t *testing.T) {
 	vaultID := glid.New()
 
 	var syncs atomic.Uint32
-	var in chan<- segmentation.Input
 	mgr, _ := segmentation.New(segmentation.Config{
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
 		OnSync:          func() { syncs.Add(1) },
 	})
+	startRunning(t, mgr)
+	syncsBefore := syncs.Load()
 
+	in, err := mgr.RegisterVault(vaultID, dir, segmentation.VaultConfig{})
+	if err != nil {
+		t.Fatalf("RegisterVault during Run: %v", err)
+	}
+
+	ts := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	in <- segmentation.Input{Record: sampleRecord(0, ts)}
+	waitSync(t, mgr, &syncs, syncsBefore+1)
+}
+
+// startRunning starts mgr.Run and returns once Run is active: a sentinel
+// vault registered before Run gets its writer from Run itself, so the
+// sentinel's first ack orders after Run has taken over registration.
+func startRunning(t *testing.T, mgr *segmentation.Manager) {
+	t.Helper()
+	sentinel, err := mgr.RegisterVault(glid.New(), t.TempDir(), segmentation.VaultConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -404,18 +440,11 @@ func TestManagerRegisterDuringRun(t *testing.T) {
 		cancel()
 		<-done
 	})
-
-	time.Sleep(20 * time.Millisecond)
-
-	var err error
-	in, err = mgr.RegisterVault(vaultID, dir, segmentation.VaultConfig{})
-	if err != nil {
-		t.Fatalf("RegisterVault during Run: %v", err)
+	ack := make(chan error, 1)
+	sentinel <- segmentation.Input{Record: sampleRecord(0, time.Now().UTC()), Ack: ack}
+	if err := waittest.Recv(t, "sentinel ack from a Run-started writer", ack, appendProgress(mgr)); err != nil {
+		t.Fatalf("sentinel ack: %v", err)
 	}
-
-	ts := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
-	in <- segmentation.Input{Record: sampleRecord(0, ts)}
-	waitSync(t, &syncs, 1)
 }
 
 func TestManagerRegisterAfterRunFinished(t *testing.T) {
@@ -432,7 +461,6 @@ func TestManagerRegisterAfterRunFinished(t *testing.T) {
 		_ = mgr.Run(ctx)
 		close(done)
 	}()
-	time.Sleep(20 * time.Millisecond)
 	cancel()
 	<-done
 
@@ -475,19 +503,7 @@ func TestManagerUnregisterVaultDuringRun(t *testing.T) {
 	dir := t.TempDir()
 	vaultID := glid.New()
 	mgr, _ := segmentation.New(segmentation.Config{})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		_ = mgr.Run(ctx)
-		close(done)
-	}()
-	t.Cleanup(func() {
-		cancel()
-		<-done
-	})
-
-	time.Sleep(20 * time.Millisecond)
+	startRunning(t, mgr)
 
 	if _, err := mgr.RegisterVault(vaultID, dir, segmentation.VaultConfig{}); err != nil {
 		t.Fatal(err)

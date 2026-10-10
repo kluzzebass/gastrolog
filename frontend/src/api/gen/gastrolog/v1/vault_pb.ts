@@ -1328,6 +1328,10 @@ export class GetStatsRequest extends Message<GetStatsRequest> {
 }
 
 /**
+ * The vault figures count each vault once from its manifest, however many
+ * nodes hold a copy, so every node reports the same totals. total_bytes is the
+ * logical size of the records: one copy of each chunk, no indexes.
+ *
  * @generated from message gastrolog.v1.GetStatsResponse
  */
 export class GetStatsResponse extends Message<GetStatsResponse> {

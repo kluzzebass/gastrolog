@@ -2,6 +2,26 @@
 
 The System view shows health and performance metrics for each node.
 
+## Cluster summary
+
+In a cluster, the first card summarizes the whole cluster:
+
+- **Vaults, Records, Data, Chunks** — what the cluster's vaults hold, with
+  each vault counted once however many nodes keep a copy of it. **Data** is
+  the size of the records themselves, one copy of each chunk, without
+  indexes. Every node reports the same figures, whichever node you are
+  connected to. While the figures are still loading they show `—`; if some
+  vault has no figures yet, a note says how many of the vaults the totals
+  cover.
+- **Throughput** — routing and append rates summed across nodes. Each record
+  is appended once, by the node that received it, so the sum is the
+  cluster's rate.
+- **Combined Resources** and **Ingest Queue** — CPU, memory, goroutines, and
+  queue depth added up across every node that is reporting stats.
+
+Disk usage, which does count every copy, is the **Storage** figure in the
+header.
+
 ## Local node (rich view)
 
 For the node you're connected to, the view includes:
