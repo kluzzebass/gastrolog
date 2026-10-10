@@ -284,9 +284,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]VaultChunkMeta, e
 	result := make([]VaultChunkMeta, 0, len(entries))
 	seen := make(map[chunk.ChunkID]struct{}, len(entries))
 	for _, e := range entries {
-		m := e.ToChunkMeta()
-		o.overlayPipelineChunkMetaBounds(vaultID, &m)
-		m = o.groundChunkMeta(vaultID, m)
+		m := o.projectManifestEntry(vaultID, e)
 		result = append(result, VaultChunkMeta{
 			ChunkMeta: m,
 			VaultID:   vaultInst.VaultID,
@@ -310,6 +308,54 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]VaultChunkMeta, e
 	}
 
 	return result, nil
+}
+
+func (o *Orchestrator) projectManifestEntry(vaultID glid.GLID, e vaultctlfsm.ManifestEntry) chunk.ChunkMeta {
+	m := e.ToChunkMeta()
+	o.overlayPipelineChunkMetaBounds(vaultID, &m)
+	return o.groundChunkMeta(vaultID, m)
+}
+
+// ErrNoVaultManifest reports that this node can read no manifest for a vault:
+// it has not joined the vault's vault-ctl group and hosts no instance of it.
+var ErrNoVaultManifest = errors.New("no manifest for vault on this node")
+
+// ListClusterChunkMetasIncludingOpen returns the vault's chunk set, open
+// chunks included, with each chunk listed once however many homes hold a
+// copy. It answers identically on every vault-ctl voter, including nodes that
+// host no instance of the vault — where ListAllChunkMetas reports nothing.
+// On a node that hosts an instance it is ListAllChunkMetas, so the open-head
+// exception applies there too.
+func (o *Orchestrator) ListClusterChunkMetasIncludingOpen(vaultID glid.GLID) ([]chunk.ChunkMeta, error) {
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	o.mu.RUnlock()
+
+	if vault != nil && vault.Instance != nil {
+		metas, err := o.ListAllChunkMetas(vaultID)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]chunk.ChunkMeta, len(metas))
+		for i, m := range metas {
+			out[i] = m.ChunkMeta
+		}
+		return out, nil
+	}
+
+	f := o.vaultCtlFSMForVault(vaultID)
+	if f == nil {
+		if vault == nil {
+			return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+		}
+		return nil, fmt.Errorf("%w: %s", ErrNoVaultManifest, vaultID)
+	}
+	entries := f.ListIncludingPipelineManifest()
+	out := make([]chunk.ChunkMeta, len(entries))
+	for i, e := range entries {
+		out[i] = o.projectManifestEntry(vaultID, e)
+	}
+	return out, nil
 }
 
 // GetChunkMeta returns metadata for a specific chunk. The result is overlaid

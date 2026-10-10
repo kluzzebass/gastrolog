@@ -2,6 +2,8 @@ import { describe, test, expect } from "bun:test";
 import { render } from "@testing-library/react";
 import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 import { StorageState } from "../../api/gen/gastrolog/v1/storage_pb";
+import { NodeStats } from "../../api/gen/gastrolog/v1/cluster_pb";
+import { GetStatsResponse, VaultInfo, VaultStats } from "../../api/gen/gastrolog/v1/vault_pb";
 import { EntityListPane } from "./EntityListPane";
 
 // The storages entity tab renders a FLAT list, exactly the VaultsList
@@ -97,5 +99,94 @@ describe("EntityListPane storages (flat list)", () => {
     });
 
     expect(getByText(/No storages configured/)).toBeTruthy();
+  });
+});
+
+// The value text of the stat row whose label reads `label`.
+function statRow(container: HTMLElement, label: string): string | null {
+  const labelEl = [...container.querySelectorAll("span")].find((el) => el.textContent === label);
+  return labelEl?.parentElement?.textContent.slice(label.length) ?? null;
+}
+
+describe("EntityListPane system cluster summary", () => {
+  const VAULT_A = testId(1);
+  const VAULT_B = testId(2);
+  const nodeIds = [testId(40), testId(41), testId(42), testId(43)];
+
+  // Each node broadcasts its own copy of every vault it is a home for: vault
+  // A sits on all four nodes, vault B on none yet.
+  function seedReplicatedCluster(qc: ReturnType<typeof createTestQueryClient>, vaultStats: GetStatsResponse | null) {
+    qc.setQueryData(["settings"], { nodeId: nodeIds[0] });
+    qc.setQueryData(["system"], {
+      nodeConfigs: nodeIds.map((id, i) => ({ id, name: `node-${i + 1}` })),
+      vaults: [],
+      ingesters: [],
+      routes: [],
+      nodeStorageConfigs: [],
+    });
+    qc.setQueryData(["clusterStatus"], {
+      clusterEnabled: true,
+      nodes: nodeIds.map((id, i) => ({
+        id,
+        name: `node-${i + 1}`,
+        isLeader: i === 1,
+        stats: new NodeStats({
+          vaults: [
+            new VaultStats({ id: VAULT_A, recordCount: 607_073n, chunkCount: 61n, dataBytes: 161_000_000n }),
+            new VaultStats({ id: VAULT_B }),
+          ],
+        }),
+      })),
+    });
+    qc.setQueryData(["vaults"], [new VaultInfo({ id: VAULT_A, name: "a" }), new VaultInfo({ id: VAULT_B, name: "b" })]);
+    if (vaultStats) qc.setQueryData(["stats", "all"], vaultStats);
+  }
+
+  test("shows each vault's holdings once, not once per replica", () => {
+    const qc = createTestQueryClient();
+    seedReplicatedCluster(
+      qc,
+      new GetStatsResponse({ totalVaults: 2n, totalRecords: 607_073n, totalChunks: 61n, totalBytes: 1024n }),
+    );
+
+    const { container } = render(<EntityListPane entityType="system" dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expect(statRow(container, "Vaults")).toBe("2");
+    expect(statRow(container, "Records")).toBe((607_073).toLocaleString());
+    expect(statRow(container, "Chunks")).toBe("61");
+    expect(statRow(container, "Data")).toBe("1.0 KiB");
+    expect(container.textContent).not.toContain("cover");
+  });
+
+  test("shows unknown holdings, not node copies, before the cluster stats arrive", () => {
+    const qc = createTestQueryClient();
+    seedReplicatedCluster(qc, null);
+
+    const { container } = render(<EntityListPane entityType="system" dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expect(statRow(container, "Vaults")).toBe("2");
+    expect(statRow(container, "Records")).toBe("—");
+    expect(statRow(container, "Chunks")).toBe("—");
+    expect(statRow(container, "Data")).toBe("—");
+  });
+
+  test("says which share of the vaults the totals cover when a vault has no figures", () => {
+    const qc = createTestQueryClient();
+    seedReplicatedCluster(
+      qc,
+      new GetStatsResponse({ totalVaults: 1n, totalRecords: 607_073n, totalChunks: 61n, totalBytes: 1024n }),
+    );
+
+    const { container, getByText } = render(<EntityListPane entityType="system" dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expect(statRow(container, "Vaults")).toBe("2");
+    expect(statRow(container, "Records")).toBe((607_073).toLocaleString());
+    expect(getByText("Records, data, and chunks cover 1 of 2 vaults.")).toBeTruthy();
   });
 });
