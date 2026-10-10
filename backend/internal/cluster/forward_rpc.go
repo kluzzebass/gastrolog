@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // forwardRPCStreamHandler implements the ForwardRPC transport. The underlying
@@ -86,6 +89,23 @@ func forwardRPCStreamHandler(srv any, stream grpc.ServerStream) error {
 // transport compression will hook in — revisit this limit when that lands.
 const ForwardRPCMaxResponseBytes = 4 << 20
 
+// forwardRPCMaxFrameBytes is the encoded size of the largest response frame
+// the handler sends — a payload of ForwardRPCMaxResponseBytes, or an error
+// code with a message of that length — and so the receive limit the
+// forwarding client needs for every frame within the limit to arrive.
+var forwardRPCMaxFrameBytes = maxForwardRPCResponseFrameBytes()
+
+func maxForwardRPCResponseFrameBytes() int {
+	fields := (&gastrologv1.ForwardRPCFrame{}).ProtoReflect().Descriptor().Fields()
+	tag := func(name protoreflect.Name) int {
+		return protowire.SizeTag(fields.ByName(name).Number())
+	}
+	atLimit := protowire.SizeBytes(ForwardRPCMaxResponseBytes)
+	payloadFrame := tag("payload") + atLimit
+	errorFrame := tag("error_code") + protowire.SizeVarint(math.MaxUint32) + tag("error_message") + atLimit
+	return max(payloadFrame, errorFrame)
+}
+
 // unaryResponseFrame reads a raw proto response body and sends it as a single
 // ForwardRPCFrame. Connect unary responses are NOT envelope-framed — the body
 // is raw proto bytes. Responses exceeding ForwardRPCMaxResponseBytes are
@@ -142,6 +162,13 @@ func decodeForwardedError(resp *http.Response) (connect.Code, string, error) {
 			resp.StatusCode, ForwardRPCMaxResponseBytes), nil
 	}
 	if code, msg, ok := decodeConnectWireError(buf.Bytes(), fallback); ok {
+		// Decoding replaces each invalid UTF-8 byte with a three-byte U+FFFD,
+		// so a message can outgrow the body it came from.
+		if len(msg) > ForwardRPCMaxResponseBytes {
+			return code, fmt.Sprintf(
+				"upstream error: HTTP %d with a decoded error message exceeding ForwardRPCMaxResponseBytes limit of %d bytes",
+				resp.StatusCode, ForwardRPCMaxResponseBytes), nil
+		}
 		return code, msg, nil
 	}
 	if text := strings.TrimSpace(buf.String()); text != "" {
@@ -218,6 +245,7 @@ func ForwardRPC(ctx context.Context, peers *PeerConnManager, nodeID, procedure s
 			ClientStreams: true,
 		},
 		"/gastrolog.v1.ClusterService/ForwardRPC",
+		grpc.MaxCallRecvMsgSize(forwardRPCMaxFrameBytes),
 	)
 	if err != nil {
 		return nil, 14, "", fmt.Errorf("open ForwardRPC stream to %s: %w", nodeID, err)
