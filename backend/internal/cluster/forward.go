@@ -22,6 +22,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // SearchExecutor runs a search on a local vault and returns results.
@@ -362,7 +365,7 @@ func forwardFollowStreamHandler(srv any, stream grpc.ServerStream) error {
 		resp := &gastrologv1.ForwardFollowResponse{
 			Records: []*gastrologv1.ExportRecord{convert.RecordToExport(rec)},
 		}
-		if err := stream.SendMsg(resp); err != nil {
+		if err := sendForwarded(stream, resp); err != nil {
 			return err
 		}
 	}
@@ -393,8 +396,9 @@ func forwardWatchChunksStreamHandler(srv any, stream grpc.ServerStream) error {
 
 // forwardSearchStreamHandler handles the server-streaming ForwardSearch RPC.
 // Executes a search on a local vault and streams matching records back to the
-// requesting node in batches of 200. For pipeline queries, sends a single
-// message with the TableResult.
+// requesting node in batches bounded by forwardBatchMaxRecords and
+// forwardBatchMaxBytes. For pipeline queries, streams the TableResult with
+// its rows split across messages under the same byte bound.
 func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 	s := srv.(*Server)
 	if s.searchExecutor == nil {
@@ -417,12 +421,8 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 		return status.Errorf(codes.Internal, "search: %v", err)
 	}
 
-	// Pipeline path: send single message with TableResult + Histogram.
 	if tableResult != nil {
-		return stream.SendMsg(&gastrologv1.ForwardSearchResponse{
-			TableResult: tableResult,
-			Histogram:   histogram,
-		})
+		return sendForwardedTable(stream, tableResult, histogram)
 	}
 
 	// No results (vault has no leader instance on this node).
@@ -430,10 +430,7 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 		return stream.SendMsg(&gastrologv1.ForwardSearchResponse{Histogram: histogram})
 	}
 
-	// Record path: iterate and batch 200 records per message.
-	const batchSize = 200
-	batch := make([]*gastrologv1.ExportRecord, 0, batchSize)
-	first := true
+	batch := newForwardSearchBatch(histogram)
 	for rec, iterErr := range searchIter {
 		if iterErr != nil {
 			// EOF can occur when a chunk is deleted mid-read (e.g., ImportToVault
@@ -444,29 +441,117 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 			}
 			return status.Errorf(codes.Internal, "search record: %v", iterErr)
 		}
-		batch = append(batch, convert.RecordToExport(rec))
-		if len(batch) >= batchSize {
-			resp := &gastrologv1.ForwardSearchResponse{Records: batch}
-			if first {
-				resp.Histogram = histogram
-				first = false
-			}
-			if err := stream.SendMsg(resp); err != nil {
+		er := convert.RecordToExport(rec)
+		n := repeatedEntrySize(forwardSearchRecordsField, er)
+		if batch.wouldOverflow(n) {
+			if err := sendForwarded(stream, batch.resp); err != nil {
 				return err
 			}
-			batch = make([]*gastrologv1.ExportRecord, 0, batchSize)
+			batch = newForwardSearchBatch(nil)
+		}
+		batch.add(er, n)
+		if batch.full() {
+			if err := sendForwarded(stream, batch.resp); err != nil {
+				return err
+			}
+			batch = newForwardSearchBatch(nil)
 		}
 	}
 	// Send remaining records + resume token in the final message.
-	resp := &gastrologv1.ForwardSearchResponse{Records: batch}
-	if first {
-		resp.Histogram = histogram
-	}
 	if getToken != nil {
-		resp.ResumeToken = getToken()
-		resp.HasMore = len(resp.ResumeToken) > 0
+		batch.resp.ResumeToken = getToken()
+		batch.resp.HasMore = len(batch.resp.ResumeToken) > 0
 	}
-	return stream.SendMsg(resp)
+	return sendForwarded(stream, batch.resp)
+}
+
+// forwardBatchMaxRecords and forwardBatchMaxBytes bound one ForwardSearch
+// response message. The coordinating node buffers searchStreamBatchSlots
+// messages per remote vault, so the byte bound is what keeps that buffer
+// small when records are large. A record or table row larger than
+// forwardBatchMaxBytes travels in a message of its own.
+const (
+	forwardBatchMaxRecords = 200
+	forwardBatchMaxBytes   = 1 << 20
+)
+
+var (
+	forwardSearchRecordsField = fieldNumber(&gastrologv1.ForwardSearchResponse{}, "records")
+	tableResultRowsField      = fieldNumber(&gastrologv1.TableResult{}, "rows")
+)
+
+func fieldNumber(m proto.Message, name protoreflect.Name) protowire.Number {
+	return m.ProtoReflect().Descriptor().Fields().ByName(name).Number()
+}
+
+// repeatedEntrySize is the number of bytes m adds to its parent when appended
+// to the repeated message field num.
+func repeatedEntrySize(num protowire.Number, m proto.Message) int {
+	return protowire.SizeTag(num) + protowire.SizeBytes(proto.Size(m))
+}
+
+// forwardSearchBatch accumulates one ForwardSearch record message and its
+// encoded size.
+type forwardSearchBatch struct {
+	resp *gastrologv1.ForwardSearchResponse
+	size int
+}
+
+func newForwardSearchBatch(histogram []*gastrologv1.HistogramBucket) *forwardSearchBatch {
+	resp := &gastrologv1.ForwardSearchResponse{Histogram: histogram}
+	return &forwardSearchBatch{resp: resp, size: proto.Size(resp)}
+}
+
+func (b *forwardSearchBatch) wouldOverflow(n int) bool {
+	return len(b.resp.Records) > 0 && b.size+n > forwardBatchMaxBytes
+}
+
+func (b *forwardSearchBatch) add(er *gastrologv1.ExportRecord, n int) {
+	b.resp.Records = append(b.resp.Records, er)
+	b.size += n
+}
+
+func (b *forwardSearchBatch) full() bool {
+	return len(b.resp.Records) >= forwardBatchMaxRecords || b.size >= forwardBatchMaxBytes
+}
+
+// sendForwardedTable streams a pipeline TableResult. The first message carries
+// the columns, flags and histogram; rows follow in as many messages as
+// forwardBatchMaxBytes requires, and the receiver appends them in order.
+func sendForwardedTable(stream grpc.ServerStream, table *gastrologv1.TableResult, histogram []*gastrologv1.HistogramBucket) error {
+	resp := &gastrologv1.ForwardSearchResponse{
+		TableResult: &gastrologv1.TableResult{
+			Columns:    table.GetColumns(),
+			Truncated:  table.GetTruncated(),
+			ResultType: table.GetResultType(),
+		},
+		Histogram: histogram,
+	}
+	size := proto.Size(resp)
+	for _, row := range table.GetRows() {
+		n := repeatedEntrySize(tableResultRowsField, row)
+		if len(resp.TableResult.Rows) > 0 && size+n > forwardBatchMaxBytes {
+			if err := sendForwarded(stream, resp); err != nil {
+				return err
+			}
+			resp = &gastrologv1.ForwardSearchResponse{TableResult: &gastrologv1.TableResult{}}
+			size = proto.Size(resp)
+		}
+		resp.TableResult.Rows = append(resp.TableResult.Rows, row)
+		size += n
+	}
+	return sendForwarded(stream, resp)
+}
+
+// sendForwarded sends a forwarded search or follow message, or refuses one the
+// coordinating node could not receive: a single record or table row over
+// maxServiceLaneMsgBytes fails the stream by name rather than being dropped.
+func sendForwarded(stream grpc.ServerStream, m proto.Message) error {
+	if n := proto.Size(m); n > maxServiceLaneMsgBytes {
+		return status.Errorf(codes.ResourceExhausted,
+			"forwarded message of %d bytes exceeds maxServiceLaneMsgBytes limit of %d bytes", n, maxServiceLaneMsgBytes)
+	}
+	return stream.SendMsg(m)
 }
 
 // forwardGetContext handles the ForwardGetContext RPC. Runs GetContext on a

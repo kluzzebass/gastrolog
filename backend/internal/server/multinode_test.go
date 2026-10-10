@@ -7,6 +7,7 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/system/configfabric"
 	"io"
+	"iter"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -140,6 +141,17 @@ type mnConfig struct {
 	diskGuardNodes map[string]bool
 	// histogramAtStreamEnd is set by WithHistogramAtStreamEnd.
 	histogramAtStreamEnd bool
+	// clusterSearch is set by WithClusterSearch.
+	clusterSearch bool
+}
+
+// WithClusterSearch makes the coordinator reach remote vaults through the
+// production ForwardSearch client and handler over real loopback gRPC,
+// instead of the in-process stand-in.
+func WithClusterSearch() mnOption {
+	return func(c *mnConfig) {
+		c.clusterSearch = true
+	}
 }
 
 // WithHistogramAtStreamEnd makes the ForwardSearch stand-in withhold each
@@ -358,13 +370,18 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	// stats collectors below) was built earlier, before node creation — see
 	// that block's comment.
 
-	routingFwd := newClusterForwarder(t, nodes, coordinatorID, vaultsDir)
+	clusterPeers := startClusterPeers(t, nodes, coordinatorID, vaultsDir)
+	routingFwd := routing.NewForwarder(clusterPeers)
+	var coordSearcher server.RemoteSearcher = remoteSearcher
+	if cfg.clusterSearch {
+		coordSearcher = cluster.NewSearchForwarder(clusterPeers)
+	}
 
 	coordNode := nodes[coordinatorID]
 	srvCfg := server.Config{
 		NoAuth:               true,
 		NodeID:               coordinatorID,
-		RemoteSearcher:       remoteSearcher,
+		RemoteSearcher:       coordSearcher,
 		RemoteIndexer:        remoteIndexer,
 		RemoteVaultValidator: &directRemoteVaultValidator{nodes: remoteOrchestrators},
 		RoutingForwarder:     routingFwd,
@@ -1273,6 +1290,14 @@ func (d *directRemoteIndexer) GetIndexes(_ context.Context, nodeID string, req *
 // crosses the same frame encoding and error translation as in production.
 func newClusterForwarder(t *testing.T, nodes map[string]multinodeTestNode, selfID, vaultsDir string) *routing.Forwarder {
 	t.Helper()
+	return routing.NewForwarder(startClusterPeers(t, nodes, selfID, vaultsDir))
+}
+
+// startClusterPeers starts a real cluster gRPC server on loopback for every
+// node but selfID, serving ForwardRPC and ForwardSearch, and returns selfID's
+// connection manager to them.
+func startClusterPeers(t *testing.T, nodes map[string]multinodeTestNode, selfID, vaultsDir string) *cluster.PeerConnManager {
+	t.Helper()
 	addrs := make(map[string]string, len(nodes))
 	for id, node := range nodes {
 		if id == selfID {
@@ -1288,6 +1313,7 @@ func newClusterForwarder(t *testing.T, nodes map[string]multinodeTestNode, selfI
 		}
 		cs.Transport()
 		cs.SetInternalHandler(remoteSrv.BuildInternalHandler())
+		cs.SetSearchExecutor(mnForwardSearchExecutor(node.orch))
 		if err := cs.Start(); err != nil {
 			t.Fatalf("start cluster server for %s: %v", id, err)
 		}
@@ -1299,7 +1325,57 @@ func newClusterForwarder(t *testing.T, nodes map[string]multinodeTestNode, selfI
 		return addr, ok
 	})
 	t.Cleanup(func() { _ = peers.Close() })
-	return routing.NewForwarder(peers)
+	return peers
+}
+
+// mnForwardSearchExecutor answers ForwardSearch on a harness node's cluster
+// server as the production executor does: the vault's leader engine, a
+// pipeline's table, or the record stream resumed at the coordinator's cursor.
+func mnForwardSearchExecutor(orch *orchestrator.Orchestrator) cluster.SearchExecutor {
+	return func(ctx context.Context, req *gastrologv1.ForwardSearchRequest) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
+		eng, err := server.ForwardSearchEngine(orch, req)
+		if err != nil || eng == nil {
+			return nil, nil, nil, nil, err
+		}
+		q, pipeline, err := server.ParseExpression(req.GetQuery())
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("parse query: %w", err)
+		}
+		q.PartialAggregates = req.GetPartialAggregates()
+		var histogram []*gastrologv1.HistogramBucket
+		if server.ForwardSearchIncludesHistogram(q) {
+			histogram = server.HistogramToProto(eng.ComputeSearchPageHistogram(ctx, q, 50))
+		}
+		if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
+			result, err := eng.RunPipeline(ctx, q, pipeline)
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
+			if result.Table != nil {
+				return nil, nil, server.TableResultToBasicProto(result.Table), histogram, nil
+			}
+			return func(yield func(chunk.Record, error) bool) {
+				for _, rec := range result.Records {
+					if !yield(rec, nil) {
+						return
+					}
+				}
+			}, nil, nil, histogram, nil
+		}
+		var resume *query.ResumeToken
+		if rt := req.GetResumeToken(); len(rt) > 0 {
+			if resume, err = server.ProtoToLocalResumeToken(rt); err != nil {
+				return nil, nil, nil, nil, fmt.Errorf("invalid resume token: %w", err)
+			}
+		}
+		searchIter, getToken := eng.Search(ctx, q, resume)
+		return searchIter, func() []byte {
+			if token := getToken(); token != nil {
+				return server.ResumeTokenToProto(token)
+			}
+			return nil
+		}, nil, histogram, nil
+	}
 }
 
 // ---------------------------------------------------------------------------

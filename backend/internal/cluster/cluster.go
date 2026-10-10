@@ -40,9 +40,13 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// maxChunkTransferBytes is the max gRPC receive message size for the cluster
-// port.
-const maxChunkTransferBytes = 128 * 1024 * 1024 // 128 MB
+// maxServiceLaneMsgBytes is the largest message either end of a service-lane
+// connection receives: the cluster port's receive cap, and the default call
+// option on every outbound service-lane connection. Imports carry one record
+// per message, so no larger record moves between nodes, and forwarded search
+// and follow results carry any record that fits in it: one built from a whole
+// HTTP or OTLP request body, or from a whole decompressed Fluent Forward batch.
+const maxServiceLaneMsgBytes = 128 << 20
 
 // Config holds cluster server configuration.
 type Config struct {
@@ -686,7 +690,7 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) startCombined() error {
-	opts := s.baseServerOpts(maxChunkTransferBytes)
+	opts := s.baseServerOpts(maxServiceLaneMsgBytes)
 	s.grpcSrv = grpc.NewServer(opts...)
 	s.tm.Register(s.grpcSrv)
 	if s.raft != nil {
@@ -701,7 +705,7 @@ func (s *Server) startWithLaneIsolation() error {
 	s.tm.SetInboundLaneRegistry(registry)
 	s.sniDemux = newSNIDemuxListener(s.listener, registry)
 
-	serviceOpts := s.baseServerOpts(maxChunkTransferBytes)
+	serviceOpts := s.baseServerOpts(maxServiceLaneMsgBytes)
 	s.grpcSrv = grpc.NewServer(serviceOpts...)
 	if s.raft != nil {
 		leaderhealth.Setup(s.raft, s.grpcSrv, []string{"cluster"})
