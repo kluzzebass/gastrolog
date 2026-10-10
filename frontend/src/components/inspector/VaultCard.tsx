@@ -61,6 +61,9 @@ function chunkStartInstant(chunk: ChunkMeta): Date | undefined {
   return start;
 }
 
+/** Node names longer than this truncate in the throughput table; the full name is in the tooltip. */
+const NODE_NAME_MAX_CHARS = 24;
+
 // chunkDiskClaimBytes is this chunk's LOCAL on-disk claim — what deleting
 // it would actually free on the responding node. Mirrors the backend's
 // chunk.DiskClaim formula (backend/internal/chunk/claim.go): a cloud-backed
@@ -384,10 +387,12 @@ function VaultThroughputSection({
   // One grid owns the columns for every row (header, stage totals, node
   // rows). The rate columns are max-content: each value cell reserves its
   // formatter's maximum width, so the track is as wide as the widest
-  // possible value and never moves. STATUS is the only prose column and
-  // takes all spare width. The edge tracks include the rows' 1rem padding.
+  // possible value and never moves. The node column is as wide as the
+  // longest node name, up to NODE_NAME_MAX_CHARS. STATUS is the only prose
+  // column and takes all spare width. The edge tracks include the rows' 1rem
+  // padding.
   const gridTemplate =
-    "grid grid-cols-[6rem_5.5rem_4.5rem_minmax(5rem,max-content)_minmax(5.5rem,max-content)_minmax(11rem,1fr)] gap-x-3";
+    "grid grid-cols-[6rem_minmax(5.5rem,max-content)_4.5rem_minmax(5rem,max-content)_minmax(5.5rem,max-content)_minmax(11rem,1fr)] gap-x-3";
   const gridCols = `${LIVE_GRID_ROW} items-center`;
 
   return (
@@ -507,7 +512,11 @@ function StageRows({
         return (
           <div key={r.node} className={rowClass} title={title}>
             <span className={stageClass}>{sorted.length === 1 && i === 0 ? label : ""}</span>
-            <span className={`font-mono truncate ${c("text-text-muted", "text-light-text-muted")}`} title={r.node}>
+            <span
+              className={`font-mono truncate ${c("text-text-muted", "text-light-text-muted")}`}
+              style={{ maxWidth: `${NODE_NAME_MAX_CHARS}ch` }}
+              title={r.node}
+            >
               {r.node}
             </span>
             <span className="text-copper">
