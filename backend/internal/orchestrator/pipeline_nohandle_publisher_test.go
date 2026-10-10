@@ -11,6 +11,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/system"
+	"gastrolog/internal/waittest"
 )
 
 func TestNoGroupModePublishFailClosed(t *testing.T) {
@@ -68,13 +70,9 @@ func TestNoGroupModePublishFailClosed(t *testing.T) {
 	if err := orch.SubmitIngest(context.Background(), rec, ack); err != nil {
 		t.Fatalf("SubmitIngest: %v", err)
 	}
-	select {
-	case err := <-ack:
-		if err != nil {
-			t.Fatalf("durability ack: %v", err)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("no durability ack")
+	progress := func() string { return pipelineProgress(orch) }
+	if err := waittest.Recv(t, "durability ack", ack, progress); err != nil {
+		t.Fatalf("durability ack: %v", err)
 	}
 
 	// The record's segment completes and STAYS in completed/ — durable truth
@@ -84,18 +82,11 @@ func TestNoGroupModePublishFailClosed(t *testing.T) {
 		t.Fatalf("originRoot: %v", err)
 	}
 	var completed map[glid.GLID]struct{}
-	deadline := time.Now().Add(30 * time.Second)
-	for {
+	waittest.Progress(t, "a completed segment under "+paths.CompletedDir(root), func() (string, bool) {
 		ids, err := paths.ListSegmentIDs(paths.CompletedDir(root))
-		if err == nil && len(ids) > 0 {
-			completed = ids
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("no completed segment appeared under %s (err=%v)", paths.CompletedDir(root), err)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+		completed = ids
+		return fmt.Sprintf("completed-files=%d err=%v %s", len(ids), err, progress()), err == nil && len(ids) > 0
+	})
 
 	// Fail-closed honesty: with no vault-ctl handle the publish counter must
 	// stay 0 (the noop publisher used to count these as published), and no

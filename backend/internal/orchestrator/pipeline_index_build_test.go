@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	filetoken "gastrolog/internal/index/file/token"
 	"gastrolog/internal/query"
 	"gastrolog/internal/record"
+	"gastrolog/internal/waittest"
 )
 
 // pipelineVaultWithSealedGLCB registers, on a fresh orchestrator, a file vault
@@ -50,16 +52,12 @@ func pipelineVaultWithSealedGLCB(t *testing.T, ctx context.Context, withBuilders
 	return orch, fx, cm, im
 }
 
-func awaitIndexes(t *testing.T, im index.IndexManager, id chunk.ChunkID) {
+func awaitIndexes(t *testing.T, orch *Orchestrator, im index.IndexManager, id chunk.ChunkID) {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if complete, err := im.IndexesComplete(id); err == nil && complete {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("secondary indexes for %s were never built", id)
+	waittest.Progress(t, fmt.Sprintf("secondary indexes for %s built", id), func() (string, bool) {
+		complete, err := im.IndexesComplete(id)
+		return fmt.Sprintf("complete=%v err=%v %s", complete, err, jobsProgress(orch.Scheduler())), err == nil && complete
+	})
 }
 
 // When chunking finishes a build on this node, the chunk's secondary indexes
@@ -72,7 +70,7 @@ func TestPipelineChunkBuiltSchedulesSecondaryIndexes(t *testing.T) {
 	vaultInst := orch.findLocalVaultInstance(fx.vaultID)
 	vaultInst.Reconciler = NewVaultLifecycleReconciler(orch, fx.vaultID, vaultInst, "node-home", slog.Default())
 	orch.onPipelineChunkBuilt(fx.vaultID, fx.fsm, fx.sealed.ID)
-	awaitIndexes(t, im, fx.sealed.ID)
+	awaitIndexes(t, orch, im, fx.sealed.ID)
 }
 
 // The startup sweep visits a vault only when its chunk manager carries index
@@ -94,5 +92,5 @@ func TestMissingIndexSweepBuildsPipelineChunkIndexes(t *testing.T) {
 	if err := orch.rebuildVaultIndexes(ctx, fx.vaultID, orch.findLocalVaultInstance(fx.vaultID)); err != nil {
 		t.Fatal(err)
 	}
-	awaitIndexes(t, im, fx.sealed.ID)
+	awaitIndexes(t, orch, im, fx.sealed.ID)
 }

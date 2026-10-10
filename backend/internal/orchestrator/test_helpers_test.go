@@ -13,6 +13,7 @@ import (
 
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gastrolog/internal/blobstore"
@@ -25,6 +26,7 @@ import (
 	"gastrolog/internal/query"
 	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
+	"gastrolog/internal/waittest"
 )
 
 // syntheticPlacements creates a Placements slice with a leader using a synthetic storage ID.
@@ -762,7 +764,7 @@ func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestN
 	// Drain post-seal + replication jobs for the newly-sealed chunk.
 	// A late ImportSealedChunk would recreate the chunk on a follower
 	// after the transition delete has fired.
-	requireIdle(t, leaderNode.orch.Scheduler(), 30*time.Second)
+	requireIdle(t, leaderNode.orch.Scheduler())
 }
 
 // assertVaultDirEmpty verifies that an instance's filesystem directory contains no
@@ -887,19 +889,48 @@ func waitForTransitions(t *testing.T, orch *Orchestrator, timeout time.Duration)
 	t.Fatal("transition jobs did not complete within timeout")
 }
 
-// requireIdle drains the scheduler's one-time jobs and FAILS if the budget
-// expires first.
-//
-// Every WaitIdle call site in this package used to discard the outcome, so a
-// scheduler that had not finished draining looked exactly like one that had.
-// That is a test which reports success for a state it never reached; under
-// full-suite load it becomes a test which reports failure for a bug that is not
-// there. Route drains through here so a blown budget says so.
-func requireIdle(t *testing.T, sched *Scheduler, budget time.Duration) {
+// requireIdle waits until the scheduler has no one-time jobs pending, failing
+// when its jobs stop making progress.
+func requireIdle(t *testing.T, sched *Scheduler) {
 	t.Helper()
-	if !sched.WaitIdle(budget) {
-		t.Fatalf("scheduler still had one-time jobs pending after %s", budget)
+	waittest.Progress(t, "scheduler drains its one-time jobs", func() (string, bool) {
+		return jobsProgress(sched), sched.PendingOnce() == 0
+	})
+}
+
+// pipelineProgress snapshots the ingest pipeline's stage counters per vault,
+// the progress measure for waits on ingested records.
+func pipelineProgress(orch *Orchestrator) string {
+	parts := []string{fmt.Sprintf("routed=%d", orch.pipeline.RouteStats().Routed)}
+	for _, st := range orch.pipeline.AppendStats() {
+		parts = append(parts, fmt.Sprintf("%s queued=%d appended=%d durable=%d completed=%d",
+			st.VaultID, st.QueueDepth, st.RecordsAppended, st.RecordsDurable, st.SegmentsCompleted))
 	}
+	for _, st := range orch.pipeline.PublishStats() {
+		parts = append(parts, fmt.Sprintf("%s published=%d", st.VaultID, st.Published))
+	}
+	for _, st := range orch.pipeline.CollectStats() {
+		parts = append(parts, fmt.Sprintf("%s collected-records=%d", st.VaultID, st.CollectedRecords))
+	}
+	slices.Sort(parts[1:])
+	return strings.Join(parts, "; ")
+}
+
+// jobsProgress snapshots every scheduled job — name, last run, and live
+// progress — the progress measure for waits on scheduled work.
+func jobsProgress(sched *Scheduler) string {
+	jobs := sched.ListJobs()
+	lines := make([]string, 0, len(jobs)+1)
+	lines = append(lines, fmt.Sprintf("pending-once=%d", sched.PendingOnce()))
+	for _, j := range jobs {
+		s := fmt.Sprintf("%s last=%d", j.Name, j.LastRun.UnixNano())
+		if p := j.Snapshot().Progress; p != nil {
+			s += fmt.Sprintf(" status=%v chunks=%d/%d records=%d err=%q", p.Status, p.ChunksDone, p.ChunksTotal, p.RecordsDone, p.Error)
+		}
+		lines = append(lines, s)
+	}
+	slices.Sort(lines[1:])
+	return strings.Join(lines, "; ")
 }
 
 // testClock is an advanceable time source safe to hand to the orchestrator.

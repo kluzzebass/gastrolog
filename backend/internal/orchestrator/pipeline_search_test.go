@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -13,10 +14,10 @@ import (
 	"gastrolog/internal/manifest"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/segment"
-	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/query"
 	"gastrolog/internal/record"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+	"gastrolog/internal/waittest"
 )
 
 // buildOpenPipelineManifest ingests records and drives the planner until the
@@ -35,25 +36,31 @@ func buildOpenPipelineManifest(t *testing.T, ctx context.Context) (glid.GLID, *v
 	if err := mgr.RegisterVault(vaultID, chunkingSpec(home, fsm, func() bool { return true })); err != nil {
 		t.Fatalf("RegisterVault: %v", err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	var open *vaultctlfsm.OpenChunkManifest
-	for {
-		if err := mgr.PlanOnce(ctx, vaultID); err != nil {
-			t.Fatalf("PlanOnce: %v", err)
-		}
-		open = fsm.OpenChunk()
-		if open != nil && len(open.Refs) > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("open manifest never opened")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	open := planUntil(t, ctx, mgr, fsm, vaultID, "open manifest with refs", func(open *vaultctlfsm.OpenChunkManifest) bool {
+		return len(open.Refs) > 0
+	})
 	if fsm.SealedManifest() != nil {
 		t.Fatal("chunk must remain open")
 	}
 	return vaultID, fsm, home, open.ChunkID, open.TotalRecords
+}
+
+// planUntil runs planner passes until the open manifest satisfies done and
+// returns it.
+func planUntil(t *testing.T, ctx context.Context, mgr *chunking.Manager, fsm *vaultctlfsm.FSM, vaultID glid.GLID, what string, done func(*vaultctlfsm.OpenChunkManifest) bool) *vaultctlfsm.OpenChunkManifest {
+	t.Helper()
+	var open *vaultctlfsm.OpenChunkManifest
+	waittest.Progress(t, what, func() (string, bool) {
+		if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+			t.Fatalf("PlanOnce: %v", err)
+		}
+		open = fsm.OpenChunk()
+		if open == nil {
+			return "open=none", false
+		}
+		return fmt.Sprintf("open refs=%d records=%d", len(open.Refs), open.TotalRecords), done(open)
+	})
+	return open
 }
 
 // buildOpenPipelineManifestN is buildOpenPipelineManifest with enough records
@@ -76,26 +83,12 @@ func (o *originFixture) ingestScrambledSourceTimes(t *testing.T, ctx context.Con
 	ingester := glid.New()
 	for i := range n {
 		ingestTS := t0.Add(time.Duration(i) * time.Second)
-		rec := record.Record{
+		o.ingest(t, ctx, &record.Record{
 			EventID:  record.EventID{IngesterID: ingester, IngestTS: ingestTS, IngestSeq: uint32(i + 1)}, //nolint:gosec // G115: small loop index
 			IngestTS: ingestTS,
 			SourceTS: t0.Add(time.Duration((i*7)%n) * time.Second),
 			Raw:      []byte("rubicon-c-segment-payload-line-with-scrambled-source-times"),
-		}
-		ack := make(chan error, 1)
-		select {
-		case o.in <- segmentation.Input{Record: &rec, Ack: ack}:
-		case <-ctx.Done():
-			t.Fatal("ingest cancelled")
-		}
-		select {
-		case err := <-ack:
-			if err != nil {
-				t.Fatalf("ingest ack: %v", err)
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatal("ingest ack timeout")
-		}
+		})
 	}
 }
 
@@ -109,17 +102,7 @@ func buildOpenPipelineManifestWith(t *testing.T, ctx context.Context, ingest fun
 	origin := newOriginFixture(t, ctx, vaultID, fsm)
 	ingest(origin)
 
-	// Segments publish asynchronously; settle on the set that arrives.
-	var entries []vaultctlfsm.CompletedSegmentEntry
-	stable := time.Now()
-	for time.Now().Before(stable.Add(500 * time.Millisecond)) {
-		cur := fsm.ListCompletedSegments()
-		if len(cur) != len(entries) {
-			entries = cur
-			stable = time.Now()
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	entries := origin.waitAllPublished(t)
 	var total uint64
 	home := t.TempDir()
 	for _, e := range entries {
@@ -131,21 +114,9 @@ func buildOpenPipelineManifestWith(t *testing.T, ctx context.Context, ingest fun
 	if err := mgr.RegisterVault(vaultID, chunkingSpec(home, fsm, func() bool { return true })); err != nil {
 		t.Fatalf("RegisterVault: %v", err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	var open *vaultctlfsm.OpenChunkManifest
-	for {
-		if err := mgr.PlanOnce(ctx, vaultID); err != nil {
-			t.Fatalf("PlanOnce: %v", err)
-		}
-		open = fsm.OpenChunk()
-		if open != nil && open.TotalRecords >= total {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("open manifest never covered the %d published records", total)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	open := planUntil(t, ctx, mgr, fsm, vaultID, fmt.Sprintf("open manifest covering the %d published records", total), func(open *vaultctlfsm.OpenChunkManifest) bool {
+		return open.TotalRecords >= total
+	})
 	if fsm.SealedManifest() != nil {
 		t.Fatal("chunk must remain open")
 	}
@@ -657,16 +628,8 @@ func TestOpenChunkPositionsSurviveSealing(t *testing.T) {
 	origin := newOriginFixture(t, ctx, vaultID, fsm)
 	origin.ingestScrambledSourceTimes(t, ctx, n)
 	home := t.TempDir()
-	var entries []vaultctlfsm.CompletedSegmentEntry
-	stable := time.Now()
-	for time.Now().Before(stable.Add(500 * time.Millisecond)) {
-		if cur := fsm.ListCompletedSegments(); len(cur) != len(entries) {
-			entries, stable = cur, time.Now()
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
 	var total uint64
-	for _, e := range entries {
+	for _, e := range origin.waitAllPublished(t) {
 		copyCompletedToHead(t, origin.root, home, e.SegmentID)
 		total += uint64(e.RecordCount)
 	}
@@ -674,20 +637,9 @@ func TestOpenChunkPositionsSurviveSealing(t *testing.T) {
 	if err := mgr.RegisterVault(vaultID, chunkingSpec(home, fsm, func() bool { return true })); err != nil {
 		t.Fatalf("RegisterVault: %v", err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	var open *vaultctlfsm.OpenChunkManifest
-	for {
-		if err := mgr.PlanOnce(ctx, vaultID); err != nil {
-			t.Fatalf("PlanOnce: %v", err)
-		}
-		if open = fsm.OpenChunk(); open != nil && open.TotalRecords >= total {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("open manifest never covered the %d published records", total)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	open := planUntil(t, ctx, mgr, fsm, vaultID, fmt.Sprintf("open manifest covering the %d published records", total), func(open *vaultctlfsm.OpenChunkManifest) bool {
+		return open.TotalRecords >= total
+	})
 	if open.TotalRecords < 8 {
 		t.Fatalf("open manifest holds %d records, need >= 8", open.TotalRecords)
 	}

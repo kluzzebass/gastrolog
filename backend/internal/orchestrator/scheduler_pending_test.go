@@ -46,7 +46,7 @@ func TestHasPendingPrefixTracksJobLifecycle(t *testing.T) {
 	}
 
 	close(release)
-	requireIdle(t, sched, 5*time.Second)
+	requireIdle(t, sched)
 
 	// The point of the fix: once the job has completed it is gone from s.jobs,
 	// so this must go false. It did before too — via absence rather than via
@@ -75,7 +75,7 @@ func TestWaitIdleDrainsOneTimeJobs(t *testing.T) {
 		t.Fatalf("RunOnce: %v", err)
 	}
 
-	requireIdle(t, sched, 5*time.Second)
+	requireIdle(t, sched)
 	select {
 	case <-done:
 	default:

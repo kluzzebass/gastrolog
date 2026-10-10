@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+	"gastrolog/internal/waittest"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -138,22 +140,21 @@ func TestSchedulePipelineCloudUpload_LeaderUploadsExternalGLCB(t *testing.T) {
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()
 
-	deadline := time.Now().Add(5 * time.Second)
-	var blobCount int
-	for time.Now().Before(deadline) {
-		blobCount = 0
+	waitBlobUploaded(t, orch, store, "blob in cloud store after pipeline upload")
+}
+
+// waitBlobUploaded waits for the cloud store to hold a blob while the
+// scheduled upload work progresses.
+func waitBlobUploaded(t *testing.T, orch *Orchestrator, store blobstore.Store, what string) {
+	t.Helper()
+	waittest.Progress(t, what, func() (string, bool) {
+		blobs := 0
 		_ = store.List(context.Background(), "", func(blobstore.BlobInfo) error {
-			blobCount++
+			blobs++
 			return nil
 		})
-		if blobCount > 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if blobCount == 0 {
-		t.Fatal("expected blob in cloud store after pipeline upload")
-	}
+		return fmt.Sprintf("blobs=%d %s", blobs, jobsProgress(orch.Scheduler())), blobs > 0
+	})
 }
 
 // TestSchedulePipelineCloudUpload_SkipsPlacementFollower verifies nodes without
@@ -182,7 +183,9 @@ func TestSchedulePipelineCloudUpload_SkipsPlacementFollower(t *testing.T) {
 	orch.schedulePipelineCloudUpload(vaultID, chunkID)
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()
-	time.Sleep(100 * time.Millisecond)
+	// Any upload job the follower scheduled has finished once the scheduler
+	// is idle.
+	requireIdle(t, orch.Scheduler())
 
 	if mock.uploadCallCount() != 0 {
 		t.Fatalf("placement follower uploaded %d chunks, want 0", mock.uploadCallCount())
@@ -301,22 +304,7 @@ func TestSchedulePipelineCloudUpload_LeaderUploadsWithoutEagerRegistration(t *te
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()
 
-	deadline := time.Now().Add(5 * time.Second)
-	var blobCount int
-	for time.Now().Before(deadline) {
-		blobCount = 0
-		_ = store.List(context.Background(), "", func(blobstore.BlobInfo) error {
-			blobCount++
-			return nil
-		})
-		if blobCount > 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if blobCount == 0 {
-		t.Fatal("expected blob in cloud store after lazy-resolved pipeline upload (no eager registration)")
-	}
+	waitBlobUploaded(t, orch, store, "blob in cloud store after lazy-resolved pipeline upload (no eager registration)")
 }
 
 func copyFile(src, dst string) error {

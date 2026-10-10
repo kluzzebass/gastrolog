@@ -20,6 +20,7 @@ import (
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/record"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+	"gastrolog/internal/waittest"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -137,12 +138,67 @@ type originFixture struct {
 // complete" — unlike polling the FSM, which is satisfiable at any prefix of
 // the publish stream while the last segment's publish is still in flight.
 func (o *originFixture) completedSegments() uint64 {
+	return o.appendStats().SegmentsCompleted
+}
+
+func (o *originFixture) appendStats() segmentation.AppendStats {
 	for _, st := range o.seg.AppendStats() {
 		if st.VaultID == o.vaultID {
-			return st.SegmentsCompleted
+			return st
 		}
 	}
-	return 0
+	return segmentation.AppendStats{}
+}
+
+// progress snapshots the origin's stage counters, the progress measure for
+// waits on its ingest acks and publishes.
+func (o *originFixture) progress() string {
+	st := o.appendStats()
+	return fmt.Sprintf("queued=%d appended=%d durable=%d completed=%d published=%d",
+		st.QueueDepth, st.RecordsAppended, st.RecordsDurable, st.SegmentsCompleted, len(o.fsm.ListCompletedSegments()))
+}
+
+// ingest feeds one record to the origin and waits for its durability ack.
+func (o *originFixture) ingest(t *testing.T, ctx context.Context, rec *record.Record) {
+	t.Helper()
+	ack := make(chan error, 1)
+	select {
+	case o.in <- segmentation.Input{Record: rec, Ack: ack}:
+	case <-ctx.Done():
+		t.Fatal("ingest cancelled")
+	}
+	if err := waittest.Recv(t, "ingest ack", ack, o.progress); err != nil {
+		t.Fatalf("ingest ack: %v", err)
+	}
+}
+
+// waitAllPublished waits until every segment the origin completed is in the
+// FSM registry and returns the entries. Call it once every ingest ack has
+// fired, when completedSegments is final.
+func (o *originFixture) waitAllPublished(t *testing.T) []vaultctlfsm.CompletedSegmentEntry {
+	t.Helper()
+	want := o.completedSegments()
+	var entries []vaultctlfsm.CompletedSegmentEntry
+	waittest.Progress(t, fmt.Sprintf("all %d completed segments published to the FSM", want), func() (string, bool) {
+		entries = o.fsm.ListCompletedSegments()
+		return o.progress(), uint64(len(entries)) == want
+	})
+	return entries
+}
+
+// waitFirstPublished waits for the origin to publish a completed segment to
+// the FSM and returns the first one's ID.
+func (o *originFixture) waitFirstPublished(t *testing.T) glid.GLID {
+	t.Helper()
+	var segID glid.GLID
+	waittest.Progress(t, "origin publishes a completed segment to the FSM", func() (string, bool) {
+		if entries := o.fsm.ListCompletedSegments(); len(entries) >= 1 {
+			segID = entries[0].SegmentID
+			return "", true
+		}
+		return o.progress(), false
+	})
+	return segID
 }
 
 // newOriginFixture starts an origin for vaultID that closes a segment every
@@ -199,36 +255,12 @@ func (o *originFixture) ingestAndPublish(t *testing.T, ctx context.Context) glid
 	t.Helper()
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 8 {
-		rec := record.Record{
+		o.ingest(t, ctx, &record.Record{
 			EventID: record.EventID{IngestTS: t0.Add(time.Duration(i) * time.Second)},
 			Raw:     []byte("rubicon-c-segment-payload-line"),
-		}
-		ack := make(chan error, 1)
-		select {
-		case o.in <- segmentation.Input{Record: &rec, Ack: ack}:
-		case <-ctx.Done():
-			t.Fatal("ingest cancelled")
-		}
-		select {
-		case err := <-ack:
-			if err != nil {
-				t.Fatalf("ingest ack: %v", err)
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatal("ingest ack timeout")
-		}
+		})
 	}
-
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		entries := o.fsm.ListCompletedSegments()
-		if len(entries) >= 1 {
-			return entries[0].SegmentID
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatal("origin did not publish a completed segment to the FSM")
-	return glid.GLID{}
+	return o.waitFirstPublished(t)
 }
 
 func segmentHolds(fsm *vaultctlfsm.FSM, segID glid.GLID, nodeID string) bool {
@@ -292,10 +324,11 @@ func TestPipelineCollectionReplicatesToRemoteHome(t *testing.T) {
 	segID := origin.ingestAndPublish(t, ctx)
 
 	// Callback-driven: no Notify/CollectOnce here.
-	waitTrue(t, "segment replicated to remote home head/", func() bool {
+	progress := func() string { return homeProgress(t, origin, homeRoot, puller) }
+	waitTrue(t, "segment replicated to remote home head/", progress, func() bool {
 		return headHas(t, homeRoot, segID)
 	})
-	waitTrue(t, "remote home recorded as holder", func() bool {
+	waitTrue(t, "remote home recorded as holder", progress, func() bool {
 		return segmentHolds(fsm, segID, testHomeNode)
 	})
 
@@ -309,7 +342,7 @@ func TestPipelineCollectionReplicatesToRemoteHome(t *testing.T) {
 	if wantSegments == 0 {
 		t.Fatal("origin completed no segments; the 8-record batch should close several")
 	}
-	waitTrue(t, "every completed segment published, collected, and receipted", func() bool {
+	waitTrue(t, "every completed segment published, collected, and receipted", progress, func() bool {
 		entries := fsm.ListCompletedSegments()
 		if uint64(len(entries)) != wantSegments {
 			return false
@@ -322,10 +355,13 @@ func TestPipelineCollectionReplicatesToRemoteHome(t *testing.T) {
 		return true
 	})
 
-	// Idempotency: a redundant nudge must not re-pull or double-add holders.
+	// Idempotency: a redundant pass must not re-pull or double-add holders.
+	// CollectOnce returns only after the running worker completes a pass that
+	// began after the request.
 	attemptsAfterCollect := puller.attemptCount()
-	colMgr.Notify(vaultID)
-	time.Sleep(50 * time.Millisecond)
+	if err := colMgr.CollectOnce(ctx, vaultID); err != nil {
+		t.Fatalf("redundant CollectOnce: %v", err)
+	}
 	if got := puller.attemptCount(); got != attemptsAfterCollect {
 		t.Fatalf("redundant nudge re-pulled: attempts %d -> %d", attemptsAfterCollect, got)
 	}
@@ -427,18 +463,15 @@ func TestPipelineCollectionRecoversFromUnreachableOriginViaRetries(t *testing.T)
 
 	segID := origin.ingestAndPublish(t, ctx)
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && !headHas(t, homeRoot, segID) {
+	progress := func() string { return homeProgress(t, origin, homeRoot, puller) }
+	waitTrue(t, "segment recovered into head/ after transient failures", progress, func() bool {
 		colMgr.Notify(vaultID)
-		time.Sleep(20 * time.Millisecond)
-	}
-	if !headHas(t, homeRoot, segID) {
-		t.Fatalf("segment never recovered into head/ after transient failures (attempts=%d)", puller.attemptCount())
-	}
+		return headHas(t, homeRoot, segID)
+	})
 	// The holder receipt commits as a batch at the END of the collect pass,
 	// so head/ becomes visible slightly before the FSM records the holder —
 	// wait rather than asserting instantly.
-	waitTrue(t, "home recorded as holder after recovery", func() bool {
+	waitTrue(t, "home recorded as holder after recovery", progress, func() bool {
 		return segmentHolds(fsm, segID, testHomeNode)
 	})
 }
@@ -863,16 +896,33 @@ func settleCollectionStart() {
 	time.Sleep(100 * time.Millisecond)
 }
 
-func waitTrue(t *testing.T, what string, fn func() bool) {
+// waitTrue waits for fn to hold while progress keeps changing.
+func waitTrue(t *testing.T, what string, progress func() string, fn func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
+	waittest.Progress(t, what, func() (string, bool) {
 		if fn() {
-			return
+			return "", true
 		}
-		time.Sleep(2 * time.Millisecond)
+		return progress(), false
+	})
+}
+
+// homeProgress snapshots replication from origin toward the remote home: the
+// origin's stage counters, pull attempts, segments in the home's head/, and
+// segments the FSM records the home as holding.
+func homeProgress(t *testing.T, origin *originFixture, homeRoot string, puller *originPuller) string {
+	t.Helper()
+	head, err := paths.ListSegmentIDs(paths.HeadDir(homeRoot))
+	if err != nil {
+		t.Fatalf("list head: %v", err)
 	}
-	t.Fatalf("timeout waiting for: %s", what)
+	held := 0
+	for _, e := range origin.fsm.ListCompletedSegments() {
+		if slices.Contains(e.Holders, testHomeNode) {
+			held++
+		}
+	}
+	return fmt.Sprintf("%s pull-attempts=%d head=%d held=%d", origin.progress(), puller.attemptCount(), len(head), held)
 }
 
 // TestSegmentPullClientAttachesUnavailableSentinel pins the boundary

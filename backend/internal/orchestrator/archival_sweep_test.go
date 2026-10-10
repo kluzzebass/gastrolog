@@ -282,7 +282,7 @@ func TestTriggerArchivalSweepEvaluatesImmediately(t *testing.T) {
 	clock.Advance(48 * time.Hour)
 
 	orch.TriggerArchivalSweep()
-	requireIdle(t, orch.Scheduler(), 5*time.Second)
+	requireIdle(t, orch.Scheduler())
 
 	meta, _ := cm.Meta(ids[0])
 	if !meta.Archived {
@@ -305,7 +305,7 @@ func TestTriggerArchivalSweepBelowThresholdNoOp(t *testing.T) {
 	clock.Advance(48 * time.Hour)
 
 	orch.TriggerArchivalSweep()
-	requireIdle(t, orch.Scheduler(), 5*time.Second)
+	requireIdle(t, orch.Scheduler())
 
 	meta, _ := cm.Meta(ids[0])
 	if meta.Archived {
@@ -375,7 +375,7 @@ func TestTriggerArchivalSweepConcurrentTriggersClaimOnce(t *testing.T) {
 	// crons and drain the one-time queue so the loader sees only the
 	// archival evaluations this test fires.
 	removeCronJobs(orch)
-	requireIdle(t, orch.Scheduler(), 5*time.Second)
+	requireIdle(t, orch.Scheduler())
 
 	gate := &gatedSystemLoader{
 		inner:   orch.systemLoader(),
@@ -440,7 +440,7 @@ func TestTriggerArchivalSweepCoalesces(t *testing.T) {
 	for range 20 {
 		orch.TriggerArchivalSweep()
 	}
-	requireIdle(t, orch.Scheduler(), 5*time.Second)
+	requireIdle(t, orch.Scheduler())
 
 	// After draining, no triggered job should remain registered.
 	if orch.Scheduler().HasJob(archivalSweepTriggerJobName) {
