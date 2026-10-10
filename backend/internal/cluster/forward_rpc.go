@@ -150,6 +150,10 @@ func sendErrorFrame(stream grpc.ServerStream, resp *http.Response) error {
 // response. The code comes from the Connect JSON body because the HTTP status
 // is shared by several codes (400 is failed_precondition, invalid_argument
 // and out_of_range); the status is the fallback for a non-Connect body.
+//
+// The message is always valid UTF-8, because the frame carries it in a proto3
+// string: JSON decoding and the plain-text path both replace invalid UTF-8
+// with U+FFFD, which can grow a message past the body it came from.
 func decodeForwardedError(resp *http.Response) (connect.Code, string, error) {
 	var buf bytes.Buffer
 	if _, err := buf.ReadFrom(io.LimitReader(resp.Body, ForwardRPCMaxResponseBytes+1)); err != nil {
@@ -161,20 +165,19 @@ func decodeForwardedError(resp *http.Response) (connect.Code, string, error) {
 			"upstream error: HTTP %d with an error body exceeding ForwardRPCMaxResponseBytes limit of %d bytes",
 			resp.StatusCode, ForwardRPCMaxResponseBytes), nil
 	}
-	if code, msg, ok := decodeConnectWireError(buf.Bytes(), fallback); ok {
-		// Decoding replaces each invalid UTF-8 byte with a three-byte U+FFFD,
-		// so a message can outgrow the body it came from.
-		if len(msg) > ForwardRPCMaxResponseBytes {
-			return code, fmt.Sprintf(
-				"upstream error: HTTP %d with a decoded error message exceeding ForwardRPCMaxResponseBytes limit of %d bytes",
-				resp.StatusCode, ForwardRPCMaxResponseBytes), nil
+	code, msg, ok := decodeConnectWireError(buf.Bytes(), fallback)
+	if !ok {
+		code, msg = fallback, strings.ToValidUTF8(strings.TrimSpace(buf.String()), "�")
+		if msg == "" {
+			msg = fmt.Sprintf("upstream error: HTTP %d", resp.StatusCode)
 		}
-		return code, msg, nil
 	}
-	if text := strings.TrimSpace(buf.String()); text != "" {
-		return fallback, text, nil
+	if len(msg) > ForwardRPCMaxResponseBytes {
+		return code, fmt.Sprintf(
+			"upstream error: HTTP %d with a decoded error message exceeding ForwardRPCMaxResponseBytes limit of %d bytes",
+			resp.StatusCode, ForwardRPCMaxResponseBytes), nil
 	}
-	return fallback, fmt.Sprintf("upstream error: HTTP %d", resp.StatusCode), nil
+	return code, msg, nil
 }
 
 // decodeConnectWireError decodes a Connect unary error body. Like a Connect
