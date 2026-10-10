@@ -9,17 +9,13 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/segmentation"
+	"gastrolog/internal/waittest"
 )
 
-func waitAck(t *testing.T, ack <-chan error, what string) {
+func waitAck(t *testing.T, mgr *segmentation.Manager, ack <-chan error, what string) {
 	t.Helper()
-	select {
-	case err := <-ack:
-		if err != nil {
-			t.Fatalf("%s: ack returned error: %v", what, err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("%s: ack did not fire", what)
+	if err := waittest.Recv(t, what+" ack", ack, appendProgress(mgr)); err != nil {
+		t.Fatalf("%s: ack returned error: %v", what, err)
 	}
 }
 
@@ -32,7 +28,7 @@ func TestAckFiresAfterGroupCommitFsync(t *testing.T) {
 
 	var syncs atomic.Uint32
 	var in chan<- segmentation.Input
-	startManager(t, segmentation.Config{
+	mgr, _ := startManager(t, segmentation.Config{
 		SyncBatchSize:   1000,      // far beyond a single record
 		SyncBatchWindow: time.Hour, // fire-and-forget window must not be the trigger
 		OnSync:          func() { syncs.Add(1) },
@@ -46,7 +42,7 @@ func TestAckFiresAfterGroupCommitFsync(t *testing.T) {
 
 	ack := make(chan error, 1)
 	in <- segmentation.Input{Record: sampleRecord(0, time.Now().UTC()), Ack: ack}
-	waitAck(t, ack, "lone ack record")
+	waitAck(t, mgr, ack, "lone ack record")
 
 	if syncs.Load() == 0 {
 		t.Fatal("expected a real fsync to back the ack (ack-after-fsync)")
@@ -61,7 +57,7 @@ func TestAckCoalesceWithMaxCommitDelay(t *testing.T) {
 
 	var syncs atomic.Uint32
 	var in chan<- segmentation.Input
-	startManager(t, segmentation.Config{
+	mgr, _ := startManager(t, segmentation.Config{
 		SyncBatchSize:   1000,
 		SyncBatchWindow: time.Hour,
 		MaxCommitDelay:  200 * time.Millisecond,
@@ -81,7 +77,7 @@ func TestAckCoalesceWithMaxCommitDelay(t *testing.T) {
 		in <- segmentation.Input{Record: sampleRecord(uint32(i), time.Now().UTC()), Ack: acks[i]}
 	}
 	for i, ack := range acks {
-		waitAck(t, ack, "coalesced record")
+		waitAck(t, mgr, ack, "coalesced record")
 		_ = i
 	}
 	if got := syncs.Load(); got != 1 {
@@ -97,7 +93,7 @@ func TestDisableFsyncAcksWithoutSync(t *testing.T) {
 
 	var syncs atomic.Uint32
 	var in chan<- segmentation.Input
-	startManager(t, segmentation.Config{
+	mgr, _ := startManager(t, segmentation.Config{
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
 		OnSync:          func() { syncs.Add(1) },
@@ -111,9 +107,9 @@ func TestDisableFsyncAcksWithoutSync(t *testing.T) {
 
 	ack := make(chan error, 1)
 	in <- segmentation.Input{Record: sampleRecord(0, time.Now().UTC()), Ack: ack}
-	waitAck(t, ack, "disable-fsync record")
+	waitAck(t, mgr, ack, "disable-fsync record")
 
-	time.Sleep(50 * time.Millisecond)
+	// The ack releases after the commit that would have fsynced it.
 	if got := syncs.Load(); got != 0 {
 		t.Fatalf("fsyncs = %d, want 0 on a DisableFsync vault", got)
 	}
@@ -137,7 +133,7 @@ func TestPerVaultDisableFsyncOverride(t *testing.T) {
 
 	var syncs atomic.Uint32
 	var inOn, inOff chan<- segmentation.Input
-	startManager(t, segmentation.Config{
+	mgr, _ := startManager(t, segmentation.Config{
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
 		OnSync:          func() { syncs.Add(1) },
@@ -154,15 +150,14 @@ func TestPerVaultDisableFsyncOverride(t *testing.T) {
 
 	ackOff := make(chan error, 1)
 	inOff <- segmentation.Input{Record: sampleRecord(0, time.Now().UTC()), Ack: ackOff}
-	waitAck(t, ackOff, "fsync-disabled vault")
-	time.Sleep(50 * time.Millisecond)
+	waitAck(t, mgr, ackOff, "fsync-disabled vault")
 	if got := syncs.Load(); got != 0 {
 		t.Fatalf("fsyncs = %d after disabled-vault write, want 0", got)
 	}
 
 	ackOn := make(chan error, 1)
 	inOn <- segmentation.Input{Record: sampleRecord(0, time.Now().UTC()), Ack: ackOn}
-	waitAck(t, ackOn, "fsync-enabled vault")
+	waitAck(t, mgr, ackOn, "fsync-enabled vault")
 	if got := syncs.Load(); got < 1 {
 		t.Fatalf("fsyncs = %d after enabled-vault write, want >= 1", got)
 	}
@@ -175,7 +170,7 @@ func TestEncodeErrorNacksAck(t *testing.T) {
 	vaultID := glid.New()
 
 	var in chan<- segmentation.Input
-	startManager(t, segmentation.Config{
+	mgr, _ := startManager(t, segmentation.Config{
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
 	}, func(t *testing.T, mgr *segmentation.Manager) {
@@ -188,12 +183,7 @@ func TestEncodeErrorNacksAck(t *testing.T) {
 
 	ack := make(chan error, 1)
 	in <- segmentation.Input{Record: nil, Ack: ack} // nil record fails EncodeFrame
-	select {
-	case err := <-ack:
-		if err == nil {
-			t.Fatal("expected a nack for an un-encodable record")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("encode error did not nack the ack")
+	if err := waittest.Recv(t, "encode-error nack", ack, appendProgress(mgr)); err == nil {
+		t.Fatal("expected a nack for an un-encodable record")
 	}
 }

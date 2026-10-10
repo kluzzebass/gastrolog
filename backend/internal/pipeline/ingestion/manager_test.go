@@ -21,16 +21,19 @@ import (
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/ingestion"
+	"gastrolog/internal/waittest"
 )
 
 type emitIngester struct {
-	msgs []ingestion.IngesterMessage
+	msgs    []ingestion.IngesterMessage
+	emitted atomic.Int32
 }
 
 func (e *emitIngester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	for _, msg := range e.msgs {
 		select {
 		case out <- msg:
+			e.emitted.Add(1)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -41,9 +44,11 @@ func (e *emitIngester) Run(ctx context.Context, out chan<- ingestion.IngesterMes
 
 type blockingIngester struct {
 	started chan struct{}
+	runs    atomic.Int32
 }
 
 func (b *blockingIngester) Run(ctx context.Context, _ chan<- ingestion.IngesterMessage) error {
+	b.runs.Add(1)
 	close(b.started)
 	<-ctx.Done()
 	return ctx.Err()
@@ -99,11 +104,7 @@ func TestManagerReconcileStartStop(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	select {
-	case <-blockA.started:
-	case <-time.After(time.Second):
-		t.Fatal("ingester A did not start")
-	}
+	waittest.Recv(t, "ingester A started", blockA.started, nil)
 
 	if err := mgr.Reconcile([]ingestion.IngesterSpec{
 		{ID: idA, Ingester: blockA, Name: "a", Type: "mock"},
@@ -112,11 +113,7 @@ func TestManagerReconcileStartStop(t *testing.T) {
 		t.Fatalf("Reconcile add B: %v", err)
 	}
 
-	select {
-	case <-blockB.started:
-	case <-time.After(time.Second):
-		t.Fatal("ingester B did not start")
-	}
+	waittest.Recv(t, "ingester B started", blockB.started, nil)
 
 	if err := mgr.Reconcile([]ingestion.IngesterSpec{
 		{ID: idB, Ingester: blockB, Name: "b", Type: "mock"},
@@ -199,13 +196,15 @@ func TestManagerPreservesAckChannel(t *testing.T) {
 		t.Fatal("Ack channel not preserved on emitted message")
 	}
 
+	// The emitted message carries the ingester's own ack channel, so the send
+	// lands in its buffer before this receive.
 	msg.Ack <- nil
 	select {
 	case got := <-ack:
 		if got != nil {
 			t.Fatalf("ack = %v, want nil", got)
 		}
-	case <-time.After(time.Second):
+	default:
 		t.Fatal("downstream ack not delivered to ingester channel")
 	}
 
@@ -241,17 +240,9 @@ func TestManagerBackpressure(t *testing.T) {
 	<-out
 	<-out
 
-	done := make(chan struct{})
-	go func() {
-		<-out
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("third message arrived before queue had capacity")
-	}
+	waittest.Recv(t, "third message once the queue has capacity", out, func() string {
+		return fmt.Sprintf("handed-off=%d queued=%d", ing.emitted.Load(), len(out))
+	})
 
 	go func() {
 		for range out {
@@ -284,14 +275,10 @@ func TestManagerPassiveRetry(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	deadline := time.After(8 * time.Second)
-	for ing.attempts.Load() < 2 {
-		select {
-		case <-deadline:
-			t.Fatalf("passive ingester did not retry, attempts=%d", ing.attempts.Load())
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
+	waittest.Progress(t, "passive ingester retried", func() (string, bool) {
+		n := ing.attempts.Load()
+		return fmt.Sprintf("attempts=%d", n), n >= 2
+	})
 
 	go func() {
 		for range out {
@@ -319,31 +306,19 @@ func TestManagerReconcileReplace(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	select {
-	case msg := <-out:
-		if string(msg.Raw) != "first" {
-			t.Fatalf("first message = %q, want first", msg.Raw)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for first ingester message")
+	progress := func() string {
+		return fmt.Sprintf("handed-off first=%d second=%d queued=%d", first.emitted.Load(), second.emitted.Load(), len(out))
+	}
+	if msg := waittest.Recv(t, "first ingester message", out, progress); string(msg.Raw) != "first" {
+		t.Fatalf("first message = %q, want first", msg.Raw)
 	}
 
 	if err := mgr.Reconcile([]ingestion.IngesterSpec{{ID: id, Ingester: second}}); err != nil {
 		t.Fatalf("Reconcile replace: %v", err)
 	}
 
-	got := []string{"first"}
-	deadline := time.After(2 * time.Second)
-	for len(got) < 2 {
-		select {
-		case msg := <-out:
-			got = append(got, string(msg.Raw))
-		case <-deadline:
-			t.Fatalf("got %v, want first and second", got)
-		}
-	}
-	if got[0] != "first" || got[1] != "second" {
-		t.Fatalf("messages = %v, want [first second]", got)
+	if msg := waittest.Recv(t, "replacement ingester message", out, progress); string(msg.Raw) != "second" {
+		t.Fatalf("message after replace = %q, want second", msg.Raw)
 	}
 
 	go func() {
@@ -504,20 +479,10 @@ func TestManagerReconcileNoOp(t *testing.T) {
 	if err := mgr.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	select {
-	case <-block.started:
-	case <-time.After(time.Second):
-		t.Fatal("ingester did not start")
-	}
+	waittest.Recv(t, "ingester started", block.started, nil)
 
-	block.started = make(chan struct{}) // would close again if restarted
 	if err := mgr.Reconcile([]ingestion.IngesterSpec{spec}); err != nil {
 		t.Fatalf("Reconcile no-op: %v", err)
-	}
-	select {
-	case <-block.started:
-		t.Fatal("no-op reconcile restarted ingester")
-	case <-time.After(100 * time.Millisecond):
 	}
 
 	go func() {
@@ -525,6 +490,10 @@ func TestManagerReconcileNoOp(t *testing.T) {
 		}
 	}()
 	_ = mgr.Stop()
+	// Stop waits for every run the manager started, so the count is final.
+	if n := block.runs.Load(); n != 1 {
+		t.Fatalf("ingester runs = %d, want 1: no-op reconcile restarted ingester", n)
+	}
 }
 
 // failNTimesIngester fails its first `failures` runs, then blocks until ctx is
@@ -581,21 +550,13 @@ func TestManagerActiveIngesterErrorRetry(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
+	progress := func() string { return fmt.Sprintf("attempts=%d", ing.attempts.Load()) }
 	for want := int32(1); want <= 3; want++ {
-		select {
-		case got := <-ing.attemptCh:
-			if got != want {
-				t.Fatalf("attempt = %d, want %d", got, want)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatalf("non-passive ingester was not retried (waiting for attempt %d)", want)
+		if got := waittest.Recv(t, fmt.Sprintf("non-passive ingester attempt %d", want), ing.attemptCh, progress); got != want {
+			t.Fatalf("attempt = %d, want %d", got, want)
 		}
 	}
-	select {
-	case <-ing.recovered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("ingester did not reach its recovered run")
-	}
+	waittest.Recv(t, "ingester reaches its recovered run", ing.recovered, progress)
 
 	go func() {
 		for range out {
@@ -644,11 +605,7 @@ func TestManagerActiveIngesterCleanExitNoRetry(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	select {
-	case <-ing.attemptCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("ingester did not run")
-	}
+	waittest.Recv(t, "ingester run", ing.attemptCh, nil)
 	select {
 	case <-ing.attemptCh:
 		t.Fatal("clean-exit non-passive ingester must not be re-run")
@@ -662,9 +619,12 @@ func TestManagerActiveIngesterCleanExitNoRetry(t *testing.T) {
 	_ = mgr.Stop()
 }
 
-type panicIngester struct{}
+type panicIngester struct {
+	runs atomic.Int32
+}
 
-func (panicIngester) Run(context.Context, chan<- ingestion.IngesterMessage) error {
+func (p *panicIngester) Run(context.Context, chan<- ingestion.IngesterMessage) error {
+	p.runs.Add(1)
 	panic("ingester boom")
 }
 
@@ -673,8 +633,19 @@ func TestManagerIngesterPanicRecovery(t *testing.T) {
 
 	nodeID := glid.New()
 	id := glid.New()
-	mgr, out := ingestion.New(ingestion.Config{NodeID: nodeID, OutCapacity: 1})
-	if err := mgr.Reconcile([]ingestion.IngesterSpec{{ID: id, Ingester: panicIngester{}}}); err != nil {
+	ing := &panicIngester{}
+	mgr, out := ingestion.New(ingestion.Config{
+		NodeID:      nodeID,
+		OutCapacity: 1,
+		// Re-arm once immediately, then park in the backoff until Stop.
+		RetryDelay: func(consecutiveFailures int) time.Duration {
+			if consecutiveFailures <= 1 {
+				return 0
+			}
+			return time.Hour
+		},
+	})
+	if err := mgr.Reconcile([]ingestion.IngesterSpec{{ID: id, Ingester: ing}}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
@@ -684,7 +655,10 @@ func TestManagerIngesterPanicRecovery(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	time.Sleep(200 * time.Millisecond)
+	waittest.Progress(t, "panicking run recovered and re-armed", func() (string, bool) {
+		n := ing.runs.Load()
+		return fmt.Sprintf("runs=%d", n), n >= 2
+	})
 
 	go func() {
 		for range out {
@@ -733,11 +707,7 @@ func TestManagerPressureGateInjection(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	select {
-	case <-ing.started:
-	case <-time.After(time.Second):
-		t.Fatal("ingester did not start")
-	}
+	waittest.Recv(t, "ingester started", ing.started, nil)
 	if ing.gate.Load() != gate {
 		t.Fatal("PressureAware ingester did not receive configured gate")
 	}
@@ -770,14 +740,15 @@ func TestManagerAckErrorDelivery(t *testing.T) {
 
 	msg := <-out
 	writeErr := errors.New("segment write failed")
+	// The emitted message carries the ingester's own ack channel, so the send
+	// lands in its buffer before this receive.
 	msg.Ack <- writeErr
-
 	select {
 	case got := <-ack:
 		if !errors.Is(got, writeErr) {
 			t.Fatalf("ack = %v, want %v", got, writeErr)
 		}
-	case <-time.After(time.Second):
+	default:
 		t.Fatal("error ack not delivered")
 	}
 
@@ -926,14 +897,14 @@ func TestManagerRetryFailureCountResets(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
+	progress := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return fmt.Sprintf("attempts=%d retry-delays=%v", ing.attempts.Load(), observed)
+	}
 	for want := int32(1); want <= 5; want++ {
-		select {
-		case got := <-ing.attemptCh:
-			if got != want {
-				t.Fatalf("attempt = %d, want %d", got, want)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatalf("passive ingester was not retried (waiting for attempt %d)", want)
+		if got := waittest.Recv(t, fmt.Sprintf("passive ingester attempt %d", want), ing.attemptCh, progress); got != want {
+			t.Fatalf("attempt = %d, want %d", got, want)
 		}
 	}
 
@@ -1001,13 +972,8 @@ func newRebuildFake(label string, events chan<- string) *rebuildFake {
 
 func expectEvent(t *testing.T, events <-chan string, want string) {
 	t.Helper()
-	select {
-	case got := <-events:
-		if got != want {
-			t.Fatalf("event = %q, want %q", got, want)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatalf("timed out waiting for event %q", want)
+	if got := waittest.Recv(t, fmt.Sprintf("event %q", want), events, nil); got != want {
+		t.Fatalf("event = %q, want %q", got, want)
 	}
 }
 
@@ -1282,11 +1248,7 @@ func TestManagerRebuildInterruptsRetryBackoff(t *testing.T) {
 
 	expectEvent(t, events, "old:run")
 	expectEvent(t, events, "old:exit")
-	select {
-	case <-delayCalled:
-	case <-time.After(10 * time.Second):
-		t.Fatal("retry delay was never consulted")
-	}
+	waittest.Recv(t, "retry delay consulted", delayCalled, nil)
 
 	// The old run goroutine is now headed into (or already inside) an
 	// hour-long backoff select. The rebuild must return promptly anyway.
@@ -1333,11 +1295,9 @@ func TestManagerCheckpointPeriodicSave(t *testing.T) {
 
 	// Two periodic saves while the run is still alive (stop not called yet).
 	for i := range 2 {
-		select {
-		case <-saves:
-		case <-time.After(5 * time.Second):
-			t.Fatalf("periodic checkpoint save %d did not happen", i+1)
-		}
+		waittest.Recv(t, fmt.Sprintf("periodic checkpoint save %d", i+1), saves, func() string {
+			return fmt.Sprintf("checkpoint saves=%d", ing.saveCalls.Load())
+		})
 	}
 
 	go func() {

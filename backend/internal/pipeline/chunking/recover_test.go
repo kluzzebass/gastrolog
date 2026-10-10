@@ -2,6 +2,7 @@ package chunking_test
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -12,6 +13,7 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+	"gastrolog/internal/waittest"
 )
 
 func TestRecoverOnceSealsFromExistingGLCB(t *testing.T) {
@@ -322,17 +324,16 @@ func TestRecoveryWaitsForFSMReplay(t *testing.T) {
 	leader.Store(true)
 	mgr.NotifyVault(vaultID)
 
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if e := fsm.Get(chunkID); e != nil && e.IsSealed() {
-			break
+	waittest.Progress(t, "recovery proposes CmdSealChunk after FSM replay", func() (string, bool) {
+		mu.Lock()
+		n := len(rebuilt)
+		mu.Unlock()
+		e := fsm.Get(chunkID)
+		if e == nil {
+			return fmt.Sprintf("%s rebuilt=%d entry=none", stageProgress(mgr, vaultID), n), false
 		}
-		if time.Now().After(deadline) {
-			e := fsm.Get(chunkID)
-			t.Fatalf("recovery never proposed CmdSealChunk after FSM replay; entry=%+v", e)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		return fmt.Sprintf("%s rebuilt=%d entry-state=%v", stageProgress(mgr, vaultID), n, e.State), e.IsSealed()
+	})
 	cancel()
 	<-done
 }

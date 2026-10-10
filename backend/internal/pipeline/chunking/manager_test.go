@@ -3,6 +3,7 @@ package chunking_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -15,10 +16,23 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+	"gastrolog/internal/waittest"
 
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/protobuf/proto"
 )
+
+// stageProgress snapshots a vault's chunk-lifecycle stage counters, the
+// progress measure for waits on the chunking worker.
+func stageProgress(mgr *chunking.Manager, vaultID glid.GLID) string {
+	for _, st := range mgr.StageStats() {
+		if st.VaultID == vaultID {
+			return fmt.Sprintf("planned=%d built=%d sealed=%d released=%d head-purges=%d",
+				st.ChunksPlanned, st.ChunksBuilt, st.ChunksSealed, st.SegmentsReleased, st.HeadPurges)
+		}
+	}
+	return "vault not registered"
+}
 
 // publishSegForTest registers a completed segment in the FSM registry —
 // required before any manifest ref since the apply-time ghost-ref guard.
@@ -288,16 +302,11 @@ func TestManagerPurgesHeadWhenSealWinsElsewhere(t *testing.T) {
 	if err := mgrA.BuildOnce(t.Context(), vaultID); err != nil {
 		t.Fatalf("home A BuildOnce: %v", err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if _, err := os.Stat(headB); os.IsNotExist(err) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("home B head should purge when peer seals")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waittest.Progress(t, "home B head purged once the peer seals", func() (string, bool) {
+		_, err := os.Stat(headB)
+		gone := os.IsNotExist(err)
+		return fmt.Sprintf("A[%s] B[%s] head-b-gone=%t", stageProgress(mgrA, vaultID), stageProgress(mgrB, vaultID), gone), gone
+	})
 }
 
 func TestManagerBuildOnceWaitsForHoldersBeforeRelease(t *testing.T) {
@@ -407,14 +416,10 @@ func TestManagerWorkerReleasesAfterBuildWithoutNewHolderAck(t *testing.T) {
 	if err := mgr.BuildOnce(ctx, vaultID); err != nil {
 		t.Fatalf("BuildOnce: %v", err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if fsm.GetCompletedSegment(segID) == nil {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("registry entry must release after build without a new holder ack")
+	waittest.Progress(t, "registry entry released after build without a new holder ack", func() (string, bool) {
+		released := fsm.GetCompletedSegment(segID) == nil
+		return fmt.Sprintf("%s registry-released=%t", stageProgress(mgr, vaultID), released), released
+	})
 }
 
 // TestManagerReleaseUnpinsDeadHolderWithFixedPlacement pins the supersession
@@ -666,21 +671,20 @@ func TestManagerBuildsOnSealEvent(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(t.Context())
-	sealedAt := base.Add(time.Minute)
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
-		time.Sleep(20 * time.Millisecond)
-		cancel()
-	}()
+	defer cancel()
+	runErr := make(chan error, 1)
+	go func() { runErr <- mgr.Run(ctx) }()
 
-	if err := mgr.Run(ctx); err != nil && err != context.Canceled {
-		t.Fatalf("Run: %v", err)
-	}
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
 
 	glcbPath := chunking.ChunkGLCBPath(filepath.Join(home, "chunks"), chunkID)
-	if _, err := os.Stat(glcbPath); err != nil {
-		t.Fatalf("GLCB not built after sealed-manifest callback: %v", err)
+	waittest.Progress(t, "GLCB built after the sealed-manifest callback", func() (string, bool) {
+		_, err := os.Stat(glcbPath)
+		return fmt.Sprintf("%s glcb-present=%t", stageProgress(mgr, vaultID), err == nil), err == nil
+	})
+	cancel()
+	if err := <-runErr; err != nil && err != context.Canceled {
+		t.Fatalf("Run: %v", err)
 	}
 }
 

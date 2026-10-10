@@ -8,17 +8,18 @@ package distribution
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/segmentation"
+	"gastrolog/internal/waittest"
 )
 
 // TestPublishBatchSkipsMissingBytesItem: one of three coalesced items lost its
@@ -118,13 +119,9 @@ func TestPublishRetryBackoffEventuallyPublishes(t *testing.T) {
 	seg, _ := writeCompleted(t, root, vaultID, glid.New())
 	completed <- seg
 
-	deadline := time.Now().Add(10 * time.Second)
-	for pub.published.Load() == 0 {
-		if time.Now().After(deadline) {
-			t.Fatalf("segment never published; attempts=%d", pub.attempts.Load())
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waittest.Progress(t, "segment published after retries", func() (string, bool) {
+		return fmt.Sprintf("attempts=%d", pub.attempts.Load()), pub.published.Load() > 0
+	})
 	// 3 failures + 1 success, plus slack for an external wake or two. A hot
 	// loop racks up orders of magnitude more before the backoff window ends.
 	if n := pub.attempts.Load(); n > 10 {

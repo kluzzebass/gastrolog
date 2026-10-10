@@ -3,7 +3,6 @@ package distribution_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/distribution"
@@ -50,13 +49,7 @@ func TestPublishIngressBacklogReadsHeadersOnly(t *testing.T) {
 		<-done
 	})
 
-	deadline := time.Now().Add(10 * time.Second)
-	for pub.count() < backlog {
-		if time.Now().After(deadline) {
-			t.Fatalf("rescan published %d of %d backlog segments", pub.count(), backlog)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	waitPublished(t, mgr, pub, backlog)
 
 	if d := segment.Opens() - opensBefore; d != 0 {
 		t.Errorf("backlog publish performed %d full-verify segment.Open calls, want 0", d)
