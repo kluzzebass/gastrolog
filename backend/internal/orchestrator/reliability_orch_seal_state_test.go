@@ -2,7 +2,6 @@ package orchestrator_test
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -54,18 +53,8 @@ func TestOrchRel_SealActive_PromotesEveryNodeToSealed(t *testing.T) {
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
-	const records = 20
-	now := time.Now()
-	for i := range records {
-		if err := h.appendOnLeader(chunk.Record{
-			SourceTS: now,
-			IngestTS: now,
-			Raw:      []byte("seal-state-" + strconv.Itoa(i)),
-		}); err != nil {
-			t.Fatalf("append %d: %v", i, err)
-		}
-	}
-	h.sealOnLeader()
+	writer := h.appendBurst(h.vaults[0], "seal-state", 20)
+	h.sealActiveOn(writer, h.vaults[0])
 	h.eventuallyAllSeeSealedChunk(t)
 
 	h.waitProgress("manifest entries reaching Sealed", 50*time.Millisecond, func() (string, bool) {

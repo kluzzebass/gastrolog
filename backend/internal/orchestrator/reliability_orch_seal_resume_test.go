@@ -11,7 +11,6 @@ package orchestrator_test
 
 import (
 	"fmt"
-	"strconv"
 	"testing"
 	"time"
 
@@ -42,22 +41,10 @@ func TestOrchRel_StrandedSeal_ResumesWithoutRestart(t *testing.T) {
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
-	const records = 20
-	now := time.Now()
-	for i := range records {
-		if err := h.appendOnLeader(chunk.Record{
-			SourceTS: now,
-			IngestTS: now,
-			Raw:      []byte("stranded-seal-" + strconv.Itoa(i)),
-		}); err != nil {
-			t.Fatalf("append %d: %v", i, err)
-		}
-	}
-
-	leader := h.waitForVaultCtlLeader()
-	inst := leader.orch.FindLocalVaultInstance(h.vaultID)
+	writer := h.appendBurst(h.vaults[0], "stranded-seal", 20)
+	inst := writer.orch.FindLocalVaultInstance(h.vaultID)
 	if inst == nil || inst.Chunks == nil {
-		t.Fatal("vault-ctl leader has no local vault instance to seal")
+		t.Fatalf("%s has no local vault instance to seal", writer.label)
 	}
 	active := inst.Chunks.Active()
 	if active == nil {
@@ -70,7 +57,7 @@ func TestOrchRel_StrandedSeal_ResumesWithoutRestart(t *testing.T) {
 		t.Fatalf("Seal: %v", err)
 	}
 
-	// Precondition: the chunk is sealed on the leader's DISK. That is the
+	// Precondition: the chunk is sealed on the writer's DISK. That is the
 	// durable half of the strand and it is stable — unlike the manifest's
 	// Sealing state, which is a transient the recovery is designed to end.
 	//
@@ -82,7 +69,7 @@ func TestOrchRel_StrandedSeal_ResumesWithoutRestart(t *testing.T) {
 	// deliberately makes brief is a test that gets less reliable as the
 	// system gets better.
 	if meta, err := inst.Chunks.Meta(strandedID); err != nil || !meta.Sealed {
-		t.Fatalf("precondition: chunk is not sealed on the leader's disk (err=%v); "+
+		t.Fatalf("precondition: chunk is not sealed on the writer's disk (err=%v); "+
 			"the strand setup did not take", err)
 	}
 
@@ -136,17 +123,8 @@ func TestOrchRel_ReconcileTickLeavesCompletedSealsAlone(t *testing.T) {
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
-	now := time.Now()
-	for i := range 10 {
-		if err := h.appendOnLeader(chunk.Record{
-			SourceTS: now,
-			IngestTS: now,
-			Raw:      []byte("healthy-seal-" + strconv.Itoa(i)),
-		}); err != nil {
-			t.Fatalf("append %d: %v", i, err)
-		}
-	}
-	h.sealOnLeader()
+	writer := h.appendBurst(h.vaults[0], "healthy-seal", 10)
+	h.sealActiveOn(writer, h.vaults[0])
 	h.eventuallyAllSeeSealedChunk(t)
 
 	leader := h.waitForVaultCtlLeader()
