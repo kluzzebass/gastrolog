@@ -1180,6 +1180,7 @@ type vaultRaftCallbacks struct {
 	isTombstoned            func(id chunk.ChunkID) bool
 	listChunks              func() []chunk.ChunkID
 	listRetPending          func() []chunk.ChunkID
+	listPendingDeletes      func() []chunk.ChunkID
 	manifestEntries         func() []vaultctlfsm.ManifestEntry
 	manifestEntry           func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
 }
@@ -1307,6 +1308,12 @@ func buildVaultRaftCallbacks(r *hraft.Raft, fsm *vaultctlfsm.FSM, applier vaultc
 			return ids
 		},
 		listRetPending: listFSMByFlag(fsm, func(e vaultctlfsm.ManifestEntry) bool { return e.RetentionPending }),
+		listPendingDeletes: func() []chunk.ChunkID {
+			if fsm == nil {
+				return nil
+			}
+			return fsm.PendingDeleteIDs()
+		},
 		manifestEntries: func() []vaultctlfsm.ManifestEntry {
 			if fsm == nil {
 				return nil

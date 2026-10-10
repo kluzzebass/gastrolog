@@ -76,6 +76,14 @@ func (f *FSM) PendingDeletes() []PendingDelete {
 	return out
 }
 
+// PendingDeleteIDs returns the chunk IDs with an in-flight delete — the
+// key set of PendingDeletes, without copying each entry's ExpectedFrom.
+func (f *FSM) PendingDeleteIDs() []chunk.ChunkID {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return slices.Collect(maps.Keys(f.pendingDeletes))
+}
+
 // PendingDelete returns a copy of the in-flight delete entry for
 // chunkID, or nil if there is no such entry.
 func (f *FSM) PendingDelete(chunkID chunk.ChunkID) *PendingDelete {

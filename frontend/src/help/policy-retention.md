@@ -12,7 +12,7 @@ A retention policy defines **when** sealed chunks fire a retention event. Multip
 
 ## Hard vs Soft Bounds
 
-Every set condition (age, size, or chunk count) is a **soft bound** by default: it drains, but never refuses admission — only the node-level disk-protect floor backstops the vault. Toggling a policy's **Refuse** flag on makes its bounds **hard**: once a retention sweep fails to clear the violation (size is checked instantaneously instead), the cluster refuses new records for the vault until drain catches up.
+Every set condition (age, size, or chunk count) is a **soft bound** by default: it drains, but never refuses admission — only the node-level disk-protect floor backstops the vault. Toggling a policy's **Refuse** flag on makes its bounds **hard**: once a retention sweep fails to clear the violation (size is checked instantaneously instead), the cluster refuses new records for the vault until drain catches up. A chunk the sweep has committed to deleting counts as cleared, even while the nodes holding it are still deleting their copies.
 
 ## Max Size
 
