@@ -509,7 +509,9 @@ segment, and those holders roll the log, pull it from any current holder, and co
 a receipt; the origin serves pulls and retains until the holder-set covers the
 desired set (or the records are chunked). So a slow or unreachable holder just hasn't
 pulled yet — completed segments accumulate on disk without ever backpressuring the
-writer or ingest. Channels carry record pointers, not files.
+writer or ingest. A home retries a failed pull on its own backoff until it lands,
+whatever the failure; it never waits for a later publish, which a quiet vault may
+never make. Channels carry record pointers, not files.
 
 On a remote home node, Collection lands each pull in pre-head and promotes it to the
 head by an atomic rename once it is whole and verified. When the origin is itself a

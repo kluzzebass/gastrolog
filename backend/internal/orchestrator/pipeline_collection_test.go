@@ -435,8 +435,9 @@ func TestPipelineCollectionPullFailureLeavesNoPartialHead(t *testing.T) {
 }
 
 // TestPipelineCollectionRecoversFromUnreachableOriginViaRetries: transient origin
-// failures are tolerated — collection keeps retrying (here via nudges) until
-// the pull succeeds and the segment lands in head/.
+// failures are tolerated — collection retries on its own until the pull
+// succeeds and the segment lands in head/. The single publish is the only
+// external event: no later publish or nudge wakes the home.
 func TestPipelineCollectionRecoversFromUnreachableOriginViaRetries(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -446,7 +447,9 @@ func TestPipelineCollectionRecoversFromUnreachableOriginViaRetries(t *testing.T)
 	origin := newOriginFixture(t, ctx, vaultID, fsm)
 
 	homeRoot := t.TempDir()
-	puller := &originPuller{dist: origin.dist, failsLeft: 3} // 3 transient failures
+	// More failures than the publishes ingestAndPublish makes: once those
+	// wakes are spent, only the manager's own retry can reach the success.
+	puller := &originPuller{dist: origin.dist, failsLeft: 20}
 	colMgr := collection.New(collection.Config{})
 	if err := colMgr.RegisterVault(vaultID, homeRoot, collection.VaultConfig{
 		Log:      &segmentLogReader{lookup: func() *vaultctlfsm.FSM { return fsm }, localNodeID: testHomeNode},
@@ -465,7 +468,6 @@ func TestPipelineCollectionRecoversFromUnreachableOriginViaRetries(t *testing.T)
 
 	progress := func() string { return homeProgress(t, origin, homeRoot, puller) }
 	waitTrue(t, "segment recovered into head/ after transient failures", progress, func() bool {
-		colMgr.Notify(vaultID)
 		return headHas(t, homeRoot, segID)
 	})
 	// The holder receipt commits as a batch at the END of the collect pass,

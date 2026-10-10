@@ -72,12 +72,9 @@ type vaultCollect struct {
 	// stopWorker cancels the per-vault worker; nil until the worker starts.
 	stopWorker context.CancelFunc
 
-	// retryTimer re-arms the wake after a pass ends with only retryable
-	// errors (catch-up race: registry lists a segment no holder can serve
-	// yet, or a holder purged after seal). Those obligations have no future
-	// event of their own — the publish that assigned them already fired, and
-	// for the last segments of a burst no later publish arrives to piggyback
-	// on — follower homes stalled forever missing sealed GLCB segments.
+	// retryTimer re-arms the wake after a failed pass. A failed obligation
+	// has no future event of its own: the publish that assigned it already
+	// fired, and a quiet vault publishes nothing more to piggyback on.
 	// One-shot with exponential backoff, armed only while an
 	// obligation is failing; a healthy vault has no timer.
 	retryMu    sync.Mutex
@@ -811,7 +808,7 @@ func (m *Manager) logCollectPassErr(v *vaultCollect, log *slog.Logger, err error
 	// Checksum failures retry like any deferred pull, but a holder serving
 	// corrupt or divergent bytes is a data-integrity signal — never bury it
 	// at Debug.
-	if retryableCollectErr(err) && !errors.Is(err, ErrCorruptSegment) {
+	if expectedCollectErr(err) && !errors.Is(err, ErrCorruptSegment) {
 		log.Debug("collect pass deferred", "error", err)
 		return
 	}
@@ -826,11 +823,12 @@ func (m *Manager) logCollectPassErr(v *vaultCollect, log *slog.Logger, err error
 func (m *Manager) afterCollectPass(v *vaultCollect, progress bool, err error, log *slog.Logger) {
 	if err != nil {
 		m.logCollectPassErr(v, log, err)
-		if retryableCollectErr(err) {
-			// "Deferred" must actually defer: nothing else retries these
-			// obligations once the burst's publish events are spent.
-			v.scheduleRetryWake()
-		}
+		// A failed pass leaves assigned segments uncollected, and nothing
+		// else is guaranteed to wake this vault's collection again — a quiet
+		// vault publishes nothing more — so every failure retries here,
+		// whatever its cause (a holder's node restarting fails at transport
+		// level, which no sentinel classifies).
+		v.scheduleRetryWake()
 	} else {
 		v.resetRetryBackoff()
 	}
@@ -849,9 +847,9 @@ const (
 	collectRetryMaxDelay  = 2 * time.Second
 )
 
-// scheduleRetryWake arms a one-shot backoff wake so a deferred pass retries
+// scheduleRetryWake arms a one-shot backoff wake so a failed pass retries
 // without depending on future publish events. Not a poll: the timer exists
-// only while a retryable obligation is outstanding.
+// only while a failed obligation is outstanding.
 func (v *vaultCollect) scheduleRetryWake() {
 	v.retryMu.Lock()
 	defer v.retryMu.Unlock()
