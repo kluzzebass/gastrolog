@@ -175,6 +175,15 @@ nothing evaluates MaxAge until the next add (unless a separate scheduled
 Still valid for **segment closure on the origin** (§24 in design-notes) — orthogonal
 clock.
 
+**Operator seal.** `SealVault` (`gastrolog seal`, the vault's *Rotate* action) seals
+the open manifest ahead of policy when it holds records. The RPC routes to the
+vault's placement leader; the seal commits only on the chunking leader (the home
+that is also the vault-ctl leader), under the same planner lock as a policy seal.
+Reaching any other node while the manifest holds records is refused as
+`Unavailable` (vault-ctl leadership is realigning onto the placement leader), never
+answered with a silent zero. A chunk-manager active chunk on the same vault is
+sealed by the same request, and `sealed_count` reports every chunk sealed.
+
 **IngestTS time windows** can be deterministic with identical segments and a pinned
 cut rule; the issue is suitability, not replayability. Design-notes §27 “no
 time-window closure” refers to **straggler/watermark** semantics, not “never use time.”

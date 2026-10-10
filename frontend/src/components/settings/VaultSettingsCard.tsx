@@ -285,8 +285,13 @@ export function VaultSettingsCard({
             disabled={seal.isPending || !!activeJob}
             onClick={async () => {
               try {
-                await seal.mutateAsync(encode(vault.id));
-                addToast("Active chunk rotated", "info");
+                const sealed = await seal.mutateAsync(encode(vault.id));
+                addToast(
+                  sealed > 0
+                    ? `Sealed ${String(sealed)} open chunk(s)`
+                    : "Nothing to rotate: no open chunk holds records",
+                  "info",
+                );
               } catch (err: unknown) {
                 addToast(err instanceof Error ? err.message : "Rotate failed", "error");
               }

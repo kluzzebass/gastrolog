@@ -63,18 +63,20 @@ describe("useStats", () => {
 });
 
 describe("useSealVault", () => {
-  test("calls sealVault and invalidates queries", async () => {
-    m(mocks.vaultClient, "sealVault").mockResolvedValueOnce({});
+  test("calls sealVault and returns the sealed count", async () => {
+    m(mocks.vaultClient, "sealVault").mockResolvedValueOnce({ sealedCount: 2 });
     const qc = createTestQueryClient();
     qc.setQueryData(["vaults"], []);
 
     const { result } = renderHook(() => useSealVault(), { wrapper: wrapper(qc) });
 
+    let sealed = -1;
     await act(async () => {
-      await result.current.mutateAsync("v1");
+      sealed = await result.current.mutateAsync("v1");
     });
 
     expect(m(mocks.vaultClient, "sealVault")).toHaveBeenCalledWith({ vault: "v1" });
+    expect(sealed).toBe(2);
   });
 });
 

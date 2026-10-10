@@ -104,7 +104,7 @@ func mapVaultError(err error) *connect.Error {
 	if errors.Is(err, orchestrator.ErrVaultNotFound) || errors.Is(err, chunk.ErrChunkNotFound) {
 		return errNotFound(err)
 	}
-	if errors.Is(err, orchestrator.ErrVaultNotReady) {
+	if errors.Is(err, orchestrator.ErrVaultNotReady) || errors.Is(err, orchestrator.ErrNotChunkingLeader) {
 		return connect.NewError(connect.CodeUnavailable, err)
 	}
 	return errInternal(err)

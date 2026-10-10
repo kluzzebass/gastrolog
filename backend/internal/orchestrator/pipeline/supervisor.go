@@ -910,14 +910,11 @@ func (s *Supervisor) RotateChunkCron(ctx context.Context, vaultID glid.GLID) err
 }
 
 // SealOpenChunk seals a vault's open chunk manifest on demand and reports
-// whether a manifest was sealed. Leader-gated inside chunking; an unknown
-// vault is not an error, it simply has nothing to seal here.
+// whether a manifest was sealed. It returns chunking.ErrNotLeader when the
+// manifest holds records but this home is not the chunking leader, and
+// chunking.ErrUnknownVault when this node is not a home for the vault.
 func (s *Supervisor) SealOpenChunk(vaultID glid.GLID) (bool, error) {
-	sealed, err := s.chunk.SealOpenManifest(vaultID)
-	if errors.Is(err, chunking.ErrUnknownVault) {
-		return false, nil
-	}
-	return sealed, err
+	return s.chunk.SealOpenManifest(vaultID)
 }
 
 // UnregisterVault stops the managers for a vault that has left this node. It is a

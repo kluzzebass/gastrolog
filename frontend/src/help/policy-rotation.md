@@ -23,6 +23,10 @@ The size limit is a **soft limit** — it checks the projected size (current siz
 
 In a [cluster](help:clustering), rotation is managed by the [node](help:clustering-nodes) hosting each vault.
 
+## Rotating Now
+
+**Rotate** on a vault's settings card (or `gastrolog seal <vault>`) seals every open chunk in the vault that holds records, without waiting for the policy. The reply says how many chunks were sealed; when nothing open holds records, it says so instead of reporting success. The request can be sent to any node — it runs on the vault's leader. If vault leadership is still moving between nodes (for example right after a restart), the seal is refused as unavailable and can simply be retried.
+
 ## Example
 
 A policy with `maxBytes: "256MB"` and `maxAge: "1h"` will seal the chunk when it reaches 256 MB **or** when it has been open for one hour, whichever comes first.

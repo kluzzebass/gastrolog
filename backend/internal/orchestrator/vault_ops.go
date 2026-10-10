@@ -917,21 +917,20 @@ func drainIterator(next chunk.RecordIterator) {
 	}
 }
 
-// SealActive seals the per-instance chunk manager's active chunk on the
-// matching local vault. Returns the number of vaults sealed; no-op if the
-// active chunk is empty or absent. Used by the SealVault RPC and the drain
-// path to flush any residual active chunk before migration.
+// SealActive seals every open chunk of a vault that holds records — the
+// chunk manager's active chunk and, for a pipeline vault, the open chunk
+// manifest — and returns how many it sealed. A vault can carry both at once
+// (a recovered chunk-manager active chunk beside the pipeline's open
+// manifest), and each is sealed independently. Used by the SealVault RPC and
+// the drain path to flush any residual active chunk before migration.
+//
+// When the chunk-manager seal succeeds and the manifest seal fails, the
+// returned count still reports the chunk that was sealed alongside the error.
 //
 // Readiness: no Vault.ReadinessErr gate — seal operates on the in-memory
 // active chunk, not the FSM. Seal is also a step on the drain path (which
 // runs even with lagging followers), so gating here would create a
 // chicken-and-egg deadlock with readiness recovery.
-//
-// After sealing, schedules the post-seal pipeline (compress, index, and
-// sealed-chunk replication to followers) via schedulePostSeal. That
-// scheduling is mandatory, not an optimization: Chunks.Seal() only
-// announces Active → Sealing, and the post-seal pipeline owns the
-// AnnounceSeal that promotes the vault-ctl manifest entry to Sealed.
 func (o *Orchestrator) SealActive(vaultID glid.GLID) (int, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
@@ -940,22 +939,44 @@ func (o *Orchestrator) SealActive(vaultID glid.GLID) (int, error) {
 		return 0, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 
-	if vaultInst := vault.Instance; vaultInst != nil {
-		active := vaultInst.Chunks.Active()
-		if active != nil && active.RecordCount > 0 {
-			chunkID := active.ID
-			if err := vaultInst.Chunks.Seal(); err != nil {
-				return 0, fmt.Errorf("seal vault %s: %w", vaultID, err)
-			}
-			o.schedulePostSeal(vaultID, vaultInst.Chunks, chunkID)
-			return 1, nil
-		}
+	sealed, err := o.sealChunkManagerActive(vaultID, vault.Instance)
+	if err != nil {
+		return 0, err
 	}
+	manifestSealed, err := o.sealOpenManifest(vaultID)
+	if err != nil {
+		return sealed, err
+	}
+	return sealed + manifestSealed, nil
+}
 
-	// No chunk-manager active file to seal. A pipeline vault's active chunk
-	// is the open manifest on the vault-ctl FSM; sealing it is a leader-gated
-	// vault-ctl command that the routing layer has already delivered to the
-	// vault's home.
+// sealChunkManagerActive seals the chunk manager's active chunk when it holds
+// records, and schedules the post-seal pipeline (compress, index, and
+// sealed-chunk replication to followers). That scheduling is mandatory, not
+// an optimization: Chunks.Seal() only announces Active → Sealing, and the
+// post-seal pipeline owns the AnnounceSeal that promotes the vault-ctl
+// manifest entry to Sealed.
+func (o *Orchestrator) sealChunkManagerActive(vaultID glid.GLID, vaultInst *VaultInstance) (int, error) {
+	if vaultInst == nil {
+		return 0, nil
+	}
+	active := vaultInst.Chunks.Active()
+	if active == nil || active.RecordCount == 0 {
+		return 0, nil
+	}
+	chunkID := active.ID
+	if err := vaultInst.Chunks.Seal(); err != nil {
+		return 0, fmt.Errorf("seal vault %s: %w", vaultID, err)
+	}
+	o.schedulePostSeal(vaultID, vaultInst.Chunks, chunkID)
+	return 1, nil
+}
+
+// sealOpenManifest seals a pipeline vault's open chunk manifest when it holds
+// records. Only the chunking leader may commit the seal; reaching any other
+// node while the manifest holds records is ErrNotChunkingLeader, never a
+// silent zero.
+func (o *Orchestrator) sealOpenManifest(vaultID glid.GLID) (int, error) {
 	if !o.isPipelineIngestVault(vaultID) {
 		return 0, nil
 	}
@@ -965,14 +986,34 @@ func (o *Orchestrator) SealActive(vaultID glid.GLID) (int, error) {
 	if pl == nil {
 		return 0, nil
 	}
-	sealedOpen, err := pl.SealOpenChunk(vaultID)
-	if err != nil {
+	sealed, err := pl.SealOpenChunk(vaultID)
+	switch {
+	case err == nil:
+		if sealed {
+			return 1, nil
+		}
+		return 0, nil
+	case errors.Is(err, chunking.ErrNotLeader):
+		return 0, fmt.Errorf("%w: vault %s", ErrNotChunkingLeader, vaultID)
+	case errors.Is(err, chunking.ErrUnknownVault):
+		if o.openManifestHoldsRecords(vaultID) {
+			return 0, fmt.Errorf("%w: vault %s is not homed on this node", ErrNotChunkingLeader, vaultID)
+		}
+		return 0, nil
+	default:
 		return 0, fmt.Errorf("seal open chunk of vault %s: %w", vaultID, err)
 	}
-	if sealedOpen {
-		return 1, nil
+}
+
+// openManifestHoldsRecords reads the vault-ctl FSM, which every node holds,
+// for an open chunk manifest with records.
+func (o *Orchestrator) openManifestHoldsRecords(vaultID glid.GLID) bool {
+	fsm, _, _, ok := o.vaultCtlHandle(vaultID)
+	if !ok {
+		return false
 	}
-	return 0, nil
+	open := fsm.OpenChunk()
+	return open != nil && open.TotalRecords > 0
 }
 
 // --- Index ops ---

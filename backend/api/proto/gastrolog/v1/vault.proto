@@ -70,7 +70,9 @@ service VaultService {
     option (auth_level) = AUTH_LEVEL_ADMIN;
   }
 
-  // SealVault seals the active chunk of a vault.
+  // SealVault seals every open chunk of a vault that holds records: the
+  // chunk manager's active chunk and, for a pipeline vault, the open chunk
+  // manifest. Unavailable while the vault's chunking leader is realigning.
   rpc SealVault(SealVaultRequest) returns (SealVaultResponse) {
     option (auth_level) = AUTH_LEVEL_ADMIN;
   }
@@ -640,7 +642,7 @@ message SealVaultRequest {
 }
 
 message SealVaultResponse {
-  int32 sealed_count = 1; // number of vaults whose active chunk was sealed
+  int32 sealed_count = 1; // number of open chunks sealed; 0 when none held records
 }
 
 message RetryUnreadableChunksRequest {

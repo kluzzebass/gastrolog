@@ -148,7 +148,9 @@ export const VaultService = {
       kind: MethodKind.Unary,
     },
     /**
-     * SealVault seals the active chunk of a vault.
+     * SealVault seals every open chunk of a vault that holds records: the
+     * chunk manager's active chunk and, for a pipeline vault, the open chunk
+     * manifest. Unavailable while the vault's chunking leader is realigning.
      *
      * @generated from rpc gastrolog.v1.VaultService.SealVault
      */

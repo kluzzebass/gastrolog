@@ -25,6 +25,11 @@ var (
 	ErrDuplicateID = errors.New("duplicate ID")
 	// ErrNoSystemLoader is returned when a hot-update method is called without a SystemLoader.
 	ErrNoSystemLoader = errors.New("no config loader configured")
+	// ErrNotChunkingLeader is returned when a seal reaches a node that cannot
+	// commit the seal of the vault's open chunk manifest: only the home that
+	// is also the vault-ctl leader can. Retryable — vault-ctl leadership
+	// realigns onto the vault's placement leader.
+	ErrNotChunkingLeader = errors.New("open chunk can only be sealed on the vault's chunking leader")
 )
 
 // IsPlacementChurnErr reports whether err signals a benign placement-state

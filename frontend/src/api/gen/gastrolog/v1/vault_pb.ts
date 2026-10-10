@@ -2803,7 +2803,7 @@ export class SealVaultRequest extends Message<SealVaultRequest> {
  */
 export class SealVaultResponse extends Message<SealVaultResponse> {
   /**
-   * number of vaults whose active chunk was sealed
+   * number of open chunks sealed; 0 when none held records
    *
    * @generated from field: int32 sealed_count = 1;
    */
