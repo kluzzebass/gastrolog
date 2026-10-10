@@ -9,13 +9,13 @@ import (
 	erragg "gastrolog/internal/errs"
 )
 
-// TestRetryableCollectErr pins classification to collection-owned sentinels:
-// deferred (retryable) failures carry ErrSegmentUnavailable, ErrCorruptSegment,
-// or os.ErrNotExist in their chain; everything else is terminal.
-func TestRetryableCollectErr(t *testing.T) {
+// TestExpectedCollectErr pins classification to collection-owned sentinels:
+// expected catch-up failures carry ErrSegmentUnavailable, ErrCorruptSegment,
+// or os.ErrNotExist in their chain; everything else is unexpected.
+func TestExpectedCollectErr(t *testing.T) {
 	t.Parallel()
 
-	retryable := []error{
+	expected := []error{
 		ErrSegmentUnavailable,
 		ErrCorruptSegment,
 		os.ErrNotExist,
@@ -34,42 +34,42 @@ func TestRetryableCollectErr(t *testing.T) {
 		// release purge, in both attachment shapes.
 		ErrPreHeadPurged,
 		fmt.Errorf("%w: %w", ErrPreHeadPurged, os.ErrNotExist),
-		// A pass aggregate is retryable when every failure it summarizes is.
+		// A pass aggregate is expected when every failure it summarizes is.
 		erragg.SummaryJoin(
 			fmt.Errorf("pull from n1: %w", ErrSegmentUnavailable),
 			fmt.Errorf("%w: no remote holder for segment s", ErrSegmentUnavailable),
 			errors.Join(ErrCorruptSegment, errors.New("bad magic")),
 		),
 	}
-	for _, err := range retryable {
-		if !retryableCollectErr(err) {
-			t.Errorf("expected retryable: %v", err)
+	for _, err := range expected {
+		if !expectedCollectErr(err) {
+			t.Errorf("want expected: %v", err)
 		}
 	}
 
-	nonRetryable := []error{
+	unexpected := []error{
 		nil,
 		errors.New("vault-ctl FSM required"),
 		errors.New("disk full"),
-		// One terminal failure poisons the whole pass aggregate.
+		// One unexpected failure makes the whole pass aggregate unexpected.
 		erragg.SummaryJoin(
 			fmt.Errorf("pull from n1: %w", ErrSegmentUnavailable),
 			errors.New("permission denied"),
 		),
 	}
-	for _, err := range nonRetryable {
-		if retryableCollectErr(err) {
-			t.Errorf("expected non-retryable: %v", err)
+	for _, err := range unexpected {
+		if expectedCollectErr(err) {
+			t.Errorf("want unexpected: %v", err)
 		}
 	}
 }
 
-// TestRetryableCollectErrIgnoresProse would catch a regression back to
+// TestExpectedCollectErrIgnoresProse would catch a regression back to
 // string-matching: errors that carry the exact prose the adapters emit — but
-// no sentinel — must classify as terminal. Classification is errors.Is on
+// no sentinel — must classify as unexpected. Classification is errors.Is on
 // collection-owned sentinels only; rewording a message in another package can
 // never flip it.
-func TestRetryableCollectErrIgnoresProse(t *testing.T) {
+func TestExpectedCollectErrIgnoresProse(t *testing.T) {
 	t.Parallel()
 
 	proseOnly := []error{
@@ -80,8 +80,8 @@ func TestRetryableCollectErrIgnoresProse(t *testing.T) {
 		errors.New("segment unavailable"), // same text as the sentinel, wrong identity
 	}
 	for _, err := range proseOnly {
-		if retryableCollectErr(err) {
-			t.Errorf("prose without a sentinel must be terminal: %v", err)
+		if expectedCollectErr(err) {
+			t.Errorf("prose without a sentinel must be unexpected: %v", err)
 		}
 	}
 }

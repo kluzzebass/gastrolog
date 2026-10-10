@@ -21,14 +21,15 @@ import (
 // never inspects transport types or error prose.
 var ErrSegmentUnavailable = errors.New("segment unavailable")
 
-// retryableCollectErr reports whether a collect pass failure is an expected
+// expectedCollectErr reports whether a collect pass failure is an expected
 // catch-up race at high ingest: the registry still lists a segment but no peer
 // has bytes yet (no holder acks), a holder already purged head/ after seal, or
 // a pulled copy failed verification and must be re-pulled from another holder.
-// The next vault-ctl publish or leadership wake retries; logging at Warn
-// drowns signal. A pass aggregate (SummaryJoin) is retryable only when every
-// failure it summarizes is — one terminal failure must surface at Warn.
-func retryableCollectErr(err error) bool {
+// It decides only how loudly a failed pass is logged — every failed pass
+// retries on the manager's backoff wake. A pass aggregate (SummaryJoin) is
+// expected only when every failure it summarizes is, so one unexpected failure
+// surfaces at Warn.
+func expectedCollectErr(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -37,22 +38,21 @@ func retryableCollectErr(err error) bool {
 		subs = []error{err}
 	}
 	for _, sub := range subs {
-		if !retryableCollectSuberr(sub) {
+		if !expectedCollectSuberr(sub) {
 			return false
 		}
 	}
 	return true
 }
 
-// retryableCollectSuberr classifies one failure by collection-owned
+// expectedCollectSuberr classifies one failure by collection-owned
 // sentinels via errors.Is — never by transport status types or error prose,
 // so rewording a message elsewhere cannot flip classification.
-func retryableCollectSuberr(err error) bool {
+func expectedCollectSuberr(err error) bool {
 	if errors.Is(err, ErrCorruptSegment) {
 		// Checksum verification failed: the serving holder has wrong bytes.
-		// The pre-head copy is already discarded; the pull must retry on the
-		// manager's own backoff wake (another holder can serve correct
-		// bytes) — no future publish event exists to retry it otherwise.
+		// The pre-head copy is already discarded and another holder can
+		// serve correct bytes on the retry.
 		return true
 	}
 	if errors.Is(err, ErrSegmentUnavailable) {
