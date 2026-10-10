@@ -3,13 +3,16 @@ package cluster
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
+	"connectrpc.com/connect"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -68,8 +71,7 @@ func forwardRPCStreamHandler(srv any, stream grpc.ServerStream) error {
 
 	// Check for HTTP-level errors.
 	if resp.StatusCode != http.StatusOK {
-		ct := resp.Header.Get("Content-Type")
-		return sendErrorFrame(stream, resp, ct)
+		return sendErrorFrame(stream, resp)
 	}
 
 	// Connect unary response: body is raw proto bytes (no envelope).
@@ -110,49 +112,89 @@ func unaryResponseFrame(stream grpc.ServerStream, body io.Reader) error {
 	})
 }
 
-// sendErrorFrame extracts a Connect error from the HTTP response and sends
-// it as a ForwardRPCFrame with the error code.
-func sendErrorFrame(stream grpc.ServerStream, resp *http.Response, _ string) error {
-	// Read error body into a fixed 4KB stack buffer — error messages are short.
-	var buf [4 << 10]byte
-	n, _ := io.ReadFull(resp.Body, buf[:])
-	errBody := string(buf[:n])
-
-	code := httpStatusToConnectCode(resp.StatusCode)
-	msg := fmt.Sprintf("upstream error: HTTP %d", resp.StatusCode)
-	if n > 0 {
-		msg = errBody
+// sendErrorFrame sends a non-200 internal-mux response as a ForwardRPCFrame
+// carrying the handler's Connect code and bare message, so the caller can
+// rebuild the same error the handler returned.
+func sendErrorFrame(stream grpc.ServerStream, resp *http.Response) error {
+	code, msg, err := decodeForwardedError(resp)
+	if err != nil {
+		return status.Errorf(codes.Internal, "read error body: %v", err)
 	}
-
 	return stream.SendMsg(&gastrologv1.ForwardRPCFrame{
-		ErrorCode:    code,
+		ErrorCode:    uint32(code),
 		ErrorMessage: msg,
 	})
 }
 
+// decodeForwardedError extracts the code and message of a failed internal-mux
+// response. The code comes from the Connect JSON body because the HTTP status
+// is shared by several codes (400 is failed_precondition, invalid_argument
+// and out_of_range); the status is the fallback for a non-Connect body.
+func decodeForwardedError(resp *http.Response) (connect.Code, string, error) {
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(io.LimitReader(resp.Body, ForwardRPCMaxResponseBytes+1)); err != nil {
+		return 0, "", err
+	}
+	fallback := httpStatusToConnectCode(resp.StatusCode)
+	if buf.Len() > ForwardRPCMaxResponseBytes {
+		return fallback, fmt.Sprintf(
+			"upstream error: HTTP %d with an error body exceeding ForwardRPCMaxResponseBytes limit of %d bytes",
+			resp.StatusCode, ForwardRPCMaxResponseBytes), nil
+	}
+	if code, msg, ok := decodeConnectWireError(buf.Bytes(), fallback); ok {
+		return code, msg, nil
+	}
+	if text := strings.TrimSpace(buf.String()); text != "" {
+		return fallback, text, nil
+	}
+	return fallback, fmt.Sprintf("upstream error: HTTP %d", resp.StatusCode), nil
+}
+
+// decodeConnectWireError decodes a Connect unary error body. Like a Connect
+// client, it keeps the message of a JSON error whose code it does not
+// recognise and substitutes fallback for the code. ok is false when the body
+// is not a JSON object carrying a recognised code or a message.
+func decodeConnectWireError(body []byte, fallback connect.Code) (connect.Code, string, bool) {
+	var wire struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(body, &wire); err != nil {
+		return 0, "", false
+	}
+	var code connect.Code
+	if err := code.UnmarshalText([]byte(wire.Code)); err != nil || code < connect.CodeCanceled || code > connect.CodeUnauthenticated {
+		if wire.Message == "" {
+			return 0, "", false
+		}
+		code = fallback
+	}
+	return code, wire.Message, true
+}
+
 // httpStatusToConnectCode maps an HTTP status code to a Connect error code.
-func httpStatusToConnectCode(httpStatus int) uint32 {
+func httpStatusToConnectCode(httpStatus int) connect.Code {
 	switch httpStatus {
 	case http.StatusBadRequest:
-		return 3 // InvalidArgument
+		return connect.CodeInvalidArgument
 	case http.StatusUnauthorized:
-		return 16 // Unauthenticated
+		return connect.CodeUnauthenticated
 	case http.StatusForbidden:
-		return 7 // PermissionDenied
+		return connect.CodePermissionDenied
 	case http.StatusNotFound:
-		return 5 // NotFound
+		return connect.CodeNotFound
 	case http.StatusConflict:
-		return 6 // AlreadyExists
+		return connect.CodeAlreadyExists
 	case http.StatusTooManyRequests:
-		return 8 // ResourceExhausted
+		return connect.CodeResourceExhausted
 	case http.StatusNotImplemented:
-		return 12 // Unimplemented
+		return connect.CodeUnimplemented
 	case http.StatusServiceUnavailable:
-		return 14 // Unavailable
+		return connect.CodeUnavailable
 	case http.StatusGatewayTimeout:
-		return 4 // DeadlineExceeded
+		return connect.CodeDeadlineExceeded
 	default:
-		return 2 // Unknown
+		return connect.CodeUnknown
 	}
 }
 
