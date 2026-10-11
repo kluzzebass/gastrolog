@@ -1386,6 +1386,10 @@ describes what the code does today.
   segment registry entry and on chunk state). Placement says who *should*
   hold; the holder set says who *does*. `holders ⊇ homes` is a release fast
   path, never the sole gate (a dead home must not pin a segment forever).
+  For a cloud-backed chunk a holder's GLCB is a **warm-cache** copy: every
+  home's cache eviction may remove it, and the home's holder receipt is
+  withdrawn with it. The uploaded object, not the holder count, is what makes
+  a cloud-backed chunk supersede its segments.
 
 - **Holder receipt** — the vault-ctl commit a node makes after it has pulled
   and verified bytes (`AckSegmentHolderCommand` for segments,

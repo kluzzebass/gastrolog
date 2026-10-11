@@ -265,7 +265,11 @@ R3. **The release predicate must use all three signals in 28, not just the first
     homes. The dead home then catches up at the **chunk** level, whose reconcile (30)
     tolerates a long absence, not the segment's seconds-to-minutes transport window.
     The chunk's *desired* holder set is still all homes; only the segment-purge
-    *trigger* is the lower RF threshold. Mechanically this needs a small persistent
+    *trigger* is the lower RF threshold. A **cloud-backed** chunk meets the
+    trigger by its upload alone: the uploaded object is the durable copy, and
+    each home's GLCB is a warm cache whose eviction withdraws that home's
+    holder receipt — counting those receipts would re-pin the segment every
+    time a home evicts. Mechanically this needs a small persistent
     segment→containing-chunk-IDs map on the vault-ctl FSM (the segment refs of a
     sealed chunk are kept only until one of its segments is released), cleared on
     release.

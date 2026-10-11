@@ -324,11 +324,11 @@ func (f *FSM) SnapshotReleaseScan(minChunkHolders int) *ReleaseScan {
 // supersedes the raw segment (design-notes 39, refined R3: RF, not home-set, so
 // a dead home never pins the segment; the dead home catches up at the chunk
 // level). True only when the segment has been chunked (≥1 containing chunk) and
-// every containing chunk is sealed and held by ≥ minChunkHolders nodes, or has
-// already aged out (tombstoned/expired — the records are gone by retention, so
-// the segment is equally free to drop). minChunkHolders ≤ 0 means placement
-// wiring is absent (single-node/test); return false so release falls back to
-// the holders⊇homes fast path.
+// every containing chunk is sealed and either held by ≥ minChunkHolders nodes or
+// cloud-backed, or has already aged out (tombstoned/expired — the records are
+// gone by retention, so the segment is equally free to drop). minChunkHolders
+// ≤ 0 means placement wiring is absent (single-node/test); return false so
+// release falls back to the holders⊇homes fast path.
 func (f *FSM) SegmentSuperseded(segID glid.GLID, minChunkHolders int) bool {
 	if minChunkHolders <= 0 {
 		return false
@@ -352,8 +352,11 @@ func (f *FSM) segmentSupersededLocked(segID glid.GLID, minChunkHolders int) bool
 }
 
 // chunkReplicatedLocked reports whether chunk id is durable enough to supersede
-// a segment: sealed and held by ≥ minChunkHolders nodes, or already gone (its
-// records aged out under retention, which only deletes sealed chunks).
+// a segment: sealed and held by ≥ minChunkHolders nodes, sealed and
+// cloud-backed, or already gone (its records aged out under retention, which
+// only deletes sealed chunks). A cloud-backed chunk's durable copy is the
+// uploaded object; its holders are warm caches that eviction withdraws, and
+// counting them would re-pin a segment every time a home evicts.
 func (f *FSM) chunkReplicatedLocked(id chunk.ChunkID, minChunkHolders int) bool {
 	entry := f.chunks[id]
 	if entry == nil {
@@ -361,6 +364,9 @@ func (f *FSM) chunkReplicatedLocked(id chunk.ChunkID, minChunkHolders int) bool 
 	}
 	if entry.State != chunk.ChunkStateSealed {
 		return false
+	}
+	if entry.CloudBacked {
+		return true
 	}
 	return len(entry.Holders) >= minChunkHolders
 }

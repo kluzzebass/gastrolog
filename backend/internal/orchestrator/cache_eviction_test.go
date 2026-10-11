@@ -96,11 +96,10 @@ func TestCacheEvictionNotDuplicatedAcrossSweeps(t *testing.T) {
 	}
 }
 
-// TestCacheEvictionSweepAll_SkipsNonLeaderInstance verifies the survivor
-// path's existing leader gate: cacheEvictionSweepAll only evicts on
-// leader instances (followers never got a runner via retentionSweepAll's
-// leader-only path either, so parity is preserved).
-func TestCacheEvictionSweepAll_SkipsNonLeaderInstance(t *testing.T) {
+// TestCacheEvictionSweepAll_EvictsOnFollowerInstance: every home holds local
+// copies of a cloud-backed vault's chunks, so a follower instance's warm cache
+// is held to the same policy as the placement leader's.
+func TestCacheEvictionSweepAll_EvictsOnFollowerInstance(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	vaultID := glid.New()
 	evictor := &evictCountingChunkManager{}
@@ -109,7 +108,7 @@ func TestCacheEvictionSweepAll_SkipsNonLeaderInstance(t *testing.T) {
 
 	orch.cacheEvictionSweepAll()
 
-	if got := evictor.evictCalls.Load(); got != 0 {
-		t.Fatalf("EvictCache calls on a follower instance = %d, want 0", got)
+	if got := evictor.evictCalls.Load(); got != 1 {
+		t.Fatalf("EvictCache calls on a follower instance = %d, want 1", got)
 	}
 }

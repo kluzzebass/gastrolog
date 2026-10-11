@@ -271,8 +271,19 @@ sequenceDiagram
 ```
 
 The local cache is byte-for-byte equivalent to a freshly-sealed local
-chunk. Subsequent queries reuse the cache; eviction policy reclaims
-disk space under pressure (`gastrolog-2idw8`).
+chunk. Subsequent queries reuse the cache; the vault's cache policy
+(`CacheEviction` LRU on `CacheBudget`, or TTL on `CacheTTL`) reclaims it.
+
+Every home holds a second kind of local copy: the GLCB the pipeline built in
+its chunk root before the chunk was uploaded. Once the vault-ctl manifest
+records the upload, that GLCB is warm cache too — reads use it without any
+cloud I/O (also after a restart, when nothing has registered it), and the
+eviction sweep, which runs on every home rather than only the placement
+leader, counts it against the budget and removes it like the chunk-dir copy.
+Eviction considers only chunks the manifest marks cloud-backed; a local GLCB
+whose upload has not committed is never removed. An evicted pipeline GLCB
+withdraws the home's holder receipt, and the next read re-fetches into the
+chunk dir through the cold path above.
 
 ## Cloud Index Infrastructure
 

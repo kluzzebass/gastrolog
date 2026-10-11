@@ -951,6 +951,27 @@ type reconcileView struct {
 // gatherReconcileView snapshots the tick's shared inputs. Returns nil
 // when there is no FSM to reconcile against.
 func (r *VaultLifecycleReconciler) gatherReconcileView() *reconcileView {
+	v := r.gatherManifestView()
+	if v == nil {
+		return nil
+	}
+	if r.vaultInst != nil && r.vaultInst.Chunks != nil {
+		v.localMetas, v.localListErr = r.vaultInst.Chunks.List()
+		if v.localListErr != nil {
+			r.logger.Warn("reconcile tick: list local chunks failed", "error", v.localListErr)
+		} else {
+			v.have = make(map[chunk.ChunkID]bool, len(v.localMetas))
+			for _, m := range v.localMetas {
+				v.have[m.ID] = true
+			}
+		}
+	}
+	return v
+}
+
+// gatherManifestView is the FSM half of gatherReconcileView: the manifest
+// entries and pending deletes, without the local chunk listing.
+func (r *VaultLifecycleReconciler) gatherManifestView() *reconcileView {
 	if r.fsm == nil {
 		return nil
 	}
@@ -966,17 +987,6 @@ func (r *VaultLifecycleReconciler) gatherReconcileView() *reconcileView {
 	v.pendingByID = make(map[chunk.ChunkID]*vaultctlfsm.PendingDelete, len(v.pending))
 	for i := range v.pending {
 		v.pendingByID[v.pending[i].ChunkID] = &v.pending[i]
-	}
-	if r.vaultInst != nil && r.vaultInst.Chunks != nil {
-		v.localMetas, v.localListErr = r.vaultInst.Chunks.List()
-		if v.localListErr != nil {
-			r.logger.Warn("reconcile tick: list local chunks failed", "error", v.localListErr)
-		} else {
-			v.have = make(map[chunk.ChunkID]bool, len(v.localMetas))
-			for _, m := range v.localMetas {
-				v.have[m.ID] = true
-			}
-		}
 	}
 	return v
 }
@@ -1523,33 +1533,19 @@ func (r *VaultLifecycleReconciler) reconcileMissingReplicas(v *reconcileView) {
 	}
 }
 
-// syncPipelineSealedGLCBs registers pipeline-built GLCBs that exist locally
-// under the vault ChunkRoot so query/OpenCursor resolve them via
-// RegisterExternalGLCB. Includes Sealing entries (GLCB built, CmdSealChunk
-// not yet committed) so search can use embedded ITSI instead of scanning
-// manifest segments. Replaces the legacy missing-replica catchup sweep for
-// pipeline ingest vaults.
+// syncPipelineSealedGLCBs is the pipeline vault's replica reconcile: pull
+// every sealed chunk this home is missing, then reconcile its holder receipts
+// against the bytes on disk. Registration is lazy (the chunk manager's on-miss
+// resolver), so this sweep does not register per entry.
 func (r *VaultLifecycleReconciler) syncPipelineSealedGLCBs(v *reconcileView) {
-	chunkRoot, hasRoot := "", false
-	if r.orch != nil {
-		chunkRoot, hasRoot = r.orch.pipelineVaultChunkRoot(r.vaultID)
-	}
-	var ack, revoke []chunk.ChunkID
 	for _, e := range v.entries {
-		if e.CloudBacked {
-			continue
-		}
-		// Registration is lazy (the chunk manager's on-miss resolver), so
-		// this sweep does not register per entry — its jobs are replica
-		// catch-up and holder-receipt truth.
-		if !e.IsSealed() {
-			continue
-		}
 		// Skip chunks on their way out (retention-pending or delete protocol
 		// in flight): the sweep tick that lands inside the expunge->finalize
 		// window otherwise schedules a doomed pull on EVERY home, since the
-		// bytes were just deleted everywhere.
-		if chunkOnItsWayOut(e, v.pendingByID[e.ID]) {
+		// bytes were just deleted everywhere. Cloud-backed chunks are never
+		// pulled: the cloud object is their durable copy, a local GLCB only
+		// their warm cache.
+		if e.CloudBacked || !e.IsSealed() || chunkOnItsWayOut(e, v.pendingByID[e.ID]) {
 			continue
 		}
 		// Replica catch-up: a home missing this sealed chunk's bytes
@@ -1559,14 +1555,40 @@ func (r *VaultLifecycleReconciler) syncPipelineSealedGLCBs(v *reconcileView) {
 		// chunks on disk while retention silently starved and the
 		// registry still reported it as a holder.
 		r.orch.pullMissingGLCB(r.vaultID, e)
+	}
+	r.reconcileHolderReceipts(v)
+}
 
-		// Holder receipts: reconcile this node's residency claim against
-		// the bytes actually on disk. Earn on presence (local build or a
-		// completed pull), revoke on absence — ChunkResidency then reports
-		// bytes truth instead of the placement assumption, and a home that
-		// lost its copy stops being counted the same sweep that schedules
-		// its recovery pull.
-		if !hasRoot {
+// SyncHolderReceipts reconciles this home's chunk holder receipts against its
+// chunk root now. Called on the warm-cache eviction edge, which removes
+// pipeline GLCBs of cloud-backed chunks; the periodic ReconcileTick is the
+// backstop. No-op for vaults that are not pipeline vaults.
+func (r *VaultLifecycleReconciler) SyncHolderReceipts() {
+	if r.orch == nil || !r.orch.isPipelineIngestVault(r.vaultID) {
+		return
+	}
+	if v := r.gatherManifestView(); v != nil {
+		r.reconcileHolderReceipts(v)
+	}
+}
+
+// reconcileHolderReceipts reconciles this node's residency claims against the
+// bytes actually in its chunk root. Earn on presence (local build or a
+// completed pull), revoke on absence — ChunkResidency then reports bytes truth
+// instead of the placement assumption: a home that lost its copy stops being
+// counted the same sweep that schedules its recovery pull, and a home whose
+// warm-cache eviction removed a cloud-backed chunk's GLCB stops claiming it.
+func (r *VaultLifecycleReconciler) reconcileHolderReceipts(v *reconcileView) {
+	if r.orch == nil {
+		return
+	}
+	chunkRoot, ok := r.orch.pipelineVaultChunkRoot(r.vaultID)
+	if !ok {
+		return
+	}
+	var ack, revoke []chunk.ChunkID
+	for _, e := range v.entries {
+		if !e.IsSealed() || chunkOnItsWayOut(e, v.pendingByID[e.ID]) {
 			continue
 		}
 		_, statErr := os.Stat(chunking.ChunkGLCBPath(chunkRoot, e.ID))

@@ -23,9 +23,15 @@ import (
 // lazy resolution serves a chunk you already name but hides it from
 // enumeration, so a restarted home answers a match-all with zero records
 // until some other path happens to register the chunk.
+//
+// The locator answers where this node's pipeline GLCB for a chunk lives, with
+// no disk or FSM read: a cloud-backed chunk resolves from the cloud index
+// before the resolver is consulted, so the read and warm-cache eviction paths
+// find its pipeline copy through the locator instead.
 type externalGLCBResolverSetter interface {
 	SetExternalGLCBResolver(func(chunk.ChunkID) (string, chunk.ExternalGLCBInfo, bool))
 	SetExternalGLCBLister(func() []chunk.ChunkID)
+	SetExternalGLCBLocator(func(chunk.ChunkID) (string, bool))
 }
 
 // pipelineGLCBSource answers, at lookup time, whether this node serves the
@@ -106,6 +112,13 @@ func installGLCBResolverOn(inst *VaultInstance, source func() (*vaultctlfsm.FSM,
 			return "", chunk.ExternalGLCBInfo{}, false
 		}
 		return glcbPath, info, true
+	})
+	setter.SetExternalGLCBLocator(func(id chunk.ChunkID) (string, bool) {
+		_, chunkRoot, ok := source()
+		if !ok {
+			return "", false
+		}
+		return chunking.ChunkGLCBPath(chunkRoot, id), true
 	})
 	// Enumeration companion to the resolver: the sealed chunk IDs of this
 	// vault's committed manifest. List() calls the resolver on each ID it

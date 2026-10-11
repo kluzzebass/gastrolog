@@ -64,6 +64,33 @@ func TestSegmentSupersededByReplicatedChunk(t *testing.T) {
 	}
 }
 
+// TestSegmentSupersededByCloudBackedChunk: a cloud-backed chunk's durable copy
+// is the uploaded object, so it supersedes its segments with no holder at all —
+// the state every home reaches once warm-cache eviction has withdrawn its
+// receipt. Before the upload commits, the same zero-holder chunk supersedes
+// nothing.
+func TestSegmentSupersededByCloudBackedChunk(t *testing.T) {
+	t.Parallel()
+	f := New()
+	segID, chunkID := buildChunkedSegment(t, f)
+
+	if f.SegmentSuperseded(segID, 2) {
+		t.Fatal("segment superseded by a sealed chunk with no holders and no upload")
+	}
+
+	applyCmd(t, f, MarshalUploadChunk(chunkID, 64, 0, 0, 0, 0, [32]byte{1}, glid.New(), 0))
+	if !f.SegmentSuperseded(segID, 2) {
+		t.Fatal("segment not superseded by its cloud-backed chunk (zero holders after eviction must not re-pin it)")
+	}
+
+	// Supersession by upload survives a holder that acked and then revoked.
+	applyCmd(t, f, mustMarshalCommand(NewAckChunkHolders([]chunk.ChunkID{chunkID}, "home-a")))
+	applyCmd(t, f, mustMarshalCommand(NewRevokeChunkHolders([]chunk.ChunkID{chunkID}, "home-a")))
+	if !f.SegmentSuperseded(segID, 2) {
+		t.Fatal("holder revoke after eviction re-pinned a segment of a cloud-backed chunk")
+	}
+}
+
 // TestSegmentSupersededSurvivesSnapshot: the segment→chunk mapping must survive
 // snapshot/restore, or a follower catching up via snapshot loses the release
 // signal and the completed/ leak returns.

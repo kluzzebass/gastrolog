@@ -16,21 +16,27 @@ const (
 	cacheEvictionJobName  = "cache-eviction"
 )
 
-// cacheEvictionSweepAll fans out EvictCache across every chunk manager in
-// the orchestrator. No-op for managers that don't implement CacheEvictor
-// (memory-mode vaults) or that have no eviction policy configured (every
-// EvictCache call short-circuits when CacheBudgetBytes and CacheTTL are
-// both zero).
+// cacheEvictionSweepAll fans out EvictCache across every vault instance on
+// this node: every home holds local copies of cloud-backed chunks, so the
+// warm-cache policy applies on each one, not only on the placement leader.
+// No-op for managers that don't implement CacheEvictor (memory-mode vaults)
+// or that have no eviction policy configured (every EvictCache call
+// short-circuits when CacheBudgetBytes and CacheTTL are both zero).
+//
+// An eviction that removed pipeline GLCBs leaves this home's holder receipts
+// claiming bytes it no longer has; the reconciler's receipt pass withdraws
+// them on this edge rather than at its next periodic tick.
 func (o *Orchestrator) cacheEvictionSweepAll() {
 	o.mu.RLock()
 	type evictTarget struct {
-		evictor CacheEvictor
-		vaultID string
+		evictor    CacheEvictor
+		reconciler *VaultLifecycleReconciler
+		vaultID    string
 	}
 	var targets []evictTarget
 	for _, v := range o.vaults {
 		t := v.Instance
-		if t == nil || !t.IsLeader() {
+		if t == nil {
 			continue
 		}
 		ev, ok := t.Chunks.(CacheEvictor)
@@ -38,29 +44,35 @@ func (o *Orchestrator) cacheEvictionSweepAll() {
 			continue
 		}
 		targets = append(targets, evictTarget{
-			evictor: ev,
-			vaultID: v.ID.String(),
+			evictor:    ev,
+			reconciler: t.Reconciler,
+			vaultID:    v.ID.String(),
 		})
 	}
 	o.mu.RUnlock()
 
 	for _, tgt := range targets {
 		evicted, freed := tgt.evictor.EvictCache()
-		if evicted > 0 && o.logger != nil {
+		if evicted == 0 {
+			continue
+		}
+		if o.logger != nil {
 			o.cacheEvictionLogger.Debug("cache eviction sweep",
-				"vault", tgt.vaultID,
 				"vault", tgt.vaultID,
 				"evicted", evicted,
 				"freed_bytes", freed)
+		}
+		if tgt.reconciler != nil {
+			tgt.reconciler.SyncHolderReceipts()
 		}
 	}
 }
 
 // startCacheEvictionSweep registers the periodic warm-cache eviction
-// sweep. Each tick walks every leader instance and asks its chunk manager to
-// apply its configured eviction policies.
+// sweep. Each tick walks every vault instance on this node and asks its
+// chunk manager to apply its configured eviction policies.
 func (o *Orchestrator) startCacheEvictionSweep() error {
-	if err := o.scheduler.AddJob(cacheEvictionJobName, cacheEvictionSchedule, o.cacheEvictionSweepAll); err != nil {
+	if err := o.scheduler.AddJob(cacheEvictionJobName, sweepCron(cacheEvictionSchedule), o.cacheEvictionSweepAll); err != nil {
 		return err
 	}
 	o.scheduler.Describe(cacheEvictionJobName, "Warm-cache eviction (LRU + TTL on cloud-backed chunks)")
