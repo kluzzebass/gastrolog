@@ -15,6 +15,9 @@ interface RouteStatsViewProps {
   dark: boolean;
 }
 
+export const ROUTE_STATS_EMPTY_TEXT = "No routing stats — no node has reported its routing counters yet.";
+export const NO_ROUTES_TEXT = "No routes configured — every record goes unmatched.";
+
 export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
   const c = useThemeClass(dark);
   const { data: stats, isLoading } = useRouteStats();
@@ -22,7 +25,13 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
   const { data: vaults } = useVaults();
 
   if (isLoading) return <LoadingPlaceholder dark={dark} />;
-  if (!stats) return null;
+  if (!stats) {
+    return (
+      <div className={`text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}>
+        {ROUTE_STATS_EMPTY_TEXT}
+      </div>
+    );
+  }
 
   const vaultLabelById = new Map<EntityID, string>();
   for (const v of vaults) {
@@ -148,6 +157,11 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
       )}
 
       {/* Per-route breakdown */}
+      {sortedRoutes.length === 0 && (
+        <div className={`text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}>
+          {NO_ROUTES_TEXT}
+        </div>
+      )}
       {sortedRoutes.length > 0 && (
         <div>
           <h3

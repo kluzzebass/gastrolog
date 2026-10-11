@@ -98,4 +98,13 @@ export class Node {
   get lastSeen(): Timestamp | undefined {
     return this.cluster?.lastSeen;
   }
+
+  /**
+   * Instant the responding node received the broadcast behind `stats`.
+   * Undefined exactly when `stats` is — a broadcast value is shown with its
+   * age, never as a live reading.
+   */
+  get statsReceivedAt(): Timestamp | undefined {
+    return this.cluster?.statsReceivedAt;
+  }
 }

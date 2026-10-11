@@ -84,6 +84,7 @@ function useNodeContext() {
   }
   return {
     localNodeId: registry.localNodeId,
+    isLocal: registry.isLocal,
     multiNode: registry.multiNode,
     nodeNames,
   };
@@ -234,7 +235,7 @@ function RouteStatsList({ dark }: Readonly<{ dark: boolean }>) {
 function JobsList({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const { jobs, connected, reconnecting } = useWatchJobs({ onError: toastError });
-  const { localNodeId, multiNode, nodeNames } = useNodeContext();
+  const { localNodeId, isLocal, multiNode, nodeNames } = useNodeContext();
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
 
   if (!connected && !reconnecting && jobs.length === 0) return <Loading dark={dark} />;
@@ -248,7 +249,7 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
       <div className="flex flex-col gap-5">
         <div className="flex items-center gap-2">
           <EntityHeader title="Jobs" helpRef="inspector-jobs#scheduled-jobs" dark={dark} />
-          {reconnecting && <Badge variant="warn" dark={dark}>reconnecting</Badge>}
+          {reconnecting && <ReconnectingBadge dark={dark} />}
         </div>
         {scheduled.length > 0 && (
           <section>
@@ -287,7 +288,7 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
         <EntityHeader title="Jobs" helpRef="inspector-jobs#scheduled-jobs" dark={dark} />
-        {reconnecting && <Badge variant="warn" dark={dark}>reconnecting</Badge>}
+        {reconnecting && <ReconnectingBadge dark={dark} />}
       </div>
 
       {groups.length === 0 && <Empty dark={dark}>No active or scheduled jobs.</Empty>}
@@ -308,8 +309,10 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
             }
             headerRight={
               <span className="flex items-center gap-1.5">
-                {group.nodeId === localNodeId && <Badge variant="copper" dark={dark}>this node</Badge>}
-                <Badge variant="muted" dark={dark}>{group.items.length}</Badge>
+                {isLocal(group.nodeId) && <Badge variant="copper" dark={dark}>this node</Badge>}
+                <Badge variant="muted" dark={dark} title="active and scheduled jobs on this node">
+                  {jobCountText(group.items.length)}
+                </Badge>
               </span>
             }
           >
@@ -364,9 +367,11 @@ function JobRow({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
         </span>
       )}
       {job.startedAt && (
-        <LiveValue dark={dark} tone="muted" reserve={ELAPSED_MAX_CHARS} className="ml-auto text-[0.9em] shrink-0">
-          {elapsed(protoToInstant(job.startedAt), now)}
-        </LiveValue>
+        <span className="ml-auto shrink-0" title="time since the job started">
+          <LiveValue dark={dark} tone="muted" reserve={ELAPSED_MAX_CHARS} className="text-[0.9em]">
+            {elapsed(protoToInstant(job.startedAt), now)}
+          </LiveValue>
+        </span>
       )}
     </div>
   );
@@ -412,6 +417,21 @@ function ScheduledRow({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
   );
 }
 
+/** The per-node header count on the Jobs tab, with its noun. */
+export function jobCountText(n: number): string {
+  return `${n} ${n === 1 ? "job" : "jobs"}`;
+}
+
+export const RECONNECTING_TITLE = "the job stream from the server dropped — reconnecting; rows may be stale until it is back";
+
+function ReconnectingBadge({ dark }: Readonly<{ dark: boolean }>) {
+  return (
+    <Badge variant="warn" dark={dark} title={RECONNECTING_TITLE} helpRef="inspector-jobs">
+      reconnecting
+    </Badge>
+  );
+}
+
 function JobStatusBadge({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
   const label = job.statusLabel;
   if (!label) return null;
@@ -419,6 +439,8 @@ function JobStatusBadge({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
 }
 
 // ---- System ----
+
+export const CLUSTER_STATUS_EMPTY_TEXT = "No cluster status yet — this node has not reported its member list.";
 
 function SystemList({ dark }: Readonly<{ dark: boolean }>) {
   const { localNodeId, multiNode } = useNodeContext();
@@ -430,11 +452,16 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
 
   // Single-node: show local stats directly.
   if (!multiNode) {
-    const localStats = registry.byId.get(localNodeId)?.stats ?? null;
+    const localNode = registry.byId.get(localNodeId);
     return (
       <div className="flex flex-col gap-3">
         <EntityHeader title="System" helpRef="inspector-system" dark={dark} />
-        <SystemStatsView nodeStats={localStats} dark={dark} />
+        <SystemStatsView
+          nodeStats={localNode?.stats ?? null}
+          receivedAt={localNode?.statsReceivedAt}
+          ttlMs={registry.statsTtlMs}
+          dark={dark}
+        />
       </div>
     );
   }
@@ -472,10 +499,10 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
           </div>
         </ExpandableCard>
       )}
-      {nodes.length === 0 && <Empty dark={dark}>No cluster data available.</Empty>}
+      {nodes.length === 0 && <Empty dark={dark}>{CLUSTER_STATUS_EMPTY_TEXT}</Empty>}
       {nodes.map((node) => {
         const nid = idFromBytes(node.id);
-        const isLocal = nid === localNodeId;
+        const isLocal = registry.isLocal(nid);
         return (
           <ExpandableCard
             key={nid}
@@ -494,7 +521,13 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
             }
           >
             <div className="p-3">
-              <SystemStatsView nodeStats={node.stats ?? null} dark={dark} />
+              <SystemStatsView
+                nodeStats={node.stats ?? null}
+                lastSeen={node.lastSeen}
+                receivedAt={node.statsReceivedAt}
+                ttlMs={registry.statsTtlMs}
+                dark={dark}
+              />
             </div>
           </ExpandableCard>
         );

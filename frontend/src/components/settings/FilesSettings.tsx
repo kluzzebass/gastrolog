@@ -14,8 +14,9 @@ import { HelpButton } from "../HelpButton";
 import { HelpLink } from "../HelpLink";
 import { ExpandableCard } from "./ExpandableCard";
 import { MaxMindCard } from "./lookup/MaxMindCard";
+import { UsedByStatus } from "./UsedByStatus";
 import { handleDragOver, handleDragEnter, handleDragLeave } from "./CertificateForms";
-import type { ManagedFileInfo } from "../../api/gen/gastrolog/v1/system_pb";
+import type { LookupSettings, ManagedFileInfo } from "../../api/gen/gastrolog/v1/system_pb";
 import { useReadOnly } from "../../hooks/useReadOnly";
 
 interface FileGroup {
@@ -23,12 +24,24 @@ interface FileGroup {
   versions: ManagedFileInfo[]; // newest first (UUIDv7 order reversed)
 }
 
-/** Maps a filename to its known usage(s) in the system. */
-function fileUsage(name: string): string[] {
-  const uses: string[] = [];
-  if (name.includes("City") && name.endsWith(".mmdb")) uses.push("lookup geoip");
-  if ((name.includes("ASN") || name.includes("ISP")) && name.endsWith(".mmdb")) uses.push("lookup asn");
-  return uses;
+/**
+ * The lookups whose saved configuration references one of these file
+ * versions by id — the only sense in which a managed file is "used".
+ */
+export function fileLookupRefs(versionIds: readonly string[], lookup: LookupSettings | undefined): string[] {
+  if (!lookup) return [];
+  const ids = new Set(versionIds);
+  const refs: string[] = [];
+  const fileLookups = [
+    ...lookup.mmdbLookups,
+    ...lookup.csvLookups,
+    ...lookup.jsonFileLookups,
+    ...lookup.yamlFileLookups,
+  ];
+  for (const l of fileLookups) {
+    if (l.fileId.length > 0 && ids.has(encode(l.fileId))) refs.push(`lookup ${l.name}`);
+  }
+  return refs;
 }
 
 function groupByName(files: ManagedFileInfo[]): FileGroup[] {
@@ -57,12 +70,6 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { addToast } = useToast();
 
   const savedMaxmind = settings?.maxmind;
-  const [maxmindVisible, setMaxmindVisible] = useState(false);
-  const [maxmindInit, setMaxmindInit] = useState(false);
-  if (savedMaxmind && !maxmindInit) {
-    setMaxmindVisible(savedMaxmind.autoDownload || savedMaxmind.licenseConfigured);
-    setMaxmindInit(true);
-  }
 
   const files = data?.managedFiles ?? [];
   const groups = groupByName(files);
@@ -156,26 +163,11 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
 
       <MaxMindCard
         dark={dark}
-        visible={maxmindVisible}
-        setVisible={setMaxmindVisible}
         savedMaxmind={savedMaxmind}
         addToast={addToast}
       />
 
-      {!maxmindVisible && (
-        <button
-          disabled={readOnly}
-          onClick={() => setMaxmindVisible(true)}
-          className={`w-full rounded-lg border border-dashed px-4 py-3 text-[0.8em] transition-colors ${c(
-            "border-ink-border text-text-muted hover:border-copper-dim hover:text-text-muted",
-            "border-light-border text-light-text-muted hover:border-copper hover:text-light-text-muted",
-          )}`}
-        >
-          Enable MaxMind Auto-Download
-        </button>
-      )}
-
-      {groups.length === 0 && !maxmindVisible && (
+      {groups.length === 0 && (
         <p className={`text-[0.8em] text-center py-4 ${c("text-text-muted", "text-light-text-muted")}`}>
           No managed files. Upload a file above to get started.
         </p>
@@ -184,7 +176,7 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
       {groups.map((group) => {
         const latest = group.versions[0]!;
         const older = group.versions.slice(1);
-        const uses = fileUsage(group.name);
+        const uses = fileLookupRefs(group.versions.map((v) => encode(v.id)), settings?.lookup);
 
         return (
           <ExpandableCard
@@ -193,17 +185,9 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
             dark={dark}
             expanded={isExpanded(group.name)}
             onToggle={() => toggle(group.name)}
-            typeBadge={formatBytes(Number(latest.size))}
+            typeBadge={{ text: formatBytes(Number(latest.size)), title: "size of the current version" }}
             monoTitle
-            status={uses.length > 0 ? (
-              <span className="flex items-center gap-1.5">
-                {uses.map((u) => (
-                  <HelpLink key={u} helpRef="managed-files#used-by" title={`Used by ${u}`} className="font-mono text-[0.8em] text-copper">
-                    {u}
-                  </HelpLink>
-                ))}
-              </span>
-            ) : undefined}
+            status={<UsedByStatus dark={dark} refs={uses} helpRef="managed-files#used-by" />}
           >
             <div className="flex flex-col gap-3">
               <VersionRow file={latest} label="current" dark={dark} onDelete={() => handleDelete(encode(latest.id), latest.name)} />

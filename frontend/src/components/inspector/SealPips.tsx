@@ -1,4 +1,4 @@
-import type { SealPip, PipState } from "./sealPipState";
+import { rowIsCalm, type SealPip, type PipState } from "./sealPipState";
 
 // SealPips renders the per-node copy-seal lifecycle for one chunk row
 // (design reference docs/mockups/seal-pips.html).
@@ -16,7 +16,7 @@ const PIP_CLASSES: Record<PipState, string> = {
     "border-[1.5px] border-amber bg-linear-to-t from-amber from-50% to-transparent to-50% animate-pulse",
   lagging:
     "border-[1.5px] border-amber bg-linear-to-t from-amber from-50% to-transparent to-50% animate-pulse shadow-[0_0_6px_1px] shadow-amber/70",
-  sealed: "bg-severity-info/45",
+  sealed: "bg-severity-info",
   uncached: "border-[1.5px] border-severity-info/40",
   unknown: "border-[1.5px] border-dashed border-text-muted/60",
   missing:
@@ -26,10 +26,20 @@ const PIP_CLASSES: Record<PipState, string> = {
   ghost: "bg-text-muted/55 shadow-[0_0_6px_1px] shadow-text-muted/50",
 };
 
-function Pip({ pip, size }: Readonly<{ pip: SealPip; size: number }>) {
+// A calm row dims its sealed pips by mixing the green into the muted text
+// tone. The sealed pip is the one with no border, so an alpha fill over
+// the ink surface leaves the whole Status column looking empty.
+export const CALM_SEALED_CLASS =
+  "bg-[color-mix(in_srgb,var(--color-severity-info)_45%,var(--color-text-muted))]";
+
+export function pipClass(state: PipState, calm: boolean): string {
+  return state === "sealed" && calm ? CALM_SEALED_CLASS : PIP_CLASSES[state];
+}
+
+function Pip({ pip, size, calm }: Readonly<{ pip: SealPip; size: number; calm: boolean }>) {
   return (
     <span
-      className={`relative inline-block rounded-full ${PIP_CLASSES[pip.state]}`}
+      className={`relative inline-block rounded-full ${pipClass(pip.state, calm)}`}
       style={{ width: size, height: size }}
       title={pip.title}
       aria-label={pip.title}
@@ -48,20 +58,23 @@ export function SealPips({
   pips,
   ghosts,
   size = 11,
+  calm = rowIsCalm(pips, ghosts),
 }: Readonly<{
   pips: SealPip[];
   ghosts: SealPip[];
   size?: number;
+  /** Whether the whole row is healthy; a caller rendering one pip at a time passes the row's verdict. */
+  calm?: boolean;
 }>) {
   if (pips.length === 0 && ghosts.length === 0) return null;
   return (
     <span className="inline-flex items-center gap-1.5">
       {pips.map((p) => (
-        <Pip key={p.node} pip={p} size={size} />
+        <Pip key={p.node} pip={p} size={size} calm={calm} />
       ))}
       {ghosts.length > 0 && <span aria-hidden style={{ width: 8 }} />}
       {ghosts.map((p) => (
-        <Pip key={p.node} pip={p} size={size} />
+        <Pip key={p.node} pip={p} size={size} calm={calm} />
       ))}
     </span>
   );

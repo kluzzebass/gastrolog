@@ -15,6 +15,7 @@ import { JobCard, ScheduledJobsTable } from "./JobCard";
 import { HelpButton } from "../HelpButton";
 import { SystemStatsView } from "./SystemStatsView";
 import { PeerBytesSection } from "./PeerBytesSection";
+import { StatsFreshnessCue } from "./StatsFreshness";
 import { Badge } from "../Badge";
 
 interface NodeDetailPaneProps {
@@ -64,6 +65,9 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       <Section title="System" dark={dark} helpRef="inspector-system">
         <SystemStatsView
           nodeStats={nodeInfo?.stats ?? null}
+          lastSeen={nodeInfo?.lastSeen}
+          receivedAt={node?.statsReceivedAt}
+          ttlMs={registry.statsTtlMs}
           dark={dark}
         />
       </Section>
@@ -71,7 +75,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       {/* Vaults section */}
       <Section title="Vaults" dark={dark} helpRef="inspector-vaults">
         {vaults.length === 0 ? (
-          <EmptyMessage dark={dark}>No vaults on this node.</EmptyMessage>
+          <EmptyMessage dark={dark}>No vaults placed on this node.</EmptyMessage>
         ) : (
           <div className="flex flex-col gap-2">
             {[...vaults]
@@ -93,7 +97,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       {/* Storages section */}
       <Section title="Storages" dark={dark} helpRef="inspector-storages">
         {storages.length === 0 ? (
-          <EmptyMessage dark={dark}>No storages on this node.</EmptyMessage>
+          <EmptyMessage dark={dark}>No file storages configured on this node.</EmptyMessage>
         ) : (
           <div className="flex flex-col gap-2">
             {[...storages]
@@ -116,7 +120,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       {/* Ingesters section */}
       <Section title="Ingesters" dark={dark} helpRef="inspector-ingesters">
         {ingesters.length === 0 ? (
-          <EmptyMessage dark={dark}>No ingesters on this node.</EmptyMessage>
+          <EmptyMessage dark={dark}>No ingesters eligible to run on this node.</EmptyMessage>
         ) : (
           <div className="flex flex-col gap-2">
             {ingesters.map((ing) => (
@@ -136,7 +140,12 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       </Section>
 
       {/* Network — per-link traffic (both peers' lanes merged). */}
-      <Section title="Network" dark={dark} helpRef="inspector-system#network">
+      <Section
+        title="Network"
+        dark={dark}
+        helpRef="inspector-system#network"
+        trailing={<StatsFreshnessCue receivedAt={node?.statsReceivedAt} ttlMs={registry.statsTtlMs} dark={dark} />}
+      >
         <PeerBytesSection
           viewNodeId={nodeIdTyped}
           nodeStats={nodeInfo?.stats ?? null}
@@ -184,12 +193,14 @@ function Section({
   dark,
   count,
   helpRef,
+  trailing,
   children,
 }: Readonly<{
   title: string;
   dark: boolean;
   count?: number;
   helpRef?: string;
+  trailing?: React.ReactNode;
   children: React.ReactNode;
 }>) {
   const c = useThemeClass(dark);
@@ -205,6 +216,7 @@ function Section({
         {count !== undefined && count > 0 && (
           <Badge variant="muted" dark={dark}>{count}</Badge>
         )}
+        {trailing && <span className="ml-auto">{trailing}</span>}
       </div>
       {children}
     </section>

@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
-import { render } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 import { CloudServiceFields, type CloudServiceFieldValues } from "./CloudServiceFields";
 import { renderWritable } from "../../testing/renderWritable";
+import { HelpProvider } from "../../hooks/useHelp";
 
 function values(patch: Partial<CloudServiceFieldValues>): CloudServiceFieldValues {
   return {
@@ -159,8 +160,10 @@ describe("CloudServiceFields endpoint validation", () => {
     );
     const input = endpointInput(container);
     expect(input.className).toContain("border-severity-error");
-    expect(input.title).toContain("no scheme");
-    expect(input.title).toContain('"https://minio.local:9000"');
+    // The refusal is visible text under the field, not a hover title.
+    expect(input.title).toBe("");
+    expect(container.textContent).toContain("no scheme");
+    expect(container.textContent).toContain('"https://minio.local:9000"');
   });
 
   test("https:// endpoint shows no error state", () => {
@@ -173,7 +176,7 @@ describe("CloudServiceFields endpoint validation", () => {
     );
     const input = endpointInput(container);
     expect(input.className).not.toContain("border-severity-error");
-    expect(input.title).toBe("");
+    expect(container.textContent).not.toContain("no scheme");
   });
 
   test("empty endpoint shows no error state (optional for AWS S3)", () => {
@@ -229,8 +232,9 @@ describe("CloudServiceFields endpoint field per provider", () => {
     );
     const input = endpointInput(container);
     expect(input.className).toContain("border-severity-error");
-    expect(input.title).toContain("no scheme");
-    expect(input.title).toContain('"https://gcs-emulator.local:4443"');
+    expect(input.title).toBe("");
+    expect(container.textContent).toContain("no scheme");
+    expect(container.textContent).toContain('"https://gcs-emulator.local:4443"');
   });
 
   test("gcs https:// endpoint shows no error state", () => {
@@ -243,7 +247,7 @@ describe("CloudServiceFields endpoint field per provider", () => {
     );
     const input = endpointInput(container);
     expect(input.className).not.toContain("border-severity-error");
-    expect(input.title).toBe("");
+    expect(container.textContent).not.toContain("no scheme");
   });
 
   test("gcs empty endpoint shows no error state (default Google endpoint)", () => {
@@ -256,5 +260,58 @@ describe("CloudServiceFields endpoint field per provider", () => {
     );
     const input = endpointInput(container);
     expect(input.className).not.toContain("border-severity-error");
+  });
+});
+
+describe("CloudServiceFields archival delete step", () => {
+  test("Delete is not among the storage classes", () => {
+    const { container } = renderWritable(
+      <CloudServiceFields
+        values={values({ archivalMode: "active", transitions: [{ after: "90d", cloudStorageClass: "GLACIER" }] })}
+        onChange={() => {}}
+        dark={true}
+      />,
+    );
+    const labels = Array.from(container.querySelectorAll("option")).map((o) => o.textContent);
+    expect(labels).toContain("Glacier");
+    expect(labels).not.toContain("Delete");
+  });
+
+  test("the delete step has its own row with the data-loss consequence, and cannot be added twice", () => {
+    const { getByText, queryByText } = renderWritable(
+      <HelpProvider onOpen={() => {}}>
+        <CloudServiceFields
+          values={values({
+            archivalMode: "active",
+            transitions: [
+              { after: "90d", cloudStorageClass: "GLACIER" },
+              { after: "365d", cloudStorageClass: "" },
+            ],
+          })}
+          onChange={() => {}}
+          dark={true}
+        />
+      </HelpProvider>,
+    );
+    expect(getByText("Delete")).toBeTruthy();
+    expect(getByText(/erased from the cloud store; nothing restores them/)).toBeTruthy();
+    expect(queryByText("+ Delete After")).toBeNull();
+  });
+
+  test("adding the delete step appends an empty-class transition", () => {
+    let patch: Partial<CloudServiceFieldValues> | undefined;
+    const { getByText, queryByText } = renderWritable(
+      <CloudServiceFields
+        values={values({ archivalMode: "active", transitions: [{ after: "90d", cloudStorageClass: "GLACIER" }] })}
+        onChange={(p) => { patch = p; }}
+        dark={true}
+      />,
+    );
+    expect(queryByText("Delete")).toBeNull();
+    fireEvent.click(getByText("+ Delete After"));
+    expect(patch?.transitions).toEqual([
+      { after: "90d", cloudStorageClass: "GLACIER" },
+      { after: "", cloudStorageClass: "" },
+    ]);
   });
 });

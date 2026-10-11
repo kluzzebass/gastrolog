@@ -45,6 +45,11 @@ type NodeStatsProvider interface {
 	// how long a node has actually been silent instead of inventing the
 	// duration client-side.
 	LastSeen(nodeID string) time.Time
+	// StatsReceivedAt is the instant the stats Get currently returns for
+	// nodeID were received; the zero time when Get would return nil.
+	StatsReceivedAt(nodeID string) time.Time
+	// StatsTTL is how long a received broadcast stays queryable through Get.
+	StatsTTL() time.Duration
 }
 
 // LifecycleServer implements the LifecycleService.
@@ -210,10 +215,18 @@ func (s *LifecycleServer) buildClusterNode(srv cluster.RaftServer, leaderID stri
 
 	isLocal := srv.ID == s.nodeID
 	// Attach per-node stats: real-time for local, last broadcast for peers.
+	// StatsReceivedAt travels with Stats so the UI can show how old a
+	// broadcast value is instead of presenting it as a live reading.
 	if isLocal && s.localStats != nil {
 		node.Stats = s.localStats()
+		if node.Stats != nil {
+			node.StatsReceivedAt = timestamppb.New(time.Now())
+		}
 	} else if s.peerStats != nil {
 		node.Stats = s.peerStats.Get(srv.ID)
+		if received := s.peerStats.StatsReceivedAt(srv.ID); node.Stats != nil && !received.IsZero() {
+			node.StatsReceivedAt = timestamppb.New(received)
+		}
 	}
 
 	// Last positive evidence of life, carried whether or not stats are present —
@@ -292,6 +305,11 @@ func (s *LifecycleServer) GetClusterStatus(
 		LocalStats:     buildRaftStats(s.cluster.LocalStats()),
 		LocalNodeId:    []byte(s.nodeID),
 		ClusterAddress: clusterAddr,
+	}
+	if s.peerStats != nil {
+		if ttl := s.peerStats.StatsTTL(); ttl > 0 {
+			resp.StatsTtl = ttl.String()
+		}
 	}
 
 	return connect.NewResponse(resp), nil

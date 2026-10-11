@@ -8,7 +8,7 @@ import {
 import { useTestCloudService } from "../../api/hooks/useVaults";
 import { useEditState } from "../../hooks/useEditState";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { endpointBlocked } from "../../utils/endpointScheme";
+import { endpointBlocked, endpointSchemeReason } from "../../utils/endpointScheme";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
@@ -22,11 +22,14 @@ interface CloudServiceCardProps {
   onToggle: () => void;
 }
 
-const providerOptions = [
+// Memory is a real provider the server accepts: an in-process store whose
+// contents vanish with the node. Its label says so, since nothing else
+// about a "cloud" picker would.
+export const providerOptions = [
   { value: "s3", label: "S3" },
   { value: "gcs", label: "GCS" },
   { value: "azure", label: "Azure" },
-  { value: "memory", label: "Memory" },
+  { value: "memory", label: "Memory — in-process test store, lost on restart" },
 ];
 
 function providerLabel(provider: string): string {
@@ -214,6 +217,7 @@ export function CloudServiceCard({
               );
             }}
             disabled={testCloud.isPending || !edit.provider || endpointInvalid}
+            disabledReason={endpointInvalid ? endpointSchemeReason : undefined}
           >
             {testCloud.isPending ? "Testing..." : "Test Connection"}
           </Button>
@@ -230,6 +234,7 @@ export function CloudServiceCard({
           <Button
             onClick={() => handleSave(encode(service.id), edit)}
             disabled={putCloudService.isPending || !isDirty(encode(service.id)) || endpointInvalid}
+            disabledReason={endpointInvalid ? endpointSchemeReason : undefined}
           >
             {putCloudService.isPending ? "Saving..." : "Save"}
           </Button>

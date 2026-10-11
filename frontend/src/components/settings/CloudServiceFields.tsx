@@ -3,6 +3,7 @@ import { endpointSchemeError } from "../../utils/endpointScheme";
 import { FormField, TextInput, TextArea, SelectInput, NumberInput } from "./FormField";
 import { Checkbox } from "./Checkbox";
 import { Button } from "./Buttons";
+import { HelpButton } from "../HelpButton";
 import { useReadOnly } from "../../hooks/useReadOnly";
 
 interface CloudStorageTransitionEdit {
@@ -103,9 +104,11 @@ export function CloudServiceFields({
             value={values.endpoint}
             onChange={(v) => onChange({ endpoint: v })}
             error={endpointError !== null}
-            title={endpointError ?? undefined}
             dark={dark}
           />
+          {endpointError && (
+            <span className="text-[0.75em] text-severity-error">{endpointError}</span>
+          )}
         </FormField>
       )}
 
@@ -239,34 +242,35 @@ function CredentialNotice({
 
 // --- Archival Lifecycle Section ---
 
+// An empty cloud storage class is the delete step; it is never offered as a
+// class, it has its own row.
 const s3ClassOptions = [
   { value: "STANDARD_IA", label: "Standard-IA" },
   { value: "GLACIER_IR", label: "Glacier IR" },
   { value: "GLACIER", label: "Glacier" },
   { value: "DEEP_ARCHIVE", label: "Deep Archive" },
-  { value: "", label: "Delete" },
 ];
 
 const azureClassOptions = [
   { value: "Cool", label: "Cool" },
   { value: "Cold", label: "Cold" },
   { value: "Archive", label: "Archive" },
-  { value: "", label: "Delete" },
 ];
 
 const gcsClassOptions = [
   { value: "NEARLINE", label: "Nearline" },
   { value: "COLDLINE", label: "Coldline" },
   { value: "ARCHIVE", label: "Archive" },
-  { value: "", label: "Delete" },
 ];
 
 const memoryClassOptions = [
   { value: "cool", label: "Cool — readable, higher access cost" },
   { value: "cold", label: "Cold — offline, requires restore" },
   { value: "deep-freeze", label: "Deep Freeze — offline, slow restore" },
-  { value: "", label: "Delete" },
 ];
+
+const DELETE_STEP_HELP_REF = "storage-config#storage-class-transitions";
+const deleteStepConsequence = "Chunks older than this are erased from the cloud store; nothing restores them.";
 
 const s3RestoreSpeedOptions = [
   { value: "Expedited", label: "Expedited (1-5 min)" },
@@ -278,6 +282,24 @@ const azureRehydrateOptions = [
   { value: "High", label: "High (< 10 hr)" },
   { value: "Standard", label: "Standard (< 15 hr)" },
 ];
+
+/** Why a provider has no restore speed to choose, or undefined when it has one. */
+export function restoreSpeedReason(provider: string): string | undefined {
+  switch (provider) {
+    case "gcs":
+      return "GCS has no restore step — archived objects are read directly.";
+    case "memory":
+      return "The memory provider has no restore step.";
+    default:
+      return undefined;
+  }
+}
+
+/** Why a provider has no restore window, or undefined when it has one. */
+export function restoreDaysReason(provider: string): string | undefined {
+  if (provider === "s3") return undefined;
+  return "S3 only — a restored object expires after this many days; other providers restore in place.";
+}
 
 function classOptionsForProvider(provider: string) {
   switch (provider) {
@@ -300,12 +322,11 @@ function ArchivalSection({
 }>) {
   const readOnly = useReadOnly();
   const c = useThemeClass(dark);
-  const isS3 = values.provider === "s3";
   const isAzure = values.provider === "azure";
-  const isGCS = values.provider === "gcs";
   const isMemory = values.provider === "memory";
   const isActive = values.archivalMode === "active";
   const classOptions = classOptionsForProvider(values.provider);
+  const hasDeleteStep = values.transitions.some((t) => t.cloudStorageClass === "");
 
   const setTransition = (idx: number, patch: Partial<CloudStorageTransitionEdit>) => {
     const updated = values.transitions.map((t, i) =>
@@ -328,9 +349,20 @@ function ArchivalSection({
     });
   };
 
+  const addDeleteStep = () => {
+    onChange({
+      transitions: [...values.transitions, { after: isMemory ? "0s" : "", cloudStorageClass: "" }],
+    });
+  };
+
   const removeTransition = (idx: number) => {
     onChange({ transitions: values.transitions.filter((_, i) => i !== idx) });
   };
+
+  const removeButtonClass = `px-2 py-1 text-[0.75em] rounded transition-colors ${c(
+    "text-text-muted hover:text-severity-error hover:bg-ink-hover",
+    "text-light-text-muted hover:text-severity-error hover:bg-light-hover",
+  )}`;
 
   return (
     <div className="flex flex-col gap-2 pt-3">
@@ -374,60 +406,71 @@ function ArchivalSection({
                   />
                 </FormField>
               </div>
-              <div className="flex-1">
-                <FormField label={i === 0 ? "Storage Class" : ""} dark={dark}>
-                  <SelectInput
-                    value={t.cloudStorageClass}
-                    onChange={(v) => setTransition(i, { cloudStorageClass: v })}
-                    options={classOptions}
-                    dark={dark}
-                  />
-                </FormField>
-              </div>
+              {t.cloudStorageClass === "" ? (
+                <div className="flex-1 flex flex-col gap-0.5 pb-1">
+                  <span className="flex items-center gap-1.5 text-[0.85em] font-medium text-severity-error">
+                    Delete
+                    <HelpButton helpRef={DELETE_STEP_HELP_REF} />
+                  </span>
+                  <span className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>
+                    {deleteStepConsequence}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex-1">
+                  <FormField label={i === 0 ? "Storage Class" : ""} dark={dark}>
+                    <SelectInput
+                      value={t.cloudStorageClass}
+                      onChange={(v) => setTransition(i, { cloudStorageClass: v })}
+                      options={classOptions}
+                      dark={dark}
+                    />
+                  </FormField>
+                </div>
+              )}
               <button
                 onClick={() => removeTransition(i)}
                 hidden={readOnly}
-                className={`px-2 py-1 text-[0.75em] rounded transition-colors ${c(
-                  "text-text-muted hover:text-severity-error hover:bg-ink-hover",
-                  "text-light-text-muted hover:text-severity-error hover:bg-light-hover",
-                )}`}
+                className={removeButtonClass}
               >
                 Remove
               </button>
             </div>
           ))}
 
-          <Button variant="ghost" dark={dark} onClick={addTransition}>
-            + Add Transition
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" dark={dark} onClick={addTransition}>
+              + Add Transition
+            </Button>
+            {!hasDeleteStep && (
+              <Button variant="ghost" dark={dark} onClick={addDeleteStep}>
+                + Delete After
+              </Button>
+            )}
+          </div>
 
-          {/* Restore defaults — S3 and Azure only (GCS has no restore step) */}
-          {!isGCS && !isMemory && (
-            <div className="flex items-end gap-2 pt-1">
-              <div className="flex-1">
-                <FormField label="Restore Speed" dark={dark}>
-                  <SelectInput
-                    value={values.restoreSpeed || "Standard"}
-                    onChange={(v) => onChange({ restoreSpeed: v })}
-                    options={isAzure ? azureRehydrateOptions : s3RestoreSpeedOptions}
-                    dark={dark}
-                  />
-                </FormField>
-              </div>
-              {isS3 && (
-                <div className="w-28">
-                  <FormField label="Restore Days" dark={dark}>
-                    <NumberInput
-                      value={String(values.restoreDays || 7)}
-                      onChange={(v) => onChange({ restoreDays: parseInt(v, 10) || 7 })}
-                      dark={dark}
-                      min={1}
-                    />
-                  </FormField>
-                </div>
-              )}
+          <div className="flex items-start gap-2 pt-1">
+            <div className="flex-1">
+              <FormField label="Restore Speed" disabledReason={restoreSpeedReason(values.provider)} dark={dark}>
+                <SelectInput
+                  value={values.restoreSpeed || "Standard"}
+                  onChange={(v) => onChange({ restoreSpeed: v })}
+                  options={isAzure ? azureRehydrateOptions : s3RestoreSpeedOptions}
+                  dark={dark}
+                />
+              </FormField>
             </div>
-          )}
+            <div className="w-40">
+              <FormField label="Restore Days" disabledReason={restoreDaysReason(values.provider)} dark={dark}>
+                <NumberInput
+                  value={String(values.restoreDays || 7)}
+                  onChange={(v) => onChange({ restoreDays: parseInt(v, 10) || 7 })}
+                  dark={dark}
+                  min={1}
+                />
+              </FormField>
+            </div>
+          </div>
         </div>
       )}
     </div>

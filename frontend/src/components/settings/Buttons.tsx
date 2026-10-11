@@ -11,6 +11,8 @@ interface ButtonProps {
   variant?: ButtonVariant;
   bordered?: boolean;
   disabled?: boolean;
+  /** One line stating why the button is disabled, shown beside it only while it is. */
+  disabledReason?: string;
   children: React.ReactNode;
   className?: string;
 }
@@ -23,6 +25,7 @@ export function Button({
   variant = "primary",
   bordered,
   disabled,
+  disabledReason,
   children,
   className: extra,
 }: Readonly<ButtonProps>) {
@@ -55,13 +58,20 @@ export function Button({
   // none of them rather than a row of controls that refuse.
   if (readOnly) return null;
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`${baseClass} ${variantClass}${extra ? " " + extra : ""}`}
-    >
-      {children}
-    </button>
+    <>
+      {disabled && disabledReason && (
+        <span className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>
+          {disabledReason}
+        </span>
+      )}
+      <button
+        onClick={onClick}
+        disabled={disabled}
+        className={`${baseClass} ${variantClass}${extra ? " " + extra : ""}`}
+      >
+        {children}
+      </button>
+    </>
   );
 }
 

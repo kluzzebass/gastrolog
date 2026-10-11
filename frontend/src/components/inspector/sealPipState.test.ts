@@ -5,6 +5,7 @@ import {
   computeCloudPips,
   computePips,
   pipOrder,
+  rowIsCalm,
   type PipInputs,
 } from "./sealPipState";
 
@@ -36,6 +37,34 @@ describe("chunkLifecycleState", () => {
     expect(chunkLifecycleState(new ChunkMeta({ sealed: true, state: ChunkState.SEALING }))).toBe(
       "sealing",
     );
+  });
+});
+
+describe("rowIsCalm", () => {
+  test("every copy sealed and nothing trailing is calm", () => {
+    const { pips, ghosts } = computePips(base);
+    expect(rowIsCalm(pips, ghosts)).toBe(true);
+  });
+
+  test("a cloud-backed row of cached and uncached copies is calm", () => {
+    const { pips, ghosts } = computeCloudPips(
+      { placementNodes: base.placementNodes, residentNodes: ["node-1"], liveNodes: base.liveNodes },
+      "minio",
+    );
+    expect(rowIsCalm(pips, ghosts)).toBe(true);
+  });
+
+  test("one lagging, unreachable or active pip breaks calm", () => {
+    expect(rowIsCalm(computePips({ ...base, residentNodes: ["node-1", "node-2"] }).pips, [])).toBe(false);
+    expect(rowIsCalm(computePips({ ...base, liveNodes: new Set(["node-1", "node-2"]) }).pips, [])).toBe(false);
+    expect(rowIsCalm(computePips({ ...base, chunkState: "active" }).pips, [])).toBe(false);
+  });
+
+  test("a ghost breaks calm, and an empty row is not calm", () => {
+    const { pips, ghosts } = computePips({ ...base, residentNodes: [...base.residentNodes, "node-9"] });
+    expect(ghosts).toHaveLength(1);
+    expect(rowIsCalm(pips, ghosts)).toBe(false);
+    expect(rowIsCalm([], [])).toBe(false);
   });
 });
 

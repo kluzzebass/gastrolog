@@ -985,6 +985,9 @@ message ListCertificatesResponse {
 message CertificateInfo {
   bytes id = 1;
   string name = 2;
+  // True when the key material is loaded from files on disk (and reloaded
+  // on change); false when PEM content is stored in the configuration.
+  bool from_files = 3;
 }
 
 message GetCertificateRequest {

@@ -27,6 +27,14 @@ type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
 // checkbox IS the field, no FormField wrapper.
 const refuseDescription = "Refuse new records while a bound is violated.";
 
+const noConditionReason = "Set at least one condition";
+
+/** What deleting a retention policy does to the vaults that use it. */
+function retentionPolicyDeleteConsequences(refs: string[]): string[] {
+  if (refs.length === 0) return [];
+  return [`${refs.join(", ")}: retention policy cleared — nothing expires; only the default floor remains, which refuses but never destroys`];
+}
+
 interface PolicyEdit {
   name: string;
   maxAge: string;
@@ -89,7 +97,7 @@ function addRetentionFormReducer(state: AddRetentionFormState, action: AddRetent
   }
 }
 
-export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{ dark: boolean; onNavigateTo?: NavigateTo }>) {
+export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean; onNavigateTo?: NavigateTo }>) {
   const _c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putPolicy = usePutRetentionPolicy();
@@ -112,6 +120,9 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
   // a silent no-op. Backend rejects empty policies with InvalidArgument;
   // mirror the rule client-side.
   const newPolicyEmpty = !newMaxAge.trim() && !newMaxBytes.trim() && !newMaxChunks.trim();
+  let createDisabledReason: string | undefined;
+  if (nameConflict) createDisabledReason = `A retention policy named "${effectiveName}" already exists`;
+  else if (newPolicyEmpty) createDisabledReason = noConditionReason;
 
   const defaults = (id: string): PolicyEdit => {
     const pol = policies.find((p) => encode(p.id) === id);
@@ -205,6 +216,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
           onCreate={handleCreate}
           isPending={putPolicy.isPending}
           createDisabled={nameConflict || newPolicyEmpty}
+          createDisabledReason={createDisabledReason}
         >
           <FormField label="Name" dark={dark}>
             <TextInput
@@ -277,15 +289,17 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
             expanded={isExpanded(id)}
             onToggle={() => toggleCard(id)}
             onDelete={() => handleDelete(id)}
+            deleteConsequences={retentionPolicyDeleteConsequences(refs)}
             footer={
               <Button
                 onClick={() => handleSave(id)}
                 disabled={putPolicy.isPending || !isDirty(id) || editEmpty}
+                disabledReason={editEmpty ? noConditionReason : undefined}
               >
                 {putPolicy.isPending ? "Saving..." : "Save"}
               </Button>
             }
-            status={<UsedByStatus dark={dark} refs={refs} />}
+            status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo && ((ref) => onNavigateTo("vaults", ref))} />}
           >
             <div className="flex flex-col gap-3">
               <FormField label="Name" dark={dark}>

@@ -6,6 +6,8 @@ import { FormField, TextInput, SpinnerInput } from "./FormField";
 import { Button } from "./Buttons";
 import { PulseIcon } from "../icons";
 import { CrossLinkBadge } from "../inspector/CrossLinkBadge";
+import { NodeBadge } from "./NodeBadge";
+import type { EntityID } from "../../api/model/id";
 
 interface FileStorageEdit {
   name: string;
@@ -17,7 +19,8 @@ interface FileStorageEdit {
 
 interface FileStorageCardProps {
   fs: FileStorage;
-  nodeName: string;
+  /** Encoded ID of the node that owns the storage. */
+  nodeId: string;
   dark: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -29,7 +32,7 @@ interface FileStorageCardProps {
 
 export function FileStorageCard({
   fs,
-  nodeName,
+  nodeId,
   dark,
   expanded,
   onToggle,
@@ -52,23 +55,29 @@ export function FileStorageCard({
   return (
     <SettingsCard
       id={fs.name || encode(fs.id)}
-      typeBadge={`class ${fs.storageClass}`}
-      secondaryBadge={nodeName}
+      typeBadge={{
+        text: `class ${fs.storageClass}`,
+        title: "storage class — vaults of this class may be placed here; lower is faster",
+        helpRef: "storage-config#file-storage",
+      }}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}
       onDelete={() => onDelete(encode(fs.id))}
       deleteLabel="Remove"
       headerRight={
-        onOpenInspector && (
-          <CrossLinkBadge
-            dark={dark}
-            title="Open in Inspector"
-            onClick={() => onOpenInspector(`entities:storages:${fs.name || encode(fs.id)}`)}
-          >
-            <PulseIcon className="w-3 h-3" />
-          </CrossLinkBadge>
-        )
+        <span className="flex items-center gap-1.5">
+          <NodeBadge nodeId={nodeId as EntityID} dark={dark} />
+          {onOpenInspector && (
+            <CrossLinkBadge
+              dark={dark}
+              title="Open in Inspector"
+              onClick={() => onOpenInspector(`entities:storages:${fs.name || encode(fs.id)}`)}
+            >
+              <PulseIcon className="w-3 h-3" />
+            </CrossLinkBadge>
+          )}
+        </span>
       }
       footer={
         <>

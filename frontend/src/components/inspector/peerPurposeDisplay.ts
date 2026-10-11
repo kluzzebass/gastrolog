@@ -1,19 +1,32 @@
-/** Canonical cluster-port purpose order (matches backend cluster.AllPurposes). */
-export const PEER_PURPOSE_SLOTS = [
-  { id: "search", emoji: "🔍", label: "search" },
-  { id: "chunk-apply", emoji: "📦", label: "chunk apply" },
-  { id: "vault-apply", emoji: "🏛", label: "vault apply" },
-  { id: "broadcast", emoji: "📡", label: "broadcast" },
-  { id: "forward", emoji: "➡️", label: "forward" },
-  { id: "fwd-rpc", emoji: "🔀", label: "forward RPC" },
-  { id: "eviction", emoji: "🚪", label: "eviction" },
-  { id: "remove-node", emoji: "➖", label: "remove node" },
-  { id: "suffrage", emoji: "🗳️", label: "suffrage" },
-  { id: "chunk-xfer", emoji: "📤", label: "chunk transfer" },
-  { id: "chunk-wait", emoji: "⏳", label: "chunk wait" },
-  { id: "replicate", emoji: "🔁", label: "replicate" },
-  { id: "repl-catchup", emoji: "🔄", label: "replicate catchup" },
-  { id: "segment-pull", emoji: "📥", label: "segment pull" },
-  { id: "file-xfer", emoji: "📁", label: "file transfer" },
-  { id: "raft", emoji: "⚓", label: "raft" },
+/** Cluster-port purposes in the backend's canonical order, with their operator labels. */
+export const PEER_PURPOSES = [
+  { id: "search", label: "search" },
+  { id: "chunk-apply", label: "chunk apply" },
+  { id: "vault-apply", label: "vault apply" },
+  { id: "broadcast", label: "broadcast" },
+  { id: "forward", label: "forward" },
+  { id: "fwd-rpc", label: "forward RPC" },
+  { id: "eviction", label: "eviction" },
+  { id: "remove-node", label: "remove node" },
+  { id: "suffrage", label: "suffrage" },
+  { id: "chunk-xfer", label: "chunk transfer" },
+  { id: "chunk-wait", label: "chunk wait" },
+  { id: "replicate", label: "replicate" },
+  { id: "repl-catchup", label: "replicate catchup" },
+  { id: "segment-pull", label: "segment pull" },
+  { id: "file-xfer", label: "file transfer" },
+  { id: "raft", label: "raft" },
 ] as const;
+
+export function peerPurposeLabel(id: string): string {
+  return PEER_PURPOSES.find((p) => p.id === id)?.label ?? id;
+}
+
+/** The given purpose IDs in canonical order; IDs the list does not know follow, sorted. */
+export function orderPeerPurposes(ids: Iterable<string>): string[] {
+  const wanted = new Set([...ids].filter((id) => id && id !== "unknown"));
+  const known = PEER_PURPOSES.map((p) => p.id).filter((id) => wanted.has(id));
+  const knownSet = new Set<string>(known);
+  const extra = [...wanted].filter((id) => !knownSet.has(id)).sort();
+  return [...known, ...extra];
+}

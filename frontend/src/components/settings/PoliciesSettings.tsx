@@ -23,6 +23,14 @@ import { sortByName } from "../../lib/sort";
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
 import { validateCron, describeCron } from "../../utils/cron";
 
+const noConditionReason = "Set at least one condition";
+
+/** What deleting a rotation policy does to the vaults that use it. */
+function rotationPolicyDeleteConsequences(refs: string[]): string[] {
+  if (refs.length === 0) return [];
+  return [`${refs.join(", ")}: rotation policy cleared — active chunks no longer seal on schedule`];
+}
+
 interface PolicyEdit {
   name: string;
   maxBytes: string;
@@ -126,7 +134,7 @@ function CronField({
   );
 }
 
-export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{ dark: boolean; onNavigateTo?: NavigateTo }>) {
+export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean; onNavigateTo?: NavigateTo }>) {
   const _c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putPolicy = usePutRotationPolicy();
@@ -151,6 +159,9 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
   // the operator sees disabled state before submitting.
   const newPolicyEmpty =
     !newMaxAge.trim() && !newMaxBytes.trim() && !newMaxRecords.trim() && !newCron.trim();
+  let createDisabledReason: string | undefined;
+  if (nameConflict) createDisabledReason = `A rotation policy named "${effectiveName}" already exists`;
+  else if (newPolicyEmpty) createDisabledReason = noConditionReason;
 
   const defaults = (id: string): PolicyEdit => {
     const pol = policies.find((p) => encode(p.id) === id);
@@ -253,6 +264,7 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
           onCreate={handleCreate}
           isPending={putPolicy.isPending}
           createDisabled={nameConflict || newPolicyEmpty}
+          createDisabledReason={createDisabledReason}
         >
           <FormField label="Name" dark={dark}>
             <TextInput
@@ -319,15 +331,17 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
             expanded={isExpanded(id)}
             onToggle={() => toggleCard(id)}
             onDelete={() => handleDelete(id)}
+            deleteConsequences={rotationPolicyDeleteConsequences(refs)}
             footer={
               <Button
                 onClick={() => handleSave(id)}
                 disabled={putPolicy.isPending || !isDirty(id) || editEmpty}
+                disabledReason={editEmpty ? noConditionReason : undefined}
               >
                 {putPolicy.isPending ? "Saving..." : "Save"}
               </Button>
             }
-            status={<UsedByStatus dark={dark} refs={refs} />}
+            status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo && ((ref) => onNavigateTo("vaults", ref))} />}
           >
             <div className="flex flex-col gap-3">
               <FormField label="Name" dark={dark}>

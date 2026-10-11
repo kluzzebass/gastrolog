@@ -1,21 +1,24 @@
 import { encode } from "../../../api/glid";
-import { FormField, SelectInput, TextInput } from "../FormField";
+import { FormField, TextInput } from "../FormField";
 import { Checkbox } from "../Checkbox";
+import { EligibilitySelect, type EligibilityOption } from "../EligibilitySelect";
 import { useCertificates } from "../../../api/hooks/useCertificates";
+import type { CertificateInfo } from "../../../api/gen/gastrolog/v1/system_pb";
 
-/** useCertOptions lists stored certificates as select options. */
-function useCertOptions() {
+export const CERTIFICATES_HELP_REF = "certificates#adding-a-certificate";
+export const NO_CERTIFICATES_MESSAGE = "No certificates stored — add one in the Certificates tab.";
+
+/**
+ * useCertOptions lists stored certificates as picker candidates, sorted by
+ * name. Ingester params reference a certificate by name; Docker params by
+ * ID — the caller says which.
+ */
+export function useCertOptions(valueOf: (c: CertificateInfo) => string = (c) => c.name || encode(c.id)): EligibilityOption[] {
   const { data: certsData } = useCertificates();
   const certs = certsData?.certificates ?? [];
-  return [
-    { value: "", label: "(none)" },
-    ...certs
-      .map((c) => ({
-        value: c.name || encode(c.id),
-        label: c.name || encode(c.id),
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label)),
-  ];
+  return certs
+    .map((c) => ({ value: valueOf(c), label: c.name || encode(c.id) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 interface TlsFieldsProps {
@@ -39,6 +42,7 @@ export function TlsListenerFields({
     onChange({ ...params, [key]: value });
   const tlsEnabled = params["tls"] === "true";
   const certOptions = useCertOptions();
+  const hasClientCa = (params["tls_ca"] ?? "") !== "";
 
   return (
     <>
@@ -55,10 +59,13 @@ export function TlsListenerFields({
             description="Server certificate from the certificate store"
             dark={dark}
           >
-            <SelectInput
+            <EligibilitySelect
               value={params["tls_cert"] ?? ""}
               onChange={(v) => set("tls_cert", v)}
               options={certOptions}
+              placeholder="(none)"
+              emptyMessage={NO_CERTIFICATES_MESSAGE}
+              helpRef={CERTIFICATES_HELP_REF}
               dark={dark}
             />
           </FormField>
@@ -67,16 +74,20 @@ export function TlsListenerFields({
             description="Stored CA that client certificates must chain to (mutual TLS); empty accepts any client"
             dark={dark}
           >
-            <SelectInput
+            <EligibilitySelect
               value={params["tls_ca"] ?? ""}
               onChange={(v) => set("tls_ca", v)}
               options={certOptions}
+              placeholder="(none)"
+              emptyMessage={NO_CERTIFICATES_MESSAGE}
+              helpRef={CERTIFICATES_HELP_REF}
               dark={dark}
             />
           </FormField>
           <FormField
             label="Allowed Client CN"
             description="Wildcard pattern a client certificate's Common Name must match"
+            disabledReason={hasClientCa ? undefined : "Requires a client CA certificate — without one no client certificate is requested."}
             dark={dark}
           >
             <TextInput
@@ -122,10 +133,13 @@ export function TlsClientFields({
             description="Stored CA the server certificate must chain to; empty uses the system roots"
             dark={dark}
           >
-            <SelectInput
+            <EligibilitySelect
               value={params["tls_ca"] ?? ""}
               onChange={(v) => set("tls_ca", v)}
               options={certOptions}
+              placeholder="(none)"
+              emptyMessage={NO_CERTIFICATES_MESSAGE}
+              helpRef={CERTIFICATES_HELP_REF}
               dark={dark}
             />
           </FormField>
@@ -134,10 +148,13 @@ export function TlsClientFields({
             description="Stored certificate presented to servers that demand one (mutual TLS)"
             dark={dark}
           >
-            <SelectInput
+            <EligibilitySelect
               value={params["tls_cert"] ?? ""}
               onChange={(v) => set("tls_cert", v)}
               options={certOptions}
+              placeholder="(none)"
+              emptyMessage={NO_CERTIFICATES_MESSAGE}
+              helpRef={CERTIFICATES_HELP_REF}
               dark={dark}
             />
           </FormField>

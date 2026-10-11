@@ -33,6 +33,13 @@ const defaultBadge = {
   helpRef: "certificates#default-certificate",
 };
 
+/** The kind badge: where the certificate's key material lives. */
+export function certSourceBadge(cert: { fromFiles: boolean }) {
+  return cert.fromFiles
+    ? { text: "files", title: "loaded from files on disk — reloaded when they change", helpRef: "certificates#hot-reload" }
+    : { text: "pem", title: "PEM material stored in the cluster configuration", helpRef: "certificates#adding-a-certificate" };
+}
+
 // -- Reducer for CertificatesSettings form + UI state --
 
 interface CertFormState {
@@ -411,7 +418,8 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
             <SettingsCard
               key={encode(cert.id)}
               id={cert.name || encode(cert.id)}
-              typeBadge={defaultCert === encode(cert.id) ? defaultBadge : undefined}
+              typeBadge={certSourceBadge(cert)}
+              secondaryBadge={defaultCert === encode(cert.id) ? defaultBadge : undefined}
               dark={dark}
               expanded={expanded === encode(cert.id)}
               onToggle={() => {

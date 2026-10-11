@@ -42,9 +42,13 @@ func newCertListCmd() *cobra.Command {
 			}
 			var rows [][]string
 			for _, c := range resp.Msg.Certificates {
-				rows = append(rows, []string{glid.FromBytes(c.Id).String(), c.Name})
+				source := "pem"
+				if c.FromFiles {
+					source = "files"
+				}
+				rows = append(rows, []string{glid.FromBytes(c.Id).String(), c.Name, source})
 			}
-			p.table([]string{"ID", "NAME"}, rows)
+			p.table([]string{"ID", "NAME", "SOURCE"}, rows)
 			return nil
 		},
 	}

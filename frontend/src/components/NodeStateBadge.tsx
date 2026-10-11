@@ -2,6 +2,8 @@ import { NodeState, type Timestamp } from "../api/model/node";
 import { Badge, type BadgeVariant } from "./Badge";
 import { formatDuration } from "../utils/units";
 
+export const NODE_STATES_HELP_REF = "clustering-nodes#node-states";
+
 interface NodeStateBadgeProps {
   state: NodeState;
   stateSince?: Timestamp;
@@ -22,24 +24,29 @@ const viewByState: Partial<Record<NodeState, StateView>> = {
   [NodeState.UNREACHABLE]: {
     label: "unreachable",
     variant: "warn",
-    description: "cluster has not heard from this node",
+    description: "no Raft contact from this node — check the process and its network; placements wait for it",
   },
   [NodeState.MAINTENANCE]: {
     label: "maintenance",
     variant: "info",
-    description: "operator-declared absence",
+    description: "operator-declared absence — the cluster expects it back and keeps its placements",
   },
   [NodeState.DRAINING]: {
     label: "draining",
     variant: "info",
-    description: "transferring chunks off this node",
+    description: "chunks are being transferred off this node ahead of its removal",
   },
   [NodeState.DECOMMISSIONING]: {
     label: "decommissioning",
     variant: "warn",
-    description: "node is being removed from the cluster",
+    description: "being removed from the cluster — it stops receiving placements",
   },
 };
+
+/** The badge view for a node state, or undefined for the states that show no badge. */
+export function nodeStateView(state: NodeState): StateView | undefined {
+  return viewByState[state];
+}
 
 function durationSince(ts: Timestamp | undefined): string {
   if (!ts) return "";
@@ -57,7 +64,7 @@ export function NodeStateBadge({ state, stateSince, dark }: Readonly<NodeStateBa
   const duration = durationSince(stateSince);
   const text = duration ? `${view.label} ${duration}` : view.label;
   return (
-    <Badge variant={view.variant} dark={dark} title={view.description}>
+    <Badge variant={view.variant} dark={dark} title={view.description} helpRef={NODE_STATES_HELP_REF}>
       {text}
     </Badge>
   );
