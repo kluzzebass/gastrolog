@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -192,7 +193,16 @@ func (m *Manager) DeleteIndexes(chunkID chunk.ChunkID) error {
 		}
 	}
 
+	// The chunk directory is shared with the chunk manager; os.Remove takes it
+	// only when nothing of either manager is left in it.
+	if err := os.Remove(filepath.Join(m.dir, chunkID.String())); err != nil && !os.IsNotExist(err) && !isDirNotEmpty(err) {
+		return err
+	}
 	return nil
+}
+
+func isDirNotEmpty(err error) bool {
+	return errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST)
 }
 
 func (m *Manager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.TokenIndexEntry], error) {

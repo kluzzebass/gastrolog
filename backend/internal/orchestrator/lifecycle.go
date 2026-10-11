@@ -310,7 +310,7 @@ func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID
 	runBuild := func(runCtx context.Context, chunkID chunk.ChunkID) error {
 		return vaultInst.Indexes.BuildIndexes(runCtx, chunkID)
 	}
-	if err := o.scheduler.RunOnce(name, runBuild, ctx, meta.ID); err != nil {
+	if _, err := o.scheduler.RunOnceIfAbsent(name, runBuild, ctx, meta.ID); err != nil {
 		o.logger.Warn("failed to schedule index rebuild", "name", name, "error", err)
 	}
 }

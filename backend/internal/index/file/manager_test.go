@@ -2,6 +2,8 @@ package file
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	gotime "time"
 
@@ -244,4 +246,44 @@ func TestIngestIndexMmapExternalGLCB(t *testing.T) {
 	if entry.TS != records[0].IngestTS.UnixNano() {
 		t.Fatalf("first entry TS = %d, want %d", entry.TS, records[0].IngestTS.UnixNano())
 	}
+}
+
+// Deleting a chunk's indexes removes the chunk's directory once nothing is
+// left in it, and leaves it while another file — the chunk manager's, in the
+// directory the two share — is still there.
+func TestDeleteIndexesRemovesTheEmptiedChunkDirectory(t *testing.T) {
+	t.Run("only index files", func(t *testing.T) {
+		mgr, _, chunkID := setupManager(t, testRecords())
+		if err := mgr.BuildIndexes(context.Background(), chunkID); err != nil {
+			t.Fatalf("BuildIndexes: %v", err)
+		}
+		chunkDir := filepath.Join(mgr.dir, chunkID.String())
+		if _, err := os.Stat(chunkDir); err != nil {
+			t.Fatalf("premise: the build created the chunk's index directory: %v", err)
+		}
+		if err := mgr.DeleteIndexes(chunkID); err != nil {
+			t.Fatalf("DeleteIndexes: %v", err)
+		}
+		if _, err := os.Stat(chunkDir); !os.IsNotExist(err) {
+			t.Fatalf("emptied index directory left behind (stat err=%v)", err)
+		}
+	})
+
+	t.Run("another manager's file remains", func(t *testing.T) {
+		mgr, _, chunkID := setupManager(t, testRecords())
+		if err := mgr.BuildIndexes(context.Background(), chunkID); err != nil {
+			t.Fatalf("BuildIndexes: %v", err)
+		}
+		chunkDir := filepath.Join(mgr.dir, chunkID.String())
+		other := filepath.Join(chunkDir, "data.glcb")
+		if err := os.WriteFile(other, []byte("blob"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := mgr.DeleteIndexes(chunkID); err != nil {
+			t.Fatalf("DeleteIndexes: %v", err)
+		}
+		if _, err := os.Stat(other); err != nil {
+			t.Fatalf("the shared directory lost another manager's file: %v", err)
+		}
+	})
 }
