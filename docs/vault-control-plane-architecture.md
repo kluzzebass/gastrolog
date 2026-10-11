@@ -229,7 +229,7 @@ stateDiagram-v2
 These require explicit product/architecture decisions:
 
 1. **One VaultRaft vs multiple raft groups per vault** (e.g. separate hot/cold metadata): pick one default.
-2. **Cutover** to **no per-instance Raft**: ~~move chunk-FSM commands and apply-forwarding onto vault control-plane Raft, then remove the legacy per-instance Raft groups, group store names, and apply-fn split~~ — **done** (gastrolog-5xxbd + gastrolog-2ze8j). `ensureVaultControlPlaneRaftGroup` and `bindVaultInstanceToCtlLocked` are the canonical entries; the single `SetGroupApplyFn` replaces the prior split apply-fns.
+2. **No per-instance Raft**: chunk-FSM commands and apply-forwarding run on the vault control-plane Raft group. `ensureVaultControlPlaneRaftGroup` and `bindVaultInstanceToCtlLocked` are the canonical entries, and a single `SetGroupApplyFn` dispatches every group's applies.
 3. **Cluster-ctl Raft shrink/grow:** Which config moves to vault Raft vs stays global; backward compatibility for existing clusters.
 4. **Snapshot layout:** Converged — every group snapshots under `raft/groups/<groupID>/` (no legacy on-disk compatibility).
 5. **Feature flags:** Whether vault Raft rolls out behind a flag per vault or cluster-wide.
