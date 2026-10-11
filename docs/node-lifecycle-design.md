@@ -1,6 +1,6 @@
 # Node Lifecycle: States, Transitions, and Learner Promotion
 
-**Status:** Design proposal under [gastrolog-gr6wy](dcat://gastrolog-gr6wy). Not yet implemented. This document defines the target state for cluster node lifecycle and the learner-based join model. Implementation issues will be opened against this design once accepted.
+This document defines cluster node lifecycle and the learner-based join model. The node states and transitions, the `Unreachable` liveness sweep with event-driven auto-clear, the soft-offline placement guard, the operator CLI verbs, and learner-based join with event-driven promoters for cluster-ctl and every vault-ctl group are built.
 
 ## Context
 
@@ -10,7 +10,7 @@ This design introduces six explicit node states with deliberate transitions, sep
 
 The category "soft-offline" describes any state where the cluster considers the node temporarily not-fully-participating without considering it removed. Two concrete states fall in this category: `Unreachable` (cluster's automatic detection) and `Maintenance` (operator's deliberate declaration). They share the placement-rotation gate but differ in their entry/exit semantics and operator UX.
 
-A companion epic, [gastrolog-2ujjh](dcat://gastrolog-2ujjh) (Fan-out data-plane architecture), reshapes the record write path, reconcile mechanism, and chunk residency model afterward. This document covers the control-plane work that lands first. Three pieces of this design are transitional under that future architecture — see "Relationship to the data-plane epic" below.
+The record write path is the segment pipeline; how this design meets it is described in "Relationship to the segment pipeline" below.
 
 ## States
 
@@ -41,7 +41,7 @@ stateDiagram-v2
 
 **Live** — heartbeats current; full participation. Placement may rotate to or from this node. Vault-ctl Raft groups: voter (or learner during initial join). Receives reads and writes when leader.
 
-**Unreachable** (soft-offline; cluster-detected) — heartbeats have lapsed past the threshold (default 5 min). **Placement does NOT rotate off this node.** Vault-ctl Raft groups: still a voter (unreachable; quorum maintained by other voters). Reads addressed to this node fail with connection error (no change to current read routing). Auto-trigger entry: heartbeat-lapse exceeds the threshold (configurable via env var). Auto-clear: heartbeat resumes. Persistent alert fires on entry; alert tone is "noticed a problem" — operator may want to act.
+**Unreachable** (soft-offline; cluster-detected) — contact has lapsed past the threshold (`GLOG_UNREACHABLE_THRESHOLD`, default 5 min). **Placement does NOT rotate off this node.** Vault-ctl Raft groups: still a voter (unreachable; quorum maintained by other voters). Reads addressed to this node fail with connection error (no change to current read routing). Auto-trigger entry: contact lapse exceeds the threshold. Auto-clear: contact resumes. A warning alarm fires once the node has stayed Unreachable longer than the alert threshold (`GLOG_UNREACHABLE_ALERT_THRESHOLD`, default 5 min); alert tone is "noticed a problem" — operator may want to act.
 
 **Maintenance** (soft-offline; operator-declared) — operator has explicitly placed this node in maintenance mode via `cluster maintenance <node>`. Cluster behavior identical to `Unreachable` for placement-rotation and quorum participation. The differences: entry is operator-initiated and sticky (contact resumption does NOT auto-clear), exit requires explicit `cluster online <node>`, and alerts are informational rather than warning ("this is intentional"). The state captures operator intent that may persist across transient reachability changes — e.g., the operator is preparing the underlying host for kernel maintenance and wants the cluster to ignore brief reachability flaps during the window.
 
@@ -89,11 +89,9 @@ type NodeConfig struct {
 | From → To | Trigger | Mechanism |
 |---|---|---|
 | Live → Unreachable | `time.Since(peerState.LastSeen(node)) > unreachableThreshold` | Leader-side sweep on a low-frequency tick (e.g. 30s) proposes `CmdSetNodeState{node, Unreachable}` |
-
-`peerState.LastSeen` is the most recent moment this node had positive evidence a peer was alive: Raft contact on any group it shares with the peer, or the arrival of the peer's stats broadcast, whichever is newer (gastrolog-1lbifx). Raft contact is what makes it fresh — the cluster-ctl group spans every node, so the cluster-ctl leader, which is the node that runs this sweep, is replicating to every peer several times a second.
 | Live → Maintenance | `cluster maintenance <node>` CLI | RPC proposes `CmdSetNodeState{node, Maintenance}` |
 | Live → Draining | `cluster drain <node>` CLI | RPC proposes `CmdSetNodeState{node, Draining}`; drain orchestrator begins transfers |
-| Unreachable → Live | contact resumes | Same sweep proposes `CmdSetNodeState{node, Live}` |
+| Unreachable → Live | contact resumes | Event-driven, not the sweep: a peer's stats broadcast or PeerState's contact-resumed hook wakes `nodeLiveness.Run` (`backend/internal/app/node_liveness.go`), and the cluster-ctl leader proposes `CmdSetNodeState{node, Live}` for every Unreachable node whose contact is current again |
 | Unreachable → Maintenance | `cluster maintenance <node>` CLI | Operator commits to the offline state; auto-restore-on-contact behavior is replaced with sticky operator control |
 | Unreachable → Draining | `cluster drain <node>` CLI | Operator begins removal |
 | Maintenance → Live | `cluster online <node>` CLI | Operator clears maintenance |
@@ -101,6 +99,8 @@ type NodeConfig struct {
 | Draining → Decommissioning | all chunks where this node is in placement set have been transferred AND verified | Drain orchestrator proposes `CmdSetNodeState{node, Decommissioning}` once verification passes |
 | Draining → Live | `cluster cancel-drain <node>` CLI | Rare; only while transfers still running |
 | Decommissioning → Removed | voter removed from cluster-ctl Raft + every vault-ctl group | Cluster removal sweep calls `RemoveServer` for each group, then `DeleteNode` on cluster-ctl FSM |
+
+`peerState.LastSeen` is the most recent moment this node had positive evidence a peer was alive: Raft contact on any group it shares with the peer, or the arrival of the peer's stats broadcast, whichever is newer. Raft contact is what makes it fresh — the cluster-ctl group spans every node, so the cluster-ctl leader, which is the node that runs the liveness sweep, is replicating to every peer several times a second.
 
 ## Operator CLI surface
 
@@ -118,7 +118,7 @@ Cluster-detected soft-offline (`Unreachable`) is not something the operator manu
 
 The CLI verbs and status RPCs above must satisfy these properties:
 
-- **Idempotent verbs.** Calling `cluster maintenance <node>` twice has the same effect as calling it once: the second call returns success with no state change, not an error. Same for `cluster drain`, `cluster online`, `cluster cancel-drain`, `cluster promote-learner`. A consumer that retries on transient failure must be safe to do so.
+- **Idempotent verbs.** Calling `cluster maintenance <node>` twice has the same effect as calling it once: the second call returns success with no state change, not an error. Same for `cluster drain`, `cluster online`, `cluster cancel-drain`, `cluster promote`. A consumer that retries on transient failure must be safe to do so.
 - **Watchable status.** Node states and per-node metadata (state, `StateSince`, last-seen, etc.) are accessible via a server-stream RPC, not just point-in-time queries. Consumers can react to state transitions without polling.
 - **Machine-readable output.** Every state-querying CLI verb supports `--output json` (or equivalent structured output) for parseable consumption.
 - **Stable state names.** `Live` / `Unreachable` / `Maintenance` / `Draining` / `Decommissioning` are part of the API contract once released. Renaming or splitting them post-release is a breaking change.
@@ -137,14 +137,14 @@ Cluster overview shows per-node state with color/icon coding. The two soft-offli
 
 New nodes joining via `JoinCluster` are added as **non-voting learners** in two layers:
 
-1. **Cluster-ctl Raft** — `JoinCluster` calls `AddNonvoter` (was `AddVoter` today).
-2. **Every vault-ctl Raft group** — `RefreshVaultCtlMembers` adds new nodes as non-voters in each per-vault group.
+1. **Cluster-ctl Raft** — a joining node asks to be admitted as a nonvoter, and the cluster-ctl leader adds it with `AddNonvoter` (`resolveSuffrageOp`, `backend/internal/app/cluster.go`). A restarting voter rejoins as a voter.
+2. **Every vault-ctl Raft group** — `RefreshVaultCtlMembers` hands the cluster's nodes to the vault-ctl leader manager, and on each group's leader `vaultCtlLeaderManager.reconcile` ([`vault_ctl_leader_manager.go`](backend/internal/orchestrator/vault_ctl_leader_manager.go)) adds a node that is not yet in the group with `AddNonvoter`.
 
 The new node receives replicated state via Raft log replication (and snapshots if far behind). It does NOT count toward quorum during this phase.
 
 ### Promotion: per-group, FSM apply-index match
 
-A new background sweep runs per vault-ctl group **on the group's leader**. When the learner's `appliedIndex` matches the leader's `commitIndex` AND has remained matched for one full heartbeat interval, the leader proposes a config change to promote the learner to voter. Cluster-ctl Raft has the same sweep on its leader.
+Promotion is event-driven and runs per group **on the group's leader** (`learnerPromoter`, `backend/internal/app/learner_promoter.go`). A learner's applied index reaches the leader only through the learner's stats broadcast, so each broadcast — and each leadership gain — triggers one evaluation pass over the groups this node leads; there is no periodic sweep. The leader promotes a learner with `AddVoter` once the learner's last broadcast applied index is within the group's catch-up tolerance of the leader's applied index: zero entries for cluster-ctl, 100 for a vault-ctl group (an active group commits faster than the broadcast interval). Cluster-ctl Raft uses the same evaluator.
 
 **Why per-group:** vault-ctl groups are independent. A learner caught up in vault A can be promoted there even while still catching up on vault B. Convergence is incremental.
 
@@ -156,23 +156,21 @@ A new background sweep runs per vault-ctl group **on the group's leader**. When 
 
 - **Learner falls behind faster than catches up:** stays a learner, alert fires ("node-X is a learner in 3/12 vault-ctl groups; investigate"). Operator decides whether to wait or remove.
 - **Snapshot install in progress:** sweep does not propose promotion until snapshot installation completes and applies.
-- **Operator force-promotion:** `gastrolog cluster promote-learner <node>` exists as an escape hatch when the operator knows the learner is functionally caught up.
+- **Operator force-promotion:** `gastrolog cluster promote <node>` promotes a node to voter in cluster-ctl Raft, as an escape hatch when the operator knows the learner is functionally caught up. There is no operator verb for promoting in vault-ctl groups.
 
 ### Composition with the soft-offline states
 
 Learners can become `Unreachable` (contact lapsed) or be placed in `Maintenance` (operator) the same way voters can. A learner in either soft-offline state is not promoted while in that state. State transition back to `Live` unlocks promotion on the next sweep tick.
 
-## Relationship to the data-plane epic
+## Relationship to the segment pipeline
 
-This design's lifecycle work — states, transitions, learner promotion, placement guard, CLI surface — ships under the FSM-authority migration epic. The companion epic [gastrolog-2ujjh](dcat://gastrolog-2ujjh) (Fan-out data-plane architecture) lands afterward and reshapes the record write path, reconcile mechanism, and chunk residency model.
+Records become segments on the receiving node, are distributed to every home of the vault, and every home builds its own chunks. Three pieces of this design meet that write path:
 
-Three pieces of this design are **transitional**: they correctly fix pre-fan-out bugs but become unnecessary or reframed under the data-plane redesign.
-
-- **The placement-rotation gate on soft-offline states.** Under the current placement-as-residency model, the gate prevents placement from rotating off `Unreachable` or `Maintenance` nodes, fixing the RF=1 redeploy bug. Under fan-out's Receiving/Holding split, placement editing is confined to the Receiving set; removal from Holding requires explicit confirmation that other holders have the records. The gate dissolves into the Holding-set semantics.
+- **The placement-rotation gate on soft-offline states.** The placement manager keeps a vault's placement on a node that is `Unreachable` or `Maintenance` — or whose leader heartbeat is lost while it is still `Live` — and raises a soft-offline alarm instead of rotating ([placement.go](backend/internal/app/placement.go)). There is no separate Receiving/Holding split of the placement; this gate is what keeps a transiently absent node's placement, and so its chunks, in place at RF=1.
 - **The `Draining` state with its drain orchestrator.** Today (under this epic): Draining is an explicit state with a worker that transfers chunks off the node before transitioning to Decommissioning. Under fan-out: drain becomes a placement edit (remove from Receiving); Holding shrinks naturally as records propagate; the node becomes safe to remove when Holding no longer references it. The orchestrator goes away.
-- **Active-chunk seal on preStop drain.** Today the leader holds unsealed state that must be flushed before SIGTERM to avoid losing records. Under fan-out there is no leader-only unsealed state; records exist on all Receiving replicas at write time. The preStop seal step becomes unnecessary.
+- **The Kubernetes preStop hook** only yields Raft leadership (`cluster yield-leadership`). There is no leader-only unsealed state to flush before SIGTERM: every home holds the vault's segments and builds its own chunks.
 
-These transitional pieces ship as part of the current epic, then get removed or reframed when the data-plane epic lands. The lifecycle states themselves, learner-based join, soft-offline category (`Unreachable` + `Maintenance`), API surface principles, and operator CLI verbs all survive the transition unchanged.
+The lifecycle states, learner-based join, soft-offline category (`Unreachable` + `Maintenance`), API surface principles, and operator CLI verbs are independent of the write path.
 
 ## Out of scope (deferred to implementation issues)
 
