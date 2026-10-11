@@ -269,12 +269,14 @@ func (s *Scheduler) SetOnJobChange(fn func()) {
 func (s *Scheduler) Events() *JobEventBroker { return s.events }
 
 // publishEvent constructs a JobEvent and hands it to the broker. Called
-// outside any lock so the broker's non-blocking publish stays fast.
+// outside any lock so the broker's non-blocking publish stays fast. The event
+// carries a snapshot of the progress record: subscribers read it without the
+// record's lock while the task may still be updating it.
 func (s *Scheduler) publishEvent(kind JobEventKind, info JobInfo) {
 	if s.events == nil {
 		return
 	}
-	s.events.Publish(JobEvent{Kind: kind, Job: info})
+	s.events.Publish(JobEvent{Kind: kind, Job: info.Snapshot()})
 }
 
 // Rebuild recreates the gocron scheduler with a new concurrency limit,
