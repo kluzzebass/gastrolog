@@ -105,9 +105,6 @@ func TestVaultTeardownCancelsPendingChunkJobs(t *testing.T) {
 				t.Fatal("DeleteVaultInstance removed nothing")
 			}
 		}},
-		{"finishDrain", func(_ *testing.T, o *Orchestrator, vaultID glid.GLID) {
-			o.finishDrain(vaultID)
-		}},
 	}
 	for _, path := range paths {
 		t.Run(path.name, func(t *testing.T) {

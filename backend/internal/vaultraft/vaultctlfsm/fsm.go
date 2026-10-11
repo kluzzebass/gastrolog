@@ -57,8 +57,7 @@ const (
 	// the FSM via CmdUploadChunk, leaving sealed-but-not-yet-uploaded
 	// chunks with zero offsets in the manifest and breaking the
 	// histogram's GLCB section-reader path. Fires from chunk/file.Manager
-	// after sealToGLCB and from the import path
-	// (orchestrator/vault_ops.finalizeImportedChunk) for replicated chunks.
+	// after sealToGLCB.
 	CmdAttachOffsets Command = 9
 
 	// CmdBeginSeal carries the Active → Sealing transition: the leader
@@ -1557,8 +1556,7 @@ func MarshalArchiveChunk(id chunk.ChunkID, cloudStorageClass string) []byte {
 
 // AttachOffsets: [16 ChunkID][8 IngestIdxOff][8 IngestIdxSize][8 SourceIdxOff][8 SourceIdxSize]
 //
-// Fired after sealToGLCB on the leader (and after finalizeImportedChunk
-// on import paths) so every sealed chunk's section-offset metadata
+// Fired after sealToGLCB on the leader so every sealed chunk's section-offset metadata
 // reaches the FSM, not just cloud-uploaded ones. The histogram's GLCB
 // section-reader uses these offsets to mmap the IngestTS index out of
 // data.glcb directly, eliminating the .ts-cache download path.

@@ -88,57 +88,14 @@ var (
 	ErrNotRunning = errors.New("orchestrator not running")
 )
 
-// drainState tracks an in-progress vault drain (migration to another node).
-type drainState struct {
-	TargetNodeID string
-	JobID        string
-	Cancel       context.CancelFunc
-}
-
-// ChunkReplicator sequences all replication commands for an instance on a single
-// ordered stream per follower. Nil in single-node mode.
-//
-// Caller role: always invoked on the instance **leader** node. Each method sends
-// a command to a follower (`nodeID`) that applies it locally. Callers must
-// verify they hold leadership for (`vaultID`, `vaultID`) before invoking —
-// the replicator itself does not re-check.
-//
-// Validation: methods assume the (`vaultID`, `vaultID`) pair is consistent
-// (instance belongs to vault). The receiver on the remote node rejects mismatches
-// via instance lookup; callers should not rely on the replicator to catch
-// programmer errors.
-//
-// Readiness: the leader's own Vault.ReadinessErr gate fires upstream of
-// these calls — by the time a replication command is sent, the local FSM
-// has applied the commit that authorized it. The follower's readiness is
-// its own concern; transient follower-not-ready errors are retried by
-// higher-level catchup scheduling (see ScheduleCatchup).
-type ChunkReplicator interface {
-	ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
-
-	// RequestReplicaCatchup is the follower→leader inverse of the other
-	// methods on this interface. Sent by a follower's lifecycle reconciler
-	// after detecting sealed chunks in its FSM that are missing on its
-	// local disk; the placement leader fans pushes out asynchronously via
-	// existing replicateToFollower machinery. Returns the count of
-	// pushes scheduled (after leader-side filtering).
-	RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error)
-}
-
 // RemoteTransferrer sends records to a remote node for cross-node chunk
 // migration. Synchronous and reliable — the caller blocks until the remote
 // node confirms delivery.
 type RemoteTransferrer interface {
 	// TransferRecords streams records to a remote node, which imports them
-	// as a new sealed chunk. Used by MoveChunk and DrainVault where
-	// preserving chunk boundaries is desired.
+	// as a new sealed chunk. Used by MoveChunk, where preserving chunk
+	// boundaries is desired.
 	TransferRecords(ctx context.Context, nodeID string, vaultID glid.GLID, next chunk.RecordIterator) error
-
-	// WaitVaultReady blocks until the vault is registered and accepting
-	// records on the given node, or ctx expires. Used by DrainVault to
-	// synchronize with the target node's AddVault before unregistering
-	// the vault locally.
-	WaitVaultReady(ctx context.Context, nodeID string, vaultID glid.GLID) error
 }
 
 // Orchestrator coordinates ingestion, indexing, and querying.
@@ -335,9 +292,6 @@ type Orchestrator struct {
 	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
 	transferrer RemoteTransferrer
 
-	// Vault replicator: ordered stream per instance per follower (nil in single-node mode).
-	chunkReplicator ChunkReplicator
-
 	// groupMgr is the shared multi-group Raft manager (system, vault ctl, …).
 	// Set from factories during ApplyConfig; used to tear down vault ctl groups.
 	groupMgr *raftgroup.GroupManager
@@ -376,15 +330,6 @@ type Orchestrator struct {
 	// prior check-then-set mutual exclusion.
 	running atomic.Bool
 	auxWg   sync.WaitGroup // tracks auxiliary goroutines (rate alerts, progress emitters, etc.)
-
-	// Per-instance import mutex for serializing SetNextChunkID + ImportRecords.
-	importMu sync.Map // vaultID → *sync.Mutex
-
-	// Draining vaults (keyed by vault ID, tracks in-progress migrations).
-	draining map[glid.GLID]*drainState
-
-	// In-progress instance drains, keyed by vault ID.
-	vaultDraining map[string]*vaultDrainState
 
 	// Retention runners (keyed by vaultID:storageID, invoked by the shared scheduler).
 	retention map[string]*retentionRunner
@@ -430,14 +375,6 @@ type Orchestrator struct {
 	// during the transition.
 	chunkSignal *notify.Signal
 
-	// vaultReadySignal wakes goroutines blocked in WaitVaultReady whenever
-	// the vault registry changes (a vault is registered, gains/loses its
-	// local instance, or is removed). Replaces the source-side 100ms
-	// ForwardListChunks poll DrainVault used to detect that a target node
-	// had created the vault: the target now blocks on this broadcast and
-	// returns the instant registration completes.
-	vaultReadySignal *notify.Signal
-
 	// chunkBus broadcasts typed ChunkChangeEvent values to subscribers.
 	// Replaces the chunkSignal-then-fan-out-refetch pattern: WatchChunks
 	// streams these events directly to clients so they can patch their
@@ -468,12 +405,6 @@ type Orchestrator struct {
 	// runs rewire+recover when RegisterVault completes (startup ordering).
 	pendingPipelineCtlRestore sync.Map
 
-	// catchupPushInFlight tracks async replica-catchup push batches keyed by
-	// (vault, requester). Prevents SweepMissingReplicas from stacking
-	// hundreds of overlapping CatchupSelectedChunks goroutines on the same
-	// sender→requester stream.
-	catchupPushInFlight sync.Map // catchupPushKey → struct{}
-
 	// cachedReplicationReady mirrors liveReplicationReady, updated by the
 	// readiness refresher goroutine (~500 ms cadence). LocalVaultsReplicationReady
 	// reads this atomic so the /readyz HTTP handler stays responsive even
@@ -484,10 +415,9 @@ type Orchestrator struct {
 	cachedReplicationReady atomic.Bool
 
 	// Shutdown phase (nil in tests / single-node setups without a
-	// Phase wired). When non-nil, hot-path replication helpers like
-	// fireAndForgetRemote and sealRemoteFollowers consult
-	// phase.ShuttingDown() and skip the remote call during drain, so
-	// the orchestrator's pipeline flush does not spam the log with
+	// Phase wired). When non-nil, the vault-ctl announcer and retention
+	// consult phase.ShuttingDown() and skip remote work during shutdown,
+	// so the orchestrator's pipeline flush does not spam the log with
 	// "connection refused" warnings for peers that are going down
 	// alongside this node.
 	phase *lifecycle.Phase
@@ -512,8 +442,7 @@ type Orchestrator struct {
 	// calls don't pay the per-call .With cost, and so each subsystem's
 	// emissions carry component=orchestrator.<sub> for fine-grained filter
 	// targeting.
-	replicationLogger   *slog.Logger
-	drainLogger         *slog.Logger
+	chunkMoveLogger     *slog.Logger
 	retentionLogger     *slog.Logger
 	rotationLogger      *slog.Logger
 	schedulerLogger     *slog.Logger
@@ -810,11 +739,11 @@ type Config struct {
 	// t.TempDir(). There is no default under $TMPDIR or the working directory.
 	SegmentsDir string
 
-	// Phase is the shared shutdown signal. When non-nil, the orchestrator
-	// consults phase.ShuttingDown() in hot-path replication helpers so that
-	// during the drain window (after BeginShutdown) remote forwards no-op
-	// instead of spamming "connection refused" against peers that are
-	// shutting down alongside this node.
+	// Phase is the shared shutdown signal. When non-nil, the vault-ctl
+	// announcer and retention consult phase.ShuttingDown() so that after
+	// BeginShutdown their remote work no-ops instead of spamming
+	// "connection refused" against peers that are shutting down alongside
+	// this node.
 	Phase *lifecycle.Phase
 
 	// SegmentCompletePolicy controls when a vault's working segment is completed —
@@ -876,8 +805,6 @@ func New(cfg Config) (*Orchestrator, error) {
 		ingesterStats:          make(map[glid.GLID]*IngesterStats),
 		ingesterMeta:           make(map[glid.GLID]ingesterInfo),
 		ingesterAdapters:       make(map[glid.GLID]ingestion.Ingester),
-		draining:               make(map[glid.GLID]*drainState),
-		vaultDraining:          make(map[string]*vaultDrainState),
 		retention:              make(map[string]*retentionRunner),
 		scheduler:              sched,
 		localNodeID:            cfg.LocalNodeID,
@@ -885,7 +812,6 @@ func New(cfg Config) (*Orchestrator, error) {
 		alerts:                 cfg.Alerts,
 		suspects:               newSuspectTracker(),
 		chunkSignal:            notify.NewSignal(),
-		vaultReadySignal:       notify.NewSignal(),
 		chunkBus:               notify.NewBus[ChunkChangeEvent](256),
 		progressTrigger:        newProgressNotifier(),
 		vaultCtlLeaders:        newVaultCtlLeaderManager(baseLogger),
@@ -899,8 +825,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		now:                    cfg.Now,
 		logger:                 logger,
 		baseLogger:             baseLogger,
-		replicationLogger:      compReplication.Apply(baseLogger),
-		drainLogger:            compDrain.Apply(baseLogger),
+		chunkMoveLogger:        compChunkMove.Apply(baseLogger),
 		retentionLogger:        compRetention.Apply(baseLogger),
 		rotationLogger:         compRotation.Apply(baseLogger),
 		schedulerLogger:        compScheduler.Apply(baseLogger),
@@ -1030,11 +955,6 @@ func New(cfg Config) (*Orchestrator, error) {
 // Must be called before Start(). Safe to leave nil for single-node mode.
 func (o *Orchestrator) SetRemoteTransferrer(t RemoteTransferrer) {
 	o.transferrer = t
-}
-
-// SetChunkReplicator injects the ordered instance replication client.
-func (o *Orchestrator) SetChunkReplicator(tr ChunkReplicator) {
-	o.chunkReplicator = tr
 }
 
 // Logger returns a child logger scoped for a subcomponent.

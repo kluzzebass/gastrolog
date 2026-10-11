@@ -36,13 +36,9 @@ type orchActions interface {
 	RemoveVaultInstance(vaultID glid.GLID) bool
 	DeleteVaultInstance(vaultID glid.GLID) bool
 	AddVaultInstance(ctx context.Context, vaultID glid.GLID, f orchestrator.Factories) error
-	DrainInstance(ctx context.Context, vaultID glid.GLID, mode orchestrator.DrainMode, targetNodeID string) error
 	UnregisterVault(id glid.GLID) error
 	MissingVaultInstance(vaultID glid.GLID, vaultIDs []glid.GLID) bool
 	LocalInstanceIDs(vaultID glid.GLID) []glid.GLID
-	DrainVault(ctx context.Context, vaultID glid.GLID, targetNodeID string) error
-	IsDraining(vaultID glid.GLID) bool
-	CancelDrain(ctx context.Context, vaultID glid.GLID) error
 	ReconcileVaultPlacement(ctx context.Context, vaultID glid.GLID)
 	ReconcilePlacements(ctx context.Context)
 	ListIngesters() []glid.GLID
@@ -77,13 +73,12 @@ type configDispatcher struct {
 	clusterTLS  *cluster.ClusterTLS
 	// certsChanged mirrors the store's certificates into this node's cert
 	// manager and swaps the HTTPS listener; set by app wiring.
-	certsChanged       func(ctx context.Context) error                   // nil for single-node or memory mode
-	tlsFilePath        string                                            // path to persist cluster TLS on rotation
-	configSignal       *notify.Signal                                    // broadcasts config changes to WatchConfig streams
-	managedFileHandler ManagedFileHandler                                // nil for single-node or before wiring
-	catchupScheduler   func(vaultID glid.GLID, followerNodeIDs []string) // nil until orch is wired
-	placementTrigger   func()                                            // triggers immediate placement reconcile; nil for single-node
-	alerts             alert.Sink                                        // raises/clears config-side-effect-failed; nil disables alerting
+	certsChanged       func(ctx context.Context) error // nil for single-node or memory mode
+	tlsFilePath        string                          // path to persist cluster TLS on rotation
+	configSignal       *notify.Signal                  // broadcasts config changes to WatchConfig streams
+	managedFileHandler ManagedFileHandler              // nil for single-node or before wiring
+	placementTrigger   func()                          // triggers immediate placement reconcile; nil for single-node
+	alerts             alert.Sink                      // raises/clears config-side-effect-failed; nil disables alerting
 
 	// obligations tracks per-entity config side effects that failed to
 	// apply to the local orchestrator. Keyed by obligationKey(entityType,
@@ -350,7 +345,7 @@ func (d *configDispatcher) triggerPlacement() {
 }
 
 // handleVaultPut applies a committed vault-put to the local orchestrator. It
-// attempts every step (drain-cancel, add-or-reconfigure) and returns the
+// attempts every step (add-or-reconfigure) and returns the
 // joined error of whatever failed, so the caller can record one reconcile
 // obligation for the vault.
 func (d *configDispatcher) handleVaultPut(ctx context.Context, id glid.GLID) error {
@@ -367,14 +362,6 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id glid.GLID) err
 	vaultIDs := []glid.GLID{id}
 
 	var errs []error
-
-	// Cancel any in-progress drain.
-	if d.orch.IsDraining(id) {
-		if err := d.orch.CancelDrain(ctx, id); err != nil {
-			errs = append(errs, fmt.Errorf("cancel drain: %w", err))
-		}
-		// Fall through to applyExistingVaultChanges to reconfigure.
-	}
 
 	if !slices.Contains(d.orch.ListVaults(), id) {
 		if err := d.orch.AddVault(ctx, *vaultCfg, d.factories); err != nil {
@@ -395,42 +382,6 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id glid.GLID) err
 
 	errs = append(errs, d.applyExistingVaultChanges(ctx, id, vaultCfg))
 	return errors.Join(errs...)
-}
-
-// maybeStartDrain starts draining a vault to a remote node if the vault is
-// locally registered and not already draining.
-//
-// Cloud vaults are exempt from drain — their data lives in shared object
-// storage (S3/Azure/GCS) accessible from any node. Draining would wastefully
-// download each chunk, send it over the internal network, and re-upload it.
-// Instead, the vault is simply unregistered locally; the new node's
-// AddVault creates a Manager pointing to the same bucket.
-func (d *configDispatcher) maybeStartDrain(ctx context.Context, id glid.GLID, targetNodeID string) {
-	if !slices.Contains(d.orch.ListVaults(), id) {
-		return
-	}
-
-	// Legacy: cloud vaults (type="cloud") were sealed-only and could be
-	// reassigned by simply unregistering. With unified vault types, cloud-backed
-	// file vaults have a local active chunk that needs draining, so they use
-	// the normal drain path below.
-	// NOTE: kept for backwards compatibility during rolling upgrades where some
-	// nodes may still report type="cloud" for migrated vaults.
-	if d.orch.VaultType(id) == "cloud" {
-		if err := d.orch.UnregisterVault(id); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
-			d.logger.Error("dispatch: unregister cloud vault for reassignment", "id", id, "error", err)
-		} else {
-			d.logger.Info("dispatch: cloud vault reassigned, unregistered locally (no drain needed)", "id", id, "target_node", targetNodeID)
-		}
-		return
-	}
-
-	if d.orch.IsDraining(id) {
-		return // drain already in progress
-	}
-	if err := d.orch.DrainVault(ctx, id, targetNodeID); err != nil {
-		d.logger.Error("dispatch: drain vault", "id", id, "node", targetNodeID, "error", err)
-	}
 }
 
 // reconcileVaultInstance incrementally adds missing instances and removes
@@ -722,18 +673,6 @@ func (d *configDispatcher) handleInstancePut(ctx context.Context, vaultID glid.G
 		errs = append(errs, err)
 	}
 
-	// Schedule catchup only for NEWLY added followers, not existing ones.
-	// When a leader changes but followers stay the same (e.g. a node dies),
-	// the surviving followers already have all chunks — no catchup needed.
-	// This reads the instance's PRIOR FollowerTargets, so it must run before
-	// ReconcileVaultPlacement below refreshes them.
-	if leaderNodeID == d.localNodeID && len(followerNodeIDs) > 0 && d.catchupScheduler != nil {
-		newFollowers := d.newFollowersForInstance(v.ID, followerNodeIDs)
-		if len(newFollowers) > 0 {
-			d.catchupScheduler(v.ID, newFollowers)
-		}
-	}
-
 	// Align this node's local instance with the new placements: role
 	// (leader/follower), leader pointer, and — for a leader — the sealed-chunk
 	// FollowerTargets. This is the authoritative, guarded reconcile: it will
@@ -828,31 +767,6 @@ func (d *configDispatcher) rebuildVaultIfInstanceMissing(ctx context.Context, v 
 		return fmt.Errorf("add vault instance %s: %w", v.ID, err)
 	}
 	return nil
-}
-
-// newFollowersForInstance returns follower node IDs that don't already have a
-// local vault instance on this node's orchestrator. Existing followers already
-// have all chunks from normal replication — only genuinely new followers need
-// catchup. This prevents redundant chunk transfers on leader reassignment
-// (e.g. when a node dies and the leader moves but followers stay the same).
-func (d *configDispatcher) newFollowersForInstance(vaultID glid.GLID, followerNodeIDs []string) []string {
-	existing := d.orch.FindLocalVaultInstance(vaultID)
-	if existing == nil {
-		// Instance was just added to this node — all followers are new.
-		return followerNodeIDs
-	}
-	// Build set of follower node IDs that were already being replicated to.
-	prev := make(map[string]bool, len(existing.FollowerTargets))
-	for _, tgt := range existing.FollowerTargets {
-		prev[tgt.NodeID] = true
-	}
-	var added []string
-	for _, nid := range followerNodeIDs {
-		if !prev[nid] {
-			added = append(added, nid)
-		}
-	}
-	return added
 }
 
 func (d *configDispatcher) handleClusterTLSPut(ctx context.Context) error {

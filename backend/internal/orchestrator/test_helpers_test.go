@@ -180,10 +180,6 @@ func (m *transitionFakeTransferrer) TransferRecords(_ context.Context, _ string,
 func (m *transitionFakeTransferrer) ForwardAppend(_ context.Context, _ string, _ glid.GLID, _ []chunk.Record) error {
 	return nil
 }
-func (m *transitionFakeTransferrer) WaitVaultReady(_ context.Context, _ string, _ glid.GLID) error {
-	return nil
-}
-
 func testIterFromRecords(recs []chunk.Record) chunk.RecordIterator {
 	i := 0
 	return func() (chunk.Record, error) {
@@ -369,9 +365,9 @@ func makeRecordWithEventID(raw string, ingesterID glid.GLID, seq uint32) chunk.R
 // Multi-node cluster transition tests
 //
 // These wire up multiple full orchestrators with in-process RemoteTransferrers,
-// multi-instance vaults with leader/follower replication, rotation policies that
-// create many sealed chunks, and burst ingestion to stress the transition +
-// replication pipeline under realistic conditions.
+// leader/follower vault instances, and rotation policies that create many
+// sealed chunks, to exercise cross-node transfer and the receipt protocol's
+// delete propagation.
 // ==========================================================================
 
 // directTransferrer implements RemoteTransferrer by calling directly into
@@ -398,60 +394,6 @@ func (d *directTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 			return err
 		}
 	}
-}
-
-func (d *directTransferrer) WaitVaultReady(ctx context.Context, nodeID string, vaultID glid.GLID) error {
-	orch, ok := d.nodes[nodeID]
-	if !ok {
-		return fmt.Errorf("directTransferrer: unknown node %q", nodeID)
-	}
-	// In-process equivalent of the gRPC ForwardWaitVaultReady handler: block
-	// on the target orchestrator's real event-driven readiness signal so the
-	// multi-node drain tests exercise the consumer path.
-	return orch.WaitVaultReady(ctx, vaultID)
-}
-
-// directChunkReplicator implements ChunkReplicator by calling directly into the
-// target orchestrator. In-process equivalent of the gRPC ChunkReplicator.
-type directChunkReplicator struct {
-	nodes map[string]*Orchestrator
-}
-
-func (d *directChunkReplicator) AppendRecords(_ context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
-	orch, ok := d.nodes[nodeID]
-	if !ok {
-		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
-	}
-	for _, rec := range records {
-		if err := orch.AppendToVault(vaultID, chunkID, rec); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (d *directChunkReplicator) SealVault(_ context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error {
-	orch, ok := d.nodes[nodeID]
-	if !ok {
-		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
-	}
-	return orch.SealActiveChunk(vaultID, chunkID)
-}
-
-func (d *directChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
-	orch, ok := d.nodes[nodeID]
-	if !ok {
-		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
-	}
-	return orch.ImportToVault(ctx, vaultID, chunkID, next)
-}
-
-func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
-	orch, ok := d.nodes[leaderNodeID]
-	if !ok {
-		return 0, fmt.Errorf("directChunkReplicator: unknown leader %q", leaderNodeID)
-	}
-	return orch.CatchupSelectedChunks(ctx, vaultID, requesterNodeID, chunkIDs)
 }
 
 // newClusterRetentionRunner creates a retention runner bound to the instance's
@@ -684,7 +626,7 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 		}
 	}
 
-	// Wire directTransferrer and directChunkReplicator: each node can reach all other nodes.
+	// Wire directTransferrer: each node can reach all other nodes.
 	for _, nid := range nodeIDs {
 		remotes := make(map[string]*Orchestrator)
 		for _, other := range nodeIDs {
@@ -693,7 +635,6 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 			}
 		}
 		orchs[nid].SetRemoteTransferrer(&directTransferrer{nodes: remotes})
-		orchs[nid].SetChunkReplicator(&directChunkReplicator{nodes: remotes})
 	}
 
 	applyRequestDelete := func(chunkID chunk.ChunkID, reason string, expectedFrom []string) error {
@@ -729,16 +670,12 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 	}
 }
 
-// sealAndReplicate seals the active chunk on the leader AND propagates the
-// seal to followers, then drains the leader scheduler so the post-seal
-// pipeline (compression → scheduleReplication → ImportSealedChunk on
-// followers) completes BEFORE any caller-side delete fires. Without this
-// drain, a late ImportSealedChunk would recreate the chunk on the follower
-// after retention deleted it. Plain Chunks.Seal() only seals the leader —
-// followers' active chunks would stay active, causing forwardDelete to
-// fail with ErrActiveChunk. The leader's production seal-on-rotation path
-// uses sealRemoteFollowers; tests that manually seal must do the same.
-func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestNode, vaultIdx int) {
+// sealActiveOnAllNodes seals the leader's active chunk and the same chunk on
+// every follower that holds it active, then waits for the leader's post-seal
+// jobs to finish so no post-seal work races a caller-side delete. A plain
+// Chunks.Seal() seals only the leader; a follower's still-active copy would
+// make the receipt protocol's local delete fail with ErrActiveChunk.
+func (h *clusterHarness) sealActiveOnAllNodes(t *testing.T, leaderNode *clusterTestNode, vaultIdx int) {
 	t.Helper()
 	vaultInst := leaderNode.instances[vaultIdx]
 	active := vaultInst.Chunks.Active()
@@ -761,10 +698,33 @@ func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestN
 			}
 		}
 	}
-	// Drain post-seal + replication jobs for the newly-sealed chunk.
-	// A late ImportSealedChunk would recreate the chunk on a follower
-	// after the transition delete has fired.
 	requireIdle(t, leaderNode.orch.Scheduler())
+}
+
+// copySealedToFollowers seeds every other node's instance with an identical
+// sealed copy of each listed leader chunk, imported under the same chunk ID
+// directly into the node's chunk manager, so cross-node delete propagation
+// has a copy to remove on every node.
+func (h *clusterHarness) copySealedToFollowers(t *testing.T, leaderNode *clusterTestNode, vaultIdx int, metas []chunk.ChunkMeta) {
+	t.Helper()
+	src := leaderNode.instances[vaultIdx].Chunks
+	for _, nid := range h.allNodeIDs() {
+		if nid == leaderNode.nodeID {
+			continue
+		}
+		dst := h.nodes[nid].instances[vaultIdx].Chunks
+		for _, m := range metas {
+			cursor, err := src.OpenCursor(m.ID)
+			if err != nil {
+				t.Fatalf("open leader chunk %s: %v", m.ID, err)
+			}
+			_, err = dst.ImportRecords(m.ID, chunk.CursorIterator(cursor))
+			_ = cursor.Close()
+			if err != nil {
+				t.Fatalf("copy chunk %s to %s: %v", m.ID, nid, err)
+			}
+		}
+	}
 }
 
 // assertVaultDirEmpty verifies that an instance's filesystem directory contains no
@@ -818,38 +778,6 @@ func (h *clusterHarness) listChunkDirsOnNode(t *testing.T, nodeID string, vaultI
 	}
 	return dirs
 }
-
-// ==========================================================================
-// Multi-node drain tests
-// ==========================================================================
-
-// waitForDrainJob waits until the vault's drain job completes, failing when the
-// job fails or the scheduler's jobs stop making progress.
-func waitForDrainJob(t *testing.T, orch *Orchestrator, vaultID glid.GLID) {
-	t.Helper()
-	jobName := "drain:" + vaultID.String()
-	waittest.Progress(t, "drain job "+jobName+" completes", func() (string, bool) {
-		for _, j := range orch.Scheduler().ListJobs() {
-			if j.Name != jobName {
-				continue
-			}
-			p := j.Snapshot().Progress
-			if p != nil && p.Status == JobStatusFailed {
-				t.Fatalf("drain job failed: %s", p.Error)
-			}
-			if p != nil && p.Status == JobStatusCompleted {
-				return "", true
-			}
-		}
-		return jobsProgress(orch.Scheduler()), false
-	})
-}
-
-// TestClusterDrainVaultRecordsArriveOnDestination drains a file-backed vault
-// from node-A to node-B via directTransferrer. Verifies:
-//   - All records arrive on node-B (cursor-verified)
-//   - Source vault unregistered on node-A
-//   - Source chunk directories removed from disk
 
 // --- Memory budget enforcement ---
 

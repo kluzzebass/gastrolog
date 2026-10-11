@@ -16,9 +16,6 @@ var (
 	compPlacement = comp.Root("placement").Desc(
 		"Vault placement reconciler — observes config + cluster topology and assigns vault homes to nodes.")
 
-	compVaultReplicator = comp.Root("vault-replicator").Desc(
-		"Per-vault chunk replicator — pushes sealed chunks to follower nodes to meet the configured RF.")
-
 	compManagedFiles = comp.Root("managed-files").Desc(
 		"Managed file transfer + repair — distributes uploaded files (e.g. lookup tables) across the cluster.")
 

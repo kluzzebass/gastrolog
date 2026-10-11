@@ -47,11 +47,6 @@ type FSM struct {
 	// next local read sees post-mutation state — the read-after-write
 	// barrier, event-driven rather than polled.
 	applyWait *applywait.Tracker
-
-	// onReady fires once, outside mu, at the first moment the FSM is ready
-	// and a callback is registered.
-	onReady    func()
-	readyFired bool
 }
 
 // NewFSM returns a new vault control-plane FSM instance.
@@ -97,36 +92,10 @@ func (f *FSM) Ready() bool {
 	return f.applyWait.Applied() > 0
 }
 
-// SetOnReady registers fn to run once when the FSM becomes ready — at
-// registration, if it already is. Replaces any prior callback; a callback
-// registered after the one-shot has fired never runs.
-func (f *FSM) SetOnReady(fn func()) {
-	f.mu.Lock()
-	f.onReady = fn
-	f.mu.Unlock()
-	f.fireReady()
-}
-
-// advance records that the entry at index has applied and fires the ready
-// callback on the first one. Call after the entry's mutation is visible.
+// advance records that the entry at index has applied. Call after the
+// entry's mutation is visible.
 func (f *FSM) advance(index uint64) {
 	f.applyWait.Advance(index)
-	f.fireReady()
-}
-
-func (f *FSM) fireReady() {
-	if !f.Ready() {
-		return
-	}
-	f.mu.Lock()
-	fn := f.onReady
-	if fn == nil || f.readyFired {
-		f.mu.Unlock()
-		return
-	}
-	f.readyFired = true
-	f.mu.Unlock()
-	fn()
 }
 
 // StoreConfiguration records that a configuration entry has applied. The

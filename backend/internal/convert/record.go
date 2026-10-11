@@ -117,8 +117,7 @@ func ChunkToRecord(rec chunk.Record) record.Record {
 			IngestTS:   rec.EventID.IngestTS,
 			IngestSeq:  rec.EventID.IngestSeq,
 		},
-		Raw:            rec.Raw,
-		WaitForReplica: rec.WaitForReplica,
+		Raw: rec.Raw,
 	}
 	if len(rec.Attrs) > 0 {
 		out.Attrs = make(record.Attributes, len(rec.Attrs))
@@ -135,12 +134,11 @@ func ChunkToRecord(rec chunk.Record) record.Record {
 // were a measurable slice of GC churn, which is what this variant removes.
 func ChunkToRecordOwned(rec chunk.Record) record.Record {
 	out := ChunkToRecord(chunk.Record{
-		SourceTS:       rec.SourceTS,
-		IngestTS:       rec.IngestTS,
-		WriteTS:        rec.WriteTS,
-		EventID:        rec.EventID,
-		Raw:            rec.Raw,
-		WaitForReplica: rec.WaitForReplica,
+		SourceTS: rec.SourceTS,
+		IngestTS: rec.IngestTS,
+		WriteTS:  rec.WriteTS,
+		EventID:  rec.EventID,
+		Raw:      rec.Raw,
 	})
 	out.Attrs = record.Attributes(rec.Attrs)
 	return out

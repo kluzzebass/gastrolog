@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
-	"sync"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
@@ -494,48 +493,6 @@ func (o *Orchestrator) findLocalVaultInstance(vaultID glid.GLID) *VaultInstance 
 	return vault.Instance
 }
 
-// replaceForwardedChunk seals (if active) and deletes a pre-existing chunk
-// on a follower to make room for the canonical sealed version from the leader.
-// The pre-existing chunk may come from:
-//   - ChunkReplicator.AppendRecords syncing records as the leader's active
-//     chunk fills up (and the follower may have missed some due to a brief
-//     network disruption, leaving its copy slightly behind the leader's)
-//   - a catchup path that fills follower state from scratch
-//
-// Retries if a concurrent Append reopens the active chunk between seal and
-// delete.
-//
-// Uses the NoAnnounce primitives throughout: this is a LOCAL cleanup operation
-// on a single follower. It must NOT propagate via vault-ctl Raft — the
-// canonical sealed chunk is about to replace it locally via ImportRecords,
-// which fires its own AnnounceCreate/AnnounceSeal for the replacement.
-//
-// The seal matters as much as the delete. Seal() announces BeginSeal and leaves
-// the matching AnnounceSeal to a post-seal pass this path never runs, so it can
-// park the cluster-wide entry in Sealing — the same stranding this file's
-// resume logic exists to repair. It does not strand today only because
-// ImportRecords re-announces Create then Seal for the same chunk ID
-// immediately, and ImportToInstanceStorage refuses pipeline vaults up front;
-// depending on that coincidence is what this avoids.
-func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActive bool) error {
-	if isActive {
-		if err := chunk.SealNoAnnounce(cm, chunkID); err != nil {
-			return fmt.Errorf("seal forwarded chunk %s: %w", chunkID, err)
-		}
-	}
-	if err := chunk.DeleteNoAnnounce(cm, chunkID); errors.Is(err, chunk.ErrActiveChunk) {
-		if sealErr := chunk.SealNoAnnounce(cm, chunkID); sealErr != nil {
-			return fmt.Errorf("re-seal forwarded chunk %s: %w", chunkID, sealErr)
-		}
-		if err = chunk.DeleteNoAnnounce(cm, chunkID); err != nil {
-			return fmt.Errorf("delete forwarded chunk %s (after re-seal): %w", chunkID, err)
-		}
-	} else if err != nil {
-		return fmt.Errorf("delete forwarded chunk %s: %w", chunkID, err)
-	}
-	return nil
-}
-
 // afterVaultCtlRestore is wired from vaultraft.FSM.SetOnAfterRestore and
 // must return immediately — GroupManager.CreateGroup holds groupMgr.mu
 // across NewRaft→fsm.Restore, and the deferred worker calls
@@ -788,186 +745,17 @@ func (o *Orchestrator) ImportChunkRecords(ctx context.Context, vaultID glid.GLID
 	return nil
 }
 
-// ImportToVault imports records as a sealed chunk into a specific instance,
-// preserving the given chunk ID. Used by sealed-chunk replication —
-// the follower receives a sealed chunk from the leader with the same ID.
-// Schedules postSealWork for local indexing (followers need indexes for queries)
-// but won't trigger further replication (gated by !IsFollower in
-// followerReplicationTargets).
-func (o *Orchestrator) ImportToVault(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
-	vaultInst := o.findLocalVaultInstance(vaultID)
-	if vaultInst == nil {
-		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
-	}
-	return o.ImportToInstanceStorage(ctx, vaultID, "", chunkID, next)
-}
-
-// ImportToInstanceStorage imports a sealed chunk into the local vault
-// instance, optionally constrained to a specific storage. When storageID is
-// empty, the local instance is targeted unconditionally. Used by same-node
-// replication to route to specific file storage instances.
-func (o *Orchestrator) ImportToInstanceStorage(ctx context.Context, vaultID glid.GLID, storageID string, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
-	if o.isPipelineIngestVault(vaultID) {
-		drainIterator(next)
-		o.vaultOpsLogger.Debug("replication: record-stream import refused for pipeline vault",
-			"vault", vaultID, "chunk", chunkID)
-		return nil
-	}
-	// Look up the instance under lock, then release BEFORE the import.
-	// ImportRecords reads from a network stream and can block — holding
-	// RLock during a network read starves writers (FSM dispatcher) and
-	// deadlocks the entire orchestrator.
-	type vaultRef struct {
-		cm           chunk.ChunkManager
-		isFollower   bool
-		isTombstoned func(chunk.ChunkID) bool
-	}
-	ref := func() *vaultRef {
-		o.mu.RLock()
-		defer o.mu.RUnlock()
-		vault := o.vaults[vaultID]
-		if vault == nil {
-			return nil
-		}
-		if t := vault.Instance; t != nil && (storageID == "" || t.StorageID == storageID) {
-			return &vaultRef{cm: t.Chunks, isFollower: t.IsFollower, isTombstoned: t.IsTombstoned}
-		}
-		return nil
-	}()
-	if ref == nil {
-		// "instance not registered on this node" rather than "vault not found":
-		// the vault almost always still exists cluster-wide; only the local
-		// instance was evicted from this node by placement churn (or never
-		// landed here in the first place).
-		return fmt.Errorf("%w: vault %s", ErrInstanceNotLocal, vaultID)
-	}
-	// Reject stale ImportSealed RPCs for chunks the cluster already deleted.
-	// The race is: leader schedules replication, retention fires, delete is
-	// committed via Raft (populates tombstone), then the late replication
-	// RPC arrives. Without this check the receiver would recreate the chunk.
-	if ref.isTombstoned != nil && ref.isTombstoned(chunkID) {
-		return fmt.Errorf("%w: import sealed chunk %s into vault %s", chunk.ErrChunkTombstoned, chunkID, vaultID)
-	}
-	cm := ref.cm
-
-	// Serialize SetNextChunkID + ImportRecords per vault instance to prevent
-	// concurrent replication messages from interleaving the two calls.
-	// Key includes storageID so same-node replicas can import in parallel.
-	importKey := vaultID.String() + ":" + storageID
-	muVal, _ := o.importMu.LoadOrStore(importKey, &sync.Mutex{})
-	vaultMu := muVal.(*sync.Mutex)
-	vaultMu.Lock()
-	defer vaultMu.Unlock()
-
-	// Check if this chunk already exists (sealed or active).
-	_, metaErr := cm.Meta(chunkID)
-	activeIsChunk := false
-	if active := cm.Active(); active != nil && active.ID == chunkID {
-		activeIsChunk = true
-	}
-
-	chunkExists := metaErr == nil || activeIsChunk
-
-	// Leader: idempotent skip — canonical version is already here.
-	if chunkExists && !ref.isFollower {
-		o.vaultOpsLogger.Debug("replication: chunk already exists, skipping import",
-			"vault", vaultID, "chunk", chunkID.String())
-		drainIterator(next)
-		return nil
-	}
-
-	// Follower: replace the forwarded version (may be incomplete due to
-	// fire-and-forget drops) with the canonical sealed chunk.
-	if chunkExists {
-		if err := replaceForwardedChunk(cm, chunkID, activeIsChunk); err != nil {
-			drainIterator(next)
-			return err
-		}
-		o.vaultOpsLogger.Debug("replication: replacing forwarded chunk with canonical version",
-			"vault", vaultID, "chunk", chunkID.String())
-	}
-
-	meta, err := cm.ImportRecords(chunkID, next)
-	if err != nil {
-		return fmt.Errorf("import to vault %s: %w", vaultID, err)
-	}
-	o.vaultOpsLogger.Debug("replication: sealed chunk imported",
-		"vault", vaultID,
-		"chunk", meta.ID.String(), "records", meta.RecordCount)
-
-	return o.finalizeImportedChunk(vaultID, cm, meta, ref.isTombstoned)
-}
-
-// finalizeImportedChunk handles the post-import steps: vault-ctl Raft
-// announcement, tombstone re-check, and (if not tombstoned) post-seal
-// work scheduling.
-//
-// Ordering matters: announce first, then re-check tombstone. This covers
-// the race where a delete finalizes between ImportRecords and our check
-// — if we checked first we'd miss it; announcing first propagates the
-// create through the vault-ctl FSM (which rejects it when tombstoned via the
-// applyCreate guard), so by the time we re-check the tombstone state is
-// authoritative and any on-disk files we wrote are orphans we must
-// clean up explicitly.
-func (o *Orchestrator) finalizeImportedChunk(vaultID glid.GLID, cm chunk.ChunkManager, meta chunk.ChunkMeta, isTombstoned func(chunk.ChunkID) bool) error {
-	if meta.ID == (chunk.ChunkID{}) {
-		return nil
-	}
-
-	if ann, ok := cm.(chunk.AnnouncerGetter); ok {
-		if a := ann.GetAnnouncer(); a != nil {
-			a.AnnounceCreate(meta.ID, meta.WriteStart, meta.IngestStart, meta.SourceStart)
-			// Active → Sealing → Sealed in quick succession. The
-			// imported chunk is already sealed on the source; we're
-			// projecting that final state onto the destination's FSM.
-			a.AnnounceBeginSeal(meta.ID)
-			a.AnnounceSeal(meta.ID, meta.WriteEnd, meta.RecordCount, meta.Bytes, meta.IngestStart, meta.IngestEnd, meta.SourceEnd, meta.IngestTSMonotonic)
-			// Section offsets (CmdAttachOffsets) already replicated from
-			// the original sealing leader via Raft; followers inherit
-			// them through the FSM and don't need to re-announce.
-		}
-	}
-
-	if isTombstoned != nil && isTombstoned(meta.ID) {
-		if del, ok := cm.(chunk.SilentDeleter); ok {
-			_ = del.DeleteSilent(meta.ID)
-		} else {
-			_ = cm.Delete(meta.ID)
-		}
-		o.vaultOpsLogger.Debug("replication: post-import tombstone detected, deleted just-created chunk",
-			"vault", vaultID, "chunk", meta.ID.String())
-		return nil
-	}
-
-	o.postSealWork(vaultID, cm, meta.ID)
-	return nil
-}
-
-// drainIterator reads and discards all remaining records from an iterator.
-// Used when skipping an import but the caller (network stream) still needs
-// its data consumed.
-func drainIterator(next chunk.RecordIterator) {
-	for {
-		if _, err := next(); err != nil {
-			return
-		}
-	}
-}
-
 // SealActive seals every open chunk of a vault that holds records — the
 // chunk manager's active chunk and, for a pipeline vault, the open chunk
 // manifest — and returns how many it sealed. A vault can carry both at once
 // (a recovered chunk-manager active chunk beside the pipeline's open
-// manifest), and each is sealed independently. Used by the SealVault RPC and
-// the drain path to flush any residual active chunk before migration.
+// manifest), and each is sealed independently. Used by the SealVault RPC.
 //
 // When the chunk-manager seal succeeds and the manifest seal fails, the
 // returned count still reports the chunk that was sealed alongside the error.
 //
 // Readiness: no Vault.ReadinessErr gate — seal operates on the in-memory
-// active chunk, not the FSM. Seal is also a step on the drain path (which
-// runs even with lagging followers), so gating here would create a
-// chicken-and-egg deadlock with readiness recovery.
+// active chunk, not the FSM.
 func (o *Orchestrator) SealActive(vaultID glid.GLID) (int, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
@@ -988,8 +776,8 @@ func (o *Orchestrator) SealActive(vaultID glid.GLID) (int, error) {
 }
 
 // sealChunkManagerActive seals the chunk manager's active chunk when it holds
-// records, and schedules the post-seal pipeline (compress, index, and
-// sealed-chunk replication to followers). That scheduling is mandatory, not
+// records, and schedules the post-seal pipeline (compress, index, upload).
+// That scheduling is mandatory, not
 // an optimization: Chunks.Seal() only announces Active → Sealing, and the
 // post-seal pipeline owns the AnnounceSeal that promotes the vault-ctl
 // manifest entry to Sealed.

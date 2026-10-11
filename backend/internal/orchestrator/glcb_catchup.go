@@ -125,7 +125,7 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 		sourceVaultID = e.TransferSourceVaultID
 	}
 
-	// Describe BEFORE scheduling — see scheduleReplication for why (missing
+	// Describe BEFORE scheduling — see schedulePostSealProcessing for why (missing
 	// label on the Scheduled event, leaked descriptions entry when the job
 	// finishes first).
 	name := glcbCatchupJobName(vaultID, e.ID)

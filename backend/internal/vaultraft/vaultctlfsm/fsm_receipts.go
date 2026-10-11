@@ -241,14 +241,14 @@ func (f *FSM) applyAckDelete(c *gastrologv1.AckDeleteCommand) (*chunk.ChunkID, s
 // The leader proposes
 // this once expectedFrom is empty for an entry. Without the
 // chunks/tombstone updates the manifest carries dead entries forever
-// and stale ImportSealed RPCs could re-create the chunk after the
-// cluster believed it deleted. Idempotent: re-applying for an entry
+// and a late command for the chunk could re-create it after the cluster
+// believed it deleted. Idempotent: re-applying for an entry
 // already finalized is a no-op (re-tombstoning a pruned tombstone aside).
 func (f *FSM) applyFinalizeDelete(c *gastrologv1.FinalizeDeleteCommand) (*chunk.ChunkID, error) {
 	id := chunkIDFromProto(c.GetId())
 
-	// Tombstone unconditionally so a stale ImportSealed/Append/Seal
-	// command racing the receipt protocol can be rejected even if the
+	// Tombstone unconditionally so a stale create/seal command racing the
+	// receipt protocol can be rejected even if the
 	// chunk metadata never lived in this FSM.
 	f.tombstoneChunksLocked(id)
 

@@ -144,23 +144,22 @@ type RecordRef struct {
 
 // ChunkState is the explicit lifecycle stage of a chunk on the vault-ctl
 // FSM. Active → Sealing → Sealed. The Sealing window is the period
-// between rotation (leader stops accepting appends) and FSM commit of
-// the sealed-form GLCB.
+// between the chunk closing to new records and the FSM commit of its
+// sealed-form GLCB.
 type ChunkState uint8
 
 const (
 	// ChunkStateUnknown is the zero value. Treated as Active by callers
 	// that haven't migrated off the legacy Sealed bool yet.
 	ChunkStateUnknown ChunkState = 0
-	// ChunkStateActive — accepting appends; only the leader's bytes are
-	// authoritative; followers maintain a best-effort active-form mirror.
+	// ChunkStateActive — open: accepting records, no sealed-form GLCB yet.
 	ChunkStateActive ChunkState = 1
-	// ChunkStateSealing — leader is assembling the sealed-form GLCB. The
-	// active-form layout is still readable for queries; sealed-form is
-	// in flight but not yet committed.
+	// ChunkStateSealing — closed to new records; the sealed-form GLCB is
+	// being assembled but not yet committed.
 	ChunkStateSealing ChunkState = 2
-	// ChunkStateSealed — sealed-form GLCB is committed. Followers may
-	// replicate it byte-for-byte.
+	// ChunkStateSealed — sealed-form GLCB is committed. A home's local copy,
+	// built there or pulled from a peer home (GLCB catch-up), must match the
+	// sealed digest.
 	ChunkStateSealed ChunkState = 3
 )
 
@@ -284,7 +283,9 @@ func (e EventID) Less(o EventID) bool {
 // Timestamps:
 //   - SourceTS: when the log was generated at the source (e.g., parsed from syslog timestamp)
 //   - IngestTS: when our ingester received the message
-//   - WriteTS:  when the chunk manager wrote the record (monotonic within a chunk)
+//   - WriteTS:  when the origin's segmentation writer appended the record to a
+//     segment; the chunk build copies it unchanged (unique per record across
+//     the cluster)
 //
 // Ref and VaultID are populated by the query engine when returning search
 // results. They are zero-valued when appending records or reading via cursor.
@@ -301,12 +302,6 @@ type Record struct {
 	Raw      []byte
 	Ref      RecordRef
 	VaultID  glid.GLID
-
-	// WaitForReplica signals that the caller wants confirmation that
-	// secondaries received this record before acking. Set by ack-gated
-	// ingesters (RELP, HTTP X-Wait-Ack). When true, appendRecord skips
-	// fire-and-forget forwarding — the caller does sync forwarding instead.
-	WaitForReplica bool
 }
 
 // Copy returns a deep copy of the record with its own Raw slice and Attrs map.

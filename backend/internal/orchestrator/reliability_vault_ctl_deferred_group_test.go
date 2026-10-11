@@ -8,7 +8,6 @@ package orchestrator_test
 // cluster-wide.
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -31,12 +30,11 @@ func TestOrchRel_DeferredVaultCtlGroupBindsInstanceWhenPeerResolves(t *testing.T
 	if deferred.groupMgr.GetGroup(gid) != nil {
 		t.Fatal("precondition: the node that cannot resolve a peer deferred group creation")
 	}
-	if deferred.orch.FindLocalVaultInstance(v.id) == nil {
+	inst := deferred.orch.FindLocalVaultInstance(v.id)
+	if inst == nil {
 		t.Fatal("precondition: the deferred node built its local instance")
 	}
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if err := deferred.orch.WaitVaultReady(cancelled, v.id); err == nil {
+	if inst.IsFSMReady == nil || inst.IsFSMReady() {
 		t.Fatal("the deferred node reports the vault ready while its vault-ctl group does not exist")
 	}
 

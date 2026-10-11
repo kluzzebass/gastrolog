@@ -152,9 +152,9 @@ func (o *Orchestrator) rateAlertAndCloudHealthTick() {
 // goroutines, then waits for everything to finish.
 //
 // Ordered shutdown:
-//  0. BeginShutdown on the shared phase (if wired) → fast-path skip in
-//     sealed-chunk replication so the drain pipeline doesn't spam peers
-//     that are going down alongside us.
+//  0. BeginShutdown on the shared phase (if wired) → the vault-ctl announcer
+//     and retention skip remote work so shutdown doesn't spam peers that
+//     are going down alongside us.
 //  1. Stop the pipeline supervisor — ingestion stops first (closing the ingest
 //     queue), cascading through digest→route→segment as each queue closes,
 //     then the remaining managers are cancelled. Ingesters' alive state is
@@ -168,8 +168,8 @@ func (o *Orchestrator) Stop() error {
 	cancel := o.cancel
 	o.mu.Unlock()
 
-	// Stage 0: flip the shutdown phase BEFORE any drain work so that
-	// sealed-chunk replication skips its remote calls while we drain.
+	// Stage 0: flip the shutdown phase BEFORE stopping the pipeline so that
+	// remote work skips its calls while we shut down.
 	// Idempotent if the top-level shutdown already flipped it; safe to call
 	// with a nil phase (single-node tests).
 	if o.phase != nil {
@@ -310,7 +310,7 @@ func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID
 	}
 	o.logger.Info("rebuilding missing indexes",
 		"vault", vaultID, "chunk", meta.ID.String())
-	// Describe BEFORE scheduling — see scheduleReplication for why (missing
+	// Describe BEFORE scheduling — see schedulePostSealProcessing for why (missing
 	// label on the Scheduled event, leaked descriptions entry when the job
 	// finishes first).
 	name := indexRebuildJobName(vaultID, meta.ID)

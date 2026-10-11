@@ -142,11 +142,8 @@ type ManifestReadFacet struct {
 
 	// IsTombstoned returns true if the given chunk ID has been deleted from
 	// this instance's replicated FSM and is still within the tombstone retention
-	// window. Used to reject stale replication commands (ImportSealed,
-	// Append, Seal) that race with retention — without this check, a late
-	// ImportSealed RPC could recreate a chunk the cluster already deleted,
-	// producing a "ghost" chunk on the follower. Nil when no Raft group
-	// exists.
+	// window, so work racing retention can skip a chunk the cluster already
+	// deleted. Nil when no Raft group exists.
 	IsTombstoned func(id chunk.ChunkID) bool
 
 	// IsFSMReady returns true after the vault-ctl FSM has applied at least one log
@@ -186,8 +183,3 @@ func (t *VaultInstance) applyRaftCallbacks(cb vaultRaftCallbacks) {
 
 // IsLeader returns true if this node is the leader for this instance.
 func (t *VaultInstance) IsLeader() bool { return !t.IsFollower }
-
-// ShouldForwardToFollowers returns true if this leader instance has replication targets.
-func (t *VaultInstance) ShouldForwardToFollowers() bool {
-	return t.IsLeader() && len(t.FollowerTargets) > 0
-}

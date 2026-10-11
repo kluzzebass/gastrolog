@@ -34,7 +34,7 @@ func (h *orchRelHarness) applyOnVaultCtlLeader(v vaultSpec, chunkCmd []byte) {
 			lastErr = fmt.Errorf("%s has no vault-ctl group", leader.label)
 			continue
 		}
-		err := g.Raft.Apply(data, cluster.ReplicationTimeout).Error()
+		err := g.Raft.Apply(data, cluster.RaftApplyTimeout).Error()
 		if err == nil {
 			return
 		}

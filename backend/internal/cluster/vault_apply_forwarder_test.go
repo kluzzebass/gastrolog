@@ -16,7 +16,7 @@ func TestVaultApplyForwarder_LocalLeader(t *testing.T) {
 	r := createVaultRaft(t, "v-leader", fsm, true, nil)
 	waitVaultLeader(t, r, 5*time.Second)
 
-	forwarder := NewVaultApplyForwarder(r, "vault/test/ctl", fsm.ApplyWait(), nil, ReplicationTimeout)
+	forwarder := NewVaultApplyForwarder(r, "vault/test/ctl", fsm.ApplyWait(), nil, RaftApplyTimeout)
 	if err := forwarder.Apply([]byte{1}); err != nil {
 		t.Fatalf("Apply on leader: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestVaultApplyForwarder_LeaderShutdown(t *testing.T) {
 	fsm := vaultraft.NewFSM()
 	r := createVaultRaft(t, "v-doomed", fsm, true, nil)
 	waitVaultLeader(t, r, 5*time.Second)
-	forwarder := NewVaultApplyForwarder(r, "vault/y/ctl", fsm.ApplyWait(), nil, ReplicationTimeout)
+	forwarder := NewVaultApplyForwarder(r, "vault/y/ctl", fsm.ApplyWait(), nil, RaftApplyTimeout)
 	r.Shutdown()
 	if err := forwarder.Apply([]byte{1}); err == nil {
 		t.Fatal("expected error after leader shutdown")

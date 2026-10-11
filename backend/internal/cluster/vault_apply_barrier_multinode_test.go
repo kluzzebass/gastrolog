@@ -71,7 +71,7 @@ func setupVaultCtlGroup(t *testing.T, nodes []*testNode, vaultID glid.GLID) (str
 			if groupID != gid {
 				return 0, errors.New("unexpected group " + groupID)
 			}
-			future := groupRaft.Apply(data, cluster.ReplicationTimeout)
+			future := groupRaft.Apply(data, cluster.RaftApplyTimeout)
 			if err := future.Error(); err != nil {
 				return 0, err
 			}
@@ -182,7 +182,7 @@ func TestFourNodeVaultCtlFollowerReadAfterForwardedApply(t *testing.T) {
 		cid := chunk.NewChunkID()
 		fwd := cluster.NewVaultCtlChunkApplyForwarder(
 			follower.raft, gid, vaultID, follower.fsm.ApplyWait(),
-			follower.node.srv.PeerConns(), cluster.ReplicationTimeout)
+			follower.node.srv.PeerConns(), cluster.RaftApplyTimeout)
 		applyWithLeaderRetry(t, func() error {
 			return fwd.Apply(vaultctlfsm.MarshalCreateChunk(cid, now, now, now))
 		}, "chunk-apply forwarder")
@@ -195,7 +195,7 @@ func TestFourNodeVaultCtlFollowerReadAfterForwardedApply(t *testing.T) {
 	cid2 := chunk.NewChunkID()
 	vfwd := cluster.NewVaultApplyForwarder(
 		follower.raft, gid, follower.fsm.ApplyWait(),
-		follower.node.srv.PeerConns(), cluster.ReplicationTimeout)
+		follower.node.srv.PeerConns(), cluster.RaftApplyTimeout)
 	applyWithLeaderRetry(t, func() error {
 		return vfwd.Apply(vaultraft.MarshalVaultChunkCommand(vaultID,
 			vaultctlfsm.MarshalCreateChunk(cid2, now, now, now)))
@@ -216,7 +216,7 @@ func TestFourNodeVaultCtlFollowerReadAfterForwardedApply(t *testing.T) {
 	cid3 := chunk.NewChunkID()
 	postFwd := cluster.NewVaultCtlChunkApplyForwarder(
 		postFollower.raft, gid, vaultID, postFollower.fsm.ApplyWait(),
-		postFollower.node.srv.PeerConns(), cluster.ReplicationTimeout)
+		postFollower.node.srv.PeerConns(), cluster.RaftApplyTimeout)
 	applyWithLeaderRetry(t, func() error {
 		return postFwd.Apply(vaultctlfsm.MarshalCreateChunk(cid3, now, now, now))
 	}, "post-transfer chunk-apply forwarder")

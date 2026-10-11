@@ -23,7 +23,7 @@ archive vault want exactly this.
   destination's homes pull the sealed GLCB via the existing
   PullChunkGLCB verify-before-promote machinery, pointed at the
   destination vault's chunk root; the destination vault-ctl FSM registers
-  the chunk (the ImportSealedChunk / registerPipelineGLCB seams); chunk
+  the chunk (the registerPipelineGLCB seam); chunk
   holder receipts from homes in the destination's current placement
   confirm the destination holds ≥ its replication factor;
   ONLY THEN does the source propose its delete (CmdRequestDelete-style
@@ -227,8 +227,8 @@ catalog + doc table row updated for the rename and new causes.
   receipts never arrive (defer + alarm, chunk retained).
 - Multi-node: the server harness is memory-vault-only (33ul6h finding) —
   transfer REQUIRES file vaults, so multi-node coverage uses the
-  orchestrator multi-node fixtures that the chunk-replication/catch-up
-  tests use (find them: replicateToFollower / PullChunkGLCB tests);
+  orchestrator multi-node fixtures that the GLCB catch-up tests use
+  (find them: PullChunkGLCB tests);
   destination RF > 1: receipts gate holds until every destination home
   holds the chunk. If those fixtures cannot express it, the gap is named
   in the report and covered at epic validation on the real cluster —

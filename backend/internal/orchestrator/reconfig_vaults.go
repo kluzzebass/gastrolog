@@ -87,7 +87,6 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 	vault.StorageType = string(vaultCfg.Type)
 	o.vaults[vaultCfg.ID] = vault
 	o.bindVaultInstanceToCtlLocked(vaultCfg.ID, instance)
-	o.signalVaultReadyChange()
 	o.scheduleHomeIndexSweep(vaultCfg.ID, instance)
 
 	// Recompile the routing table immediately so the vault can receive
@@ -274,7 +273,7 @@ func (o *Orchestrator) listClusterChunkMetasLocked(vaultID glid.GLID) ([]chunk.C
 }
 
 // removeVaultJobs removes the retention runner for a vault without closing
-// managers or unregistering. Used by UnregisterVault and drain.
+// managers or unregistering. Used by UnregisterVault.
 func (o *Orchestrator) removeVaultJobs(_ glid.GLID, vault *Vault) {
 	if vaultInst := vault.Instance; vaultInst != nil {
 		delete(o.retention, retentionKey(vaultInst.VaultID, vaultInst.StorageID))
@@ -316,7 +315,6 @@ func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	}
 
 	delete(o.vaults, id)
-	o.signalVaultReadyChange()
 }
 
 // DisableVault disables ingestion for a vault.
@@ -547,7 +545,6 @@ func (o *Orchestrator) removeVaultInstance(vaultID glid.GLID, deleteData bool) b
 		delete(o.vaults, vaultID)
 		o.logger.Info("vault removed", "vault", vaultID)
 	}
-	o.signalVaultReadyChange()
 
 	o.logger.Info("vault placement removed",
 		"vault", vaultID, "deleteData", deleteData)
@@ -641,7 +638,6 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 	}
 	vault.Instance = ti
 	o.bindVaultInstanceToCtlLocked(vaultID, ti)
-	o.signalVaultReadyChange()
 	o.scheduleHomeIndexSweep(vaultID, ti)
 	o.logger.Info("vault placement added", "vault", vaultID)
 	return nil
@@ -680,7 +676,6 @@ func (o *Orchestrator) UnregisterVault(id glid.GLID) error {
 
 	// Remove from registry.
 	delete(o.vaults, id)
-	o.signalVaultReadyChange()
 
 	o.logger.Info("vault unregistered (data preserved)", "id", id, "name", vault.Name, "type", vault.Type())
 	return nil
@@ -1069,13 +1064,12 @@ func (o *Orchestrator) ensureVaultControlPlaneRaftGroup(vaultID glid.GLID, clust
 }
 
 // bindVaultCtlGroup wires the vault-level consumers of a vault-ctl group: the
-// after-restore hook, the vault-ready signal on the group's first apply, the
-// pipeline chunk events on the live sub-FSM, and the leader loop. Every node
+// after-restore hook, the pipeline chunk events on the live sub-FSM, and the
+// leader loop. Every node
 // runs them, local instance or not. Idempotent.
 func (o *Orchestrator) bindVaultCtlGroup(vaultID glid.GLID, g *raftgroup.Group) {
 	if vfsm, ok := g.FSM.(*vaultraft.FSM); ok && vfsm != nil {
 		vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
-		vfsm.SetOnReady(o.signalVaultReadyChange)
 		wireVaultFSMPipelineChunkEvents(o, vaultID, vfsm.EnsureVaultFSM(vaultID))
 	}
 	o.vaultCtlLeaders.Start(vaultID, g)
@@ -1196,7 +1190,7 @@ func vaultCtlSubFSM(g *raftgroup.Group, vaultID glid.GLID) *vaultctlfsm.FSM {
 func (o *Orchestrator) vaultCtlChunkApplier(g *raftgroup.Group, vaultID glid.GLID) vaultctlfsm.Applier {
 	if o.peerConns != nil {
 		gid := raftgroup.VaultControlPlaneGroupID(vaultID)
-		return cluster.NewVaultCtlChunkApplyForwarder(g.Raft, gid, vaultID, groupApplyWait(g), o.peerConns, cluster.ReplicationTimeout)
+		return cluster.NewVaultCtlChunkApplyForwarder(g.Raft, gid, vaultID, groupApplyWait(g), o.peerConns, cluster.RaftApplyTimeout)
 	}
 	return &vaultCtlApplier{o: o, vaultID: vaultID}
 }
@@ -1612,7 +1606,6 @@ func (o *Orchestrator) RefreshVaultCtlMembers(clusterNodes []system.NodeConfig, 
 			o.bindVaultInstanceToCtlLocked(vaultID, v.Instance)
 		}
 	}
-	o.signalVaultReadyChange()
 	o.mu.Unlock()
 }
 
