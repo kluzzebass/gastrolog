@@ -248,7 +248,7 @@ func (c *boundCluster) startNode(n *boundClusterNode, fsm *vaultctlfsm.FSM) {
 		Chunks:  cm,
 		Indexes: indexfile.NewManager(n.dir, nil, nil, cm),
 	}
-	inst.applyRaftCallbacks(buildVaultRaftCallbacks(nil, func() *vaultctlfsm.FSM { return fsm }, c.log))
+	inst.applyRaftCallbacks(buildVaultRaftCallbacks(nil, nil, func() *vaultctlfsm.FSM { return fsm }, c.log))
 	inst.RaftLeadershipFacet = RaftLeadershipFacet{
 		HasRaftLeader: func() bool { return true },
 		IsRaftLeader:  func() bool { return isLeader },

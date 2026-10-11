@@ -60,12 +60,12 @@ Two bindings attach consumers to a group, and both run wherever the group and it
 
 | Binding | What it wires | Runs on |
 |---------|---------------|---------|
-| `bindVaultCtlGroup` (vault level, every node) | after-restore hook, pipeline chunk events on the live sub-FSM, the vault-ctl leader loop | group ensure (build, `AddVaultInstance`, `RefreshVaultCtlMembers`), snapshot restore |
+| `bindVaultCtlGroup` (vault level, every node) | after-restore hook, the vault-ready signal on the group FSM's first apply, pipeline chunk events on the live sub-FSM, the vault-ctl leader loop | group ensure (build, `AddVaultInstance`, `RefreshVaultCtlMembers`), snapshot restore |
 | `bindVaultInstanceToCtlLocked` (local instance) | once, at registration: the Raft-backed facets (`IsFSMReady`, apply callbacks, manifest reads) and the announcer; per live sub-FSM: the lifecycle reconciler's callbacks, `OnCreate` / `OnUpload`, the lazy cloud-backed resolver | instance registration (`AddVault`, `AddVaultInstance`, `RegisterVault`), `RefreshVaultCtlMembers`, snapshot restore |
 
 The facets and the announcer's applier read the instance's group pointer — stored by the binding once the group exists, read lock-free because the facets run on Raft apply goroutines — and resolve the sub-FSM through it on every call instead of capturing it, so they are correct before the group exists, after it is created, and across restores without ever being rewritten on a live instance. The sub-FSM pushes its events to whatever subscribed to it, so those subscriptions follow the live sub-FSM: the instance binding records the sub-FSM it subscribed to and is a no-op while that one is still live; a snapshot restore replaces the sub-FSM, so the restore pass subscribes the replacement. The leader loop is started through `vaultCtlLeaderManager.Start`, which runs at most one loop per vault.
 
-**Readiness while deferred:** deferral makes the **vault** not ready on that node. While the group does not exist, the instance has no group to read and `IsFSMReady()` reports `false`, so `ReadinessErr` returns `ErrVaultNotReady` until the group exists and has applied (`r.AppliedIndex() > 0`). A node without vault-ctl Raft at all (no `GroupManager` or no node address resolver: single-node/memory mode) leaves `IsFSMReady` nil and the instance is ready — its own chunk manager is authoritative.
+**Readiness while deferred:** deferral makes the **vault** not ready on that node. While the group does not exist, the instance has no group to read and `IsFSMReady()` reports `false`, so `ReadinessErr` returns `ErrVaultNotReady` until the group exists and its FSM has applied its first entry (`vaultraft.FSM.Ready`). The FSM stores configuration entries as well as commands (`hraft.ConfigurationStore`), so a fresh group becomes ready when its bootstrap configuration applies. That first apply fires the FSM's one-shot ready callback, which `bindVaultCtlGroup` wires to the vault-ready signal: a `WaitVaultReady` caller blocked on the pending group wakes then, not at its deadline. Readiness reads the FSM's own count rather than `r.AppliedIndex()`, which Raft advances before the FSM has run — a waiter woken by the FSM would otherwise still read not-ready. A node without vault-ctl Raft at all (no `GroupManager` or no node address resolver: single-node/memory mode) leaves `IsFSMReady` nil and the instance is ready — its own chunk manager is authoritative.
 
 ### Orchestrator
 
@@ -76,7 +76,7 @@ Vault / chunk operations and routing: [`backend/internal/orchestrator/vault_ops.
 1. **Authority scope:** Replicated chunk metadata is on **vault control-plane Raft** (cluster mode).
 2. **Snapshot layout:** Every group snapshots under `raft/groups/<groupID>/` — `raft/groups/cluster-ctl` for cluster-ctl, `raft/groups/vault/<vaultID>/ctl` for each vault-ctl group.
 3. **WALs:** Two per node. Cluster-ctl has its own `raftwal` at `raft/wal` (`Home.ClusterCtlWALDir`) so cluster heartbeats are not coupled to vault append/fsync batching; every vault-ctl group on the node shares one `raftwal` at `raft/groups/wal` (`Home.VaultCtlWALDir`, opened in `setupMultiRaft`).
-4. **Readiness / partial peers:** `Vault.ReadinessErr` ([`vault_readiness.go`](../backend/internal/orchestrator/vault_readiness.go)) gates on the instance's `IsFSMReady` callback, which `buildVaultRaftCallbacks` wires to `r.AppliedIndex() > 0`.
+4. **Readiness / partial peers:** `Vault.ReadinessErr` ([`vault_readiness.go`](../backend/internal/orchestrator/vault_readiness.go)) gates on the instance's `IsFSMReady` callback, which `buildVaultRaftCallbacks` wires to the vault-ctl group FSM's `Ready` (first entry applied or snapshot restored).
 5. **Apply entrypoints:** **One** `cluster.Server.SetGroupApplyFn`; `ForwardVaultApply` is the single cross-node apply RPC.
 
 ---
@@ -253,7 +253,7 @@ These require explicit product/architecture decisions:
 - [x] Replace implicit "find chunk manager" shortcuts with APIs that take **vault context** first (`vault_ops.go` and call sites). — done (554s3 + 2ze8j): orchestrator shortcuts retired in favor of vault-scoped lookups.
 - [x] Document and enforce: chunk managers are **owned** under a vault umbrella; no orphan instance lifetimes. — done (554s3).
 - [x] Forwarding (vault apply path and record/search forwarding) must use stable vault identity keys consistent with C. — done (2ze8j): `ForwardVaultApply` is the single apply RPC, `groupApplyFn` is the single apply path.
-- [x] Readiness plumbing: orchestrator checks **Vault_ControlPlaneReady** before operations that require it (per D). — `Vault.ReadinessErr` gates on the instance's `IsFSMReady` callback (`r.AppliedIndex() > 0`, wired in `buildVaultRaftCallbacks`).
+- [x] Readiness plumbing: orchestrator checks **Vault_ControlPlaneReady** before operations that require it (per D). — `Vault.ReadinessErr` gates on the instance's `IsFSMReady` callback (the vault-ctl group FSM's `Ready`, wired in `buildVaultRaftCallbacks`).
 - [x] Remove or quarantine legacy paths called out during inventory once vault Raft is live. — done (2ze8j): legacy per-instance Raft group-id helpers and tests deleted.
 
 ---
