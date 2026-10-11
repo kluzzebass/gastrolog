@@ -373,15 +373,18 @@ func (v *vaultChunking) collectRefBatch(
 // sealOpenManifestNow is the operator's seal: it commits the seal of the open
 // manifest ahead of the policy, under the same planner lock and leader gate
 // the policy-driven seal uses, so it cannot race a planner step.
+//
+// The leader gate comes before the open-manifest read: a follower's FSM can
+// lag the commit, so only the leader may answer that there is nothing to seal.
 func (v *vaultChunking) sealOpenManifestNow() (bool, error) {
 	v.planMu.Lock()
 	defer v.planMu.Unlock()
+	if !v.cfg.IsLeader() || v.applier() == nil {
+		return false, ErrNotLeader
+	}
 	open := v.fsm().OpenChunk()
 	if open == nil || open.TotalRecords == 0 {
 		return false, nil
-	}
-	if !v.cfg.IsLeader() || v.applier() == nil {
-		return false, ErrNotLeader
 	}
 	if err := v.applySealOpenManifest(open.ChunkID, v.now()); err != nil {
 		return false, err

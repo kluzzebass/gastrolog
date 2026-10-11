@@ -615,9 +615,9 @@ func (m *Manager) PlanCatchUp(ctx context.Context, vaultID glid.GLID) error {
 }
 
 // SealOpenManifest seals the vault's open chunk manifest now, regardless of
-// its rotation policy, and reports whether it did. An empty or absent manifest
-// reports (false, nil). Only the chunking leader may seal: anywhere else a
-// manifest holding records reports ErrNotLeader, and an unregistered vault
+// its rotation policy, and reports whether it did. Only the chunking leader
+// answers: on it an empty or absent manifest reports (false, nil); every other
+// home reports ErrNotLeader whatever its FSM holds, and an unregistered vault
 // reports ErrUnknownVault.
 func (m *Manager) SealOpenManifest(vaultID glid.GLID) (bool, error) {
 	m.mu.Lock()

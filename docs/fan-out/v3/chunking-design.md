@@ -179,9 +179,11 @@ clock.
 the open manifest ahead of policy when it holds records. The RPC routes to the
 vault's placement leader; the seal commits only on the chunking leader (the home
 that is also the vault-ctl leader), under the same planner lock as a policy seal.
-Reaching any other node while the manifest holds records is refused as
-`Unavailable` (vault-ctl leadership is realigning onto the placement leader), never
-answered with a silent zero. A chunk-manager active chunk on the same vault is
+Only the chunking leader may answer: on any other node the request is refused as
+`Unavailable` (vault-ctl leadership is realigning onto the placement leader)
+whether or not that node's FSM shows records open, because a non-leader's FSM can
+lag the commit and its "nothing open" is never a reliable zero. A node that has no
+vault-ctl group for the vault has no manifest to seal. A chunk-manager active chunk on the same vault is
 sealed by the same request, and `sealed_count` reports every chunk sealed.
 
 **IngestTS time windows** can be deterministic with identical segments and a pinned

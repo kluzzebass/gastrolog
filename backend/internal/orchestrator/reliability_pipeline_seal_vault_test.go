@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,12 +110,30 @@ func TestOrchPipeline_SealVaultSealsOpenManifest(t *testing.T) {
 	homeIdxs := []int{0, 1, 2}
 	ingestNode := h.nodeIDs[3]
 
-	// Nothing ingested: every home reports nothing to seal, leader or not.
+	// Nothing ingested: the chunking leader reports nothing to seal. Every
+	// other node, home or not, refuses: its FSM may lag the commit, so it
+	// cannot vouch that nothing is open. Leadership is observed on both sides
+	// of each call so a mid-call election is retried, not misread.
 	leader := h.waitForVaultCtlLeaderForVault(v)
-	for _, idx := range homeIdxs {
-		n := h.nodes[h.nodeIDs[idx]]
-		if sealed, err := n.orch.SealActive(v.id); err != nil || sealed != 0 {
-			t.Fatalf("SealActive on %s with nothing open = (%d, %v), want (0, nil)", n.label, sealed, err)
+	for _, nodeID := range h.nodeIDs {
+		n := h.nodes[nodeID]
+		for attempt := 0; ; attempt++ {
+			before := h.vaultCtlLeadership(v, nodeID)
+			sealed, err := n.orch.SealActive(v.id)
+			if h.vaultCtlLeadership(v, nodeID) != before {
+				if attempt == 20 {
+					t.Fatalf("vault-ctl leadership never held still across a seal on %s", n.label)
+				}
+				continue
+			}
+			leads := strings.HasPrefix(before, nodeID+"@")
+			switch {
+			case leads && (err != nil || sealed != 0):
+				t.Fatalf("SealActive on chunking leader %s with nothing open = (%d, %v), want (0, nil)", n.label, sealed, err)
+			case !leads && (!errors.Is(err, orchestrator.ErrNotChunkingLeader) || sealed != 0):
+				t.Fatalf("SealActive on non-leader %s with nothing open = (%d, %v), want (0, ErrNotChunkingLeader)", n.label, sealed, err)
+			}
+			break
 		}
 	}
 

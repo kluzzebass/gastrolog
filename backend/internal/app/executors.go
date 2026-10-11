@@ -582,13 +582,6 @@ func analyzeChunkOneForExecutor(o *orchestrator.Orchestrator, vaultID glid.GLID,
 	return []analyzer.ChunkAnalysis{*analysis}, nil
 }
 
-func newSealVaultExecutor(o *orchestrator.Orchestrator) cluster.SealVaultExecutor {
-	return func(_ context.Context, vaultID glid.GLID) error {
-		_, err := o.SealActive(vaultID)
-		return err
-	}
-}
-
 func newReindexVaultExecutor(o *orchestrator.Orchestrator) cluster.ReindexVaultExecutor {
 	return func(_ context.Context, vaultID glid.GLID) (string, error) {
 		if !o.VaultExists(vaultID) {

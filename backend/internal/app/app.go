@@ -748,7 +748,6 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetGetChunkExecutor(newGetChunkExecutor(orch))
 	clusterSrv.SetAnalyzeChunkExecutor(newAnalyzeChunkExecutor(orch))
 	clusterSrv.SetChunkEventSubscriber(newChunkEventSubscriber(orch))
-	clusterSrv.SetSealVaultExecutor(newSealVaultExecutor(orch))
 	clusterSrv.SetReindexVaultExecutor(newReindexVaultExecutor(orch))
 	clusterSrv.SetExplainExecutor(newExplainExecutor(orch, nodeID))
 	clusterSrv.SetFollowExecutor(newFollowExecutor(orch))

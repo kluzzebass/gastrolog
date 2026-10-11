@@ -186,9 +186,6 @@ type Server struct {
 	// analyzeChunkExecutor runs index analysis on a local vault.
 	analyzeChunkExecutor AnalyzeChunkExecutor
 
-	// sealVaultExecutor seals the active chunk of a local vault.
-	sealVaultExecutor SealVaultExecutor
-
 	// reindexVaultExecutor rebuilds all indexes for a local vault.
 	reindexVaultExecutor ReindexVaultExecutor
 

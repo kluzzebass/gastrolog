@@ -798,8 +798,8 @@ func (o *Orchestrator) sealChunkManagerActive(vaultID glid.GLID, vaultInst *Vaul
 }
 
 // sealOpenManifest seals a pipeline vault's open chunk manifest when it holds
-// records. Only the chunking leader may commit the seal; reaching any other
-// node while the manifest holds records is ErrNotChunkingLeader, never a
+// records. Only the chunking leader may commit the seal or report that there
+// is nothing to seal; every other node is ErrNotChunkingLeader, never a
 // silent zero.
 func (o *Orchestrator) sealOpenManifest(vaultID glid.GLID) (int, error) {
 	if !o.isPipelineIngestVault(vaultID) {
@@ -821,24 +821,27 @@ func (o *Orchestrator) sealOpenManifest(vaultID glid.GLID) (int, error) {
 	case errors.Is(err, chunking.ErrNotLeader):
 		return 0, fmt.Errorf("%w: vault %s", ErrNotChunkingLeader, vaultID)
 	case errors.Is(err, chunking.ErrUnknownVault):
-		if o.openManifestHoldsRecords(vaultID) {
-			return 0, fmt.Errorf("%w: vault %s is not homed on this node", ErrNotChunkingLeader, vaultID)
-		}
-		return 0, nil
+		return 0, o.nothingToSealOffHome(vaultID)
 	default:
 		return 0, fmt.Errorf("seal open chunk of vault %s: %w", vaultID, err)
 	}
 }
 
-// openManifestHoldsRecords reads the vault-ctl FSM, which every node holds,
-// for an open chunk manifest with records.
-func (o *Orchestrator) openManifestHoldsRecords(vaultID glid.GLID) bool {
-	fsm, _, _, ok := o.vaultCtlHandle(vaultID)
+// nothingToSealOffHome answers a seal on a node that does not chunk the vault.
+// Only the vault-ctl leader's FSM can say no manifest holds records: a
+// follower's can lag the commit. A node without the vault's vault-ctl group
+// has no manifest to seal.
+func (o *Orchestrator) nothingToSealOffHome(vaultID glid.GLID) error {
+	fsm, _, isLeader, ok := o.vaultCtlHandle(vaultID)
 	if !ok {
-		return false
+		return nil
 	}
-	open := fsm.OpenChunk()
-	return open != nil && open.TotalRecords > 0
+	if isLeader() {
+		if open := fsm.OpenChunk(); open == nil || open.TotalRecords == 0 {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: vault %s is not homed on this node", ErrNotChunkingLeader, vaultID)
 }
 
 // --- Index ops ---
