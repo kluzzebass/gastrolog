@@ -10,6 +10,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ type admissionNode struct {
 	tls         *cluster.ClusterTLS
 	setSuffrage func(ctx context.Context, targetNodeID string, voter bool) error
 	remove      cluster.RemoveNodeFunc
+	gate        *membershipGate
 }
 
 func newAdmissionNode(t *testing.T, ca tlsutil.CAKeyPair, bootstrap bool) *admissionNode {
@@ -93,7 +95,7 @@ func newAdmissionNode(t *testing.T, ca tlsutil.CAKeyPair, bootstrap bool) *admis
 	store.SetForwarder(fwd)
 
 	var gate membershipGate
-	n := &admissionNode{id: id, srv: srv, raft: r, store: store, tls: ctls}
+	n := &admissionNode{id: id, srv: srv, raft: r, store: store, tls: ctls, gate: &gate}
 	n.remove = makeRemoveNodeFunc(srv, store, &gate, id, discardLogger())
 	n.setSuffrage = makeSetNodeSuffrageFunc(srv, store, &gate, id, nil, discardLogger())
 
@@ -314,5 +316,59 @@ func awaitLeaderOtherThan(t *testing.T, observed chan hraft.Observation, old str
 		case <-deadline:
 			t.Fatal("no new leader was observed after the transfer")
 		}
+	}
+}
+
+// TestPromotionRefusesANodeTheClusterRemoved: a removal writes its record
+// before the node leaves the configuration, and the configuration change can
+// fail after the record lands. While a removed node is still configured,
+// neither an operator's promotion nor the learner promoter's may make it a
+// voter — hashicorp/raft's AddVoter would otherwise grant the removed node a
+// vote, or put it back after its RemoveServer.
+func TestPromotionRefusesANodeTheClusterRemoved(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node real-raft membership test")
+	}
+	t.Parallel()
+	ca, err := tlsutil.GenerateCA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	n1 := newAdmissionNode(t, ca, true)
+	select {
+	case <-n1.raft.LeaderCh():
+	case <-time.After(10 * time.Second):
+		t.Fatal("bootstrap node never became leader")
+	}
+	n2 := newAdmissionNode(t, ca, false)
+	if err := join(t, n2, n1); err != nil {
+		t.Fatalf("fresh joiner refused: %v", err)
+	}
+	if got := suffrageIn(t, n1, n2.id); got != "Nonvoter" {
+		t.Fatalf("fresh joiner admitted as %q, want Nonvoter", got)
+	}
+
+	if err := n1.store.MarkNodeRemoved(ctx, n2.id); err != nil {
+		t.Fatalf("record removal: %v", err)
+	}
+
+	err = n1.setSuffrage(ctx, n2.id, true)
+	if !errors.Is(err, cluster.ErrNodeRemoved) {
+		t.Fatalf("operator promotion of a removed node: err = %v, want ErrNodeRemoved", err)
+	}
+	if got := suffrageIn(t, n1, n2.id); got != "Nonvoter" {
+		t.Fatalf("operator promotion made the removed node %q", got)
+	}
+
+	promote := func(nodeID string) error {
+		return changeMemberSuffrageOnLeader(ctx, n1.srv, n1.store, n1.gate, discardLogger(), nodeID, true)
+	}
+	if err := promote(n2.id); !errors.Is(err, cluster.ErrNodeRemoved) {
+		t.Fatalf("learner promotion of a removed node: err = %v, want ErrNodeRemoved", err)
+	}
+	if got := suffrageIn(t, n1, n2.id); got != "Nonvoter" {
+		t.Fatalf("learner promotion made the removed node %q", got)
 	}
 }
