@@ -461,7 +461,7 @@ message VaultCtlSnapshot {
   repeated PendingDelete pending_deletes = 3;
   repeated CompletedSegmentEntry completed_segments = 4;
   OpenChunkManifestState open_chunk = 5;
-  // FIFO queue of sealed manifests awaiting local GLCB build on each home.
+  // FIFO seal queue: sealed manifests awaiting the leader's CmdSealChunk.
   // Multiple entries let the leader rotate the open chunk while earlier
   // chunks are still building without freezing ingest at rotation limits.
   repeated OpenChunkManifestState sealed_manifests = 6;
@@ -471,8 +471,12 @@ message VaultCtlSnapshot {
   // metadata without bytes (permanent collection/chunking wedge).
   repeated bytes released_segment_ids = 8;
   // Segment → containing chunk IDs, for release-by-chunk-replication after
-  // the manifest pops at build time.
+  // the manifest leaves the seal queue.
   repeated SegmentChunkIDs segment_chunks = 9;
+  // Sealed manifests whose CmdSealChunk has committed, in seal order. Each is
+  // kept until a segment it references is released or its chunk is deleted,
+  // so every home can build the chunk from its refs.
+  repeated OpenChunkManifestState sealed_chunk_manifests = 10;
 }
 
 // VaultGroupSnapshot is the snapshot of the whole vault-ctl Raft group: one

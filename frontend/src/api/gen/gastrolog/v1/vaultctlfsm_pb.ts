@@ -2504,7 +2504,7 @@ export class VaultCtlSnapshot extends Message<VaultCtlSnapshot> {
   openChunk?: OpenChunkManifestState;
 
   /**
-   * FIFO queue of sealed manifests awaiting local GLCB build on each home.
+   * FIFO seal queue: sealed manifests awaiting the leader's CmdSealChunk.
    * Multiple entries let the leader rotate the open chunk while earlier
    * chunks are still building without freezing ingest at rotation limits.
    *
@@ -2528,11 +2528,20 @@ export class VaultCtlSnapshot extends Message<VaultCtlSnapshot> {
 
   /**
    * Segment → containing chunk IDs, for release-by-chunk-replication after
-   * the manifest pops at build time.
+   * the manifest leaves the seal queue.
    *
    * @generated from field: repeated gastrolog.v1.SegmentChunkIDs segment_chunks = 9;
    */
   segmentChunks: SegmentChunkIDs[] = [];
+
+  /**
+   * Sealed manifests whose CmdSealChunk has committed, in seal order. Each is
+   * kept until a segment it references is released or its chunk is deleted,
+   * so every home can build the chunk from its refs.
+   *
+   * @generated from field: repeated gastrolog.v1.OpenChunkManifestState sealed_chunk_manifests = 10;
+   */
+  sealedChunkManifests: OpenChunkManifestState[] = [];
 
   constructor(data?: PartialMessage<VaultCtlSnapshot>) {
     super();
@@ -2551,6 +2560,7 @@ export class VaultCtlSnapshot extends Message<VaultCtlSnapshot> {
     { no: 7, name: "segment_resume", kind: "message", T: SegmentResumeRecordNumber, repeated: true },
     { no: 8, name: "released_segment_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 9, name: "segment_chunks", kind: "message", T: SegmentChunkIDs, repeated: true },
+    { no: 10, name: "sealed_chunk_manifests", kind: "message", T: OpenChunkManifestState, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultCtlSnapshot {

@@ -337,9 +337,15 @@ type FSM struct {
 
 	// openChunk is the in-progress manifest-backed active chunk. See open_chunk.go.
 	openChunk *OpenChunkManifest
-	// sealedManifests is the FIFO queue of sealed open-chunk manifests awaiting
-	// local GLCB build. SealedManifest() returns the queue head.
+	// sealedManifests is the seal queue: sealed open-chunk manifests, FIFO,
+	// awaiting the leader's CmdSealChunk. SealedManifest() returns the head.
 	sealedManifests []*OpenChunkManifest
+	// sealedChunkManifests holds, in seal order, the sealed manifests whose
+	// CmdSealChunk has committed. The leader's seal moves a manifest here
+	// from the seal queue; it stays until a segment it references is
+	// released or its chunk is deleted, so a home that has not built the
+	// chunk yet still has the refs to build it from.
+	sealedChunkManifests []*OpenChunkManifest
 	// segmentResume maps segment ID → next EventID-order record number after
 	// a partial manifest ref.
 	segmentResume map[glid.GLID]uint32
@@ -1315,14 +1321,15 @@ func (f *FSM) SnapshotProto() *gastrologv1.VaultCtlSnapshot {
 // and round-trip equality checks sane.
 func (f *FSM) snapshotProtoLocked() *gastrologv1.VaultCtlSnapshot {
 	snap := &gastrologv1.VaultCtlSnapshot{
-		Entries:           make([]*gastrologv1.ManifestEntry, 0, len(f.chunks)),
-		Tombstones:        make([]*gastrologv1.Tombstone, 0, len(f.tombstones)),
-		PendingDeletes:    make([]*gastrologv1.PendingDelete, 0, len(f.pendingDeletes)),
-		CompletedSegments: f.snapshotCompletedSegmentsLocked(),
-		OpenChunk:         f.snapshotOpenChunkLocked(),
-		SealedManifests:   f.snapshotSealedManifestsLocked(),
-		SegmentResume:     f.snapshotSegmentResumeLocked(),
-		SegmentChunks:     f.snapshotSegmentChunksLocked(),
+		Entries:              make([]*gastrologv1.ManifestEntry, 0, len(f.chunks)),
+		Tombstones:           make([]*gastrologv1.Tombstone, 0, len(f.tombstones)),
+		PendingDeletes:       make([]*gastrologv1.PendingDelete, 0, len(f.pendingDeletes)),
+		CompletedSegments:    f.snapshotCompletedSegmentsLocked(),
+		OpenChunk:            f.snapshotOpenChunkLocked(),
+		SealedManifests:      snapshotManifests(f.sealedManifests),
+		SealedChunkManifests: snapshotManifests(f.sealedChunkManifests),
+		SegmentResume:        f.snapshotSegmentResumeLocked(),
+		SegmentChunks:        f.snapshotSegmentChunksLocked(),
 	}
 
 	releasedIDs := slices.SortedFunc(maps.Keys(f.releasedSegments), glid.Compare)
@@ -1474,7 +1481,9 @@ func (f *FSM) applySeal(c *gastrologv1.SealChunkCommand) error {
 		sealedAt = e.WriteEnd
 	}
 	e.SealedAt = sealedAt
-	f.popSealedManifestHeadIfIDLocked(id)
+	if m := f.popSealedManifestHeadIfIDLocked(id); m != nil && len(m.Refs) > 0 {
+		f.sealedChunkManifests = append(f.sealedChunkManifests, m)
+	}
 	return nil
 }
 

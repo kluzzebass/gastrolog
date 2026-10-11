@@ -3207,7 +3207,7 @@ type VaultCtlSnapshot struct {
 	PendingDeletes    []*PendingDelete         `protobuf:"bytes,3,rep,name=pending_deletes,json=pendingDeletes,proto3" json:"pending_deletes,omitempty"`
 	CompletedSegments []*CompletedSegmentEntry `protobuf:"bytes,4,rep,name=completed_segments,json=completedSegments,proto3" json:"completed_segments,omitempty"`
 	OpenChunk         *OpenChunkManifestState  `protobuf:"bytes,5,opt,name=open_chunk,json=openChunk,proto3" json:"open_chunk,omitempty"`
-	// FIFO queue of sealed manifests awaiting local GLCB build on each home.
+	// FIFO seal queue: sealed manifests awaiting the leader's CmdSealChunk.
 	// Multiple entries let the leader rotate the open chunk while earlier
 	// chunks are still building without freezing ingest at rotation limits.
 	SealedManifests []*OpenChunkManifestState    `protobuf:"bytes,6,rep,name=sealed_manifests,json=sealedManifests,proto3" json:"sealed_manifests,omitempty"`
@@ -3217,10 +3217,14 @@ type VaultCtlSnapshot struct {
 	// metadata without bytes (permanent collection/chunking wedge).
 	ReleasedSegmentIds [][]byte `protobuf:"bytes,8,rep,name=released_segment_ids,json=releasedSegmentIds,proto3" json:"released_segment_ids,omitempty"`
 	// Segment → containing chunk IDs, for release-by-chunk-replication after
-	// the manifest pops at build time.
+	// the manifest leaves the seal queue.
 	SegmentChunks []*SegmentChunkIDs `protobuf:"bytes,9,rep,name=segment_chunks,json=segmentChunks,proto3" json:"segment_chunks,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Sealed manifests whose CmdSealChunk has committed, in seal order. Each is
+	// kept until a segment it references is released or its chunk is deleted,
+	// so every home can build the chunk from its refs.
+	SealedChunkManifests []*OpenChunkManifestState `protobuf:"bytes,10,rep,name=sealed_chunk_manifests,json=sealedChunkManifests,proto3" json:"sealed_chunk_manifests,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *VaultCtlSnapshot) Reset() {
@@ -3312,6 +3316,13 @@ func (x *VaultCtlSnapshot) GetReleasedSegmentIds() [][]byte {
 func (x *VaultCtlSnapshot) GetSegmentChunks() []*SegmentChunkIDs {
 	if x != nil {
 		return x.SegmentChunks
+	}
+	return nil
+}
+
+func (x *VaultCtlSnapshot) GetSealedChunkManifests() []*OpenChunkManifestState {
+	if x != nil {
+		return x.SealedChunkManifests
 	}
 	return nil
 }
@@ -3676,7 +3687,7 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12*\n" +
 	"\x11proposed_at_nanos\x18\x03 \x01(\x03R\x0fproposedAtNanos\x12#\n" +
-	"\rexpected_from\x18\x04 \x03(\tR\fexpectedFrom\"\xfa\x04\n" +
+	"\rexpected_from\x18\x04 \x03(\tR\fexpectedFrom\"\xd6\x05\n" +
 	"\x10VaultCtlSnapshot\x125\n" +
 	"\aentries\x18\x01 \x03(\v2\x1b.gastrolog.v1.ManifestEntryR\aentries\x127\n" +
 	"\n" +
@@ -3689,7 +3700,9 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\x10sealed_manifests\x18\x06 \x03(\v2$.gastrolog.v1.OpenChunkManifestStateR\x0fsealedManifests\x12N\n" +
 	"\x0esegment_resume\x18\a \x03(\v2'.gastrolog.v1.SegmentResumeRecordNumberR\rsegmentResume\x120\n" +
 	"\x14released_segment_ids\x18\b \x03(\fR\x12releasedSegmentIds\x12D\n" +
-	"\x0esegment_chunks\x18\t \x03(\v2\x1d.gastrolog.v1.SegmentChunkIDsR\rsegmentChunks\"\x81\x01\n" +
+	"\x0esegment_chunks\x18\t \x03(\v2\x1d.gastrolog.v1.SegmentChunkIDsR\rsegmentChunks\x12Z\n" +
+	"\x16sealed_chunk_manifests\x18\n" +
+	" \x03(\v2$.gastrolog.v1.OpenChunkManifestStateR\x14sealedChunkManifests\"\x81\x01\n" +
 	"\x12VaultGroupSnapshot\x12=\n" +
 	"\x06vaults\x18\x01 \x03(\v2%.gastrolog.v1.VaultGroupSnapshotEntryR\x06vaults\x12,\n" +
 	"\x12last_applied_index\x18\x02 \x01(\x04R\x10lastAppliedIndex\"p\n" +
@@ -3796,13 +3809,14 @@ var file_gastrolog_v1_vaultctlfsm_proto_depIdxs = []int32{
 	19, // 38: gastrolog.v1.VaultCtlSnapshot.sealed_manifests:type_name -> gastrolog.v1.OpenChunkManifestState
 	20, // 39: gastrolog.v1.VaultCtlSnapshot.segment_resume:type_name -> gastrolog.v1.SegmentResumeRecordNumber
 	22, // 40: gastrolog.v1.VaultCtlSnapshot.segment_chunks:type_name -> gastrolog.v1.SegmentChunkIDs
-	40, // 41: gastrolog.v1.VaultGroupSnapshot.vaults:type_name -> gastrolog.v1.VaultGroupSnapshotEntry
-	38, // 42: gastrolog.v1.VaultGroupSnapshotEntry.snapshot:type_name -> gastrolog.v1.VaultCtlSnapshot
-	43, // [43:43] is the sub-list for method output_type
-	43, // [43:43] is the sub-list for method input_type
-	43, // [43:43] is the sub-list for extension type_name
-	43, // [43:43] is the sub-list for extension extendee
-	0,  // [0:43] is the sub-list for field type_name
+	19, // 41: gastrolog.v1.VaultCtlSnapshot.sealed_chunk_manifests:type_name -> gastrolog.v1.OpenChunkManifestState
+	40, // 42: gastrolog.v1.VaultGroupSnapshot.vaults:type_name -> gastrolog.v1.VaultGroupSnapshotEntry
+	38, // 43: gastrolog.v1.VaultGroupSnapshotEntry.snapshot:type_name -> gastrolog.v1.VaultCtlSnapshot
+	44, // [44:44] is the sub-list for method output_type
+	44, // [44:44] is the sub-list for method input_type
+	44, // [44:44] is the sub-list for extension type_name
+	44, // [44:44] is the sub-list for extension extendee
+	0,  // [0:44] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_vaultctlfsm_proto_init() }

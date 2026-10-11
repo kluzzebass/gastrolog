@@ -1,12 +1,10 @@
 package chunking
 
 import (
-	"slices"
 	"sync"
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // buildKey identifies one sealed-manifest build cycle.
@@ -27,8 +25,10 @@ type cachedBuild struct {
 // manifest lifecycle: per build cycle the GLCB is built once, CmdSealChunk
 // is proposed once, post-seal purge/release work runs once, and OnBuilt fires
 // once. It owns its lock; every once-guard has exactly one definition here.
-// Guards are single slots, not sets, because at most one sealed manifest is
-// in flight per vault at a time.
+// Guards are single slots, not sets: only the seal-queue head awaits
+// CmdSealChunk across build passes, and a chunk built after its seal
+// committed finishes its post-seal work and OnBuilt in the pass that
+// builds it.
 type sealProgress struct {
 	mu sync.Mutex
 	// built marks the cycle whose GLCB this home has materialized.
@@ -47,9 +47,6 @@ type sealProgress struct {
 	// onBuiltFired ensures OnBuilt fires once per sealed manifest build.
 	onBuiltFired buildKey
 	cached       cachedBuild
-	// pending is a copy of the sealed manifest retained after CmdSealChunk
-	// clears sealedManifest cluster-wide so follower homes can still build.
-	pending *vaultctlfsm.OpenChunkManifest
 }
 
 // alreadyBuilt reports whether the GLCB for this cycle is materialized locally.
@@ -189,47 +186,11 @@ func closeDoneChLocked(ch chan struct{}) {
 	}
 }
 
-// setPending records the sealed manifest awaiting build on this home.
-func (p *sealProgress) setPending(m *vaultctlfsm.OpenChunkManifest) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.pending = m
-}
-
-// pendingManifest returns the retained sealed manifest, if any.
-func (p *sealProgress) pendingManifest() *vaultctlfsm.OpenChunkManifest {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.pending
-}
-
 // noteSealCleared handles CmdSealChunk applying cluster-wide: the seal-proposed
-// and OnBuilt guards reset for the next cycle, and a copy of the retained
-// pending manifest (nil when none) is returned for post-seal work. The pending
-// manifest itself stays retained so follower homes that have not built yet
-// still can.
-func (p *sealProgress) noteSealCleared() *vaultctlfsm.OpenChunkManifest {
+// and OnBuilt guards reset for the next seal-queue head.
+func (p *sealProgress) noteSealCleared() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.sealProposed = buildKey{}
 	p.onBuiltFired = buildKey{}
-	if p.pending == nil {
-		return nil
-	}
-	sealedCopy := *p.pending
-	sealedCopy.Refs = slices.Clone(p.pending.Refs)
-	return &sealedCopy
-}
-
-// clearPendingAfterBuilt drops the retained pending manifest once this home
-// has built the cycle's GLCB. No-op when the chunk does not match or the
-// build has not landed — pendingSeal must survive until then so
-// OnSealedManifestCleared can run afterSealBuild on follower homes.
-func (p *sealProgress) clearPendingAfterBuilt(chunkID chunk.ChunkID, key buildKey) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.pending == nil || p.pending.ChunkID != chunkID || p.built != key {
-		return
-	}
-	p.pending = nil
 }

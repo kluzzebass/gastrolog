@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 func testSealKey(sec int64) buildKey {
@@ -180,64 +179,16 @@ func TestSealProgressNewCycleClaimReleasesStaleWaiters(t *testing.T) {
 func TestSealProgressNoteSealClearedResetsGuards(t *testing.T) {
 	var p sealProgress
 	key := testSealKey(1)
-	manifest := &vaultctlfsm.OpenChunkManifest{
-		ChunkID: key.chunkID,
-		Refs:    []vaultctlfsm.OpenChunkSegmentRef{{FirstRecordNumber: 1}},
-	}
-	p.setPending(manifest)
 	p.markProposed(key)
 	if !p.claimOnBuilt(key) {
 		t.Fatal("setup: claimOnBuilt lost")
 	}
 
-	cleared := p.noteSealCleared()
-	if cleared == nil || cleared.ChunkID != manifest.ChunkID {
-		t.Fatalf("noteSealCleared = %+v; want copy of pending", cleared)
-	}
-	cleared.Refs[0].FirstRecordNumber = 99
-	if manifest.Refs[0].FirstRecordNumber != 1 {
-		t.Fatal("noteSealCleared returned a shallow Refs copy")
-	}
+	p.noteSealCleared()
 	if !p.shouldPropose(key) {
 		t.Fatal("seal-proposed guard survived noteSealCleared")
 	}
 	if !p.claimOnBuilt(key) {
 		t.Fatal("OnBuilt guard survived noteSealCleared")
-	}
-	if p.pendingManifest() == nil {
-		t.Fatal("noteSealCleared dropped the retained pending manifest")
-	}
-}
-
-func TestSealProgressNoteSealClearedNoPending(t *testing.T) {
-	var p sealProgress
-	key := testSealKey(1)
-	p.markProposed(key)
-	if cleared := p.noteSealCleared(); cleared != nil {
-		t.Fatalf("noteSealCleared = %+v; want nil without pending", cleared)
-	}
-	if !p.shouldPropose(key) {
-		t.Fatal("guards not reset when pending is nil")
-	}
-}
-
-func TestSealProgressClearPendingAfterBuilt(t *testing.T) {
-	var p sealProgress
-	key := testSealKey(1)
-	manifest := &vaultctlfsm.OpenChunkManifest{ChunkID: key.chunkID}
-	p.setPending(manifest)
-
-	p.clearPendingAfterBuilt(key.chunkID, key)
-	if p.pendingManifest() == nil {
-		t.Fatal("pending cleared before markBuilt")
-	}
-	p.markBuilt(key, BuildResult{})
-	p.clearPendingAfterBuilt(chunk.NewChunkID(), key)
-	if p.pendingManifest() == nil {
-		t.Fatal("pending cleared for a different chunk")
-	}
-	p.clearPendingAfterBuilt(key.chunkID, key)
-	if p.pendingManifest() != nil {
-		t.Fatal("pending retained after built clear")
 	}
 }
