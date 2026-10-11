@@ -5,8 +5,8 @@ import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 
 const mocks = installMockClients();
 
-import { IngestersSettings } from "./IngestersSettings";
-import { GetSystemResponse } from "../../api/gen/gastrolog/v1/system_pb";
+import { IngestersSettings, ingesterModeBadge } from "./IngestersSettings";
+import { GetSystemResponse, IngesterMode } from "../../api/gen/gastrolog/v1/system_pb";
 import { renderWritable } from "../../testing/renderWritable";
 
 function testId(n: number): Uint8Array<ArrayBuffer> {
@@ -85,5 +85,16 @@ describe("IngestersSettings save gates", () => {
 
     fireEvent.click(getByText("edge-syslog"));
     expect(queryByText(/is required/)).toBeNull();
+  });
+});
+
+describe("ingesterModeBadge", () => {
+  test("a listener binds a port; an active ingester pulls", () => {
+    expect(ingesterModeBadge(IngesterMode.PASSIVE)).toEqual({
+      text: "listener",
+      title: "listener — binds a port and accepts what clients push to it",
+    });
+    expect(ingesterModeBadge(IngesterMode.ACTIVE).text).toBe("active");
+    expect(ingesterModeBadge(IngesterMode.ACTIVE).title).toContain("pulls");
   });
 });
