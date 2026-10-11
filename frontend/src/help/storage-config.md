@@ -12,7 +12,7 @@ File storages are locally-attached disk resources declared per node. Each file s
 - **Disk Free Warn** — free space on this storage below which the disk-space alarm raises. An absolute size like `10GB`, or a percentage of the volume like `10%`. Leave empty to inherit the node default.
 - **Disk Free Floor** — free space below which every vault placed on this storage is refused admission, cluster-wide, until space frees. Vaults on other storages keep ingesting. A size like `3GB` or a percentage like `3%`; leave empty to inherit the node default.
 
-File storages on every node are listed together, sorted by name and badged with their node, and any of them can be edited or removed from whichever node you are connected to. **Add File Storage** asks which node the new storage belongs to, defaulting to the node you are connected to.
+File storages on every node are listed together, sorted by name and badged with their node, and any of them can be edited or removed from whichever node you are connected to. **Add File Storage** asks which **Node** the new storage belongs to, defaulting to the node you are connected to: the path is resolved on that node's disk, and vaults placed on the storage live there.
 
 The thresholds are evaluated once per storage, not once per vault — a below-floor storage refuses every vault placed on it with a single alarm, rather than one alarm per vault sharing the volume.
 
@@ -20,7 +20,7 @@ The thresholds are evaluated once per storage, not once per vault — a below-fl
 
 When you create a file vault, you assign it a **Storage Class**. The placement manager finds file storages with that class across the cluster and assigns one per replica. For example, a file vault with RF=3 and storage class 1 needs three file storages with class 1 — they can be on different nodes (availability) or the same node (redundancy).
 
-The number of file storages with a matching class determines the maximum replication factor for that vault.
+The number of file storages with a matching class is the vault's replication factor cap. The Storage Class picker lists that count per class, the Replication Factor field states the cap and its cause (`Cap 2: 2 file storages with class 1`), and the vault card's [Placement](help:vaults-config#placement) block shows which nodes hold the leader and follower placements, or why the vault is unplaced. To raise the cap, add a file storage with the class on any node.
 
 ## Cloud Storage
 
@@ -31,6 +31,9 @@ Cloud storage endpoints are cluster-wide — not tied to any specific node. Clou
 - **S3** — Amazon S3 or S3-compatible services (MinIO, Ceph, DigitalOcean Spaces, etc.). Requires Bucket, Region, and access credentials (Access Key + Secret Key). Set the Endpoint field for non-AWS services — it must include an explicit scheme (`https://…`, or `http://…` for a plaintext local/dev endpoint).
 - **GCS** — Google Cloud Storage. Requires Bucket and a service account Credentials JSON.
 - **Azure** — Azure Blob Storage. Requires a Container name and Connection String.
+- **Memory** — an in-process store with no durability: its contents vanish when the node stops. For tests and local development only; the picker labels it that way.
+
+**Restore Speed** and **Restore Days** are always shown; they are disabled, with the reason, for providers that have no restore step (GCS reads archived objects directly; Memory has nothing to restore) and Restore Days applies to S3 only, where a restored object expires after that many days.
 
 ### Credentials are write-only
 

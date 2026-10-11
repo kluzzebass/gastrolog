@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, mock } from "bun:test";
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, waitFor } from "@testing-library/react";
+import { encode } from "../../api/glid";
 import { installMockClients, m } from "../../../test/api-mock";
 import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 import { HelpProvider } from "../../hooks/useHelp";
@@ -175,6 +176,73 @@ describe("ServiceSettings", () => {
     expect(getAllByText("disabled").length).toBe(2);
   });
 
+  // Under --no-auth the authentication settings are not consulted. A form
+  // that still accepted edits would save into a mode that ignores them, so
+  // the inputs are read-only and the secret cannot be regenerated. With auth
+  // on, the same inputs are writable — the premise the first half rests on.
+  test("noAuth makes authentication inputs read-only and hides the regenerate action", () => {
+    const qc = createTestQueryClient();
+    qc.setQueryData(["settings"], sampleSettings);
+    qc.setQueryData(["certificates"], { certificates: [] });
+
+    const noAuth = renderWritable(<ServiceSettings dark noAuth />, { wrapper: settingsWrapper(qc) });
+    const tokenInput = noAuth.getByDisplayValue("15m") as HTMLInputElement;
+    expect(tokenInput.readOnly).toBe(true);
+    expect(noAuth.queryByText("Regenerate Secret")).toBeNull();
+    noAuth.unmount();
+
+    const withAuth = renderWritable(<ServiceSettings dark />, { wrapper: settingsWrapper(qc) });
+    expect((withAuth.getByDisplayValue("15m") as HTMLInputElement).readOnly).toBe(false);
+    expect(withAuth.queryByText("Regenerate Secret")).not.toBeNull();
+  });
+
+  // The TLS header badge reads the saved configuration. Ticking the
+  // checkbox is a proposal: the badge stays off until Save, and appears
+  // once the saved settings echoed back from the server say enabled.
+  test("TLS badge follows saved state, not the draft", async () => {
+    const certId = testId(1);
+    const settingsWithCert = {
+      ...sampleSettings,
+      tls: { defaultCert: encode(certId), enabled: false, httpToHttpsRedirect: false, httpsPort: "" },
+    };
+    const qc = createTestQueryClient();
+    qc.setQueryData(["settings"], settingsWithCert);
+    qc.setQueryData(["certificates"], { certificates: [{ id: certId, name: "my-cert" }] });
+    m(mocks.systemClient, "putServiceSettings").mockResolvedValueOnce({
+      echo: { settings: { ...settingsWithCert, tls: { ...settingsWithCert.tls, enabled: true } } },
+    });
+
+    const { getByText, queryByText, getAllByRole } = renderWritable(<ServiceSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+    fireEvent.click(getByText("TLS"));
+    expect(queryByText("enabled")).toBeNull();
+
+    // The only checkbox on screen is Enable TLS: Authentication (expanded)
+    // has none and Password Policy is collapsed.
+    const enableTls = getAllByRole("checkbox")[0]!;
+    fireEvent.click(enableTls);
+    expect(enableTls.getAttribute("aria-checked")).toBe("true");
+    expect(queryByText("enabled")).toBeNull();
+
+    fireEvent.click(getByText("Save"));
+    await waitFor(() => expect(queryByText("enabled")).not.toBeNull());
+  });
+
+  test("TLS saved as enabled on a certificate that no longer exists says so", () => {
+    const qc = createTestQueryClient();
+    qc.setQueryData(["settings"], {
+      ...sampleSettings,
+      tls: { defaultCert: encode(testId(9)), enabled: true, httpToHttpsRedirect: false, httpsPort: "" },
+    });
+    qc.setQueryData(["certificates"], { certificates: [] });
+
+    const { getByText, queryByText } = renderWritable(<ServiceSettings dark />, { wrapper: settingsWrapper(qc) });
+    expect(getByText("enabled")).toBeTruthy();
+    fireEvent.click(getByText("TLS"));
+    expect(queryByText(/saved default certificate no longer exists/)).not.toBeNull();
+  });
+
   test("broadcasting section shows broadcast interval", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["settings"], sampleSettings);
@@ -190,10 +258,10 @@ describe("ServiceSettings", () => {
   });
 });
 
-function renderWithHelp(noAuth?: boolean) {
+function renderWithHelp(noAuth?: boolean, certificates: { id: Uint8Array; name: string }[] = [{ id: testId(1), name: "my-cert" }]) {
   const qc = createTestQueryClient();
   qc.setQueryData(["settings"], sampleSettings);
-  qc.setQueryData(["certificates"], { certificates: [{ id: testId(1), name: "my-cert" }] });
+  qc.setQueryData(["certificates"], { certificates });
   const openHelp = mock((_helpRef?: string) => {});
   const result = renderWritable(
     <HelpProvider onOpen={openHelp}>
@@ -202,6 +270,11 @@ function renderWithHelp(noAuth?: boolean) {
     { wrapper: settingsWrapper(qc) },
   );
   return { ...result, openHelp };
+}
+
+/** The note rendered inside the FormField that owns this label or input, if any. */
+function fieldNote(el: HTMLElement): Element | null {
+  return el.closest(".flex-col")!.querySelector('[role="note"]');
 }
 
 /** The help button beside a form field's label. */
@@ -219,6 +292,43 @@ describe("ServiceSettings help", () => {
     fireEvent.click(fieldHelpButton(getByText("Default certificate")));
 
     expect(openHelp).toHaveBeenCalledWith("certificates#default-certificate");
+  });
+
+  test("with no certificate stored the picker says so and links to the default-certificate section", () => {
+    const { getByText, getByLabelText, openHelp } = renderWithHelp(false, []);
+    fireEvent.click(getByText("TLS"));
+    expect(fieldNote(getByLabelText("Default certificate"))?.textContent).toContain(
+      "No certificates stored — add one in the Certificates tab.",
+    );
+    fireEvent.click(getByText("Eligibility rules"));
+    expect(openHelp).toHaveBeenCalledWith("certificates#default-certificate");
+  });
+
+  test("the TLS fields stay on screen without a certificate, disabled with the reason", () => {
+    const { getByText, container } = renderWithHelp(false, []);
+    fireEvent.click(getByText("TLS"));
+    for (const label of ["Enable TLS (HTTPS)", "HTTPS port", "Redirect HTTP to HTTPS"]) {
+      expect(fieldNote(getByText(label))?.textContent).toBe("Requires a default certificate.");
+    }
+    expect(getByText("Enable TLS (HTTPS)").closest(".flex-col")!.querySelector('[role="checkbox"]')?.getAttribute("aria-disabled")).toBe("true");
+    const port = container.querySelector(`#${CSS.escape((getByText("HTTPS port") as HTMLLabelElement).htmlFor)}`) as HTMLInputElement;
+    expect(port.disabled).toBe(true);
+  });
+
+  test("choosing a certificate frees Enable TLS; enabling TLS frees the port and redirect", () => {
+    const { getByText, getByLabelText, container } = renderWithHelp(false);
+    fireEvent.click(getByText("TLS"));
+    fireEvent.change(getByLabelText("Default certificate"), { target: { value: encode(testId(1)) } });
+
+    expect(fieldNote(getByText("Enable TLS (HTTPS)"))).toBeNull();
+    expect(fieldNote(getByText("HTTPS port"))?.textContent).toBe("Requires TLS enabled.");
+    expect(fieldNote(getByText("Redirect HTTP to HTTPS"))?.textContent).toBe("Requires TLS enabled.");
+
+    fireEvent.click(getByText("Enable TLS (HTTPS)").closest(".flex-col")!.querySelector('[role="checkbox"]')!);
+    expect(fieldNote(getByText("HTTPS port"))).toBeNull();
+    expect(fieldNote(getByText("Redirect HTTP to HTTPS"))).toBeNull();
+    const port = container.querySelector(`#${CSS.escape((getByText("HTTPS port") as HTMLLabelElement).htmlFor)}`) as HTMLInputElement;
+    expect(port.disabled).toBe(false);
   });
 
   test("the --no-auth badge names its cause and opens the no-auth section", () => {

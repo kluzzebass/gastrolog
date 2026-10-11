@@ -19,7 +19,8 @@ import { Spark } from "../Spark";
 // eslint-disable-next-line no-restricted-imports -- ThroughputRate is a passthrough stats type; no model wrap planned
 import type { ThroughputRate } from "../../api/gen/gastrolog/v1/vault_pb";
 import { type ClusterVaultStats, summarizeCluster } from "./clusterSummary";
-import type { Timestamp } from "../../api/model/node";
+import type { Timestamp } from "@bufbuild/protobuf";
+import { StatsFreshnessCue } from "./StatsFreshness";
 import { formatDuration } from "../../utils/units";
 import { useTick } from "./JobCard";
 
@@ -50,25 +51,37 @@ export function leaderLabel(leaderName: string): string {
 
 /**
  * System stats view for a single node, using gossip-broadcast NodeStats.
- * Used identically for the local node and peers — no special-casing.
+ * Used identically for the local node and peers — no special-casing. The
+ * sample's age (from the responding node's receipt instant) heads the view
+ * so every figure below reads as "as of then".
  */
 interface SystemStatsViewProps {
   nodeStats: NodeStats | null;
   /** The cluster's last contact with the node, shown when it has no stats. */
   lastSeen?: Timestamp;
+  receivedAt?: Timestamp;
+  ttlMs?: number | null;
   dark: boolean;
 }
 
 export function SystemStatsView({
   nodeStats,
   lastSeen,
+  receivedAt,
+  ttlMs = null,
   dark,
 }: Readonly<SystemStatsViewProps>) {
   const c = useThemeClass(dark);
   const now = useTick();
 
   if (nodeStats) {
-    return <CompactView stats={nodeStats} dark={dark} />;
+    return (
+      <CompactView
+        stats={nodeStats}
+        freshness={<StatsFreshnessCue receivedAt={receivedAt} ttlMs={ttlMs} dark={dark} className="ml-auto" />}
+        dark={dark}
+      />
+    );
   }
   return (
     <div className={`text-[0.85em] italic ${c("text-text-muted", "text-light-text-muted")}`}>
@@ -81,13 +94,14 @@ export function SystemStatsView({
 
 function CompactView({
   stats,
+  freshness,
   dark,
-}: Readonly<{ stats: NodeStats; dark: boolean }>) {
+}: Readonly<{ stats: NodeStats; freshness?: React.ReactNode; dark: boolean }>) {
   return (
     <div className="flex flex-col gap-4">
       {/* System stats */}
       <section>
-        <CompactSectionLabel label="System" dark={dark} />
+        <CompactSectionLabel label="System" trailing={freshness} dark={dark} />
         <div className="grid grid-cols-2 gap-x-6 gap-y-1">
           <CompactStatRow label="CPU" value={formatPercent(stats.cpuPercent)} mono dark={dark} />
           <CompactStatRow label="Goroutines" value={stats.goroutines.toLocaleString()} mono dark={dark} />
@@ -368,7 +382,12 @@ function HelpLabel({ helpRef, className, children }: Readonly<{ helpRef: string;
   return <HelpLink helpRef={helpRef} className={className}>{children}</HelpLink>;
 }
 
-function CompactSectionLabel({ label, helpRef, dark }: Readonly<{ label: string; helpRef?: string; dark: boolean }>) {
+function CompactSectionLabel({
+  label,
+  helpRef,
+  trailing,
+  dark,
+}: Readonly<{ label: string; helpRef?: string; trailing?: React.ReactNode; dark: boolean }>) {
   const c = useThemeClass(dark);
   return (
     <span
@@ -376,6 +395,7 @@ function CompactSectionLabel({ label, helpRef, dark }: Readonly<{ label: string;
     >
       {label}
       {helpRef && <HelpButton helpRef={helpRef} />}
+      {trailing && <span className="ml-auto normal-case tracking-normal">{trailing}</span>}
     </span>
   );
 }

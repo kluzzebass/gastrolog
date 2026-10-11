@@ -466,6 +466,18 @@ one segmented file set, one batch-writer goroutine.
   by a failing probe. The unreachable sweep and the stale-voter reaper measure
   their multi-minute thresholds against this, not against peer liveness.
 
+- **Stats TTL** — how long a received stats broadcast stays queryable on the
+  node that received it (`PeerState.StatsTTL`, a multiple of the broadcast
+  interval). Past it, `Get` returns nil and the node reads as offline. Carried
+  to the UI as `GetClusterStatusResponse.stats_ttl` together with each
+  `ClusterNode.stats_received_at`, so every stats surface dates its figures
+  and marks a sample older than the TTL as **stale**.
+
+- **Responding node** — the node that answered a given RPC. The API has no
+  session affinity, so behind a load balancer each request may be answered by
+  a different node; the UI labels a node "this node" only while every
+  response in the session has come from the same one.
+
 ### Request routing
 
 How an operator-issued RPC finds the node that should execute it. See

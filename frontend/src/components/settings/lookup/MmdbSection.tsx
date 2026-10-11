@@ -14,6 +14,21 @@ import { type MMDBLookupDraft, type LookupSectionProps, mmdbDbTypes, mmdbDefault
 import type { MMDBLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 import { useReadOnly } from "../../../hooks/useReadOnly";
 
+const MMDB_HELP_REF = "lookups-settings#mmdb-lookups";
+
+/**
+ * Why an uploaded .mmdb file does not fit the lookup's database type, or
+ * undefined when it may. Only the file name is known here, so a file is
+ * ruled out only when its name says it is the other kind.
+ */
+export function mmdbFileIneligibility(dbType: string, fileName: string): string | undefined {
+  const namedAsn = fileName.includes("ASN") || fileName.includes("ISP");
+  const namedCity = fileName.includes("City");
+  if (dbType === "city" && namedAsn && !namedCity) return "named as an ASN database";
+  if (dbType === "asn" && namedCity && !namedAsn) return "named as a GeoIP City database";
+  return undefined;
+}
+
 function serializeMmdbLookups(lookups: MMDBLookupDraft[]) {
   return lookups
     .filter((m) => m.name)
@@ -74,6 +89,8 @@ export function MmdbAddForm({
           label={draft.dbType === "city" ? "GeoIP City .mmdb" : "ASN .mmdb"}
           currentFile={draft.fileId ? managedFiles.find((f) => encode(f.id) === draft.fileId) : undefined}
           pickableFiles={managedFiles.filter((f) => f.name.endsWith(".mmdb"))}
+          ineligibleReason={(f) => mmdbFileIneligibility(draft.dbType, f.name)}
+          helpRef={MMDB_HELP_REF}
           uploadFile={uploadFile}
           addToast={addToast}
           onFileSelected={(fileId) => setDraft((d) => ({ ...d, fileId }))}
@@ -160,6 +177,8 @@ export function MmdbCards({
                   label={m.dbType === "city" ? "GeoIP City .mmdb" : "ASN .mmdb"}
                   currentFile={resolvedFile}
                   pickableFiles={managedFiles.filter((f) => f.name.endsWith(".mmdb"))}
+                  ineligibleReason={(f) => mmdbFileIneligibility(m.dbType, f.name)}
+                  helpRef={MMDB_HELP_REF}
                   uploadFile={uploadFile}
                   addToast={addToast}
                   onFileSelected={(fileId) => onUpdate(i, { fileId })}
@@ -168,7 +187,7 @@ export function MmdbCards({
               {!m.fileId && (
                 <div className={`flex items-center gap-1.5 text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
                   <span>No file uploaded — will use auto-downloaded {dbLabel} database if MaxMind auto-download is enabled.</span>
-                  <HelpButton helpRef="lookups-settings#mmdb-lookups" />
+                  <HelpButton helpRef={MMDB_HELP_REF} />
                 </div>
               )}
             </div>
@@ -183,7 +202,7 @@ function MmdbDbTypeRadio({ dark, value, onChange, name }: Readonly<{ dark: boole
   const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   return (
-    <FormField label="Database Type" helpRef="lookups-settings#mmdb-lookups" dark={dark}>
+    <FormField label="Database Type" helpRef={MMDB_HELP_REF} dark={dark}>
       <div className="flex gap-3">
         {mmdbDbTypes.map((t) => (
           <label key={t.value} className="flex items-center gap-1.5 cursor-pointer">

@@ -88,23 +88,29 @@ near capacity while its durable-commit rate lags its append rate is
 experiencing write-path backpressure (usually fsync pressure on that node's
 disk).
 
-Peer node data is refreshed at the [broadcast interval](help:clustering-broadcasting) (default 5 seconds). The stats carry no freshness marker; a node the cluster has not heard from shows an **offline** badge in the node list, with how long it has been silent.
+Peer node data is refreshed at the [broadcast interval](help:clustering-broadcasting) (default 5 seconds). Every node's stats carry the moment the responding node received them — **sampled Ns ago** at the head of the System section and beside the Network heading — so a figure reads as "as of then", never as a live reading. The cue turns into a **stale** warning once the sample is older than the stats TTL (a multiple of the broadcast interval, three by default): the cluster itself stops serving a broadcast that old, so what remains on screen is a copy nothing refreshes. A node the cluster has not heard from shows an **offline** badge in the node list, with how long it has been silent.
 
 ## Network
 
 The **Network** section of a node's pane lists its inter-node traffic: one row
 per peer with the combined Tx/s and Rx/s rates and a sparkline of recent
-history, and beneath it one lane row per connection between the two nodes,
-both directions merged. `raft` lanes carry one Raft group each: the lane whose
-detail reads `—` is the cluster-ctl group; each other names the vault whose
-vault-ctl group it carries (hover for the group ID). `service #N` lanes are
-the pooled RPC connections, numbered by pool slot. A service lane's detail is
-a purpose strip with one slot per purpose — search, chunk apply, vault apply,
-broadcast, forward, forward RPC, eviction, remove node, suffrage, chunk
-transfer, chunk wait, replicate, replicate catchup, segment pull, file
-transfer, raft — lit when that purpose used the lane during the last stats
-interval and dimmed otherwise; hover a slot for its name. A rate reads `—`
-until the lane has history, and a node with no recorded connections says so.
+history, and beneath it one lane per connection between the two nodes, both
+directions merged.
+
+- **raft** lanes carry one Raft group each. The detail names the group:
+  `cluster-ctl` for the cluster configuration group, the vault's name for its
+  vault-ctl group (hover for the group ID), or `vault-ctl` when that vault is
+  not known to this node.
+- **rpc pool N** lanes are the pooled RPC connections, numbered by their slot
+  in the pool. The detail lists the purposes the lane has carried — search,
+  chunk apply, vault apply, broadcast, forward, forward RPC, eviction, remove
+  node, suffrage, chunk transfer, chunk wait, replicate, replicate catchup,
+  segment pull, file transfer, raft — in the backend's order. A purpose that
+  used the lane during the last stats interval reads normally; one that did
+  not is dimmed. Hover a purpose for its state.
+
+A rate reads `—` until the lane has history, and a node with no recorded
+connections says so.
 
 ## System alerts
 

@@ -261,6 +261,18 @@ func (p *mnPeerNodeStats) LastSeen(nodeID string) time.Time {
 	return time.Now()
 }
 
+// StatsReceivedAt: live collection means the stats are received the moment
+// they are asked for.
+func (p *mnPeerNodeStats) StatsReceivedAt(nodeID string) time.Time {
+	return p.LastSeen(nodeID)
+}
+
+const mnStatsTTL = 15 * time.Second
+
+func (p *mnPeerNodeStats) StatsTTL() time.Duration {
+	return mnStatsTTL
+}
+
 // setupMultiNode creates an N-node in-process cluster. The first nodeID
 // is the coordinator (runs the server). All other nodes are remote —
 // the coordinator's directRemoteSearcher calls into their orchestrators.

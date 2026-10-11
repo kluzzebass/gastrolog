@@ -30,12 +30,15 @@ Every ingester card carries a mode badge:
 - **listener** — binds a port and accepts what clients push to it (Syslog, HTTP, RELP, OTLP, Fluent Forward)
 - **active** — pulls records from its upstream source itself (Kafka, MQTT, Tail, Docker, Metrics, the generators)
 
-## Node Eligibility
+## Node Assignment
 
-The card's node badge is where the ingester may run, the same rule the dispatcher applies on every node:
+In a cluster, every ingester form carries a **Nodes** picker and a **Singleton** checkbox that together say where the ingester runs.
 
-- **all nodes** — eligible on every cluster node, nodes that join later included; also shown when no node is pinned
-- a node name — pinned to that one node
-- **N nodes** — pinned to those nodes only
+| Control | Meaning |
+|---------|---------|
+| **All nodes** | The ingester runs on every member, including nodes that join later. It is a setting of its own, not a shortcut for ticking every current node — a ticked list is a fixed set that a new joiner is not part of. |
+| **Ticked nodes** | The ingester runs on exactly those nodes. |
+| **No node selected** | With **All nodes** off and nothing ticked, the ingester runs on every node, the same as **All nodes**; the picker says so. |
+| **Singleton** | Of the assigned nodes, exactly one runs the ingester at a time, with automatic failover. Available for Kafka, MQTT, Chatterbox and Scatterbox. Listeners bind their port on every assigned node, and Docker, Tail, Metrics and Self read a node-local source, so for those types the checkbox is disabled with the reason. |
 
-A listener pinned to nodes binds its port only there. Whether it actually runs on each eligible node is on the [Ingesters inspector](help:inspector-ingesters).
+The card's node badge reads the saved assignment the same way the dispatcher does, whatever the ingester's mode: **all nodes** (set, or nothing ticked), a node name (one node ticked), or **N nodes** (several). Whether the ingester actually runs on each assigned node is on the [Ingesters inspector](help:inspector-ingesters).

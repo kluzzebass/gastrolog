@@ -14,7 +14,7 @@ MMDB lookups map IP addresses to metadata using MaxMind-format `.mmdb` database 
 - **Database Type** — determines which fields are extracted:
   - **GeoIP City** — country, city, subdivision, latitude, longitude, timezone, accuracy radius
   - **ASN** — AS number and organization name
-- **MMDB File** — upload a custom `.mmdb` file, or leave empty to use the auto-downloaded database from [MaxMind Auto-Download](settings:files).
+- **MMDB File** — upload a custom `.mmdb` file, or leave empty to use the auto-downloaded database from [MaxMind Auto-Download](settings:files). The existing-files list shows every uploaded `.mmdb`; a file whose name says it is the other kind (`ASN`/`ISP` for a city lookup, `City` for an ASN lookup) is listed disabled with that reason — only the name is known, so an unnamed file stays pickable.
 
 You can create multiple MMDB lookups with different names pointing to different database files — for example, a `geoip` lookup using GeoLite2-City and a `geoip_precise` lookup using a commercial GeoIP2-City database.
 
@@ -58,8 +58,8 @@ CSV file lookups map a key column to one or more value columns from an uploaded 
 
 - **Name** — registry name used in queries, e.g. `| lookup assets`.
 - **File** — upload a `.csv` or `.tsv` file, or select an existing managed file. A preview of the file's columns and first rows appears automatically after upload.
-- **Key Column** — select the column to use as the lookup key from the dropdown. Defaults to the first column. The preview table highlights the key column.
-- **Value Columns** — all non-key columns are included by default. Uncheck any columns you don't need in lookup results.
+- **Key Column** — select the column to use as the lookup key from the dropdown. Defaults to the first column. The preview table highlights the key column. Until a file is selected and its preview has loaded, the picker is disabled with the reason.
+- **Value Columns** — **All non-key columns** is on by default and also covers columns added to the file later; turn it off to pick an explicit set, which does not grow with the file. Unticking every column turns **All** back on, since an empty set means all.
 
 ### Tips
 
@@ -77,8 +77,8 @@ JSON file lookups turn a managed JSON file into a key/value table with a jq expr
 - **Name** — registry name used in queries, e.g. `| lookup hosts`.
 - **File** — upload a `.json` file or select an existing managed file.
 - **Query** — a jq expression that transforms the file into a lookup table. It must produce an array of objects, one per row — for example `[.hosts[] | {ip, hostname, env}]` or `.data`. The preview below the field shows the file's content and the query result as a table (**Refresh** re-runs it); a result that is not an array of objects is flagged, and a query error is shown in place of the table.
-- **Key Column** — select the column to use as the lookup key from the query result's columns. Defaults to the first column. Shown once the query produces a table.
-- **Value Columns** — all non-key columns are included by default. Uncheck any columns you don't need in lookup results.
+- **Key Column** — select the column to use as the lookup key from the query result's columns. Defaults to the first column. Disabled, with the reason, until a file is selected and the query produces a table.
+- **Value Columns** — **All non-key columns** is on by default and also covers columns the query yields later; turn it off to pick an explicit set. Unticking every column turns **All** back on, since an empty set means all.
 
 Source files are limited to 10 MB — for larger datasets use CSV, which is mmapped directly without a transform step.
 

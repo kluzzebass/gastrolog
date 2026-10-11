@@ -279,6 +279,24 @@ const azureRehydrateOptions = [
   { value: "Standard", label: "Standard (< 15 hr)" },
 ];
 
+/** Why a provider has no restore speed to choose, or undefined when it has one. */
+export function restoreSpeedReason(provider: string): string | undefined {
+  switch (provider) {
+    case "gcs":
+      return "GCS has no restore step — archived objects are read directly.";
+    case "memory":
+      return "The memory provider has no restore step.";
+    default:
+      return undefined;
+  }
+}
+
+/** Why a provider has no restore window, or undefined when it has one. */
+export function restoreDaysReason(provider: string): string | undefined {
+  if (provider === "s3") return undefined;
+  return "S3 only — a restored object expires after this many days; other providers restore in place.";
+}
+
 function classOptionsForProvider(provider: string) {
   switch (provider) {
     case "s3": return s3ClassOptions;
@@ -300,9 +318,7 @@ function ArchivalSection({
 }>) {
   const readOnly = useReadOnly();
   const c = useThemeClass(dark);
-  const isS3 = values.provider === "s3";
   const isAzure = values.provider === "azure";
-  const isGCS = values.provider === "gcs";
   const isMemory = values.provider === "memory";
   const isActive = values.archivalMode === "active";
   const classOptions = classOptionsForProvider(values.provider);
@@ -401,33 +417,28 @@ function ArchivalSection({
             + Add Transition
           </Button>
 
-          {/* Restore defaults — S3 and Azure only (GCS has no restore step) */}
-          {!isGCS && !isMemory && (
-            <div className="flex items-end gap-2 pt-1">
-              <div className="flex-1">
-                <FormField label="Restore Speed" dark={dark}>
-                  <SelectInput
-                    value={values.restoreSpeed || "Standard"}
-                    onChange={(v) => onChange({ restoreSpeed: v })}
-                    options={isAzure ? azureRehydrateOptions : s3RestoreSpeedOptions}
-                    dark={dark}
-                  />
-                </FormField>
-              </div>
-              {isS3 && (
-                <div className="w-28">
-                  <FormField label="Restore Days" dark={dark}>
-                    <NumberInput
-                      value={String(values.restoreDays || 7)}
-                      onChange={(v) => onChange({ restoreDays: parseInt(v, 10) || 7 })}
-                      dark={dark}
-                      min={1}
-                    />
-                  </FormField>
-                </div>
-              )}
+          <div className="flex items-start gap-2 pt-1">
+            <div className="flex-1">
+              <FormField label="Restore Speed" disabledReason={restoreSpeedReason(values.provider)} dark={dark}>
+                <SelectInput
+                  value={values.restoreSpeed || "Standard"}
+                  onChange={(v) => onChange({ restoreSpeed: v })}
+                  options={isAzure ? azureRehydrateOptions : s3RestoreSpeedOptions}
+                  dark={dark}
+                />
+              </FormField>
             </div>
-          )}
+            <div className="w-40">
+              <FormField label="Restore Days" disabledReason={restoreDaysReason(values.provider)} dark={dark}>
+                <NumberInput
+                  value={String(values.restoreDays || 7)}
+                  onChange={(v) => onChange({ restoreDays: parseInt(v, 10) || 7 })}
+                  dark={dark}
+                  min={1}
+                />
+              </FormField>
+            </div>
+          </div>
         </div>
       )}
     </div>
