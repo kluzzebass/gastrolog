@@ -65,6 +65,7 @@ export function HttpAddForm({
       onCreate={handleCreate}
       isPending={putConfig.isPending}
       createDisabled={(!draft.name.trim() && !namePlaceholder) || !draft.urlTemplate.trim()}
+      createDisabledReason={!draft.name.trim() && !namePlaceholder ? "Name is required" : "URL Template is required"}
       typeBadge="http"
     >
       <FormField label="Name" description="Registry name used in queries, e.g. | lookup users" dark={dark}>
@@ -125,7 +126,18 @@ export function HttpCards({
 
   return (
     <>
-      {lookups.map((h, i) => (
+      {lookups.map((h, i) => {
+        // Test sends the draft form but reads the private-destinations flag
+        // from the saved lookup, so a test while that flag is dirty would
+        // report on a setting other than the one on screen.
+        const privateFlagDirty = h.allowPrivateDestinations !== (savedLookups[i]?.allowPrivateDestinations ?? false);
+        let testDisabledReason: string | undefined;
+        if (!h.urlTemplate) testDisabledReason = "URL Template is required";
+        else if (privateFlagDirty) testDisabledReason = "Save first: Test uses the saved private-destinations setting";
+        let saveDisabledReason: string | undefined;
+        if (!h.name) saveDisabledReason = "Name is required";
+        else if (!h.urlTemplate) saveDisabledReason = "URL Template is required";
+        return (
         <SettingsCard
           key={`http-${i}`}
           id={h.name || `HTTP Lookup ${i + 1}`}
@@ -144,6 +156,7 @@ export function HttpCards({
               <Button
                 onClick={() => save(i)}
                 disabled={!isDirty(i) || !h.name || !h.urlTemplate || putConfig.isPending}
+                disabledReason={saveDisabledReason}
               >
                 {putConfig.isPending ? "Saving..." : "Save"}
               </Button>
@@ -209,7 +222,8 @@ export function HttpCards({
                 <Button
                   variant="ghost"
                   dark={dark}
-                  disabled={!h.urlTemplate || testLookup.isPending}
+                  disabled={testDisabledReason !== undefined || testLookup.isPending}
+                  disabledReason={testDisabledReason}
                   onClick={() => {
                     setTestResults((prev) => ({ ...prev, [i]: undefined as never }));
                     testLookup.mutate(
@@ -274,7 +288,8 @@ export function HttpCards({
             </div>
           </div>
         </SettingsCard>
-      ))}
+        );
+      })}
     </>
   );
 }

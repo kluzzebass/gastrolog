@@ -28,6 +28,7 @@ import { FormField, TextInput } from "./FormField";
 import { Button } from "./Buttons";
 import { sortByName } from "../../lib/sort";
 import { middleTruncate } from "../../utils/middleTruncate";
+import { removalEffect, removalRefusalReason, type RemovalEffect } from "../../utils/nodeRemoval";
 import { useReadOnly } from "../../hooks/useReadOnly";
 
 function roleName(role: ClusterNodeRole): string {
@@ -53,9 +54,16 @@ function roleTitle(role: ClusterNodeRole): string | undefined {
 }
 
 const NODE_ROLES_HELP_REF = "clustering#node-roles";
+const REMOVING_NODES_HELP_REF = "clustering-nodes#removing-nodes";
 
 interface NodeEdit {
   name: string;
+}
+
+/** What confirming a removal does, as one line. */
+function removalConsequence(effect: RemovalEffect): string {
+  if (effect.rePlaced.length === 0) return "This will evict the node from the cluster.";
+  return `This will evict the node from the cluster; ${effect.rePlaced.join(", ")} lose their copy here and are re-placed on another node.`;
 }
 
 export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
@@ -107,6 +115,10 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
   }
 
   const voterCount = nodes.filter((n) => n.suffrage === ClusterNodeSuffrage.VOTER).length;
+  const vaults = configData?.vaults ?? [];
+  const nodeStorageConfigs = configData?.nodeStorageConfigs ?? [];
+  const effectOfRemoving = (nodeId: string) =>
+    removalEffect(nodeId, vaults, nodeStorageConfigs, nodes.map((n) => ({ id: n.id, state: n.state })));
 
   const defaults = (id: string): NodeEdit => ({
     name: nodes.find((n) => n.id === id)?.name ?? "",
@@ -144,6 +156,8 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
           const isLocal = node.id === localNodeId;
           const displayName = getEdit(node.id).name || node.name || "Unnamed Node";
           const dirty = isDirty(node.id);
+          const effect = effectOfRemoving(node.id);
+          const refusalReason = removalRefusalReason(effect);
 
           return (
             <SettingsCard
@@ -216,6 +230,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                       dark={dark}
                       bordered
                       disabled={voterCount <= 1}
+                      disabledReason="The last voter cannot be demoted"
                     >
                       Demote
                     </Button>
@@ -240,9 +255,9 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                   {!isLocal && (confirmRemoveId === node.id ? (
                     <>
                       <span className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>
-                        This will evict the node from the cluster.
+                        {removalConsequence(effect)}
                       </span>
-                      <HelpButton helpRef="clustering-nodes#removing-nodes" />
+                      <HelpButton helpRef={REMOVING_NODES_HELP_REF} />
                       <Button variant="danger"
                         onClick={async () => {
                           try {
@@ -262,9 +277,18 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                       </Button>
                     </>
                   ) : (
-                    <Button variant="danger" onClick={() => setConfirmRemoveId(node.id)}>
-                      Remove
-                    </Button>
+                    <>
+                      <Button
+                        variant="danger"
+                        onClick={() => setConfirmRemoveId(node.id)}
+                        disabled={refusalReason !== undefined}
+                        disabledReason={refusalReason}
+                        dark={dark}
+                      >
+                        Remove
+                      </Button>
+                      {refusalReason && <HelpButton helpRef={REMOVING_NODES_HELP_REF} />}
+                    </>
                   ))}
                 </div>
               )}

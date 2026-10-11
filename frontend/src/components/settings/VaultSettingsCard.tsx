@@ -29,12 +29,51 @@ import {
   VaultStorageForm,
   isCloudBacked,
   isStorageComplete,
+  storageIncompleteReason,
   vaultTypeEnum,
   type StorageEntry,
   type VaultTypeLabel,
 } from "./VaultsSettings";
 import { transferTargetOptions } from "./transferEligibility";
 import { classStorageCounts, placementStatus, plural, rfCap } from "./vaultPlacement";
+
+const DELETING_VAULT_HELP_REF = "vaults-config#deleting-a-vault";
+
+/**
+ * Why Delete is refused, or undefined: the server refuses while any route
+ * names the vault as a destination.
+ */
+function routeReferenceReason(vaultId: string, routes: readonly RouteConfig[]): string | undefined {
+  const names = routes
+    .filter((r) => r.destinations.some((d) => encode(d.vaultId) === vaultId))
+    .map((r) => r.name || encode(r.id));
+  if (names.length === 0) return undefined;
+  const noun = names.length === 1 ? "route" : "routes";
+  return `Destination of ${noun} ${names.join(", ")} — remove it there first`;
+}
+
+/** What a confirmed delete does, one line each. */
+function vaultDeleteConsequences(vault: VaultConfig, holderNames: string[], deleteData: boolean): string[] {
+  const name = vault.name || encode(vault.id);
+  const lines = [
+    holderNames.length > 0
+      ? `Removes "${name}" and its ${String(holderNames.length)} placement(s) on ${holderNames.join(", ")}; nothing routes to it afterwards`
+      : `Removes "${name}", which has no placements`,
+  ];
+  switch (vault.type) {
+    case VaultType.MEMORY:
+      lines.push("Its records live only in memory and are gone with it");
+      break;
+    case VaultType.JSONL:
+      lines.push("The JSONL file stays on disk");
+      break;
+    default:
+      lines.push(deleteData
+        ? "Its chunk files are erased from every placement node"
+        : "Its chunk files stay on disk, unreachable, until removed by hand");
+  }
+  return lines;
+}
 
 interface VaultSettingsCardProps {
   vault: VaultConfig;
@@ -131,7 +170,7 @@ function entryToVault(
 export function VaultSettingsCard({
   vault,
   vaults,
-  routes: _routes,
+  routes,
   nodeConfigs,
   nodeStorageConfigs,
   storageClassOptions,
@@ -224,6 +263,8 @@ export function VaultSettingsCard({
     : null;
   const labelClass = `text-[0.8em] font-medium ${c("text-text-muted", "text-light-text-muted")}`;
   const mutedClass = `text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`;
+  const holderNames = leaderName ? [leaderName, ...followerNames] : followerNames;
+  const deleteDisabledReason = routeReferenceReason(encode(vault.id), routes);
 
   return (
     <SettingsCard
@@ -235,16 +276,23 @@ export function VaultSettingsCard({
       onToggle={onToggle}
       onDelete={() => handleDelete(encode(vault.id))}
       deleteLabel="Delete"
-      deleteConfirmExtra={vault.type === VaultType.FILE ? (
-        <label className="flex items-center gap-1.5 text-[0.8em] opacity-70">
-          <input
-            type="checkbox"
-            checked={deleteData}
-            onChange={(e) => setDeleteData(e.target.checked)}
-          />
-          Delete data files
-        </label>
-      ) : undefined}
+      deleteDisabledReason={deleteDisabledReason}
+      deleteConsequences={vaultDeleteConsequences(vault, holderNames, deleteData)}
+      deleteConfirmExtra={
+        <div className="flex items-center gap-1.5">
+          {vault.type === VaultType.FILE && (
+            <label className="flex items-center gap-1.5 text-[0.8em] opacity-70">
+              <input
+                type="checkbox"
+                checked={deleteData}
+                onChange={(e) => setDeleteData(e.target.checked)}
+              />
+              Delete data files
+            </label>
+          )}
+          <HelpButton helpRef={DELETING_VAULT_HELP_REF} />
+        </div>
+      }
       footer={
         <>
           {activeJob && (
@@ -282,6 +330,7 @@ export function VaultSettingsCard({
           <Button
             onClick={handleSaveAll}
             disabled={putVault.isPending || !anyDirty || !storageComplete}
+            disabledReason={storageIncompleteReason(edit.storage)}
           >
             {putVault.isPending ? "Saving..." : "Save"}
           </Button>

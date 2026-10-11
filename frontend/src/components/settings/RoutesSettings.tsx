@@ -181,6 +181,11 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
           onCreate={handleCreate}
           isPending={putRoute.isPending}
           createDisabled={nameConflict || newDestinations.length === 0}
+          createDisabledReason={
+            nameConflict
+              ? `A route named "${effectiveName}" already exists`
+              : "Pick at least one destination"
+          }
         >
           <FormField label="Name" dark={dark}>
             <TextInput

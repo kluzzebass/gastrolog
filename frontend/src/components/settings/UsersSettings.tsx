@@ -272,7 +272,12 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
                     mono
                   />
                 </FormField>
-                <FormField label="Role" helpRef={ROLES_HELP_REF} dark={dark}>
+                <FormField
+                  label="Role"
+                  helpRef={ROLES_HELP_REF}
+                  dark={dark}
+                  description={isSelf ? "Your own role is locked here — another admin changes it." : undefined}
+                >
                   <SelectInput
                     value={edit.role}
                     onChange={(v) => setEdit(encode(user.id), { role: v })}

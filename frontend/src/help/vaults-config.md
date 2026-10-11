@@ -86,6 +86,16 @@ Each action on an expanded vault card runs against the live vault; the line besi
 - **Reindex** — rebuilds every sealed chunk's indexes as a tracked job whose progress shows on the card; the records themselves are untouched.
 - **Retry Unreadable** — resets the retry backoff on every chunk retention has marked unreadable, so the next retention sweep retries them all at once instead of waiting out each chunk's backoff.
 
+## Deleting a Vault
+
+**Delete** on a vault card removes the vault and every placement it has, on every node; the confirm step lists what goes. A vault that is a [route](help:routing) destination cannot be deleted — the Delete button stays disabled and names the route; remove the vault from the route's destinations first.
+
+What happens to the data depends on the storage type:
+
+- **File** — the chunk files stay on disk, unreachable, unless **Delete data files** is ticked, which erases the vault directory on every placement node.
+- **Memory** — the records live only in memory and are gone with the vault.
+- **JSONL** — the sink file stays on disk.
+
 ## Rotation and Retention Policies
 
 Policies are shared resources created in the [Policies](settings:policies) tab and referenced by name in vault settings. This lets multiple vaults share the same rotation or retention schedule. A vault has one rotation policy and any number of retention policies; a policy card's "used by" list links back to each vault that attaches it.

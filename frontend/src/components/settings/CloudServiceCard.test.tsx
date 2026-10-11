@@ -1,5 +1,44 @@
 import { describe, expect, test } from "bun:test";
-import { cloudServiceSaveRequest } from "./CloudServiceCard";
+import { installMockClients } from "../../../test/api-mock";
+import { createTestQueryClient, settingsWrapper } from "../../../test/render";
+
+installMockClients();
+
+import { CloudServiceCard, cloudServiceSaveRequest } from "./CloudServiceCard";
+import { CloudService } from "../../api/gen/gastrolog/v1/storage_pb";
+import { renderWritable } from "../../testing/renderWritable";
+
+function testId(n: number): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(16);
+  bytes[15] = n;
+  return bytes;
+}
+
+function renderCard(endpoint: string) {
+  const service = new CloudService({ id: testId(1), name: "archive", provider: "s3", bucket: "chunks", endpoint });
+  const qc = createTestQueryClient();
+  return renderWritable(
+    <CloudServiceCard service={service} dark expanded onToggle={() => {}} />,
+    { wrapper: settingsWrapper(qc) },
+  );
+}
+
+describe("CloudServiceCard endpoint gate", () => {
+  test("a saved scheme-less endpoint disables Test and Save, each saying why", () => {
+    const { getByText, getAllByText } = renderCard("minio.local:9000");
+
+    expect(getByText("Test Connection").closest("button")!.disabled).toBe(true);
+    expect(getByText("Save").closest("button")!.disabled).toBe(true);
+    expect(getAllByText("Endpoint needs an http:// or https:// scheme")).toHaveLength(2);
+  });
+
+  test("a well-formed endpoint carries no reason", () => {
+    const { getByText, queryByText } = renderCard("https://minio.local:9000");
+
+    expect(getByText("Test Connection").closest("button")!.disabled).toBe(false);
+    expect(queryByText(/needs an http/)).toBeNull();
+  });
+});
 
 // The card never receives a service's credentials, so its edit state starts
 // them empty. What matters on save is that an untouched credential goes out

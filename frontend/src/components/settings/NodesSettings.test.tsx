@@ -8,6 +8,7 @@ const mocks = installMockClients();
 
 import { NodesSettings } from "./NodesSettings";
 import { ClusterNodeRole, ClusterNodeSuffrage } from "../../api/gen/gastrolog/v1/lifecycle_pb";
+import { GetSystemResponse, NodeState, VaultConfig, VaultType } from "../../api/gen/gastrolog/v1/system_pb";
 import { renderWritable } from "../../testing/renderWritable";
 
 /** Create a distinct 16-byte Uint8Array test ID from a small number. */
@@ -387,5 +388,103 @@ describe("NodesSettings help", () => {
     expect(openHelp).toHaveBeenCalledWith("clustering#node-roles");
     // The badge sits in the card header; opening help must not collapse the card.
     expect(getByDisplayValue("my-node")).toBeTruthy();
+  });
+});
+
+describe("NodesSettings disabled reasons", () => {
+  test("the last voter's Demote says why it is disabled", () => {
+    const qc = createTestQueryClient();
+    seedQueries(qc, { cluster: { ...sampleCluster, nodes: [sampleCluster.nodes[0]!] } });
+    const { getByText } = renderWritable(<NodesSettings dark />, { wrapper: settingsWrapper(qc) });
+
+    expect(getByText("Demote").closest("button")!.disabled).toBe(true);
+    expect(getByText("The last voter cannot be demoted")).toBeTruthy();
+  });
+
+  test("with two voters Demote carries no reason", () => {
+    const qc = createTestQueryClient();
+    seedQueries(qc);
+    const { queryByText } = renderWritable(<NodesSettings dark />, { wrapper: settingsWrapper(qc) });
+
+    expect(queryByText("The last voter cannot be demoted")).toBeNull();
+  });
+});
+
+// Vault placements as the leader's removal gates read them: the local
+// node's file storage is testId(50), the remote node's is testId(51).
+const localStorage = testId(50);
+const remoteStorage = testId(51);
+function clusterConfig(vaults: VaultConfig[]) {
+  return new GetSystemResponse({
+    nodeConfigs: [
+      { id: localNodeId, name: "my-node" },
+      { id: remoteNodeId, name: "remote-node" },
+    ],
+    nodeStorageConfigs: [
+      { nodeId: localNodeId, fileStorages: [{ id: localStorage, storageClass: 1 }] },
+      { nodeId: remoteNodeId, fileStorages: [{ id: remoteStorage, storageClass: 1 }] },
+    ],
+    vaults,
+  });
+}
+function fileVault(name: string, rf: number, storages: Uint8Array<ArrayBuffer>[]) {
+  return new VaultConfig({
+    id: testId(name.length),
+    name,
+    type: VaultType.FILE,
+    storageClass: 1,
+    replicationFactor: rf,
+    placements: storages.map((storageId, i) => ({ storageId, leader: i === 0 })),
+  });
+}
+const liveCluster = {
+  ...sampleCluster,
+  nodes: sampleCluster.nodes.map((n) => ({ ...n, state: NodeState.LIVE })),
+};
+
+function renderRemoteExpanded(vaults: VaultConfig[]) {
+  const qc = createTestQueryClient();
+  qc.setQueryData(["settings"], sampleSettings);
+  qc.setQueryData(["system"], clusterConfig(vaults));
+  qc.setQueryData(["clusterStatus"], liveCluster);
+  const result = renderWritable(<NodesSettings dark />, { wrapper: settingsWrapper(qc) });
+  fireEvent.click(result.getByText("remote-node"));
+  return result;
+}
+
+describe("NodesSettings removal gates", () => {
+  test("a node holding a vault's only copy cannot be removed, and the reason names the vault", () => {
+    const { getByText, getAllByText, queryByText } = renderRemoteExpanded([fileVault("solo", 1, [remoteStorage])]);
+
+    const remove = getAllByText("Remove")[0]!.closest("button")!;
+    expect(remove.disabled).toBe(true);
+    expect(getByText(/Holds the only copy of solo/)).toBeTruthy();
+    fireEvent.click(remove);
+    expect(queryByText(/evict the node/)).toBeNull();
+  });
+
+  test("a removal that would leave a vault below RF with nowhere to go is refused with the arithmetic", () => {
+    const { getByText, getAllByText } = renderRemoteExpanded([fileVault("pair", 2, [localStorage, remoteStorage])]);
+
+    expect(getAllByText("Remove")[0]!.closest("button")!.disabled).toBe(true);
+    expect(getByText(/pair \(1 of 2 copies would remain\)/)).toBeTruthy();
+  });
+
+  test("a removal the leader accepts is offered, and the confirm step names the vaults re-placed", () => {
+    const { getByText, getAllByText, queryByText } = renderRemoteExpanded([fileVault("pair", 1, [localStorage, remoteStorage])]);
+
+    const remove = getAllByText("Remove")[0]!.closest("button")!;
+    expect(remove.disabled).toBe(false);
+    expect(queryByText(/only copy/)).toBeNull();
+    fireEvent.click(remove);
+
+    expect(getByText(/evict the node from the cluster; pair lose their copy here and are re-placed/)).toBeTruthy();
+  });
+
+  test("a node holding nothing evicts with the plain consequence", () => {
+    const { getByText, getAllByText } = renderRemoteExpanded([fileVault("elsewhere", 1, [localStorage])]);
+
+    fireEvent.click(getAllByText("Remove")[0]!);
+    expect(getByText("This will evict the node from the cluster.")).toBeTruthy();
   });
 });
