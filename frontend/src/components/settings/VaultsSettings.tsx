@@ -17,6 +17,7 @@ import { EligibilitySelect, type EligibilityOption } from "./EligibilitySelect";
 import { TRANSFER_HELP_REF, transferSourceIneligibility, transferTargetOptions } from "./transferEligibility";
 import { sortByName } from "../../lib/sort";
 import { VaultSettingsCard } from "./VaultSettingsCard";
+import { classStorageCounts, plural, rfCap, type RFCap } from "./vaultPlacement";
 
 // ---------------------------------------------------------------------------
 // Vault storage form types
@@ -41,7 +42,7 @@ export interface StorageEntry {
   cacheTTL: string;
   memoryBudget: string;
   rotationPolicyId: string;
-  retentionPolicyId: string;
+  retentionPolicyIds: string[]; // one RetentionRule per policy, in this order
   retentionDisposition: string; // "delete" (default) | "route" | "transfer"
   retentionTransferTarget: string; // vault ID — required when retentionDisposition is "transfer"
   replicationFactor: string;
@@ -60,7 +61,7 @@ function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
     cacheTTL: "",
     memoryBudget: "",
     rotationPolicyId: "",
-    retentionPolicyId: "",
+    retentionPolicyIds: [],
     retentionDisposition: "delete",
     retentionTransferTarget: "",
     replicationFactor: "1",
@@ -182,7 +183,7 @@ export function VaultStorageForm({
   transferTargetOptions,
   nodeOptions,
   vaultName,
-  maxRF,
+  cap,
   cloudLocked,
   onTypeChange,
   onUpdate,
@@ -196,7 +197,7 @@ export function VaultStorageForm({
   transferTargetOptions: EligibilityOption[];
   nodeOptions: { value: string; label: string }[];
   vaultName: string;
-  maxRF?: number;
+  cap: RFCap;
   // cloudLocked freezes the Cloud Storage selector. The backend rejects
   // cloud_service_id changes on existing vaults — to change cloud binding,
   // create a new vault and route data via retention. The Add form leaves
@@ -362,17 +363,12 @@ export function VaultStorageForm({
       )}
 
       {storage.type !== "jsonl" && retentionPolicyOptions.length > 0 && (
-        <FormField label="Retention Policy" helpRef="vaults-config#rotation-and-retention-policies" dark={dark}>
-          <SelectInput
-            value={storage.retentionPolicyId}
-            onChange={(v) => onUpdate({ retentionPolicyId: v })}
-            options={[
-              { value: "", label: "None" },
-              ...retentionPolicyOptions,
-            ]}
-            dark={dark}
-          />
-        </FormField>
+        <RetentionPoliciesEditor
+          attached={storage.retentionPolicyIds}
+          onChange={(ids) => onUpdate({ retentionPolicyIds: ids })}
+          options={retentionPolicyOptions}
+          dark={dark}
+        />
       )}
 
       {storage.type !== "jsonl" && (
@@ -414,17 +410,68 @@ export function VaultStorageForm({
       )}
 
       {storage.type !== "jsonl" && (
-        <FormField label="Replication Factor" dark={dark} description="1 = none, 2 = redundant, 3+ = fault tolerant" helpRef="storage-config#how-vaults-use-file-storages">
+        <FormField
+          label="Replication Factor"
+          dark={dark}
+          description={`1 = none, 2 = redundant, 3+ = fault tolerant. Cap ${String(cap.max)}: ${cap.cause}.`}
+          helpRef="storage-config#how-vaults-use-file-storages"
+        >
           <SpinnerInput
             value={storage.replicationFactor}
             onChange={(v) => onUpdate({ replicationFactor: v })}
             dark={dark}
             min={1}
-            max={maxRF}
+            max={cap.max}
           />
         </FormField>
       )}
     </div>
+  );
+}
+
+// RetentionPoliciesEditor renders a flat checkbox list — every attached
+// policy is explicit. The wire shape is a list of RetentionRule in
+// attachment order; this component keeps that order, appending newly
+// checked policies at the end.
+function RetentionPoliciesEditor({
+  attached,
+  onChange,
+  options,
+  dark,
+}: Readonly<{
+  attached: string[];
+  onChange: (ids: string[]) => void;
+  options: { value: string; label: string }[];
+  dark: boolean;
+}>) {
+  const selected = new Set(attached);
+  const toggle = (id: string) => {
+    onChange(selected.has(id) ? attached.filter((a) => a !== id) : [...attached, id]);
+  };
+  const n = attached.length;
+  const noun = n === 1 ? "policy" : "policies";
+  const description = n === 0
+    ? "None attached: sealed chunks stay until the default size floor drains them."
+    : `${String(n)} ${noun} attached. Every attached policy is evaluated on each sweep; the tightest bound wins.`;
+  return (
+    <FormField
+      label="Retention Policies"
+      helpRef="vaults-config#rotation-and-retention-policies"
+      dark={dark}
+      description={description}
+    >
+      <div className="flex flex-col gap-1.5">
+        {options.map((o) => (
+          <Checkbox
+            key={o.value}
+            checked={selected.has(o.value)}
+            onChange={() => toggle(o.value)}
+            label={o.label}
+            dark={dark}
+          />
+        ))}
+      </div>
+    </FormField>
   );
 }
 
@@ -450,8 +497,10 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
   const nameConflict = existingNames.has(effectiveName);
   const routes = config?.routes ?? [];
 
-  // Derive storage class options with node availability.
+  // Storage class options carry the fact that caps RF: the storage count
+  // in the class (same-node storages each hold a replica), plus the nodes.
   const nodeNameMap = buildNodeNameMap(config?.nodeConfigs ?? []);
+  const classStorageCount = classStorageCounts(config?.nodeStorageConfigs ?? []);
   const storageClassOptions = (() => {
     const classNodes = new Map<number, string[]>();
     for (const nsc of config?.nodeStorageConfigs ?? []) {
@@ -471,27 +520,10 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       .toSorted(([a], [b]) => a - b)
       .map(([sc, nodes]) => ({
         value: String(sc),
-        label: `Class ${String(sc)} — ${nodes.toSorted().join(", ")}`,
+        label: `Class ${String(sc)} — ${plural(classStorageCount.get(sc) ?? 0, "file storage")} on ${nodes.toSorted().join(", ")}`,
       }));
   })();
-
-  // Compute eligible file storage count per storage class (for RF max).
-  // Same-node replication is valid — count file storages, not nodes.
-  const classStorageCount = new Map<number, number>();
-  for (const nsc of config?.nodeStorageConfigs ?? []) {
-    for (const fs of nsc.fileStorages) {
-      classStorageCount.set(fs.storageClass, (classStorageCount.get(fs.storageClass) ?? 0) + 1);
-    }
-  }
   const totalNodes = config?.nodeConfigs.length ?? 1;
-  const maxRFForStorage = (s: { type: string; storageClass: string }) => {
-    if (s.type === "memory") return totalNodes;
-    if (s.type === "jsonl") return 1;
-    // Single storage class for all file vaults (local-only and cloud-backed).
-    const sc = parseInt(s.storageClass, 10) || 0;
-    if (sc === 0) return 1; // no class selected yet
-    return classStorageCount.get(sc) ?? 1;
-  };
 
   // Derive cloud storage options
   const cloudServiceOptions = (config?.cloudServices ?? [])
@@ -546,9 +578,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       cacheTtl: cloudBacked ? storage.cacheTTL : "",
       memoryBudget: storage.type === "memory" ? storage.memoryBudget : "",
       rotationPolicyId: storage.rotationPolicyId ? decode(storage.rotationPolicyId) : new Uint8Array(0),
-      retentionRules: storage.retentionPolicyId
-        ? [new RetentionRule({ retentionPolicyId: decode(storage.retentionPolicyId) })]
-        : [],
+      retentionRules: storage.retentionPolicyIds.map((id) => new RetentionRule({ retentionPolicyId: decode(id) })),
       retentionDisposition: storage.type !== "jsonl" ? (storage.retentionDisposition || "delete") : "",
       retentionTransferTargetVaultId:
         storage.type !== "jsonl" && storage.retentionDisposition === "transfer" && storage.retentionTransferTarget
@@ -617,7 +647,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
             transferTargetOptions={transferTargetOptions(vaults)}
             nodeOptions={(config?.nodeConfigs ?? []).map((n) => ({ value: encode(n.id), label: n.name || encode(n.id) })).sort((a, b) => a.label.localeCompare(b.label))}
             vaultName={addForm.name || addForm.namePlaceholder || ""}
-            maxRF={maxRFForStorage(addForm.storage)}
+            cap={rfCap(addForm.storage, classStorageCount, totalNodes)}
             onTypeChange={(t) => dispatchAdd({ type: "setType", vaultType: t })}
             onUpdate={(patch) => dispatchAdd({ type: "updateStorage", patch })}
           />

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"slices"
 	"strconv"
 
 	"connectrpc.com/connect"
@@ -201,7 +202,7 @@ shape (memory, file, file+cloud, JSONL) defined by --type, --storage-class
 	cmd.Flags().Uint32("storage-class", 1, "storage class for file vaults")
 	cmd.Flags().String("cloud-service", "", "cloud service name or ID — sets cloud_service_id, making the vault cloud-backed")
 	cmd.Flags().String("rotation-policy", "", "rotation policy name or ID")
-	cmd.Flags().String("retention-policy", "", "retention policy name or ID")
+	cmd.Flags().StringSlice("retention-policy", nil, "retention policy name or ID; repeat or comma-separate to attach several — every attached policy is evaluated each sweep. An empty value detaches all")
 	cmd.Flags().String("cache-eviction", "lru", "cache eviction strategy: lru or ttl")
 	cmd.Flags().String("cache-budget", "", "warm-cache soft cap for cloud-backed chunks (e.g. 1GB, 500MB, 1GiB). Unset defaults to a bounded budget for cloud vaults; 0 is rejected")
 	cmd.Flags().String("cache-ttl", "", "cache TTL duration for ttl eviction mode (e.g. 1h, 7d)")
@@ -351,9 +352,15 @@ func resolveVaultRotationPolicy(ctx context.Context, cmd *cobra.Command, client 
 	return err
 }
 
+// resolveVaultRetentionPolicy resolves every --retention-policy value onto
+// RetentionRules, one rule per policy in the order given. Rules carry only
+// the trigger policy: routing of retired records is the routing engine's
+// job (a route matching _source = "retention"). An empty flag value, or
+// the flag passed with no non-empty value, detaches every policy.
 func resolveVaultRetentionPolicy(ctx context.Context, cmd *cobra.Command, client *server.Client, cfg *v1.VaultConfig) error {
-	retPolicy, _ := cmd.Flags().GetString("retention-policy")
-	if retPolicy == "" {
+	names, _ := cmd.Flags().GetStringSlice("retention-policy")
+	names = slices.DeleteFunc(names, func(s string) bool { return s == "" })
+	if len(names) == 0 {
 		cfg.RetentionRules = nil
 		return nil
 	}
@@ -361,17 +368,15 @@ func resolveVaultRetentionPolicy(ctx context.Context, cmd *cobra.Command, client
 	if err != nil {
 		return err
 	}
-	retIDBytes, err := resolveToProto(retPolicy, r.retentionPolicies, "retention policy")
-	if err != nil {
-		return err
+	rules := make([]*v1.RetentionRule, 0, len(names))
+	for _, name := range names {
+		retIDBytes, err := resolveToProto(name, r.retentionPolicies, "retention policy")
+		if err != nil {
+			return err
+		}
+		rules = append(rules, &v1.RetentionRule{RetentionPolicyId: retIDBytes})
 	}
-	cfg.RetentionRules = []*v1.RetentionRule{{
-		RetentionPolicyId: retIDBytes,
-		// Retention rules carry only the trigger policy. Routing of
-		// expired chunks' records is the routing engine's job — give a
-		// vault a route matching _source = "retention" to receive
-		// another vault's retired records.
-	}}
+	cfg.RetentionRules = rules
 	return nil
 }
 
