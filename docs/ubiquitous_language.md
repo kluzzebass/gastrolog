@@ -321,6 +321,11 @@ Reading records back, filtering, aggregating, and rendering them.
   optional `group_counts` (for per-severity breakdowns), flags indicating
   whether any records came from cloud storage.
 
+- **HistogramGrid** — the one bucket grid a search's page histogram is counted
+  on: start, end and bucket count. The coordinator chooses it from the
+  search's window and every node counts its vaults' share on it, so the shares
+  sum bucket by bucket.
+
 - **ChunkPlan** — per-chunk execution metadata inside `Explain`: time bounds,
   which indexes were usable, whether the chunk was skipped and why.
 

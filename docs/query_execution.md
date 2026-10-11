@@ -339,8 +339,8 @@ node honours a source-time window or a `pos=` address the same way a local one
 does. A legacy token/key-value query is folded into its filter first, so it
 never reaches a peer as an unfiltered scan. What the text does not carry
 travels in the request beside it: the resume cursor in `ResumeToken`, the
-partial-aggregate request in `PartialAggregates`, the histogram request in
-`HistogramOnly`. A test fails when a
+partial-aggregate request in `PartialAggregates`, the histogram request and
+its grid in `HistogramGrid`. A test fails when a
 `query.Query` field is neither round-tripped through the wire form nor named
 with the channel that carries it instead. `Query.String()` is a display form
 for Explain, not the wire.
@@ -372,16 +372,39 @@ limit, so no record scan can produce it: a filtered histogram is its own scan
 of the window (`timechartScanPath`), an unfiltered one counts from the
 timestamp index. On the first page the coordinator computes its own leader
 vaults' share and, concurrently, `collectRemoteHistogram` sends every remote
-vault's leader a `ForwardSearch` with `histogram_only` set; the peer answers
-with `ComputeSearchPageHistogram` over the forwarded query — the function the
-coordinator runs for its own vaults — and no records. The shares sum bucket by
-bucket on the grid every node derives from the same absolute window. Record
-streams carry no histogram, and later pages ask for none, so no record waits on
-a histogram's scan and the response's closing message is the only one that
-does. Pipeline searches merge the remote shares the same way. If any remote
-vault fails to answer, the response carries no histogram: a sum missing one
-vault's share would understate volume while looking authoritative. A remote
-vault whose record stream fails fails the search itself.
+vault's leader a `ForwardSearch` carrying a `HistogramGrid`; the peer answers
+with `ComputeSearchPageHistogram` over the forwarded filter — the function the
+coordinator runs for its own vaults — and no records. Record streams carry no
+histogram, and later pages ask for none, so no record waits on a histogram's
+scan and the response's closing message is the only one that does. Pipeline
+searches merge the remote shares the same way. If any remote vault fails to
+answer, the response carries no histogram: a sum missing one vault's share
+would understate volume while looking authoritative. A remote vault whose
+record stream fails fails the search itself.
+
+**One grid, chosen by the coordinator.** The shares sum bucket by bucket only
+when every node counts on the same grid, so the coordinator chooses it — the
+search's window cut into the page histogram's 50 buckets (`pageHistogramGrid`)
+— and sends its start, end and bucket count in the `HistogramGrid`. A peer
+counts on exactly that grid and refuses one it cannot count on bucket for
+bucket (no buckets, more than `query.MaxHistogramBuckets`, an empty window or
+one narrower than a nanosecond per bucket); it never derives a window of its
+own, because its view of the chunks differs from every other node's.
+
+A search with no time window gets one before it fans out:
+`resolveUnboundedQuery` takes the oldest record across every vault in scope as
+the window's start, and the newest record or the coordinator's now, whichever
+is later, as its end. Each vault's bounds come from this node's view of its
+chunks — the vault-ctl FSM manifest every node holds, open chunks included,
+and any chunks held locally. A vault with no records in that view is asked of
+its leader with `ForwardListChunks`. The resolved window bounds the record
+search as well as the histogram, and later pages keep it through the resume
+token's frozen bounds rather than resolving again. When a leader cannot report
+its vault's chunks, the query stays unbounded — a window derived without that
+vault could cut its records out of the search — and with no window there is no
+grid, so the response carries no histogram. A search over vaults all led by
+the coordinator has no shares to align and counts on the window its own engine
+derives.
 
 **Resume tokens** carry the coordinator's local chunk positions plus one
 canonical cursor for the merged stream: the last emitted record's timestamp on

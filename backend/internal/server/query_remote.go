@@ -102,24 +102,26 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) (iter.Se
 	return merged, contributingVaults
 }
 
-// collectRemoteHistogram asks the leader of every remote vault in q's scope
-// for that vault's page histogram and sums them. Each request runs beside the
+// remoteHistogramVaults returns the remote vaults in q's scope, grouped by
+// the node that leads each: the vaults whose histogram shares come from
+// collectRemoteHistogram.
+func (s *QueryServer) remoteHistogramVaults(ctx context.Context, q query.Query) map[string][]glid.GLID {
+	if s.remoteSearcher == nil || s.cfgStore == nil {
+		return nil
+	}
+	selectedVaults, _ := query.ExtractVaultFilter(q.Normalize().BoolExpr, nil)
+	return s.remoteVaultsByNode(ctx, selectedVaults)
+}
+
+// collectRemoteHistogram asks the leader of every vault in byNode for that
+// vault's page histogram on grid and sums them. Each request runs beside the
 // vault's record stream, never inside it, so no record waits on a histogram's
 // scan of the window.
 //
 // ok is false when any remote vault fails to answer: a histogram missing a
 // vault's share would understate volume while looking authoritative, so the
 // caller shows none rather than a partial one.
-func (s *QueryServer) collectRemoteHistogram(ctx context.Context, q query.Query) (buckets []*apiv1.HistogramBucket, ok bool) {
-	if s.remoteSearcher == nil || s.cfgStore == nil {
-		return nil, true
-	}
-	selectedVaults, _ := query.ExtractVaultFilter(q.Normalize().BoolExpr, nil)
-	byNode := s.remoteVaultsByNode(ctx, selectedVaults)
-	if len(byNode) == 0 {
-		return nil, true
-	}
-
+func (s *QueryServer) collectRemoteHistogram(ctx context.Context, q query.Query, grid *apiv1.HistogramGrid, byNode map[string][]glid.GLID) (buckets []*apiv1.HistogramBucket, ok bool) {
 	queryExpr := forwardedQueryExpression(q)
 	type vaultHistogram struct {
 		nodeID  string
@@ -139,7 +141,7 @@ func (s *QueryServer) collectRemoteHistogram(ctx context.Context, q query.Query)
 			resp, err := s.remoteSearcher.Search(ctx, f.nodeID, &apiv1.ForwardSearchRequest{
 				VaultId:       f.vaultID.ToProto(),
 				Query:         queryExpr,
-				HistogramOnly: true,
+				HistogramGrid: grid,
 			})
 			f.buckets, f.err = resp.GetHistogram(), err
 		})

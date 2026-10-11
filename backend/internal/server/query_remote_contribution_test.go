@@ -45,6 +45,10 @@ func (s *stubQuerySearcher) SearchStream(_ context.Context, _ string, _ *apiv1.F
 	return rc, nil, ec, func() []byte { return nil }
 }
 
+func (s *stubQuerySearcher) ListChunks(_ context.Context, _ string, _ *apiv1.ForwardListChunksRequest) (*apiv1.ForwardListChunksResponse, error) {
+	return &apiv1.ForwardListChunksResponse{}, nil
+}
+
 func (s *stubQuerySearcher) GetContext(_ context.Context, _ string, _ *apiv1.ForwardGetContextRequest) (*apiv1.ForwardGetContextResponse, error) {
 	return nil, errors.New("not implemented")
 }
