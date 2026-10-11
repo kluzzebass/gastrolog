@@ -531,7 +531,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
               )}
               <FormField
                 label="Default certificate"
-                description="Certificate used for HTTPS. Set in Certificates tab."
+                description="Certificate the HTTPS listener serves."
                 helpRef={DEFAULT_CERT_HELP_REF}
                 dark={dark}
               >
