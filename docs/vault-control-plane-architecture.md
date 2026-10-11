@@ -32,9 +32,9 @@
 
 | Aspect | Detail |
 |--------|--------|
-| **Entry** | `openRaftSystemStore` in [`backend/internal/app/raft.go`](../backend/internal/app/raft.go) |
-| **Persistence** | `raftwal.Open(filepath.Join(Home.RaftDir(), "wal"))` with `GroupStore("system")`; file snapshot store `hraft.NewFileSnapshotStore(raftDir, …)` on `Home.RaftDir()` (same `raft/` tree as home layout in [`backend/internal/home/home.go`](../backend/internal/home/home.go)) |
-| **Transport** | Cluster server transport (not multiraft group-scoped) |
+| **Entry** | `openRaftClusterCtlStore` in [`backend/internal/app/raft.go`](../backend/internal/app/raft.go) |
+| **Persistence** | Its own WAL: `raftwal.Open(Home.ClusterCtlWALDir())` (`raft/wal`) with `GroupStore("cluster-ctl")`; file snapshot store `hraft.NewFileSnapshotStore(Home.RaftGroupDir("cluster-ctl"), …)` (`raft/groups/cluster-ctl`). Layout helpers in [`backend/internal/home/home.go`](../backend/internal/home/home.go) |
+| **Transport** | `cluster.Server.Transport()` — the multiraft transport scoped to group ID `config` (`cluster.ConfigGroupID`); not a `GroupManager` group |
 | **Apply path** | `cluster.SetApplyFn` → `raftstore.Store.ApplyRaw` (config mutations) |
 
 ### Vault control-plane Raft (per vault, `vault/<id>/ctl`)
@@ -54,15 +54,13 @@ Replicated chunk metadata uses the **vault control-plane** group only (`OpVaultC
 
 Vault / chunk operations and routing: [`backend/internal/orchestrator/vault_ops.go`](../backend/internal/orchestrator/vault_ops.go) and related orchestrator code; replicated metadata callbacks from `ensureVaultCtlMetadata` / `vaultRaftCallbacks` read the per-instance sub-FSM inside [`backend/internal/vaultraft/`](../backend/internal/vaultraft/).
 
-### Status: target design achieved (gastrolog-5xxbd + gastrolog-2ze8j)
+### Status
 
-The deltas below were the original design questions this spec needed to resolve. They have been addressed by the gastrolog-5xxbd (vault-level Raft groups + FSM namespacing) and gastrolog-2ze8j (decommission of legacy per-instance Raft code paths) work. Preserved here for historical reference.
-
-1. **Authority scope:** Replicated chunk metadata is on **vault control-plane Raft** (cluster mode). Done.
-2. **Snapshot layout asymmetry:** System snapshots live under `raftDir`; group snapshots under `raft/groups/<groupId>/`. Target must either justify a **uniform two-root pattern** or **converge** layouts.
-3. **Shared WAL:** System and vault groups share one `raftwal` on-disk segment stream; coupling is total. A vault redesign **must not** assume independent WALs unless the design explicitly splits them (default stays shared). Done.
-4. **Readiness / partial peers:** Vault readiness predicates landed in gastrolog-4ip1o + gastrolog-5j6eu (`Vault.ReadinessErr`, keyed on `r.AppliedIndex()`). Done.
-5. **Apply entrypoints:** Unified to **one** `cluster.Server.SetGroupApplyFn`; `ForwardVaultApply` is the single cross-node apply RPC. Done in 2ze8j.
+1. **Authority scope:** Replicated chunk metadata is on **vault control-plane Raft** (cluster mode).
+2. **Snapshot layout:** Every group snapshots under `raft/groups/<groupID>/` — `raft/groups/cluster-ctl` for cluster-ctl, `raft/groups/vault/<vaultID>/ctl` for each vault-ctl group.
+3. **WALs:** Two per node. Cluster-ctl has its own `raftwal` at `raft/wal` (`Home.ClusterCtlWALDir`) so cluster heartbeats are not coupled to vault append/fsync batching; every vault-ctl group on the node shares one `raftwal` at `raft/groups/wal` (`Home.VaultCtlWALDir`, opened in `setupMultiRaft`).
+4. **Readiness / partial peers:** `Vault.ReadinessErr` ([`vault_readiness.go`](../backend/internal/orchestrator/vault_readiness.go)) gates on the instance's `IsFSMReady` callback, which `buildVaultRaftCallbacks` wires to `r.AppliedIndex() > 0`.
+5. **Apply entrypoints:** **One** `cluster.Server.SetGroupApplyFn`; `ForwardVaultApply` is the single cross-node apply RPC.
 
 ---
 
@@ -113,16 +111,16 @@ The deltas below were the original design questions this spec needed to resolve.
 ### Identifiers and routing
 
 - String `GroupID` remains the routing key for `multiraft.GroupTransport` ([`backend/internal/multiraft/transport.go`](../backend/internal/multiraft/transport.go)).
-- Target naming convention **MUST** be explicit. **Vault control-plane Raft** uses `vault/<vaultGLID>/ctl` (`raftgroup.VaultControlPlaneGroupID`) and is the **only** vault-scoped multiraft group for replicated chunk metadata. System config group stays `system` in multiraft transport wiring.
+- Target naming convention **MUST** be explicit. **Vault control-plane Raft** uses `vault/<vaultGLID>/ctl` (`raftgroup.VaultControlPlaneGroupID`) and is the **only** vault-scoped multiraft group for replicated chunk metadata. Cluster-ctl Raft routes on the multiraft transport as group `config` (`cluster.ConfigGroupID`); its on-disk name is `cluster-ctl`.
 
 ### Persistence (target rules)
 
-- **WAL:** Either (1) one shared `raftwal` for **all** group stores including system and vault groups with stable `GroupStore` naming, or (2) split WALs with a **documented** reason and identical **semantic** contract per WAL. Default direction: **(1)** unless I/O isolation proves mandatory.
-- **Snapshots:** One directory pattern for all group kinds — e.g. `raft/groups/<groupID>/` **including** a system alias `system` — OR elevate both to a symmetric `{wal, groups}` layout with zero special cases. The spec **MUST** pick one. **Greenfield only:** no on-disk upgrade path from older layouts; wipe or replace the raft tree when the layout changes during development.
+- **WAL:** Split WALs with an identical semantic contract: cluster-ctl on `raft/wal`, all vault-ctl groups sharing `raft/groups/wal`. The split exists for I/O isolation — cluster-ctl heartbeats must not wait on vault append/fsync batching.
+- **Snapshots:** One directory pattern for all group kinds: `raft/groups/<groupID>/`, with cluster-ctl at `raft/groups/cluster-ctl`. **Greenfield only:** no on-disk upgrade path from older layouts; wipe or replace the raft tree when the layout changes during development.
 
 ### Lifecycle
 
-- **Create / seed / restart:** Symmetric across group kinds (same `GroupManager` patterns in [`backend/internal/raftgroup/groupmanager.go`](../backend/internal/raftgroup/groupmanager.go)).
+- **Create / seed / restart:** Vault-ctl groups are created, seeded and restarted through `GroupManager` ([`backend/internal/raftgroup/groupmanager.go`](../backend/internal/raftgroup/groupmanager.go)). Cluster-ctl Raft is not a `GroupManager` group: `openRaftClusterCtlStore` opens it directly, and `setupMultiRaft` leaves `GroupManagerConfig.ShutdownLast` empty for that reason.
 - **Shutdown:** Preserve ordering already relied upon (Raft shutdown before transport removal; see `DestroyGroup`). Vault redesign **MUST NOT** weaken shutdown invariants.
 
 ### Authority direction (target)
@@ -167,35 +165,30 @@ Documents the transitions that flow through `vaultctlfsm` / vault-ctl Raft appli
 
 Chunk substates (delete pending, tombstone, etc.) are mapped to: **vault-committed**, **instance-local**, or **system-committed**.
 
-### Chunk lifecycle (Phase 3, gastrolog-1huz5)
+### Chunk lifecycle (pipeline vaults)
 
-A chunk traverses three FSM-tracked states. The state is `vault-committed` (replicated through the per-vault control-plane Raft).
+A chunk traverses three FSM-tracked states (`chunk.ChunkState` on the vault-ctl `ManifestEntry`). The state is `vault-committed` (replicated through the per-vault control-plane Raft). The vault-ctl leader plans chunks as open chunk manifests over published segments; every home builds its own GLCB from the sealed manifest.
 
 ```mermaid
 stateDiagram-v2
   direction LR
-  [*] --> Active: CmdCreateChunk
-  Active --> Sealing: CmdBeginSeal (rotation policy fired)
-  Sealing --> Sealed: CmdSealChunk (sealToGLCB committed data.glcb)
-  Sealed --> [*]: CmdDeleteChunk
+  [*] --> Active: AddOpenChunkSegmentRef (first ref of an open manifest)
+  Active --> Sealing: SealOpenChunkManifest (leader seals the manifest)
+  Sealing --> Sealed: CmdSealChunk (leader, after its own GLCB build)
+  Sealed --> [*]: FinalizeDelete (delete receipt protocol)
 ```
 
-| State    | Producer trigger                          | Files on the leader                          | Followers                              |
-|----------|-------------------------------------------|----------------------------------------------|----------------------------------------|
-| Active   | `CmdCreateChunk`                          | `raw.log`+`idx.log`+`attr.log`+`dict.log` open for append; B+ trees in use | Best-effort active-form mirror via record streaming |
-| Sealing  | `CmdBeginSeal` (in `sealActiveLocked`)    | active-form files closed but readable; B+ trees removed; `data.glcb` not yet on disk | Mirror frozen — no further append; not yet a promotion candidate |
-| Sealed   | `CmdSealChunk` (in `PostSealProcess` after `sealToGLCB`) | `data.glcb` on disk; FSM carries the GLCB whole-blob digest | Eligible for sealed-form GLCB byte replication from leader |
+| State    | Producer trigger | Bytes on each home | Reads |
+|----------|------------------|--------------------|-------|
+| Active   | `applyAddOpenChunkSegmentRef` ([`vaultctlfsm/open_chunk.go`](../backend/internal/vaultraft/vaultctlfsm/open_chunk.go)) creates the `ManifestEntry` in `Active` when the first segment ref lands in the open manifest | Segments in `head/`; no GLCB | `OpenPipelineChunkCursor` reads the manifest-listed segment spans |
+| Sealing  | `applySealOpenChunkManifest` moves the open manifest onto the FIFO sealed-manifest queue and the entry to `Sealing`; proposed by the chunking leader's `applySealOpenManifest` ([`pipeline/chunking/leader.go`](../backend/internal/pipeline/chunking/leader.go)) on rotation policy or operator seal | Each home builds `data.glcb` and its secondary indexes from the sealed manifest; until its build finishes it still has the segments | `OpenPipelineChunkCursor` opens the local GLCB when present, else the segment spans |
+| Sealed   | `proposeSealOnce` ([`pipeline/chunking/build_pass.go`](../backend/internal/pipeline/chunking/build_pass.go)) — only the vault-ctl leader commits `CmdSealChunk`, after its own build; `applySeal` pops the sealed-manifest head | `data.glcb` on every home that built or pulled it; holder receipts (`AckChunkHolder` / `RevokeChunkHolder`) record which homes hold it | The local GLCB |
 
-**Authority during Sealing.** Only the leader's bytes are authoritative. `OverlayFromFSM` projects the FSM state onto `chunk.ChunkMeta`, so retention / archival sweep / cloud backfill / replication catchup / vault drain gate on `State == Sealed` rather than the local `Sealed` bool. The local bool flips at `sealActiveLocked` time; the cluster-wide signal flips when `sealToGLCB` commits the GLCB.
+**Every home builds.** No home receives another's sealed bytes as the normal path. A follower home that finishes its build before `CmdSealChunk` commits keeps its GLCB and waits for the leader's seal. A home that misses a build (down or wedged while the segments were released) pulls the GLCB from a peer home: the lifecycle reconciler's `syncPipelineSealedGLCBs` ([`vault_lifecycle_reconciler.go`](../backend/internal/orchestrator/vault_lifecycle_reconciler.go)) calls `pullMissingGLCB` ([`glcb_catchup.go`](../backend/internal/orchestrator/glcb_catchup.go)) for every Sealed entry without local bytes, then reconciles this node's holder receipt against what is on disk.
 
-**Local vs cluster `Sealed` semantics.** The two bits answer different questions and must not be conflated:
+**Gates on Sealed.** Metas are grounded in the FSM through `groundChunkMeta` ([`grounded_meta.go`](../backend/internal/orchestrator/grounded_meta.go)), which sets `meta.Sealed` from `State == Sealed`. Every producer-side gate that ships, retires, or otherwise irreversibly acts on a chunk reads the grounded meta and skips anything not yet Sealed: retention (`retentionRunner.sweep`), archival sweep (`archivalSweepVault`), cloud backfill/upload (`backfillCloudUploads`), and vault drain (`drainVaultChunks`, `drainSealed`). `ListAllChunkMetas` ([`vault_ops.go`](../backend/internal/orchestrator/vault_ops.go)) projects every chunk from the FSM manifest (including open and sealing entries) the same way.
 
-- **Local `meta.Sealed`** (returned by `cm.List()` and `ListChunkMetas`): "is this chunk's active form closed on this node?" Used by query / index / read paths to decide between sealed-cursor and active-cursor strategies. Robust to transient mid-`PostSealProcess` state because `OpenCursor` reads from active-form files when `data.glcb` isn't yet present.
-- **Cluster `State == Sealed`** (via `OverlayFromFSM`): "has the GLCB been committed cluster-wide?" Used by every producer-side gate that ships, retires, or otherwise irreversibly acts on a chunk. Conservative: a Sealing chunk reads as not-yet-Sealed so producers wait for the assembly to complete.
-
-A blanket overlay on `ListChunkMetas` would conflate them — the query path would see Sealing chunks as not-Sealed and try the active-chunk fast path, which can no longer access the chunk via `ScanActive*`. Each caller chooses explicitly.
-
-**Crash recovery.** A leader that dies between `CmdBeginSeal` (`Active → Sealing`) and `CmdSealChunk` (`Sealing → Sealed`) leaves the FSM holding a `Sealing` entry indefinitely. `VaultLifecycleReconciler.ReconcileFromSnapshot` runs `resumeSealingFromFSM` after every Restore: for each `State == Sealing` entry whose chunk the local Manager still holds (sealed bit set on disk), it re-schedules `PostSealProcess`. `sealToGLCB` is idempotent (writes via `data.glcb.tmp` + atomic rename), so re-running after a partial pass is safe. Followers-turned-leaders that never had the active-form files cannot resume; their Sealing entries fall to `SweepStaleLeaderFSMEntries`' grace-period cleanup.
+**Crash recovery.** A home that built its GLCB but stopped before `CmdSealChunk` applied recovers through chunking's `RecoverOnce` ([`pipeline/chunking/recover.go`](../backend/internal/pipeline/chunking/recover.go)): for the sealed-manifest head and for every Active or Sealing entry whose GLCB is present locally, it re-reads the build result from the GLCB and proposes the seal (the leader commits; followers wait). It runs when the pipeline registers the vault on a home and after every vault-ctl snapshot restore (`reconcilePipelineAfterCtlRestore`). The build writes through a temp file and an atomic rename, so re-running after a partial build is safe; `RecoverOnce` sweeps orphaned build temp files first.
 
 ### Vault state diagram
 
@@ -221,7 +214,7 @@ These require explicit product/architecture decisions:
 1. **One VaultRaft vs multiple raft groups per vault** (e.g. separate hot/cold metadata): pick one default.
 2. **Cutover** to **no per-instance Raft**: ~~move chunk-FSM commands and apply-forwarding onto vault control-plane Raft, then remove the legacy per-instance Raft groups, group store names, and apply-fn split~~ — **done** (gastrolog-5xxbd + gastrolog-2ze8j). `ensureVaultCtlMetadata` is the canonical entry; the single `SetGroupApplyFn` replaces the prior split apply-fns.
 3. **Cluster-ctl Raft shrink/grow:** Which config moves to vault Raft vs stays global; backward compatibility for existing clusters.
-4. **Snapshot layout convergence:** Single rule for system and vault snapshots (no legacy on-disk compatibility).
+4. **Snapshot layout:** Converged — every group snapshots under `raft/groups/<groupID>/` (no legacy on-disk compatibility).
 5. **Feature flags:** Whether vault Raft rolls out behind a flag per vault or cluster-wide.
 
 ---
@@ -235,7 +228,7 @@ These require explicit product/architecture decisions:
 - [x] FSM boundary: chunk-metadata commands run as a sub-FSM (`vaultctlfsm`) inside `vaultraft.FSM`, dispatched via `OpVaultChunkFSM` envelopes (`vaultraft.MarshalVaultChunkCommand`). Done (5xxbd).
 - [x] **RPC / naming cleanup:** consolidated apply entrypoints — done (2ze8j): single `SetGroupApplyFn`; `ForwardVaultApply` is the single cross-node apply RPC.
 - [x] Bootstrap/defer rules from D for partial membership; tests for "no bad initial config". — done (5xxbd).
-- [x] WAL: confirm shared `raftwal` grouping and replay order; extend `raftwal` tests if new group naming or churn patterns appear. — done (5xxbd): vault-ctl groups share the per-node `raftwal` with system/config groups.
+- [x] WAL: vault-ctl groups share the per-node vault-ctl `raftwal` (`raft/groups/wal`); cluster-ctl has its own (`raft/wal`).
 - [x] Shutdown: preserve `DestroyGroup` ordering vs transport; add vault group to shutdown sequence in `app` if needed. — done (5xxbd).
 
 ### For gastrolog-554s3 — explicit vault → instance ownership
@@ -243,7 +236,7 @@ These require explicit product/architecture decisions:
 - [x] Replace implicit "find chunk manager" shortcuts with APIs that take **vault context** first (`vault_ops.go` and call sites). — done (554s3 + 2ze8j): orchestrator shortcuts retired in favor of vault-scoped lookups.
 - [x] Document and enforce: chunk managers are **owned** under a vault umbrella; no orphan instance lifetimes. — done (554s3).
 - [x] Forwarding (vault apply path and record/search forwarding) must use stable vault identity keys consistent with C. — done (2ze8j): `ForwardVaultApply` is the single apply RPC, `groupApplyFn` is the single apply path.
-- [x] Readiness plumbing: orchestrator checks **Vault_ControlPlaneReady** before operations that require it (per D). — done (5xxbd): `vaultCtlReady` gate drives readiness; `r.AppliedIndex() > 0` semantics in `vaultraft.FSM.Ready()`.
+- [x] Readiness plumbing: orchestrator checks **Vault_ControlPlaneReady** before operations that require it (per D). — `Vault.ReadinessErr` gates on the instance's `IsFSMReady` callback (`r.AppliedIndex() > 0`, wired in `buildVaultRaftCallbacks`).
 - [x] Remove or quarantine legacy paths called out during inventory once vault Raft is live. — done (2ze8j): legacy per-instance Raft group-id helpers and tests deleted.
 
 ---
