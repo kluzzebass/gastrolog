@@ -1,10 +1,13 @@
 package orchestrator
 
 import (
+	"sync/atomic"
+
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
+	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
@@ -45,6 +48,17 @@ type VaultInstance struct {
 	// the canonical deleteChunk entry point. All cluster-wide deletes route
 	// through here. Nil for memory-mode vaults (no FSM, no replication).
 	Reconciler *VaultLifecycleReconciler
+
+	// vaultCtlGroup is the vault's vault-ctl group on this node, stored by
+	// bindVaultInstanceToCtlLocked once the group exists; nil before. The
+	// facets read it lock-free: they run on Raft apply goroutines, which
+	// GroupManager.Shutdown waits for while holding the GroupManager lock.
+	vaultCtlGroup atomic.Pointer[raftgroup.Group]
+
+	// vaultCtl is the vault-ctl sub-FSM the reconciler and chunk-event
+	// callbacks are subscribed to; nil until bindVaultInstanceToCtlLocked
+	// finds the vault's group. Guarded by Orchestrator.mu.
+	vaultCtl *vaultctlfsm.FSM
 }
 
 // RaftLeadershipFacet groups the vault control-plane Raft leadership queries.
@@ -136,8 +150,9 @@ type ManifestReadFacet struct {
 	IsTombstoned func(id chunk.ChunkID) bool
 
 	// IsFSMReady returns true after the vault-ctl FSM has applied at least one log
-	// entry or restored from a snapshot. Before that, the manifest is incomplete
-	// and must not be used for reconciliation decisions.
+	// entry or restored from a snapshot. Before that — including while the
+	// vault's vault-ctl group has not been created on this node — the manifest
+	// is incomplete and must not be used for reconciliation decisions.
 	IsFSMReady func() bool
 }
 

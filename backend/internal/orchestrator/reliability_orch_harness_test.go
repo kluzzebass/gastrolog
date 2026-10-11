@@ -111,6 +111,11 @@ type orchRelHarness struct {
 	// fresh-joiner way: ApplyConfig(nil) at startNode, config arriving only
 	// through the test-driven dispatcher-equivalent fan-out.
 	nilConfigBootIdxs map[int]bool
+	// vaultCtlHiddenPeer maps a node index (into h.nodeIDs) to the index of a
+	// peer its vault-ctl member resolution cannot see at boot, so its vault-ctl
+	// group creation defers until resolveVaultCtlPeers. Such nodes are left
+	// out of the boot-time readiness wait.
+	vaultCtlHiddenPeer map[int]int
 	// rotationPolicyID is the shared pipeline rotation policy written by
 	// seedSharedConfig (nil without withPipelineCluster); vaults added
 	// mid-test (addRuntimeVault) reference it too.
@@ -166,6 +171,19 @@ func withNilConfigBoot(nodeIdx int) orchRelOption {
 			h.nilConfigBootIdxs = make(map[int]bool)
 		}
 		h.nilConfigBootIdxs[nodeIdx] = true
+	}
+}
+
+// withVaultCtlPeerHidden boots the node at nodeIdx unable to resolve the node
+// at hiddenIdx for vault-ctl membership — a peer not yet in its cluster-ctl
+// Raft configuration — so its vault-ctl groups defer creation while every
+// other node creates them. resolveVaultCtlPeers lifts it.
+func withVaultCtlPeerHidden(nodeIdx, hiddenIdx int) orchRelOption {
+	return func(h *orchRelHarness) {
+		if h.vaultCtlHiddenPeer == nil {
+			h.vaultCtlHiddenPeer = make(map[int]int)
+		}
+		h.vaultCtlHiddenPeer[nodeIdx] = hiddenIdx
 	}
 }
 
@@ -680,9 +698,20 @@ func (h *orchRelHarness) startNode(id string) {
 	}
 	n.orch = orch
 
+	resolver := h.resolver()
+	if hiddenIdx, ok := h.vaultCtlHiddenPeer[slices.Index(h.nodeIDs, id)]; ok {
+		hidden := h.nodeIDs[hiddenIdx]
+		resolvesAll := resolver
+		resolver = func(nodeID string) (string, bool) {
+			if nodeID == hidden {
+				return "", false
+			}
+			return resolvesAll(nodeID)
+		}
+	}
 	factories := orchestrator.Factories{
 		GroupManager:        groupMgr,
-		NodeAddressResolver: h.resolver(),
+		NodeAddressResolver: resolver,
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			vaultTypeKey: chunkfile.NewFactory(),
 		},
@@ -699,7 +728,7 @@ func (h *orchRelHarness) startNode(id string) {
 	// Vault-ctl apply forwarding, wired for EVERY multi-node harness rather
 	// than only pipeline ones.
 	//
-	// factories.PeerConns is what makes ensureVaultCtlMetadata choose the
+	// factories.PeerConns is what makes the vault-ctl instance binding choose the
 	// forwarding applier; without it a vault-ctl announce from a node that is
 	// not the group leader hits g.Raft.Apply directly and fails with
 	// "node is not the leader". A chunk sealed on a non-leader then never
@@ -906,9 +935,12 @@ func (h *orchRelHarness) waitForAllReady() {
 	// is still false, so a slow-but-live election never reads as a stall.
 	h.waitProgress("vault replication readiness", 50*time.Millisecond, func() (string, bool) {
 		var notReady []string
-		for _, id := range h.nodeIDs {
+		for i, id := range h.nodeIDs {
 			n := h.nodes[id]
 			if n.orch == nil {
+				continue
+			}
+			if _, deferred := h.vaultCtlHiddenPeer[i]; deferred {
 				continue
 			}
 			if !n.orch.LocalVaultsReplicationReady() {
@@ -923,6 +955,22 @@ func (h *orchRelHarness) waitForAllReady() {
 		_ = pprof.Lookup("goroutine").WriteTo(&stacks, 1)
 		h.t.Logf("goroutine profile at readiness stall:\n%s", stacks.String())
 	})
+}
+
+// resolveVaultCtlPeers makes every peer resolvable for the node and runs the
+// node-config refresh the dispatcher drives when the missing peer's address
+// reaches the cluster-ctl Raft configuration.
+func (h *orchRelHarness) resolveVaultCtlPeers(id string) {
+	h.t.Helper()
+	idx := slices.Index(h.nodeIDs, id)
+	delete(h.vaultCtlHiddenPeer, idx)
+	n := h.nodes[id]
+	n.factories.NodeAddressResolver = h.resolver()
+	nodes, err := h.cfgStore.ListNodes(context.Background())
+	if err != nil {
+		h.t.Fatalf("ListNodes: %v", err)
+	}
+	n.orch.RefreshVaultCtlMembers(nodes, n.factories)
 }
 
 // sweepJobLastRun reports when a node's named scheduler job last ran, and

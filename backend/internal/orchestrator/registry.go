@@ -17,6 +17,7 @@ func (o *Orchestrator) RegisterVault(vault *Vault) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.vaults[vault.ID] = vault
+	o.bindVaultInstanceToCtlLocked(vault.ID, vault.Instance)
 	o.signalVaultReadyChange()
 }
 

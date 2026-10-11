@@ -75,7 +75,7 @@ func TestSweepAbandonedTransferAnnouncesRetractsOnlyTheStalePhantom(t *testing.T
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepAbandonedTransferAnnounces()
 
@@ -121,7 +121,7 @@ func TestSweepAbandonedTransferAnnouncesFollowerNoOp(t *testing.T) {
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepAbandonedTransferAnnounces()
 

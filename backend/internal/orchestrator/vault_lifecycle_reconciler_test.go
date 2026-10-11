@@ -1560,7 +1560,7 @@ func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *test
 	}
 
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepStaleLeaderFSMEntries()
 
@@ -1620,7 +1620,7 @@ func TestSweepStaleLeaderFSMEntriesSkipsPipelineVault(t *testing.T) {
 		},
 	}
 	rec := NewVaultLifecycleReconciler(orch, vaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepStaleLeaderFSMEntries()
 
@@ -1660,7 +1660,7 @@ func TestSweepStaleLeaderFSMEntriesRespectsSealedAtGrace(t *testing.T) {
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepStaleLeaderFSMEntries()
 
@@ -1712,7 +1712,7 @@ func TestSweepNodesOutsidePlacementPrunesNonPlacementNodes(t *testing.T) {
 	}
 
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "leader-node", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepNodesOutsidePlacement()
 
@@ -1760,7 +1760,7 @@ func TestSweepNodesOutsidePlacementSkipsCurrentPlacementMembers(t *testing.T) {
 	}
 
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "leader-node", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepNodesOutsidePlacement()
 
@@ -1862,7 +1862,7 @@ func TestSweepNodesOutsidePlacementFollowersAreNoOp(t *testing.T) {
 	}
 
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-X", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepNodesOutsidePlacement()
 
@@ -1969,7 +1969,7 @@ func TestSweepIdleActiveSealsLocalActivePastThreshold(t *testing.T) {
 
 	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepIdleActiveChunks()
 
@@ -2017,7 +2017,7 @@ func TestSweepIdleActiveSealsMetadataOnlyOrphan(t *testing.T) {
 
 	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepIdleActiveChunks()
 
@@ -2059,7 +2059,7 @@ func TestSweepIdleActiveSkipsFreshActiveEntries(t *testing.T) {
 
 	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepIdleActiveChunks()
 
@@ -2099,7 +2099,7 @@ func TestSweepIdleActiveSkipsChunksNotHeldLocally(t *testing.T) {
 
 	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepIdleActiveChunks()
 
@@ -2152,7 +2152,7 @@ func TestSweepIdleActiveSkipsAlreadyLocallySealedChunks(t *testing.T) {
 
 	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepIdleActiveChunks()
 
@@ -2199,7 +2199,7 @@ func TestSweepIdleActiveSkipsSealingAndSealedEntries(t *testing.T) {
 
 	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepIdleActiveChunks()
 
@@ -2298,7 +2298,7 @@ func TestReconcileMembershipCatchupPrunesStalePendingAcks(t *testing.T) {
 	}
 
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "leader-node", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	// Fire ONLY the lead-gained catchup wake. No ReconcileTick.
 	rec.ReconcileMembershipCatchup()

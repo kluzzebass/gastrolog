@@ -48,11 +48,28 @@
 
 ### Vault chunk metadata (cluster mode)
 
-Replicated chunk metadata uses the **vault control-plane** group only (`OpVaultChunkFSM` wrapping `vaultctlfsm` wire payloads). Entry: `ensureVaultCtlMetadata` in [`backend/internal/orchestrator/reconfig_vaults.go`](../backend/internal/orchestrator/reconfig_vaults.go). Cross-node apply uses `ForwardVaultApply` with the vault-ctl `group_id` and wrapped command bytes (`cluster.NewVaultCtlChunkApplyForwarder`).
+Replicated chunk metadata uses the **vault control-plane** group only (`OpVaultChunkFSM` wrapping `vaultctlfsm` wire payloads). Entry: `bindVaultInstanceToCtlLocked` in [`backend/internal/orchestrator/reconfig_vaults.go`](../backend/internal/orchestrator/reconfig_vaults.go). Cross-node apply uses `ForwardVaultApply` with the vault-ctl `group_id` and wrapped command bytes (`cluster.NewVaultCtlChunkApplyForwarder`).
+
+### Deferred group creation and instance binding
+
+A node creates a vault's vault-ctl group only with the complete voter set: every node in the cluster node list resolvable, the local node among them (`tryStartClusterWideRaftGroup`). Otherwise creation **defers** — a joiner whose own `NodeConfig` has not reached the node list yet, or a peer not yet in the cluster-ctl Raft configuration. The vault still registers, and a node with a placement still builds its local instance.
+
+`RefreshVaultCtlMembers` (dispatched on every node-config put and delete) retries: once the member set is complete it creates each missing group.
+
+Two bindings attach consumers to a group, and both run wherever the group and its consumers meet:
+
+| Binding | What it wires | Runs on |
+|---------|---------------|---------|
+| `bindVaultCtlGroup` (vault level, every node) | after-restore hook, pipeline chunk events on the live sub-FSM, the vault-ctl leader loop | group ensure (build, `AddVaultInstance`, `RefreshVaultCtlMembers`), snapshot restore |
+| `bindVaultInstanceToCtlLocked` (local instance) | once, at registration: the Raft-backed facets (`IsFSMReady`, apply callbacks, manifest reads) and the announcer; per live sub-FSM: the lifecycle reconciler's callbacks, `OnCreate` / `OnUpload`, the lazy cloud-backed resolver | instance registration (`AddVault`, `AddVaultInstance`, `RegisterVault`), `RefreshVaultCtlMembers`, snapshot restore |
+
+The facets and the announcer's applier read the instance's group pointer — stored by the binding once the group exists, read lock-free because the facets run on Raft apply goroutines — and resolve the sub-FSM through it on every call instead of capturing it, so they are correct before the group exists, after it is created, and across restores without ever being rewritten on a live instance. The sub-FSM pushes its events to whatever subscribed to it, so those subscriptions follow the live sub-FSM: the instance binding records the sub-FSM it subscribed to and is a no-op while that one is still live; a snapshot restore replaces the sub-FSM, so the restore pass subscribes the replacement. The leader loop is started through `vaultCtlLeaderManager.Start`, which runs at most one loop per vault.
+
+**Readiness while deferred:** deferral makes the **vault** not ready on that node. While the group does not exist, the instance has no group to read and `IsFSMReady()` reports `false`, so `ReadinessErr` returns `ErrVaultNotReady` until the group exists and has applied (`r.AppliedIndex() > 0`). A node without vault-ctl Raft at all (no `GroupManager` or no node address resolver: single-node/memory mode) leaves `IsFSMReady` nil and the instance is ready — its own chunk manager is authoritative.
 
 ### Orchestrator
 
-Vault / chunk operations and routing: [`backend/internal/orchestrator/vault_ops.go`](../backend/internal/orchestrator/vault_ops.go) and related orchestrator code; replicated metadata callbacks from `ensureVaultCtlMetadata` / `vaultRaftCallbacks` read the per-instance sub-FSM inside [`backend/internal/vaultraft/`](../backend/internal/vaultraft/).
+Vault / chunk operations and routing: [`backend/internal/orchestrator/vault_ops.go`](../backend/internal/orchestrator/vault_ops.go) and related orchestrator code; replicated metadata callbacks from `bindVaultInstanceToCtlLocked` / `vaultRaftCallbacks` read the per-instance sub-FSM inside [`backend/internal/vaultraft/`](../backend/internal/vaultraft/).
 
 ### Status
 
@@ -212,7 +229,7 @@ stateDiagram-v2
 These require explicit product/architecture decisions:
 
 1. **One VaultRaft vs multiple raft groups per vault** (e.g. separate hot/cold metadata): pick one default.
-2. **Cutover** to **no per-instance Raft**: ~~move chunk-FSM commands and apply-forwarding onto vault control-plane Raft, then remove the legacy per-instance Raft groups, group store names, and apply-fn split~~ — **done** (gastrolog-5xxbd + gastrolog-2ze8j). `ensureVaultCtlMetadata` is the canonical entry; the single `SetGroupApplyFn` replaces the prior split apply-fns.
+2. **Cutover** to **no per-instance Raft**: ~~move chunk-FSM commands and apply-forwarding onto vault control-plane Raft, then remove the legacy per-instance Raft groups, group store names, and apply-fn split~~ — **done** (gastrolog-5xxbd + gastrolog-2ze8j). `ensureVaultControlPlaneRaftGroup` and `bindVaultInstanceToCtlLocked` are the canonical entries; the single `SetGroupApplyFn` replaces the prior split apply-fns.
 3. **Cluster-ctl Raft shrink/grow:** Which config moves to vault Raft vs stays global; backward compatibility for existing clusters.
 4. **Snapshot layout:** Converged — every group snapshots under `raft/groups/<groupID>/` (no legacy on-disk compatibility).
 5. **Feature flags:** Whether vault Raft rolls out behind a flag per vault or cluster-wide.
@@ -248,7 +265,7 @@ These require explicit product/architecture decisions:
 | Cluster-ctl Raft | `backend/internal/app/raft.go` |
 | Multi-Raft setup, unified group apply | `backend/internal/app/app.go` (`setupMultiRaft`, `wireClusterRaftApplies`, `SetGroupApplyFn`) |
 | Vault control-plane Raft | `backend/internal/orchestrator/reconfig_vaults.go` (`ensureVaultControlPlaneRaftGroup`), `backend/internal/orchestrator/vault_ctl_apply.go`, `backend/internal/vaultraft/`, `backend/internal/cluster/vault_apply_forwarder.go`, `backend/internal/cluster/vault_ctl_chunk_apply_forwarder.go` |
-| Vault ctl metadata wiring | `backend/internal/orchestrator/reconfig_vaults.go` (`ensureVaultControlPlaneRaftGroup`, `ensureVaultCtlMetadata`) |
+| Vault ctl metadata wiring | `backend/internal/orchestrator/reconfig_vaults.go` (`ensureVaultControlPlaneRaftGroup`, `bindVaultCtlGroup`, `bindVaultInstanceToCtlLocked`, `RefreshVaultCtlMembers`) |
 | Group manager | `backend/internal/raftgroup/groupmanager.go` |
 | WAL | `backend/internal/raftwal/` |
 | Transport | `backend/internal/multiraft/transport.go` |

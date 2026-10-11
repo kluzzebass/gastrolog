@@ -118,8 +118,10 @@ type VaultLifecycleReconciler struct {
 
 	// fsm is the instance sub-FSM this reconciler is bound to. Stored on
 	// Wire() so onAckDelete can read remaining ExpectedFrom without
-	// having to re-resolve the FSM through the Raft group.
-	fsm *vaultctlfsm.FSM
+	// having to re-resolve the FSM through the Raft group. Atomic because
+	// a snapshot restore or a deferred group's creation rebinds a reconciler
+	// whose sweeps are already running.
+	fsm atomic.Pointer[vaultctlfsm.FSM]
 
 	mu sync.Mutex
 
@@ -204,7 +206,7 @@ func (r *VaultLifecycleReconciler) Wire(fsm *vaultctlfsm.FSM) {
 	if fsm == nil {
 		return
 	}
-	r.fsm = fsm
+	r.fsm.Store(fsm)
 	fsm.SetOnSeal(r.onSeal)
 	fsm.SetOnRetentionPending(r.onRetentionPending)
 	fsm.SetOnRequestDelete(r.onRequestDelete)
@@ -515,7 +517,8 @@ func (r *VaultLifecycleReconciler) reconcileSealingResume(v *reconcileView) {
 // its GLCB rather than a chunk-manager chunk stranded mid-seal. Nil-safe so a
 // reconciler without an FSM behaves as it did before the distinction existed.
 func (r *VaultLifecycleReconciler) awaitingBuild(id chunk.ChunkID) bool {
-	return r.fsm != nil && r.fsm.AwaitingBuild(id)
+	fsm := r.fsm.Load()
+	return fsm != nil && fsm.AwaitingBuild(id)
 }
 
 // maxSealResumeAttempts bounds how many times the steady-state pass re-drives
@@ -952,13 +955,14 @@ type reconcileView struct {
 // gatherReconcileView snapshots the tick's shared inputs. Returns nil
 // when there is no FSM to reconcile against.
 func (r *VaultLifecycleReconciler) gatherReconcileView() *reconcileView {
-	if r.fsm == nil {
+	fsm := r.fsm.Load()
+	if fsm == nil {
 		return nil
 	}
 	v := &reconcileView{
-		ready:   r.fsm.Ready(),
-		entries: r.fsm.List(),
-		pending: r.fsm.PendingDeletes(),
+		ready:   fsm.Ready(),
+		entries: fsm.List(),
+		pending: fsm.PendingDeletes(),
 	}
 	v.entryByID = make(map[chunk.ChunkID]*vaultctlfsm.ManifestEntry, len(v.entries))
 	for i := range v.entries {
@@ -1207,7 +1211,7 @@ func (r *VaultLifecycleReconciler) reconcileLocalOrphans(v *reconcileView) {
 		// invariant (docs/disk-authority-audit.md).
 		// Auto-deleting them removes the recovery surface for FSM-glitch
 		// scenarios.
-		tombstoned := r.fsm.IsTombstoned(meta.ID)
+		tombstoned := r.fsm.Load().IsTombstoned(meta.ID)
 		ghost := !tombstoned && meta.Sealed && !meta.WriteEnd.IsZero() &&
 			meta.RecordCount == 0 &&
 			now.Sub(meta.WriteEnd) > ghostAgeThreshold
@@ -1341,7 +1345,7 @@ func (r *VaultLifecycleReconciler) sweepReleasedSegmentStaging() {
 	}
 	purged := 0
 	for id := range candidates {
-		if !r.fsm.SegmentReleased(id) {
+		if !r.fsm.Load().SegmentReleased(id) {
 			continue
 		}
 		if err := paths.PurgeSegmentStaging(root, id); err != nil {
@@ -1382,7 +1386,7 @@ func (r *VaultLifecycleReconciler) sweepTombstonedChunkStaging(v *reconcileView)
 		if v.entryByID[id] != nil || v.pendingByID[id] != nil {
 			continue
 		}
-		if !r.fsm.IsTombstoned(id) {
+		if !r.fsm.Load().IsTombstoned(id) {
 			continue
 		}
 		r.deletePipelineChunkDir(id)
@@ -1788,7 +1792,7 @@ func (r *VaultLifecycleReconciler) reconcileStaleLeaderFSMEntries(v *reconcileVi
 		if v.have[e.ID] {
 			continue
 		}
-		if pending := r.fsm.SealedManifest(); pending != nil && pending.ChunkID == e.ID {
+		if pending := r.fsm.Load().SealedManifest(); pending != nil && pending.ChunkID == e.ID {
 			continue
 		}
 		// Pipeline GLCB builds materialize under segments/<vault>/chunks/<id>/
@@ -1818,7 +1822,7 @@ func (r *VaultLifecycleReconciler) reconcileStaleLeaderFSMEntries(v *reconcileVi
 		// PendingDelete check inside deleteChunk dedups but logs each
 		// proposal; check up front to keep the log quiet for the
 		// already-in-flight case.
-		if r.fsm.PendingDelete(e.ID) != nil {
+		if r.fsm.Load().PendingDelete(e.ID) != nil {
 			continue
 		}
 		r.logger.Warn("stale-fsm sweep: proposing delete for unrecoverable chunk",
@@ -2325,7 +2329,7 @@ func (r *VaultLifecycleReconciler) deleteChunk(chunkID chunk.ChunkID, reason str
 			"chunk", chunkID, "reason", reason)
 		return r.deleteLocalCopy(chunkID, reason)
 	}
-	if r.fsm != nil && r.fsm.PendingDelete(chunkID) != nil {
+	if fsm := r.fsm.Load(); fsm != nil && fsm.PendingDelete(chunkID) != nil {
 		r.logger.Debug("deleteChunk: pendingDelete entry already exists, skipping propose",
 			"chunk", chunkID, "reason", reason)
 		return nil

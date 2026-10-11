@@ -61,7 +61,7 @@ func sealResumeFixture(t *testing.T, logger *slog.Logger) (*VaultLifecycleReconc
 	}
 	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", logger)
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 	return rec, idSealing
 }
 
@@ -211,7 +211,7 @@ func TestSnapshotResumeStillWarnsOnUnrecoverableSealing(t *testing.T) {
 	cm.chunks = nil
 	recordScheduled(rec)
 
-	rec.ReconcileFromSnapshot(rec.fsm)
+	rec.ReconcileFromSnapshot(rec.fsm.Load())
 
 	if got := out.String(); !strings.Contains(got, "cannot resume") {
 		t.Errorf("restore path went quiet about an unrecoverable Sealing entry; log was:\n%s", got)

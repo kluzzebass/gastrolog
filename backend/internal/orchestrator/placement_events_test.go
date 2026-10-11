@@ -272,7 +272,7 @@ func instanceWithPendingAcks(vaultID glid.GLID, nodeID string, targets []system.
 		RaftApplyFacet:  RaftApplyFacet{ApplyRaftPruneNode: rec.apply},
 	}
 	inst.Reconciler = NewVaultLifecycleReconciler(nil, vaultID, inst, nodeID, slog.Default())
-	inst.Reconciler.fsm = pendingDeleteFSM(expectedFrom...)
+	inst.Reconciler.fsm.Store(pendingDeleteFSM(expectedFrom...))
 	return inst
 }
 
