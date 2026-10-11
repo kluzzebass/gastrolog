@@ -257,3 +257,57 @@ func TestScheduler_ConcurrentProgress(t *testing.T) {
 		t.Errorf("records_done = %d, want 500", snap.Progress.RecordsDone)
 	}
 }
+
+// TestJobEventsCarryAProgressSnapshot: a subscriber reads an event's progress
+// without the scheduler's lock, so the event must carry a copy. A record the
+// running task can still change under it is a data race, and the job event
+// log's fields would change after the line describing them was decided.
+func TestJobEventsCarryAProgressSnapshot(t *testing.T) {
+	t.Parallel()
+	sched := newTestScheduler(t)
+
+	sub, cancel := sched.Events().Subscribe()
+	defer cancel()
+
+	release := make(chan struct{})
+	sched.Submit("progress-snapshot", func(_ context.Context, prog *JobProgress) {
+		prog.SetRunning(10)
+		<-release
+		prog.IncrChunks()
+		prog.AddRecords(7)
+		prog.Fail(time.Now(), "boom")
+	})
+
+	awaitEvent := func(kind JobEventKind) JobEvent {
+		t.Helper()
+		deadline := time.After(10 * time.Second)
+		for {
+			select {
+			case ev := <-sub.Events():
+				if ev.Kind == kind && ev.Job.Name == "progress-snapshot" {
+					return ev
+				}
+			case <-deadline:
+				t.Fatalf("no %v event for the job", kind)
+			}
+		}
+	}
+
+	started := awaitEvent(JobEventStarted)
+	if started.Job.Progress == nil {
+		t.Fatal("started event carries no progress")
+	}
+	p := started.Job.Progress
+	type fields struct {
+		status              JobStatus
+		chunksDone, records int64
+		errMsg              string
+	}
+	before := fields{p.Status, p.ChunksDone, p.RecordsDone, p.Error}
+	close(release)
+	awaitEvent(JobEventFailed)
+
+	if after := (fields{p.Status, p.ChunksDone, p.RecordsDone, p.Error}); after != before {
+		t.Fatalf("the started event's progress changed after it was published: before %+v, after %+v", before, after)
+	}
+}
