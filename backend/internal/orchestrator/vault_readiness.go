@@ -61,13 +61,11 @@ func (v *Vault) ReadinessErr() error {
 
 // signalVaultReadyChange wakes every goroutine blocked in WaitVaultReady so
 // it can re-evaluate the readiness predicate. Called after any vault registry
-// mutation (register, instance add/remove, unregister) and after
-// RefreshVaultCtlMembers binds instances to vault-ctl groups it created.
-// Safe to call while holding o.mu — notify.Signal uses its own leaf mutex.
-//
-// The vault-ctl group's first apply (IsFSMReady turning true) is not an edge
-// signalled here: a waiter that re-evaluates before its group has applied
-// waits for the next signal or its context deadline.
+// mutation (register, instance add/remove, unregister), after
+// RefreshVaultCtlMembers binds instances to vault-ctl groups it created, and
+// from the FSM of a vault-ctl group when it first applies (IsFSMReady turning
+// true). Safe to call while holding o.mu or from the FSM apply path —
+// notify.Signal uses its own leaf mutex.
 func (o *Orchestrator) signalVaultReadyChange() {
 	if o.vaultReadySignal != nil {
 		o.vaultReadySignal.Notify()

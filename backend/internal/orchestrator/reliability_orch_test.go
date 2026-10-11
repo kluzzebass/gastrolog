@@ -43,10 +43,10 @@ import (
 // Boots a 3-node cluster with real vault-ctl Raft; every node's
 // orchestrator reports LocalVaultsReplicationReady=true within the
 // harness's deadline. This is the real end-to-end regression test: on
-// fresh init with no user commands, readiness must flip true because
-// hraft's post-bootstrap LogConfiguration + post-election LogNoop advance
-// r.AppliedIndex(), and the isFSMReady closure we wire in
-// buildVaultRaftCallbacks now keys on that.
+// fresh init with no user commands, readiness must flip true because the
+// vault-ctl FSM stores hraft's bootstrap LogConfiguration, which counts as
+// its first applied entry — the isFSMReady closure wired in
+// buildVaultRaftCallbacks keys on that.
 //
 // Goes through the full orchestrator.LocalVaultsReplicationReady →
 // Vault.ReadinessErr → instance.IsFSMReady path used by search/ingest RPCs

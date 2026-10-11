@@ -1078,11 +1078,13 @@ func (o *Orchestrator) ensureVaultControlPlaneRaftGroup(vaultID glid.GLID, clust
 }
 
 // bindVaultCtlGroup wires the vault-level consumers of a vault-ctl group: the
-// after-restore hook, the pipeline chunk events on the live sub-FSM, and the
-// leader loop. Every node runs them, local instance or not. Idempotent.
+// after-restore hook, the vault-ready signal on the group's first apply, the
+// pipeline chunk events on the live sub-FSM, and the leader loop. Every node
+// runs them, local instance or not. Idempotent.
 func (o *Orchestrator) bindVaultCtlGroup(vaultID glid.GLID, g *raftgroup.Group) {
 	if vfsm, ok := g.FSM.(*vaultraft.FSM); ok && vfsm != nil {
 		vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
+		vfsm.SetOnReady(o.signalVaultReadyChange)
 		wireVaultFSMPipelineChunkEvents(o, vaultID, vfsm.EnsureVaultFSM(vaultID))
 	}
 	o.vaultCtlLeaders.Start(vaultID, g)
@@ -1148,13 +1150,24 @@ func instanceVaultRaftCallbacks(t *VaultInstance, applier vaultctlfsm.Applier) v
 		}
 		return nil
 	}
+	ready := func() bool {
+		g := t.vaultCtlGroup.Load()
+		return g != nil && vaultCtlGroupReady(g)
+	}
 	fsm := func() *vaultctlfsm.FSM {
 		if g := t.vaultCtlGroup.Load(); g != nil {
 			return vaultCtlSubFSM(g, t.VaultID)
 		}
 		return nil
 	}
-	return buildVaultRaftCallbacks(raft, fsm, applier)
+	return buildVaultRaftCallbacks(raft, ready, fsm, applier)
+}
+
+// vaultCtlGroupReady reports whether the group's FSM has applied its first
+// entry on this node.
+func vaultCtlGroupReady(g *raftgroup.Group) bool {
+	vfsm, ok := g.FSM.(*vaultraft.FSM)
+	return ok && vfsm != nil && vfsm.Ready()
 }
 
 // instanceVaultCtlChunkApplier applies a vault's sub-FSM commands through the
@@ -1264,19 +1277,12 @@ type vaultRaftCallbacks struct {
 // buildVaultRaftCallbacks constructs the callback struct for replicated instance
 // chunk metadata (vault control-plane Raft in cluster mode). raft and fsm
 // resolve the vault-ctl group's Raft and the vault's sub-FSM at call time;
-// either may return nil, and leadership and readiness then report false and
-// reads report nothing.
-//
-// Readiness uses the Raft applied index, not the FSM's ready flag. hraft
-// filters LogNoop and LogConfiguration entries before calling FSM.Apply —
-// only LogCommand entries hit the FSM — so a fresh cluster (bootstrap config
-// + post-election no-op) advances r.AppliedIndex but never touches
-// FSM.Apply. The vault FSM's own Ready flag only flips on user-triggered
-// commands, which never fire before the first ingestion. Raft's applied
-// index is the authoritative "this group is live on this node" signal:
-// it advances on bootstrap, elections, snapshot restore, and normal
-// replication alike.
-func buildVaultRaftCallbacks(raft func() *hraft.Raft, fsm func() *vaultctlfsm.FSM, applier vaultctlfsm.Applier) vaultRaftCallbacks {
+// either may return nil, and leadership then reports false and reads report
+// nothing. ready reports whether the group's FSM has applied its first entry
+// (vaultraft.FSM.Ready) — the FSM's own count, not raft.AppliedIndex, which
+// advances before the FSM has run and would let a reader woken by the FSM's
+// ready signal still see not-ready. A nil ready reports not ready.
+func buildVaultRaftCallbacks(raft func() *hraft.Raft, ready func() bool, fsm func() *vaultctlfsm.FSM, applier vaultctlfsm.Applier) vaultRaftCallbacks {
 	return vaultRaftCallbacks{
 		hasLeader: func() bool {
 			r := raft()
@@ -1287,8 +1293,7 @@ func buildVaultRaftCallbacks(raft func() *hraft.Raft, fsm func() *vaultctlfsm.FS
 			return r != nil && r.State() == hraft.Leader
 		},
 		isFSMReady: func() bool {
-			r := raft()
-			return r != nil && r.AppliedIndex() > 0
+			return ready != nil && ready()
 		},
 		applyRequestDelete: func(id chunk.ChunkID, reason string, expectedFrom []string) error {
 			return applier.Apply(vaultctlfsm.MarshalRequestDelete(id, time.Now(), reason, expectedFrom))
