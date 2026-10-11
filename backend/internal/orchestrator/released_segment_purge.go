@@ -48,7 +48,7 @@ func (o *Orchestrator) sweepReleasedSegmentsForVault(sys *system.System, vaultID
 		return
 	}
 	log := o.logger.With("vault", vaultID)
-	covered, purged, err := pipeline.PurgeReleasedStaging(fsm, o.releasedSegmentStagingRoots(sys, vaultID))
+	covered, purged, err := pipeline.PurgeReleasedStaging(fsm, o.vaultStagingRoots(sys, vaultID))
 	if len(purged) > 0 {
 		log.Info("released-segment sweep: purged released segments' staging copies", "segments", len(purged))
 	}
@@ -72,13 +72,13 @@ func (o *Orchestrator) sweepReleasedSegmentsForVault(sys *system.System, vaultID
 	}
 }
 
-// releasedSegmentStagingRoots is where this node may hold staging copies of a
-// vault's segments, whether or not the vault is registered with the pipeline
-// here: every candidate pipeline root (the node home's and one per local file
-// storage), plus the root the vault is registered with. A placement change
-// leaves a former home's head/ copies under its previous root, and this sweep
-// is what reclaims them.
-func (o *Orchestrator) releasedSegmentStagingRoots(sys *system.System, vaultID glid.GLID) []string {
+// vaultStagingRoots is every pipeline root under which this node may hold a
+// vault's staging copies — segments and chunks — whether or not the vault is
+// registered with the pipeline here: the node home's root, one per local file
+// storage, and the root the vault is registered with. A placement change
+// leaves a former home's head/ and chunks/ under its previous root, and the
+// purge sweeps reclaim them from there.
+func (o *Orchestrator) vaultStagingRoots(sys *system.System, vaultID glid.GLID) []string {
 	roots := o.pipelineRootCandidates(sys, vaultID)
 	if reg, ok := o.lookupPipelineVault(vaultID); ok && reg.root != "" && !slices.Contains(roots, reg.root) {
 		roots = append(roots, reg.root)

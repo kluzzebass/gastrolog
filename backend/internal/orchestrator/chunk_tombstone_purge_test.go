@@ -11,6 +11,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 
 	hraft "github.com/hashicorp/raft"
@@ -54,7 +55,7 @@ func TestChunkTombstonePurgeReachesStagingOnNonHomes(t *testing.T) {
 	f.orch.deletePipelineVaultLocked(f.vaultID)
 	c := seedStagingCases(t, f)
 
-	if _, err := f.orch.purgeTombstonedChunks(f.vaultID, f.fsm); err != nil {
+	if _, err := f.orch.purgeTombstonedChunks(nil, f.vaultID, f.fsm); err != nil {
 		t.Fatalf("purge: %v", err)
 	}
 	if exists(c.tombstoned) {
@@ -79,7 +80,7 @@ func TestChunkTombstonePurgeReportsAnUndeletableStagingCopy(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(chunksDir, 0o755) })
 
-	if _, err := f.orch.purgeTombstonedChunks(f.vaultID, f.fsm); err == nil {
+	if _, err := f.orch.purgeTombstonedChunks(nil, f.vaultID, f.fsm); err == nil {
 		t.Fatal("purge reported success with the tombstoned copy still on disk")
 	}
 	if !exists(c.tombstoned) {
@@ -89,7 +90,7 @@ func TestChunkTombstonePurgeReportsAnUndeletableStagingCopy(t *testing.T) {
 	if err := os.Chmod(chunksDir, 0o755); err != nil {
 		t.Fatalf("chmod chunks/ back: %v", err)
 	}
-	if _, err := f.orch.purgeTombstonedChunks(f.vaultID, f.fsm); err != nil {
+	if _, err := f.orch.purgeTombstonedChunks(nil, f.vaultID, f.fsm); err != nil {
 		t.Fatalf("purge once deletable: %v", err)
 	}
 	if exists(c.tombstoned) {
@@ -113,7 +114,7 @@ func TestChunkTombstonePurgeCoversTheVaultInstanceChunkStore(t *testing.T) {
 		orch := &Orchestrator{vaults: map[glid.GLID]*Vault{vaultID: {Instance: inst}}}
 		inst.Reconciler = NewVaultLifecycleReconciler(orch, vaultID, inst, "node-A", slog.Default())
 		inst.Reconciler.Wire(fsm)
-		_, err := orch.purgeTombstonedChunks(vaultID, fsm)
+		_, err := orch.purgeTombstonedChunks(nil, vaultID, fsm)
 		return err
 	}
 
@@ -169,5 +170,31 @@ func applyTo(t *testing.T, fsm *vaultctlfsm.FSM, data []byte) {
 	t.Helper()
 	if err, ok := fsm.Apply(&hraft.Log{Data: data}).(error); ok && err != nil {
 		t.Fatalf("apply: %v", err)
+	}
+}
+
+// After a placement moves a vault onto a file storage, its chunks live under
+// that storage's pipeline root, not the node home's. The purge must reach
+// them there, or a confirmation would vouch for a copy that is still on disk.
+func TestChunkTombstonePurgeReachesEveryStorageRoot(t *testing.T) {
+	t.Parallel()
+	f := newStagingSweepFixture(t)
+	storageDir := t.TempDir()
+	sys := &system.System{Runtime: system.Runtime{NodeStorageConfigs: []system.NodeStorageConfig{{
+		NodeID:       f.orch.localNodeID,
+		FileStorages: []system.FileStorage{{ID: glid.New(), StorageClass: 3, Name: "archive", Path: storageDir}},
+	}}}}
+	tombstoned := chunk.NewChunkID()
+	f.apply(t, vaultctlfsm.MarshalFinalizeDelete(tombstoned))
+	onStorage := filepath.Join(pipelineChunkRoot(storagePipelineRoot(storageDir, f.vaultID)), tombstoned.String())
+	if err := os.MkdirAll(onStorage, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.orch.purgeTombstonedChunks(sys, f.vaultID, f.fsm); err != nil {
+		t.Fatalf("purge: %v", err)
+	}
+	if exists(onStorage) {
+		t.Error("tombstoned chunk dir on a file storage's pipeline root survived the purge")
 	}
 }

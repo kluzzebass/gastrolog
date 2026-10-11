@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -17,7 +19,16 @@ import (
 // of the group has confirmed. Every node takes part because every node is a
 // vault-ctl member, and a node outside a delete's expected-acks set can still
 // hold the chunk in its chunk store or chunk staging.
+//
+// A pass whose config cannot be loaded does nothing: without the node's file
+// storages it cannot reach every root a chunk copy may be under, and a purge
+// that skipped one must not be confirmed.
 func (o *Orchestrator) sweepChunkTombstones() {
+	sys, err := o.loadSystem(context.Background())
+	if err != nil && !errors.Is(err, ErrNoSystemLoader) {
+		o.logger.Warn("chunk tombstone sweep: config unavailable; skipping", "error", err)
+		return
+	}
 	o.mu.RLock()
 	vaultIDs := make([]glid.GLID, 0, len(o.vaults))
 	for vaultID := range o.vaults {
@@ -25,18 +36,18 @@ func (o *Orchestrator) sweepChunkTombstones() {
 	}
 	o.mu.RUnlock()
 	for _, vaultID := range vaultIDs {
-		o.sweepChunkTombstonesForVault(vaultID)
+		o.sweepChunkTombstonesForVault(sys, vaultID)
 	}
 }
 
-func (o *Orchestrator) sweepChunkTombstonesForVault(vaultID glid.GLID) {
+func (o *Orchestrator) sweepChunkTombstonesForVault(sys *system.System, vaultID glid.GLID) {
 	fsm, applier, isLeader, ok := o.vaultCtlHandle(vaultID)
 	if !ok || !fsm.Ready() {
 		return
 	}
 	log := o.logger.With("vault", vaultID)
 	covered := fsm.DeleteSeq()
-	purged, err := o.purgeTombstonedChunks(vaultID, fsm)
+	purged, err := o.purgeTombstonedChunks(sys, vaultID, fsm)
 	if len(purged) > 0 {
 		log.Info("chunk tombstone sweep: removed tombstoned chunk staging dirs", "chunks", len(purged))
 	}
@@ -62,18 +73,19 @@ func (o *Orchestrator) sweepChunkTombstonesForVault(vaultID glid.GLID) {
 
 // purgeTombstonedChunks deletes this node's copies of the vault's tombstoned
 // chunks: from the vault instance's chunk store when the vault has an instance
-// here, and from the vault's chunk staging whether or not this node is a home.
-// Returns the chunks purged from staging; an error means a tombstoned chunk
-// may still be on this node.
-func (o *Orchestrator) purgeTombstonedChunks(vaultID glid.GLID, fsm *vaultctlfsm.FSM) ([]chunk.ChunkID, error) {
+// here, and from the chunk staging under every pipeline root the vault may
+// have on this node, whether or not this node is a home. Returns the chunks
+// purged from staging; an error means a tombstoned chunk may still be on this
+// node.
+func (o *Orchestrator) purgeTombstonedChunks(sys *system.System, vaultID glid.GLID, fsm *vaultctlfsm.FSM) ([]chunk.ChunkID, error) {
 	var errs []error
 	if rec := o.vaultReconciler(vaultID); rec != nil {
 		errs = append(errs, rec.purgeLocalOrphans())
 	}
 	var purged []chunk.ChunkID
-	if o.segmentsDir != "" {
-		var err error
-		purged, err = purgeTombstonedChunkStaging(fsm, pipelineChunkRoot(pipelineVaultRoot(o.segmentsDir, vaultID)))
+	for _, root := range o.vaultStagingRoots(sys, vaultID) {
+		ids, err := purgeTombstonedChunkStaging(fsm, pipelineChunkRoot(root))
+		purged = append(purged, ids...)
 		errs = append(errs, err)
 	}
 	return purged, errors.Join(errs...)

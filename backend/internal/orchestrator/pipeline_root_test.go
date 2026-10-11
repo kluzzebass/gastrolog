@@ -426,13 +426,13 @@ func TestPipelineRootGatherFailureRetries(t *testing.T) {
 // The released-segment sweep reaches every root a vault's staging copies can
 // be under on this node — the home's and each local storage's — not just the
 // root the vault is registered with now.
-func TestReleasedSegmentStagingRootsCoverEveryLocalStorage(t *testing.T) {
+func TestVaultStagingRootsCoverEveryLocalStorage(t *testing.T) {
 	t.Parallel()
 	c := newRootTestCluster(t)
 	vaultID := glid.New()
 	sys := c.system(vaultID, onStorage(c.peerStore))
 	orch := c.newOrch(t, &staticSystemLoader{sys: sys})
-	roots := orch.releasedSegmentStagingRoots(sys, vaultID)
+	roots := orch.vaultStagingRoots(sys, vaultID)
 	for _, want := range []string{
 		c.homeRoot(vaultID),
 		c.storageRoot(c.fast, vaultID),
