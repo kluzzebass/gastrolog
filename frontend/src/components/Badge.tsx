@@ -1,3 +1,4 @@
+import { useHelp } from "../hooks/useHelp";
 import { useThemeClass } from "../hooks/useThemeClass";
 
 export type BadgeVariant =
@@ -14,6 +15,8 @@ interface BadgeProps {
   children: React.ReactNode;
   className?: string;
   title?: string;
+  /** Help reference the badge opens when clicked; pair with `title` so the meaning is also readable on hover. */
+  helpRef?: string;
 }
 
 const variantClasses: Record<BadgeVariant, string | ((c: ReturnType<typeof useThemeClass>) => string)> = {
@@ -31,19 +34,34 @@ const variantClasses: Record<BadgeVariant, string | ((c: ReturnType<typeof useTh
  * All badges use: px-1.5 py-0.5 text-[0.75em] font-mono rounded.
  * The variant controls color only.
  */
-export function Badge({ variant, dark, children, className, title }: Readonly<BadgeProps>) {
+export function Badge({ variant, dark, children, className, title, helpRef }: Readonly<BadgeProps>) {
   const c = useThemeClass(dark);
   const colorCls =
     typeof variantClasses[variant] === "function"
       ? (variantClasses[variant] as (c: ReturnType<typeof useThemeClass>) => string)(c)
       : variantClasses[variant];
+  const cls = `px-1.5 py-0.5 text-[0.75em] font-mono rounded whitespace-nowrap ${colorCls}${className ? " " + className : ""}`;
 
+  if (helpRef) {
+    return <HelpBadge className={cls} title={title} helpRef={helpRef}>{children}</HelpBadge>;
+  }
   return (
-    <span
-      className={`px-1.5 py-0.5 text-[0.75em] font-mono rounded whitespace-nowrap ${colorCls}${className ? " " + className : ""}`}
-      title={title}
-    >
+    <span className={cls} title={title}>
       {children}
     </span>
+  );
+}
+
+function HelpBadge({ className, title, helpRef, children }: Readonly<{ className: string; title?: string; helpRef: string; children: React.ReactNode }>) {
+  const { openHelp } = useHelp();
+  return (
+    <button
+      type="button"
+      className={`${className} cursor-pointer hover:underline`}
+      title={title}
+      onClick={(e) => { e.stopPropagation(); openHelp(helpRef); }}
+    >
+      {children}
+    </button>
   );
 }

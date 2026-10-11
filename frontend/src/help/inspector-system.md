@@ -24,25 +24,31 @@ header.
 
 ## Local node (rich view)
 
-For the node you're connected to, the view includes:
-
-- **Status** — healthy, degraded, or unhealthy
-- **Version** and **uptime**
-- **CPU** usage percentage
-- **Memory** — RSS, heap alloc/in-use/idle/released, stack, virtual, heap objects, GC cycles
-- **Ingest queue** — depth, capacity, and a fill bar
-- **Storage** — total records, size, chunk counts, time span, and a per-vault breakdown
-- **Ingestion** — per-ingester message/byte counts and error rates
+Every node — the one you are connected to included — is shown with the same
+view, filled from that node's stats [broadcast](help:clustering-broadcasting);
+there is no separate local view. In a [cluster](help:clustering) each node is
+a card with its node-state badge, the local node first, expanded, and badged
+**this node**. The rows are listed in the next section.
 
 ## Peer nodes (compact view)
 
-For other [cluster](help:clustering) nodes, metrics are collected via [broadcasting](help:clustering-broadcasting) and include:
+The per-node view, the same for every node:
 
-- **CPU** and **memory** usage
-- **Goroutines** and **GC** cycle count
-- **Ingest queue** depth and capacity
-- **Raft state** — current role (leader/follower/candidate), term, and applied log index
-- **Per-ingester** message and byte count summaries
+- **System** — CPU, Goroutines, Mem In-Use, RSS, Heap Alloc, Heap Idle,
+  Stack, GC Cycles. **Log Drops** appears once the self ingester has
+  discarded a diagnostic record because its capture channel was full.
+- **Addresses** — the node's API and pprof addresses, when it reports them.
+- **Ingest Queue** — Depth against capacity, Uptime, and **Pressure** once
+  the ingest pressure level leaves normal.
+- **Throughput** — see below.
+- **Raft State** — State, Term, Applied and Commit index, FSM Pending
+  (entries waiting to be applied), and Last Contact (`never` when there is
+  none).
+- **Raft liveness** rows, once the node has appended to its WAL —
+  **WAL Append** average and max latency across every Raft group on the node,
+  **Elections** total and per minute, **Leader Losses**, and **Failed HBs**.
+  Elections sustained above about 3/min is an election storm; a WAL max
+  latency near 1s means bulk I/O is starving consensus.
 
 ## Throughput
 
@@ -65,7 +71,23 @@ near capacity while its durable-commit rate lags its append rate is
 experiencing write-path backpressure (usually fsync pressure on that node's
 disk).
 
-Peer node data is refreshed at the [broadcast interval](help:clustering-broadcasting) (default 5 seconds). Nodes that haven't broadcast recently show stale timestamps.
+Peer node data is refreshed at the [broadcast interval](help:clustering-broadcasting) (default 5 seconds). The stats carry no freshness marker; a node the cluster has not heard from shows an **offline** badge in the node list, with how long it has been silent.
+
+## Network
+
+The **Network** section of a node's pane lists its inter-node traffic: one row
+per peer with the combined Tx/s and Rx/s rates and a sparkline of recent
+history, and beneath it one lane row per connection between the two nodes,
+both directions merged. `raft` lanes carry one Raft group each: the lane whose
+detail reads `—` is the cluster-ctl group; each other names the vault whose
+vault-ctl group it carries (hover for the group ID). `service #N` lanes are
+the pooled RPC connections, numbered by pool slot. A service lane's detail is
+a purpose strip with one slot per purpose — search, chunk apply, vault apply,
+broadcast, forward, forward RPC, eviction, remove node, suffrage, chunk
+transfer, chunk wait, replicate, replicate catchup, segment pull, file
+transfer, raft — lit when that purpose used the lane during the last stats
+interval and dimmed otherwise; hover a slot for its name. A rate reads `—`
+until the lane has history, and a node with no recorded connections says so.
 
 ## System alerts
 

@@ -149,6 +149,7 @@ export function StaticCards({
           key={cardKey}
           id={s.name || `Static Lookup ${String(i + 1)}`}
           typeBadge="static"
+          helpRef="lookups-settings#static-lookups"
           dark={dark}
           expanded={isExpanded(cardKey)}
           onToggle={() => toggle(cardKey)}

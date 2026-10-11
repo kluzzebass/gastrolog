@@ -1,5 +1,6 @@
 import { ReadOnlyProvider } from "../../hooks/useReadOnly";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { clickableProps } from "../../utils";
 import { useConfig } from "../../api/hooks/useSystem";
 import { useVaults, useStorages, useNodeRegistry } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
@@ -7,6 +8,7 @@ import { toastError } from "../Toast";
 import { Dialog } from "../Dialog";
 import { VaultsIcon, IngestersIcon, JobsIcon, MetricsIcon, ClusterIcon, RouteIcon, StorageIcon } from "../icons";
 import { Badge } from "../Badge";
+import { HelpButton } from "../HelpButton";
 import { OfflineBadge } from "../OfflineBadge";
 import { NodeState } from "../../api/model/node";
 import { ModeToggle } from "./ModeToggle";
@@ -151,11 +153,14 @@ export function InspectorDialog({
         <nav
           className={`min-w-fit shrink-0 border-r overflow-y-auto app-scroll p-3 flex flex-col gap-1 ${c("border-ink-border", "border-light-border")}`}
         >
-          <h2
-            className={`text-[0.75em] uppercase tracking-wider font-medium mb-2 px-2 ${c("text-text-muted", "text-light-text-muted")}`}
-          >
-            Inspector
-          </h2>
+          <div className="flex items-center gap-1 mb-2 px-2">
+            <h2
+              className={`text-[0.75em] uppercase tracking-wider font-medium ${c("text-text-muted", "text-light-text-muted")}`}
+            >
+              Inspector
+            </h2>
+            <HelpButton helpRef="inspector#two-mode-layout" />
+          </div>
 
           {/* Mode toggle — hidden in single-node */}
           {multiNode && (
@@ -183,11 +188,15 @@ export function InspectorDialog({
             nodes.map((node) => {
               const isActive = selectedNodeId === node.id;
               const isLocal = registry.isLocal(node.id);
+              const select = () => onNavigate(encodeParam({ mode: "nodes", nodeId: node.id }));
+              // A div, not a button: the row holds help badges that are
+              // buttons themselves, and a button cannot nest a button.
               return (
-                <button
+                <div
                   key={node.id}
-                  onClick={() => onNavigate(encodeParam({ mode: "nodes", nodeId: node.id }))}
-                  className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded text-[0.85em] transition-colors ${
+                  onClick={select}
+                  {...clickableProps(select)}
+                  className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded text-[0.85em] cursor-pointer transition-colors ${
                     isActive
                       ? "bg-copper/15 text-copper"
                       : c(
@@ -205,16 +214,16 @@ export function InspectorDialog({
                       <OfflineBadge lastSeen={node.lastSeen} isOffline={!node.isOnline} dark={dark} />
                     )}
                     {node.isLeader && (
-                      <Badge variant="copper" dark={dark}>leader</Badge>
+                      <Badge variant="copper" dark={dark} title="cluster-ctl Raft leader" helpRef="clustering#node-roles">leader</Badge>
                     )}
                     {node.isNonvoter && (
-                      <Badge variant="muted" dark={dark}>nonvoter</Badge>
+                      <Badge variant="muted" dark={dark} title="receives the log, does not vote" helpRef="clustering#node-roles">nonvoter</Badge>
                     )}
                     {isLocal && (
                       <Badge variant="muted" dark={dark}>this node</Badge>
                     )}
                   </span>
-                </button>
+                </div>
               );
             })
           ) : (

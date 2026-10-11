@@ -31,6 +31,15 @@ const roleOptions = [
   { value: "user", label: "User" },
 ];
 
+const ROLES_HELP_REF = "user-management#roles";
+
+function roleBadge(role: string) {
+  const title = role === "admin"
+    ? "Admin — full access, including settings and user management"
+    : "User — can search and read every vault, cannot change settings";
+  return { text: role, title, helpRef: ROLES_HELP_REF };
+}
+
 // -- Reducer for "Add user" form state --
 
 interface AddUserFormState {
@@ -193,7 +202,7 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
                 mono
               />
             </FormField>
-            <FormField label="Role" dark={dark}>
+            <FormField label="Role" helpRef={ROLES_HELP_REF} dark={dark}>
               <SelectInput
                 value={newRole}
                 onChange={(v) => dispatchAdd({ type: "setNewRole", value: v })}
@@ -227,7 +236,7 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
           <SettingsCard
             key={encode(user.id)}
             id={user.username}
-            typeBadge={user.role}
+            typeBadge={roleBadge(user.role)}
             dark={dark}
             expanded={isExpanded(encode(user.id))}
             onToggle={() => toggleCard(encode(user.id))}
@@ -263,7 +272,7 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
                     mono
                   />
                 </FormField>
-                <FormField label="Role" dark={dark}>
+                <FormField label="Role" helpRef={ROLES_HELP_REF} dark={dark}>
                   <SelectInput
                     value={edit.role}
                     onChange={(v) => setEdit(encode(user.id), { role: v })}

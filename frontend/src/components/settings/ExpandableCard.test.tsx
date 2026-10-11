@@ -1,9 +1,32 @@
 import { describe, expect, test, mock } from "bun:test";
 import React from "react";
 import { render, fireEvent } from "@testing-library/react";
+import { HelpProvider } from "../../hooks/useHelp";
 import { ExpandableCard } from "./ExpandableCard";
 
 describe("ExpandableCard", () => {
+  test("a badge spec carries its meaning on hover and opens its help reference without toggling the card", () => {
+    const openHelp = mock((_helpRef?: string) => {});
+    const onToggle = mock(() => {});
+    const { getByText } = render(
+      <HelpProvider onOpen={openHelp}>
+        <ExpandableCard
+          id="disk-1"
+          typeBadge={{ text: "class 1", title: "storage class — lower is faster", helpRef: "storage-config#file-storage" }}
+          dark={true}
+          onToggle={onToggle}
+        >
+          <p>content</p>
+        </ExpandableCard>
+      </HelpProvider>,
+    );
+    const badge = getByText("class 1");
+    expect(badge.getAttribute("title")).toBe("storage class — lower is faster");
+    fireEvent.click(badge);
+    expect(openHelp).toHaveBeenCalledWith("storage-config#file-storage");
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
   test("renders id label", () => {
     const { getByText } = render(
       <ExpandableCard id="my-store" dark={true}><p>content</p></ExpandableCard>,

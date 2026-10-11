@@ -75,6 +75,8 @@ function fieldsFromData(data: GetSettingsResponse): ServiceFormState {
   };
 }
 
+const noAuthBadge = { text: "disabled", title: "disabled by --no-auth", helpRef: "user-management#no-auth-mode" };
+
 const INITIAL_STATE: ServiceFormState = {
   tokenDuration: "", minPwLen: "", maxJobs: "",
   tlsDefaultCert: "", tlsEnabled: false, httpToHttpsRedirect: false,
@@ -236,22 +238,24 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
         <div className="flex flex-col gap-3">
           <ExpandableCard
             id="Authentication"
+            helpRef="user-management#authentication"
             dark={dark}
             expanded={isExpanded("auth")}
             onToggle={() => toggle("auth")}
             monoTitle={false}
-            typeBadge={noAuth ? "disabled" : undefined}
+            typeBadge={noAuth ? noAuthBadge : undefined}
           >
             <div className={`flex flex-col gap-4 ${noAuth ? "opacity-50" : ""}`} aria-disabled={noAuth || undefined}>
               <FormField
                 label="Token Duration"
                 description="How long access tokens remain valid. Short-lived tokens are more secure when paired with refresh tokens."
+               
                 dark={dark}
               >
                 <TextInput
                   value={s.tokenDuration}
                   onChange={set("tokenDuration")}
-                  placeholder="15m"
+                  placeholder="1h"
                   dark={dark}
                   mono
                   examples={["15m", "1h", "24h"]}
@@ -267,6 +271,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
               <FormField
                 label="Refresh Token Duration"
                 description="How long refresh tokens remain valid. Users must re-authenticate after this period of inactivity."
+               
                 dark={dark}
               >
                 <TextInput
@@ -341,16 +346,18 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
 
           <ExpandableCard
             id="Password Policy"
+            helpRef="user-management#password-policy"
             dark={dark}
             expanded={isExpanded("password")}
             onToggle={() => toggle("password")}
             monoTitle={false}
-            typeBadge={noAuth ? "disabled" : undefined}
+            typeBadge={noAuth ? noAuthBadge : undefined}
           >
             <div className={`flex flex-col gap-4 ${noAuth ? "opacity-50" : ""}`} aria-disabled={noAuth || undefined}>
               <div className="flex items-baseline gap-4">
                 <FormField
                   label="Minimum length"
+                 
                   dark={dark}
                 >
                   <NumberInput
@@ -364,6 +371,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
 
                 <FormField
                   label="Max consecutive repeats"
+                 
                   dark={dark}
                 >
                   <NumberInput
@@ -466,6 +474,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
 
           <ExpandableCard
             id="TLS"
+            helpRef="service-settings#tls-configuration"
             dark={dark}
             expanded={isExpanded("tls")}
             onToggle={() => toggle("tls")}
@@ -477,6 +486,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
               <FormField
                 label="Default certificate"
                 description="Certificate used for HTTPS. Set in Certificates tab."
+                helpRef="certificates#default-certificate"
                 dark={dark}
               >
                 <select
@@ -503,6 +513,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                   <FormField
                     label="Enable TLS (HTTPS)"
                     description="Serve HTTPS when a default certificate is set"
+                   
                     dark={dark}
                   >
                     <Checkbox
@@ -516,6 +527,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                       <FormField
                         label="HTTPS port"
                         description="Port for the HTTPS listener. Leave empty for HTTP port + 1."
+                       
                         dark={dark}
                       >
                         <input
@@ -534,6 +546,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                       <FormField
                         label="Redirect HTTP to HTTPS"
                         description="Redirect plain HTTP requests to HTTPS"
+                       
                         dark={dark}
                       >
                         <Checkbox
@@ -560,6 +573,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
               <FormField
                 label="Broadcast Interval"
                 description="How often each node broadcasts its full stats payload (vault stats, route stats, alerts) to peers. Lower values give fresher data but increase network traffic."
+                helpRef="service-settings#broadcasting"
                 dark={dark}
               >
                 <TextInput
@@ -593,6 +607,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
               <FormField
                 label="Backlog Budget"
                 description="Per-vault budget for the pipeline backlog (completed segments awaiting chunking). At the budget, new records for that vault are refused cluster-wide — retryable backpressure — until chunking drains it. Bounds the backlog before disk pressure; the disk-space guard remains the backstop. Applies to every vault. Leave empty for unbounded."
+                helpRef="service-settings#pipeline"
                 dark={dark}
               >
                 <TextInput

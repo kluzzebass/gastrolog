@@ -1,11 +1,11 @@
 import { useHelp } from "../hooks/useHelp";
 
-export function HelpButton({ topicId }: Readonly<{ topicId?: string }>) {
+export function HelpButton({ helpRef }: Readonly<{ helpRef?: string }>) {
   const { openHelp } = useHelp();
 
   return (
     <button
-      onClick={() => openHelp(topicId)}
+      onClick={() => openHelp(helpRef)}
       aria-label="Help"
       title="Help"
       className="w-5 h-5 flex items-center justify-center rounded-full text-text-muted hover:text-copper hover:bg-copper/10 transition-colors cursor-pointer"

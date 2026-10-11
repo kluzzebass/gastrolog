@@ -162,8 +162,8 @@ export function useSearchView() {
     showPreferences, setShowPreferences,
   } = useDialogState();
 
-  const openHelp = (topicId?: string) => {
-    navigate({ search: (prev) => ({ ...prev, help: topicId || "general" }) });
+  const openHelp = (helpRef?: string) => {
+    navigate({ search: (prev) => ({ ...prev, help: helpRef || "general" }) });
   };
 
   const openSettings = (tab?: string) => {

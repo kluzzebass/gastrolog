@@ -13,6 +13,7 @@ import {
 import { useToast } from "../Toast";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { Badge } from "../Badge";
+import { HelpButton } from "../HelpButton";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput } from "./FormField";
 import { Button } from "./Buttons";
@@ -299,6 +300,7 @@ export function VaultSettingsCard({
           >
             {seal.isPending ? "Rotating..." : "Rotate"}
           </Button>
+          <HelpButton helpRef="policy-rotation#rotating-now" />
           <Button
             variant="ghost"
             bordered
@@ -335,6 +337,7 @@ export function VaultSettingsCard({
           >
             {retryUnreadable.isPending ? "Retrying..." : "Retry Unreadable"}
           </Button>
+          <HelpButton helpRef="vaults-config#editing-a-vault" />
           {anyDirty && (
             <Button
               variant="ghost"
@@ -426,6 +429,7 @@ export function VaultSettingsCard({
               })}
             </span>
           )}
+          <HelpButton helpRef="storage-config#how-vaults-use-file-storages" />
         </div>
 
         {/* Storage shape edit — same form the Add flow uses, with type

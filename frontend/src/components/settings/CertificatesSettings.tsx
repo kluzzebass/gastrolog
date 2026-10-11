@@ -27,6 +27,12 @@ import {
 
 type CertSource = "pem" | "files";
 
+const defaultBadge = {
+  text: "default",
+  title: "Serves HTTPS on the main listener when TLS is enabled",
+  helpRef: "certificates#default-certificate",
+};
+
 // -- Reducer for CertificatesSettings form + UI state --
 
 interface CertFormState {
@@ -405,7 +411,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
             <SettingsCard
               key={encode(cert.id)}
               id={cert.name || encode(cert.id)}
-              typeBadge={defaultCert === encode(cert.id) ? "default" : undefined}
+              typeBadge={defaultCert === encode(cert.id) ? defaultBadge : undefined}
               dark={dark}
               expanded={expanded === encode(cert.id)}
               onToggle={() => {

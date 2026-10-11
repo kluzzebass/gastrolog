@@ -12,6 +12,7 @@ import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
 import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
+import { HelpLink } from "../HelpLink";
 import type { SettingsTab } from "./SettingsDialog";
 import { sortByName } from "../../lib/sort";
 import type { RouteConfig } from "../../api/gen/gastrolog/v1/system_pb";
@@ -27,6 +28,18 @@ function routeExpression(r: RouteConfig): string {
 }
 
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
+
+const ROUTE_COMPONENTS_HELP_REF = "routing#route-components";
+
+const distributionTitles: Record<string, string> = {
+  "fanout": "Fanout — every destination receives every matched record",
+  "round-robin": "Round Robin — matched records are spread evenly across destinations",
+  "failover": "Failover — records go to the first available destination",
+};
+
+function distributionBadge(distribution: string) {
+  return { text: distribution, title: distributionTitles[distribution], helpRef: ROUTE_COMPONENTS_HELP_REF };
+}
 
 interface DestinationEdit {
   vaultId: string;
@@ -197,6 +210,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
           <FormField
             label="Match expression"
             description='Match expression evaluated against each record. "*" matches everything. The lean editor with autocomplete and live validation lands later in this epic.'
+            helpRef="routing#match-expressions"
             dark={dark}
           >
             <TextInput
@@ -219,6 +233,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
                 ? "Only takes effect with two or more destinations."
                 : "Fanout sends to all destinations. Round Robin distributes evenly. Failover sends to the first available destination."
             }
+            helpRef={ROUTE_COMPONENTS_HELP_REF}
             dark={dark}
           >
             <SelectInput
@@ -247,10 +262,14 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
             expanded={isExpanded(id)}
             onToggle={() => toggleCard(id)}
             onDelete={() => handleDelete(id)}
-            typeBadge={route.destinations.length > 1 ? route.distribution || "fanout" : undefined}
+            typeBadge={route.destinations.length > 1 ? distributionBadge(route.distribution || "fanout") : undefined}
             status={
               <span className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
-                {expr || "no match expression"}
+                {expr || (
+                  <HelpLink helpRef={ROUTE_COMPONENTS_HELP_REF} title="Nothing is matched: a route without a match expression never fires">
+                    no match expression
+                  </HelpLink>
+                )}
                 {destNames ? ` → ${destNames}` : ""}
                 {!route.enabled && " (disabled)"}
               </span>
@@ -292,6 +311,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
               <FormField
                 label="Match expression"
                 description='Match expression evaluated against each record. "*" matches everything. The lean editor with autocomplete and live validation lands later in this epic.'
+                helpRef="routing#match-expressions"
                 dark={dark}
               >
                 <TextInput
@@ -314,6 +334,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
                     ? "Only takes effect with two or more destinations."
                     : "Fanout sends to all destinations. Round Robin distributes evenly. Failover sends to the first available destination."
                 }
+                helpRef={ROUTE_COMPONENTS_HELP_REF}
                 dark={dark}
               >
                 <SelectInput
@@ -359,7 +380,7 @@ function DestinationsEditor({
   };
 
   return (
-    <FormField label="Destinations" dark={dark}>
+    <FormField label="Destinations" helpRef={ROUTE_COMPONENTS_HELP_REF} dark={dark}>
       <div className="flex flex-col gap-1.5">
         {sortedVaults.length === 0 && (
           <p className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>

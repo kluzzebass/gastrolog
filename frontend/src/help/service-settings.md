@@ -4,8 +4,9 @@ Global server settings that affect authentication, query execution, background p
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| **Token Duration** | How long [JWT tokens](help:user-management) remain valid. Uses Go duration syntax (e.g., `168h`, `720h`) | `168h` (7 days) |
-| **JWT Secret** | The signing key for authentication tokens. Never displayed; paste a new value to replace. Changing this invalidates all existing sessions immediately | |
+| **Token Duration** | How long [JWT access tokens](help:user-management) remain valid. Uses Go duration syntax (e.g., `15m`, `1h`, `24h`); at least 1 minute | `1h` |
+| **Refresh Token Duration** | How long refresh tokens remain valid; users must re-authenticate after this period of inactivity. At least 1 hour and longer than the token duration | `168h` (7 days) |
+| **JWT Secret** | The signing key for authentication tokens. Never displayed; the card says whether a key is configured, and **Regenerate Secret** replaces it after a confirmation. Regenerating invalidates all existing sessions cluster-wide | |
 | **Minimum Password Length** | Minimum characters required for [user](help:user-management) passwords | `8` |
 | **Query Timeout** | Maximum [query](help:query-engine) execution time. Uses Go duration syntax (e.g., `30s`, `1m`). Set to empty or `0s` to disable | Disabled |
 | **Max Concurrent Jobs** | How many [background jobs](help:inspector-jobs) ([rotation](help:policy-rotation), [retention](help:policy-retention), [indexing](help:indexers)) can run in parallel | `4` |

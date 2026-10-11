@@ -6,6 +6,7 @@ import { useExpandedCards } from "../../../hooks/useExpandedCards";
 import { useLookupCrud } from "./useLookupCrud";
 import { FormField, TextInput } from "../FormField";
 import { Button } from "../Buttons";
+import { HelpButton } from "../../HelpButton";
 import { SettingsCard } from "../SettingsCard";
 import { AddFormCard } from "../AddFormCard";
 import { FileDropZone } from "../FileDropZone";
@@ -165,9 +166,10 @@ export function MmdbCards({
                 />
               </FormField>
               {!m.fileId && (
-                <p className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
-                  No file uploaded — will use auto-downloaded {dbLabel} database if MaxMind auto-download is enabled.
-                </p>
+                <div className={`flex items-center gap-1.5 text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
+                  <span>No file uploaded — will use auto-downloaded {dbLabel} database if MaxMind auto-download is enabled.</span>
+                  <HelpButton helpRef="lookups-settings#mmdb-lookups" />
+                </div>
               )}
             </div>
           </SettingsCard>
@@ -181,7 +183,7 @@ function MmdbDbTypeRadio({ dark, value, onChange, name }: Readonly<{ dark: boole
   const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   return (
-    <FormField label="Database Type" dark={dark}>
+    <FormField label="Database Type" helpRef="lookups-settings#mmdb-lookups" dark={dark}>
       <div className="flex gap-3">
         {mmdbDbTypes.map((t) => (
           <label key={t.value} className="flex items-center gap-1.5 cursor-pointer">

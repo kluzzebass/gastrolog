@@ -29,6 +29,8 @@ import { Spark } from "../Spark";
 import { middleTruncate } from "../../utils/middleTruncate";
 import { leaderNodeId, followerNodeIds } from "../../utils/placement";
 import { Badge } from "../Badge";
+import { HelpButton } from "../HelpButton";
+import { HelpLink } from "../HelpLink";
 import { BlobMark, SealPips } from "./SealPips";
 import { chunkLifecycleState, computeCloudPips, computePips } from "./sealPipState";
 import { CogIcon } from "../icons";
@@ -180,7 +182,7 @@ export function VaultCard({
       key={vault.id}
       id={vault.displayLabel}
       typeBadge={vault.typeLabel}
-      secondaryBadge={vault.isCloudBacked ? "cloud" : undefined}
+      secondaryBadge={vault.isCloudBacked ? { text: "cloud", title: "cloud-backed vault", helpRef: "storage-cloud" } : undefined}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}
@@ -190,7 +192,7 @@ export function VaultCard({
             <Badge variant="warn" dark={dark}>disabled</Badge>
           )}
           {refusingCauses.length > 0 && (
-            <Badge variant="warn" dark={dark} title={refusingCauses.join("; ")}>
+            <Badge variant="warn" dark={dark} title={refusingCauses.join("; ")} helpRef="inspector-vaults#refusal">
               refusing
             </Badge>
           )}
@@ -244,9 +246,10 @@ function VaultRefusalSection({
   return (
     <section className="flex flex-col gap-4">
       <h3
-        className={`text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+        className={`flex items-center gap-1.5 text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
       >
         Refusal
+        <HelpButton helpRef="inspector-vaults#refusal" />
       </h3>
       <div
         className={`rounded-lg border px-4 py-3 flex flex-col gap-2 ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`}
@@ -398,9 +401,10 @@ function VaultThroughputSection({
   return (
     <section className="flex flex-col gap-4">
       <h3
-        className={`text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+        className={`flex items-center gap-1.5 text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
       >
         Throughput
+        <HelpButton helpRef="inspector-vaults#throughput" />
       </h3>
       <div
         className={`${gridTemplate} rounded-lg border overflow-hidden ${c("border-ink-border", "border-light-border")}`}
@@ -636,9 +640,10 @@ function VaultLeaderSummary({
 
   const sectionTitle = (
     <h3
-      className={`text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+      className={`flex items-center gap-1.5 text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
     >
       Topology
+      <HelpButton helpRef="inspector-vaults#topology" />
     </h3>
   );
 
@@ -867,7 +872,12 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
               >
                 <th className="px-4 py-2 font-medium">Chunk ID</th>
                 <th className="px-2 py-2 font-medium">Time Range</th>
-                <th className="px-2 py-2 font-medium">Status</th>
+                <th className="px-2 py-2 font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    Status
+                    <HelpButton helpRef="inspector-vaults#seal-pips" />
+                  </span>
+                </th>
                 <th className="px-2 py-2 font-medium text-right">Records</th>
                 <th className="px-4 py-2 font-medium text-right">Size</th>
               </tr>
@@ -1032,6 +1042,7 @@ function ChunkRow({
                 variant="warn"
                 dark={dark}
                 title="Retention pending — chunk is queued for retention firing"
+                helpRef="policy-retention#hard-vs-soft-bounds"
               >
                 ret
               </Badge>
@@ -1101,7 +1112,6 @@ function ChunkDetail({
   // Skip index fetch for cloud-backed chunks — they don't have local indexes.
   const { data, isLoading } = useIndexes(vaultId, chunk.cloudBacked ? "" : encode(chunk.id));
 
-
   return (
     <div className={`px-4 py-3 ${c("bg-ink-raised", "bg-light-bg")}`}>
       {/* Full chunk ID — selectable for copy/paste */}
@@ -1136,7 +1146,9 @@ function ChunkDetail({
           />
           {placementNodes.length < rf && (
             <div className="mt-1 text-[0.8em] text-severity-error">
-              Not enough nodes with the required storage class to satisfy RF={String(rf)}
+              Not enough nodes with the{" "}
+              <HelpLink helpRef="storage-config#how-vaults-use-file-storages">required storage class</HelpLink>{" "}
+              to satisfy RF={String(rf)}
             </div>
           )}
         </div>
@@ -1199,9 +1211,10 @@ function ChunkDetail({
         <>
           {/* Local indexes */}
           <div
-            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-muted", "text-light-text-muted")}`}
+            className={`flex items-center gap-1.5 text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-muted", "text-light-text-muted")}`}
           >
             Indexes
+            <HelpButton helpRef="inspector-vaults#indexes" />
           </div>
 
           {isLoading && (

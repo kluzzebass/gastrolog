@@ -54,7 +54,7 @@ export function VaultStageCountersSection({
         className={`flex items-center gap-1.5 text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
       >
         Pipeline stages
-        <HelpButton topicId="inspector-pipeline-stages" />
+        <HelpButton helpRef="inspector-pipeline-stages" />
       </h3>
       <div className={`${gridTemplate} rounded-lg border overflow-hidden ${c("border-ink-border", "border-light-border")}`}>
         <div

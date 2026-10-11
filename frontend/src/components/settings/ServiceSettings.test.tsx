@@ -1,7 +1,8 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, mock } from "bun:test";
 import { render, fireEvent } from "@testing-library/react";
 import { installMockClients, m } from "../../../test/api-mock";
 import { createTestQueryClient, settingsWrapper } from "../../../test/render";
+import { HelpProvider } from "../../hooks/useHelp";
 
 const mocks = installMockClients();
 
@@ -186,5 +187,47 @@ describe("ServiceSettings", () => {
     fireEvent.click(getByText("Broadcasting"));
     expect(getByText("Broadcast Interval")).toBeTruthy();
     expect(getByDisplayValue("5s")).toBeTruthy();
+  });
+});
+
+function renderWithHelp(noAuth?: boolean) {
+  const qc = createTestQueryClient();
+  qc.setQueryData(["settings"], sampleSettings);
+  qc.setQueryData(["certificates"], { certificates: [{ id: testId(1), name: "my-cert" }] });
+  const openHelp = mock((_helpRef?: string) => {});
+  const result = renderWritable(
+    <HelpProvider onOpen={openHelp}>
+      <ServiceSettings dark noAuth={noAuth} />
+    </HelpProvider>,
+    { wrapper: settingsWrapper(qc) },
+  );
+  return { ...result, openHelp };
+}
+
+/** The help button beside a form field's label. */
+function fieldHelpButton(label: HTMLElement): HTMLButtonElement {
+  const button = label.parentElement!.querySelector('button[aria-label="Help"]');
+  expect(button).not.toBeNull();
+  return button as HTMLButtonElement;
+}
+
+describe("ServiceSettings help", () => {
+  test("the default certificate field opens the certificates section that explains it", () => {
+    const { getByText, openHelp } = renderWithHelp();
+    fireEvent.click(getByText("TLS"));
+
+    fireEvent.click(fieldHelpButton(getByText("Default certificate")));
+
+    expect(openHelp).toHaveBeenCalledWith("certificates#default-certificate");
+  });
+
+  test("the --no-auth badge names its cause and opens the no-auth section", () => {
+    const { getAllByText, openHelp } = renderWithHelp(true);
+    const badge = getAllByText("disabled")[0]!;
+    expect(badge.getAttribute("title")).toBe("disabled by --no-auth");
+
+    fireEvent.click(badge);
+
+    expect(openHelp).toHaveBeenCalledWith("user-management#no-auth-mode");
   });
 });

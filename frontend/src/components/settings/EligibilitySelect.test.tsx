@@ -10,7 +10,7 @@ function renderSelect(props: {
   placeholder?: string;
   emptyMessage?: string;
 }) {
-  const openHelp = mock((_topicId?: string) => {});
+  const openHelp = mock((_helpRef?: string) => {});
   const onChange = mock((_v: string) => {});
   const result = renderWritable(
     <HelpProvider onOpen={openHelp}>

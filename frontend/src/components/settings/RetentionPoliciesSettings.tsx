@@ -232,6 +232,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
               label="Max Size"
               dark={dark}
               description="The vault's disk-claim bound: oldest chunks drain past it; with Refuse on, new records refuse while over it."
+              helpRef="policy-retention#max-size"
             >
               <TextInput
                 value={newMaxBytes}
@@ -255,6 +256,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
             checked={newRefuse}
             onChange={(v) => dispatchAdd({ type: "setNewRefuse", value: v })}
             label={refuseDescription}
+            helpRef="policy-retention#hard-vs-soft-bounds"
             dark={dark}
           />
         </AddFormCard>
@@ -311,6 +313,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
                   label="Max Size"
                   dark={dark}
                   description="The vault's disk-claim bound: oldest chunks drain past it; with Refuse on, new records refuse while over it."
+                  helpRef="policy-retention#max-size"
                 >
                   <TextInput
                     value={edit.maxBytes}
@@ -334,6 +337,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
                 checked={edit.refuse}
                 onChange={(v) => setEdit(id, { refuse: v })}
                 label={refuseDescription}
+                helpRef="policy-retention#hard-vs-soft-bounds"
                 dark={dark}
               />
             </div>

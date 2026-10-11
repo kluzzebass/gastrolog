@@ -1,7 +1,8 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, mock } from "bun:test";
 import { render, fireEvent, waitFor } from "@testing-library/react";
 import { installMockClients, m } from "../../../test/api-mock";
 import { createTestQueryClient, settingsWrapper } from "../../../test/render";
+import { HelpProvider } from "../../hooks/useHelp";
 
 const mocks = installMockClients();
 
@@ -269,5 +270,33 @@ describe("NodesSettings", () => {
     });
 
     expect(getByText("No nodes found.")).toBeTruthy();
+  });
+});
+
+describe("NodesSettings help", () => {
+  function renderWithHelp() {
+    const qc = createTestQueryClient();
+    seedQueries(qc);
+    const openHelp = mock((_helpRef?: string) => {});
+    const result = renderWritable(
+      <HelpProvider onOpen={openHelp}>
+        <NodesSettings dark />
+      </HelpProvider>,
+      { wrapper: settingsWrapper(qc) },
+    );
+    return { ...result, openHelp };
+  }
+
+  test("a role badge explains itself on hover and opens the node roles section", () => {
+    const { getByText, getByDisplayValue, openHelp } = renderWithHelp();
+    const leader = getByText("leader");
+    expect(leader.getAttribute("title")).toContain("Raft leader");
+    expect(getByText("follower").getAttribute("title")).toContain("Raft follower");
+
+    fireEvent.click(leader);
+
+    expect(openHelp).toHaveBeenCalledWith("clustering#node-roles");
+    // The badge sits in the card header; opening help must not collapse the card.
+    expect(getByDisplayValue("my-node")).toBeTruthy();
   });
 });

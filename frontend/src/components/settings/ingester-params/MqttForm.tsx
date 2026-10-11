@@ -77,7 +77,7 @@ export function MqttForm({
         checked={params["clean_session"] !== "false"}
         onChange={(v) => set("clean_session", v ? "true" : "false")}
         label="Clean session"
-        helpTopicId="ingester-mqtt"
+        helpRef="ingester-mqtt#clean-session"
         dark={dark}
       />
       <TlsClientFields params={params} onChange={onChange} dark={dark} />

@@ -549,7 +549,7 @@ describe("transfer target picker", () => {
   function renderWithHelp(config: unknown) {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], config);
-    const openHelp = mock((_topicId?: string) => {});
+    const openHelp = mock((_helpRef?: string) => {});
     const result = renderWritable(
       <HelpProvider onOpen={openHelp}>
         <VaultsSettings dark />
@@ -571,6 +571,18 @@ describe("transfer target picker", () => {
 
     fireEvent.click(getByText("Eligibility rules"));
     expect(openHelp).toHaveBeenCalledWith(TRANSFER_HELP_REF);
+  });
+
+  test("the replication factor field opens the file storage placement section", () => {
+    const { getByText, openHelp } = renderWithHelp(oneVaultConfig);
+    expandVault(getByText);
+
+    const label = getByText("Replication Factor");
+    const button = label.parentElement!.querySelector('button[aria-label="Help"]');
+    expect(button).not.toBeNull();
+    fireEvent.click(button!);
+
+    expect(openHelp).toHaveBeenCalledWith("storage-config#how-vaults-use-file-storages");
   });
 
   test("ineligible vaults are listed disabled with their reason", async () => {

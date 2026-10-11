@@ -27,7 +27,7 @@ HTTP lookups fetch data from an external HTTP endpoint at query time. Each looku
 - **Name** — registry name used in queries, e.g. `| lookup users`.
 - **URL Template** — the endpoint URL with `{param}` placeholders matching parameter names below. For example: `https://api.example.com/users/{user_id}`.
 - **Parameters** — ordered list of named URL template parameters. Each name becomes a `{name}` placeholder in the URL. In queries, fields map positionally: `| lookup users user_id` passes the `user_id` field as the first parameter.
-- **Response Paths** — jq expressions to extract fields from the JSON response. Each path produces a named suffix. Results from multiple paths are merged. Leave empty to flatten the entire response.
+- **Response Paths** — JSONPath expressions (`$.data.user`; `$` root, dot and bracket notation, array indices, and `[?(@.field == 'x')]` filters) to extract target objects from the JSON response. The server translates each one to jq and runs it; results from multiple paths are merged. Leave empty to flatten the entire response.
 - **Headers** — custom HTTP request headers (e.g. `Authorization: Bearer token123`).
 - **Timeout** — maximum time to wait for a response. Default: `5s`.
 - **Cache TTL** — how long to cache successful responses. Default: `5m`. Set to `0` to disable caching.
@@ -70,20 +70,31 @@ CSV file lookups map a key column to one or more value columns from an uploaded 
 
 ## JSON File Lookups
 
-JSON file lookups query a managed JSON file using a jq-style expression. Useful for structured reference data that doesn't fit a flat CSV model — nested objects, arrays, or complex key schemes.
+JSON file lookups turn a managed JSON file into a key/value table with a jq expression. Useful for structured reference data that doesn't fit a flat CSV model — nested objects, arrays, or complex key schemes.
 
 ### Settings
 
 - **Name** — registry name used in queries, e.g. `| lookup hosts`.
 - **File** — upload a `.json` file or select an existing managed file.
-- **Query** — a jq expression with `{param}` placeholders. The expression is evaluated against the JSON file with parameter values substituted. For example: `.hosts[] | select(.ip == "{value}")` finds the host object whose `ip` field matches the lookup value.
-- **Parameters** — named parameters that map to `{name}` placeholders in the query expression. Fields map positionally in queries, just like HTTP lookups.
-- **Response Paths** — jq expressions to extract specific fields from the query result. Leave empty to flatten the entire matched object into key-value pairs.
+- **Query** — a jq expression that transforms the file into a lookup table. It must produce an array of objects, one per row — for example `[.hosts[] | {ip, hostname, env}]` or `.data`. The preview below the field shows the file's content and the query result as a table (**Refresh** re-runs it); a result that is not an array of objects is flagged, and a query error is shown in place of the table.
+- **Key Column** — select the column to use as the lookup key from the query result's columns. Defaults to the first column. Shown once the query produces a table.
+- **Value Columns** — all non-key columns are included by default. Uncheck any columns you don't need in lookup results.
 
 Source files are limited to 10 MB — for larger datasets use CSV, which is mmapped directly without a transform step.
 
 ## YAML File Lookups
 
-YAML file lookups work identically to JSON file lookups — same jq transform, same key/value column picker, same 10 MB cap. The only difference is the file format at rest: `.yaml` / `.yml` instead of `.json`. Use YAML when your reference data is already in YAML (Kubernetes manifests, Ansible inventories, etc.) and you'd rather not convert it.
+YAML file lookups work identically to JSON file lookups — same jq query, same key/value column picker, same preview, same 10 MB cap. The only difference is the file format at rest: `.yaml` / `.yml` instead of `.json`. Use YAML when your reference data is already in YAML (Kubernetes manifests, Ansible inventories, etc.) and you'd rather not convert it.
 
 Under the hood the YAML is parsed into the same tree JSON produces, so any jq expression that works on one works on the other.
+
+## Static Lookups
+
+Static lookups hold a small table typed straight into the settings page — no file, no endpoint. Useful for a handful of mappings that rarely change, such as team codes or environment names.
+
+### Settings
+
+- **Name** — registry name used in queries, e.g. `| lookup teams`.
+- **Table** — edited in place. The first column, marked with a key icon, is the lookup key; every other column is a value column. Column headers are typed into the header row, `+` adds a column, and columns and rows can be dragged to reorder. Each row has a delete and an insert-below button, and **+ Add row** appends one.
+
+The card's status shows the row count (`N rows`). Create and Save stay disabled while any column header is empty, any key cell is empty (**Key column has empty values.**), or two rows share a key (**Duplicate key values.**); the offending key cells are outlined.

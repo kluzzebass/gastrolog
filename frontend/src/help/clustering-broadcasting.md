@@ -24,7 +24,7 @@ Lower intervals give fresher data in the Inspector but increase network traffic.
 
 ## Staleness
 
-A peer's cached stats expire if no broadcast arrives within three broadcast intervals (default `15s`), tunable with the `GLOG_PEER_TTL_MULTIPLIER` environment variable. The [Inspector](help:inspector-system) shows peer node metrics with their last-seen timestamp so you can tell how fresh the data is.
+A peer's cached stats expire if no broadcast arrives within three broadcast intervals (default `15s`), tunable with the `GLOG_PEER_TTL_MULTIPLIER` environment variable. The [Inspector](help:inspector-system) shows no freshness marker on peer metrics; a node the cluster has not heard from carries an **offline** badge in the node list with how long it has been silent, and a storage card says how long ago its disk guard last sampled.
 
 ## Liveness
 

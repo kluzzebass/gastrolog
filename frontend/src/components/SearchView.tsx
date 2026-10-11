@@ -193,7 +193,7 @@ export function SearchView() {
           {sv.helpParam && (
             <HelpDialog
               dark={sv.dark}
-              topicId={sv.helpParam}
+              helpRef={sv.helpParam}
               onClose={() => sv.navigate({ search: (prev) => ({ ...prev, help: undefined }) })}
               onNavigate={(id) => sv.navigate({ search: (prev) => ({ ...prev, help: id }) })}
               onOpenSettings={(tab) => sv.navigate({ search: (prev) => ({ ...prev, help: undefined, settings: tab }) })}

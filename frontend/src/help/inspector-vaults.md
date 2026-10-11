@@ -4,7 +4,7 @@ The Vaults tab shows each configured [vault](help:storage) with its [chunks](hel
 
 ## Vault Overview
 
-Each vault lists its name, type, enabled/disabled status, total chunk count, and record count. Expand a vault to see its chunk timeline. In a [cluster](help:clustering), vaults are grouped by their owning [node](help:clustering-nodes).
+Each vault lists its name, type, enabled/disabled status, total chunk count, and record count. Expand a vault to see its chunk timeline. The list is flat and sorted by name, whichever [node](help:clustering-nodes) you are connected to; where a vault's copies live is in its **Topology** section.
 
 ## Refusal
 
@@ -44,15 +44,25 @@ Expand a chunk row to see the same pips with node names beside them.
 
 ## Indexes
 
-Sealed chunks list their [indexes](help:indexers) with name, status, entry count, and size. An index in **ready** status is being used by the [query engine](help:query-engine). A **building** index is still being constructed in the background.
+Sealed chunks (cloud-backed ones aside) list their [indexes](help:indexers) by name. An index marked **ok** opened on the responding node and shows its entry count and size; one marked **missing** could not be opened there — its file is absent or unreadable — so the [query engine](help:query-engine) cannot use it for that chunk. A chunk with nothing to list says **No indexes.**; **Indexes unavailable.** means the chunk was not located and some peer hosting the vault could not be reached, so the answer is uncertain rather than empty.
 
 ## Validate
 
 The Validate button checks data integrity for a vault — verifying that chunk files are consistent and indexes match their data. Use it if you suspect corruption after a crash or disk issue.
 
+## Topology
+
+The **Topology** block on a vault card shows where the vault's copies live, read from the vault's placements in the cluster configuration. A jsonl vault also shows its path.
+
+| Field | Meaning |
+|-------|---------|
+| **Leader** | The node whose placement leads the vault. Reads `unplaced` when no placement is marked leader — usually because no node has a file storage of the vault's storage class |
+| **Followers** | The other placement nodes. A follower shown with `(class N)` in warn colour has no file storage of the vault's class and falls back to its first storage, which is of class N |
+| **RF=N** | The vault's replication factor; shown only when it is above 1 |
+
 ## Throughput
 
-Each vault card shows the pipeline as three stage rates, per node, with
+A vault card shows a **Throughput** section once some node reports rates for the vault; a vault no node reports rates for has none. The section shows the pipeline as three stage rates, per node, with
 sparklines (recent per-tick history) and Unix-load-style 1m/5m/15m averages
 on hover:
 

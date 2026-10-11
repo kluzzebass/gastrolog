@@ -97,6 +97,7 @@ export const helpTopics: HelpTopic[] = [
       { id: 'lookups-settings', title: 'Lookups', load: md(() => import('./lookups-settings.md?raw')) },
       { id: 'storage-config', title: 'Storage', load: md(() => import('./storage-config.md?raw')) },
       { id: 'vaults-config', title: 'Vaults', load: md(() => import('./vaults-config.md?raw')) },
+      { id: 'log-levels', title: 'Log Levels', load: md(() => import('./log-levels.md?raw')) },
     ],
   },
   {

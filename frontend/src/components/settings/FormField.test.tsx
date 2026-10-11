@@ -1,6 +1,7 @@
 import { describe, expect, test, mock } from "bun:test";
 import React from "react";
 import { render, fireEvent } from "@testing-library/react";
+import { HelpProvider } from "../../hooks/useHelp";
 import {
   FormField,
   TextInput,
@@ -33,6 +34,26 @@ describe("FormField", () => {
       </FormField>,
     );
     expect(getByTestId("child")).toBeTruthy();
+  });
+
+  test("a helpRef puts a help button beside the label that opens that reference", () => {
+    const openHelp = mock((_helpRef?: string) => {});
+    const { getByLabelText } = render(
+      <HelpProvider onOpen={openHelp}>
+        <FormField label="Backlog Budget" helpRef="service-settings#pipeline" dark={true}><input /></FormField>
+      </HelpProvider>,
+    );
+    fireEvent.click(getByLabelText("Help"));
+    expect(openHelp).toHaveBeenCalledWith("service-settings#pipeline");
+  });
+
+  test("no helpRef, no help button", () => {
+    const { queryByLabelText } = render(
+      <HelpProvider onOpen={() => {}}>
+        <FormField label="Name" dark={true}><input /></FormField>
+      </HelpProvider>,
+    );
+    expect(queryByLabelText("Help")).toBeNull();
   });
 });
 
