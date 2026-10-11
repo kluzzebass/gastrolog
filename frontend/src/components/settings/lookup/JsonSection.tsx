@@ -3,7 +3,8 @@
 // logic all live in FileLookupSection.tsx — only the format-specific bits
 // (preview hook, file extensions, payload key, type badge) vary.
 
-import { FileLookupAddForm, FileLookupCards, jsonFormatSpec } from "./FileLookupSection";
+import { FileLookupAddForm, FileLookupCards } from "./FileLookupSection";
+import { jsonFormatSpec } from "./fileLookupFormat";
 import type { JSONFileLookupDraft, LookupSectionProps } from "./types";
 import type { JSONFileLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 

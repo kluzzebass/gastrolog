@@ -16,6 +16,7 @@ import { ModeToggle } from "./ModeToggle";
 import type { InspectorMode } from "./ModeToggle";
 import { NodeDetailPane } from "./NodeDetailPane";
 import { EntityListPane } from "./EntityListPane";
+import { entityCountTitle } from "./entityCounts";
 
 export type EntityType = "vaults" | "storages" | "ingesters" | "routes" | "jobs" | "system";
 
@@ -90,21 +91,6 @@ const entityNavItems: EntityNavItem[] = [
   { id: "jobs", label: "Jobs", icon: JobsIcon },
   { id: "system", label: "System", icon: MetricsIcon },
 ];
-
-const entityCountNouns: Record<EntityType, [singular: string, plural: string]> = {
-  vaults: ["vault configured", "vaults configured"],
-  storages: ["file storage", "file storages"],
-  ingesters: ["ingester configured", "ingesters configured"],
-  routes: ["route configured", "routes configured"],
-  jobs: ["job active or scheduled", "jobs active or scheduled"],
-  system: ["live node", "live nodes"],
-};
-
-/** The hover text of a nav count: the number with the noun it counts. */
-export function entityCountTitle(entityType: EntityType, count: number): string {
-  const [one, many] = entityCountNouns[entityType];
-  return `${count} ${count === 1 ? one : many}`;
-}
 
 // ---- Dialog ----
 

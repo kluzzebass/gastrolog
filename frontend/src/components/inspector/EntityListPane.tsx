@@ -23,6 +23,7 @@ import { LIVE_TEXT } from "../liveValueStyle";
 import { SystemStatsView, ClusterSummaryView } from "./SystemStatsView";
 import { RouteStatsView } from "./RouteStatsView";
 import { groupByNode } from "./groupByNode";
+import { jobCountText } from "./entityCounts";
 import type { EntityType } from "./InspectorDialog";
 import { encode } from "../../api/glid";
 
@@ -415,11 +416,6 @@ function ScheduledRow({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
       <JobRunTimes job={job} now={now} dark={dark} />
     </div>
   );
-}
-
-/** The per-node header count on the Jobs tab, with its noun. */
-export function jobCountText(n: number): string {
-  return `${n} ${n === 1 ? "job" : "jobs"}`;
 }
 
 export const RECONNECTING_TITLE = "the job stream from the server dropped — reconnecting; rows may be stale until it is back";

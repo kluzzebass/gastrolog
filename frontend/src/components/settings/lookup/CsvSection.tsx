@@ -11,7 +11,7 @@ import { AddFormCard } from "../AddFormCard";
 import { PreviewTable } from "./PreviewTable";
 import { ColumnPickers } from "./ColumnPickers";
 import { FileDropZone } from "../FileDropZone";
-import { type CSVLookupDraft, type LookupSectionProps, emptyCsvDraft, csvLookupEqual, fileLookupIncompleteReason } from "./types";
+import { type CSVLookupDraft, type LookupSectionProps, emptyCsvDraft, csvLookupEqual, csvColumnsUnavailable, fileLookupIncompleteReason } from "./types";
 import type { CSVLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 import { useReadOnly } from "../../../hooks/useReadOnly";
 
@@ -147,19 +147,6 @@ function CsvFileFields({
       />
     </>
   );
-}
-
-/** Why the column pickers have nothing to offer yet, or undefined once the preview has columns. */
-export function csvColumnsUnavailable(
-  fileId: string,
-  previewPending: boolean,
-  data?: { error?: string; columns: string[] },
-): string | undefined {
-  if (!fileId) return "Select a file first — the columns come from its preview.";
-  if (data?.error) return "The preview failed — fix the file to pick columns.";
-  if (previewPending || !data) return "Waiting for the preview.";
-  if (data.columns.length === 0) return "The preview found no columns.";
-  return undefined;
 }
 
 // ---------------------------------------------------------------------------

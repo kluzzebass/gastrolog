@@ -28,6 +28,7 @@ import { FormField, TextInput } from "./FormField";
 import { Button } from "./Buttons";
 import { sortByName } from "../../lib/sort";
 import { middleTruncate } from "../../utils/middleTruncate";
+import { joinIneligibility } from "./joinEligibility";
 import { removalEffect, removalRefusalReason, type RemovalEffect } from "../../utils/nodeRemoval";
 import { useReadOnly } from "../../hooks/useReadOnly";
 
@@ -314,12 +315,6 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
       )}
     </div>
   );
-}
-
-/** Why this node cannot join another cluster, or undefined when it can. */
-export function joinIneligibility(memberCount: number): string | undefined {
-  if (memberCount <= 1) return undefined;
-  return `Only a single-node cluster can join another — this node is already one of ${String(memberCount)} members.`;
 }
 
 function JoinClusterCard({ dark, memberCount }: Readonly<{ dark: boolean; memberCount: number }>) {

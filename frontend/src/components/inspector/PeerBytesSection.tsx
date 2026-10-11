@@ -13,42 +13,16 @@ import { type EntityID } from "../../api/model/id";
 import type { NodeRegistry } from "../../api/hooks";
 import {
   mergeAllPeerTraffic,
-  laneDetailText,
+  laneLabel,
+  raftLaneDetail,
   mergedPurposesWindow,
   type MergedPeerLane,
 } from "./peerTrafficMerge";
 import { PurposeWindowText } from "./PurposeWindowText";
 import type { ReactNode } from "react";
 
-// The multiraft group ID the cluster-ctl Raft group travels under on the wire
-// (multiraft.ClusterConfigGroupID); vault-ctl groups are "vault/<id>/ctl".
-const CLUSTER_CTL_GROUP_ID = "config";
-
-/** The lane column: `raft` for a Raft group's connection, `rpc pool N` for a pooled RPC slot. */
-export function laneLabel(lane: string, poolIndex: number): string {
-  if (lane === "raft") {
-    return "raft";
-  }
-  return `rpc pool ${poolIndex}`;
-}
-
 function rowKey(peerId: EntityID, lane: MergedPeerLane): string {
   return `${peerId}\0${lane.lane}\0${lane.groupId}\0${lane.poolIndex}`;
-}
-
-/** A raft lane's detail: the Raft group it carries, by name. */
-export function raftLaneDetail(
-  lane: MergedPeerLane,
-  vaultNameOf?: (vaultId: EntityID) => string | undefined,
-): { label: string; title?: string } {
-  if (lane.groupId === CLUSTER_CTL_GROUP_ID) {
-    return { label: "cluster-ctl", title: lane.groupId };
-  }
-  const text = laneDetailText(lane, { vaultNameOf });
-  if (text.label !== "—") {
-    return { label: text.label, title: text.title || undefined };
-  }
-  return lane.groupId ? { label: "vault-ctl", title: lane.groupId } : { label: "—" };
 }
 
 function laneDetailCell(

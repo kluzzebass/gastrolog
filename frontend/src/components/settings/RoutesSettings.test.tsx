@@ -5,7 +5,8 @@ import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 
 const mocks = installMockClients();
 
-import { RoutesSettings, displayExpression } from "./RoutesSettings";
+import { RoutesSettings } from "./RoutesSettings";
+import { displayExpression } from "./routeDisplay";
 import { encode } from "../../api/glid";
 import { renderWritable } from "../../testing/renderWritable";
 import { HelpProvider } from "../../hooks/useHelp";

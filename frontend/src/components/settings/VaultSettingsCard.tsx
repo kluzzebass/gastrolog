@@ -25,15 +25,15 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { leaderNodeId, followerNodeIds } from "../../utils/placement";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 
+import { VaultStorageForm } from "./VaultsSettings";
 import {
-  VaultStorageForm,
   isCloudBacked,
   isStorageComplete,
   storageIncompleteReason,
   vaultTypeEnum,
   type StorageEntry,
   type VaultTypeLabel,
-} from "./VaultsSettings";
+} from "./vaultStorageEntry";
 import { transferTargetOptions } from "./transferEligibility";
 import { classStorageCounts, placementStatus, plural, rfCap } from "./vaultPlacement";
 

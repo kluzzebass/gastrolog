@@ -21,6 +21,7 @@ import { CrossLinkBadge } from "../inspector/CrossLinkBadge";
 import { IngesterMode, type IngesterConfig } from "../../api/gen/gastrolog/v1/system_pb";
 import type { IngesterDefaults } from "../../api/hooks/useIngesterDefaults";
 import { ingesterHelpRef, ingesterTypeLabel } from "./ingesterTypeLabel";
+import { ingesterModeBadge } from "./ingesterLabels";
 
 const ingesterTypes = [
   "chatterbox", "docker", "fluentfwd", "http", "kafka", "mqtt", "metrics",
@@ -256,13 +257,6 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
 }
 
 export const INGESTER_MODES_HELP_REF = "ingestion#ingester-modes";
-
-/** The mode badge: a listener binds a port and waits for clients; an active ingester pulls from its source. */
-export function ingesterModeBadge(mode: IngesterMode): { text: string; title: string } {
-  return mode === IngesterMode.PASSIVE
-    ? { text: "listener", title: "listener — binds a port and accepts what clients push to it" }
-    : { text: "active", title: "active — pulls records from its upstream source itself" };
-}
 
 // IngesterNodeBadge reads the ingester's saved eligibility config, exactly
 // as the dispatcher evaluates it: all nodes when `allNodes` is set or no

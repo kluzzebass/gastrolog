@@ -99,3 +99,8 @@ export function listenAddrConflict(
   }
   return null;
 }
+
+/** Whether `tls_verify` verifies: only the literal "false" turns verification off, as the ingesters read it. */
+export function tlsVerifies(params: Record<string, string>): boolean {
+  return params["tls_verify"] !== "false";
+}

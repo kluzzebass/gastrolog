@@ -10,7 +10,8 @@ import { DockerForm } from "./DockerForm";
 import { KafkaForm } from "./KafkaForm";
 import { MqttForm } from "./MqttForm";
 import { SyslogForm } from "./SyslogForm";
-import { TLS_VERIFY_LABEL, tlsVerifies } from "./TlsFields";
+import { TLS_VERIFY_LABEL } from "./TlsFields";
+import { tlsVerifies } from "./validation";
 import type { SubFormProps } from "./types";
 
 type Form = (props: SubFormProps) => React.ReactNode;

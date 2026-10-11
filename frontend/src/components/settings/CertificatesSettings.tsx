@@ -14,6 +14,7 @@ import {
 import { useSettings } from "../../api/hooks/useSettings";
 import { useToast } from "../Toast";
 import { SettingsCard } from "./SettingsCard";
+import { certSourceBadge } from "./certificateSource";
 import { sortByName } from "../../lib/sort";
 import {
   PemCertForm,
@@ -32,13 +33,6 @@ const defaultBadge = {
   title: "Serves HTTPS on the main listener when TLS is enabled",
   helpRef: "certificates#default-certificate",
 };
-
-/** The kind badge: where the certificate's key material lives. */
-export function certSourceBadge(cert: { fromFiles: boolean }) {
-  return cert.fromFiles
-    ? { text: "files", title: "file-path certificate — read from files on disk, reloaded when they change", helpRef: "certificates#file-path-certificates" }
-    : { text: "pem", title: "PEM material stored in the cluster configuration", helpRef: "certificates#adding-a-certificate" };
-}
 
 // -- Reducer for CertificatesSettings form + UI state --
 

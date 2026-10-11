@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ingesterStatusBadge, nodeChipTitle } from "./IngesterCard";
+import { ingesterStatusBadge, nodeChipTitle } from "./ingesterStatus";
 
 // The status badge separates the three states the old "stopped" pill
 // folded together: disabled, nowhere eligible to run, and not running on

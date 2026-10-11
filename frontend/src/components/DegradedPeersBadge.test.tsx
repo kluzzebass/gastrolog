@@ -3,7 +3,8 @@ import { render } from "@testing-library/react";
 import { createTestQueryClient, settingsWrapper } from "../../test/render";
 import { encode } from "../api/glid";
 import { ContributionReport, DegradedPeer } from "../api/gen/gastrolog/v1/vault_pb";
-import { DegradedPeersBadge, PARTIAL_HELP_REF, partialBadgeText } from "./DegradedPeersBadge";
+import { DegradedPeersBadge, PARTIAL_HELP_REF } from "./DegradedPeersBadge";
+import { partialBadgeText } from "./partialBadgeText";
 
 function testId(n: number): Uint8Array {
   const bytes = new Uint8Array(16);

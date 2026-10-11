@@ -4,7 +4,8 @@ import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 
 installMockClients();
 
-import { CloudServiceCard, cloudServiceSaveRequest } from "./CloudServiceCard";
+import { CloudServiceCard } from "./CloudServiceCard";
+import { cloudServiceSaveRequest } from "./cloudServiceEdit";
 import { CloudService } from "../../api/gen/gastrolog/v1/storage_pb";
 import { renderWritable } from "../../testing/renderWritable";
 

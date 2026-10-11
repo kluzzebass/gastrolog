@@ -1,4 +1,5 @@
 import { Badge } from "./Badge";
+import { partialBadgeText } from "./partialBadgeText";
 import { useNodeRegistry } from "../api/hooks";
 import { decode } from "../api/glid";
 import { idFromBytes } from "../api/model/id";
@@ -6,11 +7,6 @@ import { idFromBytes } from "../api/model/id";
 import { type ContributionReport } from "../api/gen/gastrolog/v1/vault_pb";
 
 export const PARTIAL_HELP_REF = "inspector#partial-results";
-
-/** The badge text for a merge that `unreached` peers dropped out of. */
-export function partialBadgeText(unreached: number): string {
-  return `partial — ${unreached} ${unreached === 1 ? "node" : "nodes"} unreached`;
-}
 
 /**
  * DegradedPeersBadge surfaces a partial cross-node merge: when a fanned-out

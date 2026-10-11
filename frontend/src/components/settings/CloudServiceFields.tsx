@@ -5,6 +5,7 @@ import { Checkbox } from "./Checkbox";
 import { Button } from "./Buttons";
 import { HelpButton } from "../HelpButton";
 import { useReadOnly } from "../../hooks/useReadOnly";
+import { restoreDaysReason, restoreSpeedReason } from "./cloudProviders";
 
 interface CloudStorageTransitionEdit {
   after: string; // duration (e.g. "30s", "7d", "2w")
@@ -282,24 +283,6 @@ const azureRehydrateOptions = [
   { value: "High", label: "High (< 10 hr)" },
   { value: "Standard", label: "Standard (< 15 hr)" },
 ];
-
-/** Why a provider has no restore speed to choose, or undefined when it has one. */
-export function restoreSpeedReason(provider: string): string | undefined {
-  switch (provider) {
-    case "gcs":
-      return "GCS has no restore step — archived objects are read directly.";
-    case "memory":
-      return "The memory provider has no restore step.";
-    default:
-      return undefined;
-  }
-}
-
-/** Why a provider has no restore window, or undefined when it has one. */
-export function restoreDaysReason(provider: string): string | undefined {
-  if (provider === "s3") return undefined;
-  return "S3 only — a restored object expires after this many days; other providers restore in place.";
-}
 
 function classOptionsForProvider(provider: string) {
   switch (provider) {

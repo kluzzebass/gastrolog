@@ -1,25 +1,11 @@
-import { encode } from "../../../api/glid";
 import { FormField, TextInput } from "../FormField";
 import { Checkbox } from "../Checkbox";
-import { EligibilitySelect, type EligibilityOption } from "../EligibilitySelect";
-import { useCertificates } from "../../../api/hooks/useCertificates";
-import type { CertificateInfo } from "../../../api/gen/gastrolog/v1/system_pb";
+import { EligibilitySelect } from "../EligibilitySelect";
+import { useCertOptions } from "./useCertOptions";
+import { tlsVerifies } from "./validation";
 
 export const CERTIFICATES_HELP_REF = "certificates#adding-a-certificate";
 export const NO_CERTIFICATES_MESSAGE = "No certificates stored — add one in the Certificates tab.";
-
-/**
- * useCertOptions lists stored certificates as picker candidates, sorted by
- * name. Ingester params reference a certificate by name; Docker params by
- * ID — the caller says which.
- */
-export function useCertOptions(valueOf: (c: CertificateInfo) => string = (c) => c.name || encode(c.id)): EligibilityOption[] {
-  const { data: certsData } = useCertificates();
-  const certs = certsData?.certificates ?? [];
-  return certs
-    .map((c) => ({ value: valueOf(c), label: c.name || encode(c.id) }))
-    .sort((a, b) => a.label.localeCompare(b.label));
-}
 
 interface TlsFieldsProps {
   params: Record<string, string>;
@@ -29,11 +15,6 @@ interface TlsFieldsProps {
 
 export const TLS_VERIFY_LABEL =
   "Verify server certificate (turning this off is unsafe — a stored CA certificate covers self-signed servers)";
-
-/** Whether `tls_verify` verifies: only the literal "false" turns verification off, as the ingesters read it. */
-export function tlsVerifies(params: Record<string, string>): boolean {
-  return params["tls_verify"] !== "false";
-}
 
 /**
  * The one server-verification checkbox every dialing ingester shares, so the

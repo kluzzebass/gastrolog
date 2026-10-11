@@ -1,7 +1,8 @@
 import { describe, test, expect } from "bun:test";
 import { render } from "@testing-library/react";
 import { Timestamp } from "@bufbuild/protobuf";
-import { StatsFreshnessCue, statsFreshness } from "./StatsFreshness";
+import { StatsFreshnessCue } from "./StatsFreshness";
+import { statsFreshness } from "./sampleFreshness";
 
 // A broadcast value is shown with its age, from the responding node's
 // receipt instant, and warns once the sample is older than the stats TTL —

@@ -6,7 +6,8 @@ import { NodeStats } from "../../api/gen/gastrolog/v1/cluster_pb";
 import { GetStatsResponse, VaultInfo, VaultStats } from "../../api/gen/gastrolog/v1/vault_pb";
 import { Timestamp } from "@bufbuild/protobuf";
 import { GetRouteStatsResponse } from "../../api/gen/gastrolog/v1/system_pb";
-import { EntityListPane, jobCountText } from "./EntityListPane";
+import { EntityListPane } from "./EntityListPane";
+import { jobCountText } from "./entityCounts";
 import { NO_ROUTES_TEXT } from "./RouteStatsView";
 
 describe("EntityListPane routes empty states", () => {

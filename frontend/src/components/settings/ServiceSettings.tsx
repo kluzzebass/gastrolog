@@ -77,7 +77,7 @@ function fieldsFromData(data: GetSettingsResponse): ServiceFormState {
 }
 
 const noAuthBadge = { text: "disabled", title: "disabled by --no-auth", helpRef: "user-management#no-auth-mode" };
-export const TLS_ENABLED_BADGE = {
+const TLS_ENABLED_BADGE = {
   text: "enabled",
   title: "the saved configuration serves HTTPS on the default certificate",
   helpRef: "service-settings#tls-configuration",

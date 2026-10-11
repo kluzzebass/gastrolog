@@ -6,7 +6,8 @@ import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 
 const mocks = installMockClients();
 
-import { CertificatesSettings, certSourceBadge } from "./CertificatesSettings";
+import { CertificatesSettings } from "./CertificatesSettings";
+import { certSourceBadge } from "./certificateSource";
 import { renderWritable } from "../../testing/renderWritable";
 
 /** Create a distinct 16-byte Uint8Array test ID from a small number. */

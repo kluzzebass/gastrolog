@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { render } from "@testing-library/react";
-import { CALM_SEALED_CLASS, SealPips, pipClass } from "./SealPips";
+import { SealPips } from "./SealPips";
+import { CALM_SEALED_CLASS, pipClass } from "./sealPipClass";
 import { computePips, type PipInputs } from "./sealPipState";
 
 // A sealed pip is the only pip drawn without a border, so its fill is all

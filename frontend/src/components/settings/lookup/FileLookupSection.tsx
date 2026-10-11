@@ -1,7 +1,7 @@
 import { encode } from "../../../api/glid";
 import { useState, useEffect } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
-import { usePutLookupSettings, usePreviewJSONLookup, usePreviewYAMLLookup, type PutLookupWire } from "../../../api/hooks/useSettings";
+import { usePutLookupSettings, type PutLookupWire } from "../../../api/hooks/useSettings";
 import { useExpandedCards } from "../../../hooks/useExpandedCards";
 import { useLookupCrud } from "./useLookupCrud";
 import { FormField, TextInput } from "../FormField";
@@ -10,26 +10,11 @@ import { SettingsCard } from "../SettingsCard";
 import { AddFormCard } from "../AddFormCard";
 import { FileDropZone } from "../FileDropZone";
 import { ColumnPickers } from "./ColumnPickers";
-import { type JSONFileLookupDraft, type LookupSectionProps, emptyJsonDraft, fileLookupIncompleteReason } from "./types";
+import { type JSONFileLookupDraft, type LookupSectionProps, emptyJsonDraft, fileLookupIncompleteReason, tableColumnsUnavailable } from "./types";
+import type { FormatSpec } from "./fileLookupFormat";
 import type { JSONFileLookupEntry, YAMLFileLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 import { PreviewTable, parseTabularResult } from "./PreviewTable";
 import { useReadOnly } from "../../../hooks/useReadOnly";
-
-// FileLookupFormat tags which structured format a section instance serves.
-// Drives preview hook, file-picker extension, type badge, and payload key.
-type FileLookupFormat = "json" | "yaml";
-
-interface FormatSpec {
-  format: FileLookupFormat;
-  label: string;           // "JSON" / "YAML" — capitalized for user-visible text
-  typeBadge: string;       // "json" / "yaml" — lowercase badge text
-  helpRef: string;         // help section describing this format's lookups
-  accept: string;          // accepted file extensions for the drop zone
-  fileExtensions: string[]; // filter for managed-file picker
-  lookupKey: "jsonFileLookups" | "yamlFileLookups"; // putLookupSettings payload field
-  equal: (draft: JSONFileLookupDraft, saved: JSONFileLookupEntry | YAMLFileLookupEntry) => boolean;
-  usePreview: typeof usePreviewJSONLookup;
-}
 
 // ---------------------------------------------------------------------------
 // File Preview
@@ -259,13 +244,6 @@ export function FileLookupAddForm({
   );
 }
 
-/** Why the column pickers have nothing to offer yet, or undefined once the query yields a table. */
-export function tableColumnsUnavailable(fileId: string, tableColumns: string[]): string | undefined {
-  if (!fileId) return "Select a file first — the columns come from the query result.";
-  if (tableColumns.length === 0) return "The query must produce an array of objects to pick columns from.";
-  return undefined;
-}
-
 function FileLookupCardBody({
   dark,
   draft,
@@ -404,35 +382,3 @@ export function FileLookupCards({
     </>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Format specs exported for wrapper sections to pass in.
-// ---------------------------------------------------------------------------
-
-// Re-export the equality helpers via the types module to keep the spec
-// definition self-contained within this file.
-import { jsonFileLookupEqual, yamlFileLookupEqual } from "./types";
-
-export const jsonFormatSpec: FormatSpec = {
-  format: "json",
-  label: "JSON",
-  typeBadge: "json",
-  helpRef: "lookups-settings#json-file-lookups",
-  accept: ".json",
-  fileExtensions: [".json"],
-  lookupKey: "jsonFileLookups",
-  equal: jsonFileLookupEqual as FormatSpec["equal"],
-  usePreview: usePreviewJSONLookup,
-};
-
-export const yamlFormatSpec: FormatSpec = {
-  format: "yaml",
-  label: "YAML",
-  typeBadge: "yaml",
-  helpRef: "lookups-settings#yaml-file-lookups",
-  accept: ".yaml,.yml",
-  fileExtensions: [".yaml", ".yml"],
-  lookupKey: "yamlFileLookups",
-  equal: yamlFileLookupEqual as FormatSpec["equal"],
-  usePreview: usePreviewYAMLLookup,
-};

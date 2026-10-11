@@ -10,7 +10,7 @@ import { usePipelineBacklog } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 // eslint-disable-next-line no-restricted-imports -- no Chunk model yet
-import { type ChunkMeta, type ContributionReport, type GetIndexesResponse } from "../../api/gen/gastrolog/v1/vault_pb";
+import { type ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import { VaultAdmissionCause, type Vault, type VaultAdmissionRefusal } from "../../api/model/vault";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
 import {
@@ -41,6 +41,18 @@ import { PipelineBacklogView } from "./PipelineBacklogView";
 import { appendIdleNote, collectIdleNote, sealIdleNote, type IdleNote } from "./throughputNotes";
 import { VaultStageCountersSection } from "./VaultStageCounters";
 import { useReadOnly } from "../../hooks/useReadOnly";
+import { chunkDiskClaimBytes, chunkSizeCell } from "./chunkSize";
+import {
+  CLOUD_BACKED_VAULT_BADGE,
+  INDEX_MISSING_TITLE,
+  INDEX_OK_TITLE,
+  archivedBadgeTitle,
+  chunksEmptyText,
+  indexesEmptyText,
+  refusingBadgeText,
+  vaultRefusalDetails,
+  vaultRefusingCauseLabels,
+} from "./vaultCardText";
 
 // chunkEndInstant returns the ingest/write end for display, omitting unset or
 // sentinel epoch timestamps that proto encodes for zero-value Go times.
@@ -67,21 +79,6 @@ function chunkStartInstant(chunk: ChunkMeta): Date | undefined {
 /** Node names longer than this truncate in the throughput table; the full name is in the tooltip. */
 const NODE_NAME_MAX_CHARS = 24;
 
-// chunkDiskClaimBytes is this chunk's LOCAL on-disk claim — what deleting
-// it would actually free on the responding node. Mirrors the backend's
-// chunk.DiskClaim formula (backend/internal/chunk/claim.go): a cloud-backed
-// chunk with no local cache (diskBytes == 0) claims nothing — the object
-// still lives in the cloud store, at cloudBytes, a currency this never
-// substitutes in. Otherwise diskBytes wins when recorded, falling back to
-// logical bytes only for chunks with no disk-bytes tracking at all
-// (pipeline GLCB chunks).
-export function chunkDiskClaimBytes(chunk: ChunkMeta): number {
-  const diskBytes = Number(chunk.diskBytes);
-  if (chunk.cloudBacked && diskBytes === 0) return 0;
-  if (diskBytes > 0) return diskBytes;
-  return Number(chunk.bytes);
-}
-
 // chunkSizeCellTitle explains the size column's number — terse, and honest
 // about which of the two cloud currencies (local cache vs. cloud object) is
 // showing. undefined = no tooltip needed (the number is self-explanatory).
@@ -99,20 +96,6 @@ function chunkSizeCellTitle(chunk: ChunkMeta): string | undefined {
     return `${formatBytes(Number(chunk.bytes))} → ${formatBytes(diskBytes)} on disk`;
   }
   return "record bytes — this chunk reports no file size, so its disk claim is the record bytes";
-}
-
-/** Which quantity the chunk list's Size column shows for one row. */
-export type ChunkSizeKind = "disk" | "cloud";
-
-// chunkSizeCell shows the chunk's disk claim — the figure the header sums and
-// retention's size bound counts — except for a cloud-backed chunk with no
-// local copy, whose claim is zero; that row shows the cloud object's size and
-// is labeled cloud so the two currencies never share one unmarked number.
-export function chunkSizeCell(chunk: ChunkMeta): { bytes: number; kind: ChunkSizeKind } {
-  if (chunk.cloudBacked && Number(chunk.diskBytes) === 0) {
-    return { bytes: Number(chunk.cloudBytes), kind: "cloud" };
-  }
-  return { bytes: chunkDiskClaimBytes(chunk), kind: "disk" };
 }
 
 // VaultHoldingsBadges is the card header's chunk / record / size summary.
@@ -156,90 +139,6 @@ export function VaultHoldingsBadges({
     </>
   );
 }
-
-// vaultAdmissionCauseLabels maps the backend's admission-refusal cause enum
-// (VaultInfo.admissionRefused, populated from the responding node's own
-// admission-causes collector — backend/internal/orchestrator/disk_guard.go's
-// VaultAdmissionCauses) to a terse tooltip phrase. A first-class backend
-// signal, not a UI-side derivation from alarm state. The disk-free
-// thresholds belong to the storage a vault is placed on, not the vault,
-// hence STORAGE_DISK_PROTECT.
-const vaultAdmissionCauseLabels: Partial<Record<VaultAdmissionCause, string>> = {
-  [VaultAdmissionCause.MAX_SIZE_BOUND]: "at max-size bound",
-  [VaultAdmissionCause.STORAGE_DISK_PROTECT]: "storage below floor",
-  [VaultAdmissionCause.BACKLOG_BUDGET]: "backlog at budget",
-  [VaultAdmissionCause.AGE_BOUND]: "past age bound",
-  [VaultAdmissionCause.CHUNK_COUNT_BOUND]: "over chunk-count bound",
-};
-
-// vaultRefusingCauseLabels maps the vault's admission-refused causes to their
-// terse tooltip phrases, dropping UNSPECIFIED (never emitted by the backend
-// today, but the label map has no entry for it — defense in depth).
-export function vaultRefusingCauseLabels(refusals: readonly VaultAdmissionRefusal[]): string[] {
-  const labels: string[] = [];
-  for (const r of refusals) {
-    const label = vaultAdmissionCauseLabels[r.cause];
-    if (label) labels.push(label);
-  }
-  return labels;
-}
-
-// vaultRefusalDetails pairs each active cause's label with the backend's own
-// detail string, verbatim — the expanded card's refusal section renders
-// exactly this, never reconstructing the specifics client-side
-// (VaultAdmissionRefusal carries {cause, detail} on the wire). Same
-// UNSPECIFIED-drop discipline as vaultRefusingCauseLabels.
-export interface VaultRefusalDetail {
-  label: string;
-  detail: string;
-}
-
-export function vaultRefusalDetails(refusals: readonly VaultAdmissionRefusal[]): VaultRefusalDetail[] {
-  const details: VaultRefusalDetail[] = [];
-  for (const r of refusals) {
-    const label = vaultAdmissionCauseLabels[r.cause];
-    if (label) details.push({ label, detail: r.detail });
-  }
-  return details;
-}
-
-/** The header badge for a vault refusing new records, naming every active cause. */
-export function refusingBadgeText(causes: readonly string[]): string {
-  return causes.length === 0 ? "refusing" : `refusing: ${causes.join(", ")}`;
-}
-
-function nodesUnreached(n: number): string {
-  return `${n} ${n === 1 ? "node" : "nodes"} unreached`;
-}
-
-/** The chunk table's empty state: ListChunks fans out to every node hosting the vault, so an empty list is a cluster-wide fact unless some host dropped out of the merge. */
-export function chunksEmptyText(report: ContributionReport | null | undefined): string {
-  const n = report?.degraded.length ?? 0;
-  return n > 0 ? `No chunks reported — ${nodesUnreached(n)}.` : "No chunks in this vault yet.";
-}
-
-/** The Indexes section's empty state for a sealed chunk that produced no index list. */
-export function indexesEmptyText(data?: GetIndexesResponse): string {
-  const n = data?.contributionReport?.degraded.length ?? 0;
-  return n > 0
-    ? `Indexes unknown — the chunk was not found on the nodes that answered, ${nodesUnreached(n)}.`
-    : "Indexes unavailable — no node answered for this chunk.";
-}
-
-export const INDEX_OK_TITLE = "opened on the node that answered — queries on that node use it";
-export const INDEX_MISSING_TITLE =
-  "could not be opened on the node that answered — its file is absent or unreadable there; reindex rebuilds it";
-
-/** The archived badge's hover text, naming the cloud storage class the chunk sits in when the backend reports one. */
-export function archivedBadgeTitle(cloudStorageClass: string): string {
-  return `archived to ${cloudStorageClass || "offline storage"} — restore it before it can be queried`;
-}
-
-export const CLOUD_BACKED_VAULT_BADGE = {
-  text: "cloud-backed",
-  title: "cloud-backed vault — sealed chunks are uploaded to its cloud service",
-  helpRef: "storage-cloud",
-};
 
 interface VaultCardProps {
   vault: Vault;

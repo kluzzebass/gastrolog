@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { entityCountTitle } from "./InspectorDialog";
+import { entityCountTitle } from "./entityCounts";
 
 // A nav count names what it counts on hover: "System 4" is four live
 // nodes, "Jobs 7" is seven jobs active or scheduled.

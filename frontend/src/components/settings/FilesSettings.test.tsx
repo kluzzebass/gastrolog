@@ -6,7 +6,8 @@ import { encode } from "../../api/glid";
 
 const mocks = installMockClients();
 
-import { FilesSettings, fileLookupRefs } from "./FilesSettings";
+import { FilesSettings } from "./FilesSettings";
+import { fileLookupRefs } from "./fileLookupRefs";
 import { LookupSettings } from "../../api/gen/gastrolog/v1/system_pb";
 import { renderWritable } from "../../testing/renderWritable";
 

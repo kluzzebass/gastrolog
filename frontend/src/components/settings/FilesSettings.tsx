@@ -15,33 +15,14 @@ import { HelpLink } from "../HelpLink";
 import { ExpandableCard } from "./ExpandableCard";
 import { MaxMindCard } from "./lookup/MaxMindCard";
 import { UsedByStatus } from "./UsedByStatus";
+import { fileLookupRefs } from "./fileLookupRefs";
 import { handleDragOver, handleDragEnter, handleDragLeave } from "./CertificateForms";
-import type { LookupSettings, ManagedFileInfo } from "../../api/gen/gastrolog/v1/system_pb";
+import type { ManagedFileInfo } from "../../api/gen/gastrolog/v1/system_pb";
 import { useReadOnly } from "../../hooks/useReadOnly";
 
 interface FileGroup {
   name: string;
   versions: ManagedFileInfo[]; // newest first (UUIDv7 order reversed)
-}
-
-/**
- * The lookups whose saved configuration references one of these file
- * versions by id — the only sense in which a managed file is "used".
- */
-export function fileLookupRefs(versionIds: readonly string[], lookup: LookupSettings | undefined): string[] {
-  if (!lookup) return [];
-  const ids = new Set(versionIds);
-  const refs: string[] = [];
-  const fileLookups = [
-    ...lookup.mmdbLookups,
-    ...lookup.csvLookups,
-    ...lookup.jsonFileLookups,
-    ...lookup.yamlFileLookups,
-  ];
-  for (const l of fileLookups) {
-    if (l.fileId.length > 0 && ids.has(encode(l.fileId))) refs.push(`lookup ${l.name}`);
-  }
-  return refs;
 }
 
 function groupByName(files: ManagedFileInfo[]): FileGroup[] {

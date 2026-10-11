@@ -10,24 +10,11 @@ import { HelpButton } from "../../HelpButton";
 import { SettingsCard } from "../SettingsCard";
 import { AddFormCard } from "../AddFormCard";
 import { FileDropZone } from "../FileDropZone";
-import { type MMDBLookupDraft, type LookupSectionProps, mmdbDbTypes, mmdbDefaultName, emptyMmdbDraft, mmdbLookupEqual } from "./types";
+import { type MMDBLookupDraft, type LookupSectionProps, mmdbDbTypes, mmdbDefaultName, emptyMmdbDraft, mmdbFileIneligibility, mmdbLookupEqual } from "./types";
 import type { MMDBLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 import { useReadOnly } from "../../../hooks/useReadOnly";
 
 const MMDB_HELP_REF = "lookups-settings#mmdb-lookups";
-
-/**
- * Why an uploaded .mmdb file does not fit the lookup's database type, or
- * undefined when it may. Only the file name is known here, so a file is
- * ruled out only when its name says it is the other kind.
- */
-export function mmdbFileIneligibility(dbType: string, fileName: string): string | undefined {
-  const namedAsn = fileName.includes("ASN") || fileName.includes("ISP");
-  const namedCity = fileName.includes("City");
-  if (dbType === "city" && namedAsn && !namedCity) return "named as an ASN database";
-  if (dbType === "asn" && namedCity && !namedAsn) return "named as a GeoIP City database";
-  return undefined;
-}
 
 function serializeMmdbLookups(lookups: MMDBLookupDraft[]) {
   return lookups

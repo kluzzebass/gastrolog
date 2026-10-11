@@ -3,7 +3,8 @@ import { render } from "@testing-library/react";
 import { Timestamp } from "@bufbuild/protobuf";
 import { HelpProvider } from "../hooks/useHelp";
 import { NodeState } from "../api/model/node";
-import { NODE_STATES_HELP_REF, NodeStateBadge, nodeStateView } from "./NodeStateBadge";
+import { NODE_STATES_HELP_REF, NodeStateBadge } from "./NodeStateBadge";
+import { nodeStateView } from "./nodeStateView";
 import { OfflineBadge } from "./OfflineBadge";
 
 function withHelp(ui: React.ReactElement, onOpen: (ref?: string) => void = () => {}) {

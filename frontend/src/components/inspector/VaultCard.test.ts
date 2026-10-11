@@ -1,17 +1,16 @@
 import { describe, test, expect } from "bun:test";
+import { chunkDiskClaimBytes, chunkSizeCell } from "./chunkSize";
 import {
   CLOUD_BACKED_VAULT_BADGE,
   INDEX_MISSING_TITLE,
   INDEX_OK_TITLE,
   archivedBadgeTitle,
-  chunkDiskClaimBytes,
-  chunkSizeCell,
   chunksEmptyText,
   indexesEmptyText,
   refusingBadgeText,
   vaultRefusingCauseLabels,
   vaultRefusalDetails,
-} from "./VaultCard";
+} from "./vaultCardText";
 import {
   ChunkMeta,
   ContributionReport,

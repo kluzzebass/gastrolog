@@ -7,7 +7,7 @@ import {
   usePutVault,
   useGenerateName,
 } from "../../api/hooks";
-import { VaultType, RetentionRule, VaultConfig } from "../../api/gen/gastrolog/v1/system_pb";
+import { RetentionRule, VaultConfig } from "../../api/gen/gastrolog/v1/system_pb";
 import { useToast } from "../Toast";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
@@ -20,37 +20,18 @@ import { TRANSFER_HELP_REF, transferSourceIneligibility, transferTargetOptions }
 import { sortByName } from "../../lib/sort";
 import { VaultSettingsCard } from "./VaultSettingsCard";
 import { classStorageCounts, plural, rfCap, type RFCap } from "./vaultPlacement";
+import {
+  isCloudBacked,
+  isStorageComplete,
+  storageIncompleteReason,
+  vaultTypeEnum,
+  type StorageEntry,
+  type VaultTypeLabel,
+} from "./vaultStorageEntry";
 
 // ---------------------------------------------------------------------------
 // Vault storage form types
 // ---------------------------------------------------------------------------
-
-// A cloud-backed vault is a file vault with cloudServiceId set; cloud-ness
-// is derived via isCloudBacked() rather than a separate type discriminator.
-export type VaultTypeLabel = "memory" | "file" | "jsonl";
-
-/** Returns true if this vault is cloud-backed (file vault with a cloud service binding). */
-export function isCloudBacked(v: { type: VaultTypeLabel; cloudServiceId: string }): boolean {
-  return v.type === "file" && v.cloudServiceId !== "";
-}
-
-export interface StorageEntry {
-  key: string;
-  type: VaultTypeLabel;
-  storageClass: string;
-  cloudServiceId: string;
-  cacheEviction: string;
-  cacheBudget: string;
-  cacheTTL: string;
-  memoryBudget: string;
-  rotationPolicyId: string;
-  retentionPolicyIds: string[]; // one RetentionRule per policy, in this order
-  retentionDisposition: string; // "delete" (default) | "route" | "transfer"
-  retentionTransferTarget: string; // vault ID — required when retentionDisposition is "transfer"
-  replicationFactor: string;
-  path: string;
-  nodeId: string;
-}
 
 function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
   return {
@@ -75,21 +56,6 @@ function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
 /** Mirrors the backend's DefaultVaultMemoryBudget: what an empty Budget resolves to. */
 export const DEFAULT_VAULT_MEMORY_BUDGET = "1GiB";
 
-// ---------------------------------------------------------------------------
-// VaultType label ↔ enum conversion
-// ---------------------------------------------------------------------------
-
-export function vaultTypeEnum(t: VaultTypeLabel): VaultType {
-  switch (t) {
-    case "memory":
-      return VaultType.MEMORY;
-    case "file":
-      return VaultType.FILE;
-    case "jsonl":
-      return VaultType.JSONL;
-  }
-}
-
 const CLOUD_STORAGE_HELP_REF = "storage-config#cloud-storage";
 const FILE_STORAGE_HELP_REF = "storage-config#file-storage";
 const POLICIES_HELP_REF = "vaults-config#rotation-and-retention-policies";
@@ -97,30 +63,6 @@ const CACHE_HELP_REF = "storage-cloud#settings";
 
 function extractErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
-}
-
-export function isStorageComplete(s: StorageEntry, _hasCloudServices: boolean): boolean {
-  return storageIncompleteReason(s) === undefined;
-}
-
-/** Why the storage shape cannot be saved yet, or undefined when it can. */
-export function storageIncompleteReason(s: StorageEntry): string | undefined {
-  if (s.type !== "jsonl" && s.retentionDisposition === "transfer") {
-    const sourceReason = transferSourceIneligibility(s);
-    if (sourceReason !== undefined) return `Transfer is not available: ${sourceReason}`;
-    if (s.retentionTransferTarget === "") return "Pick a transfer target";
-  }
-  switch (s.type) {
-    case "memory":
-      return undefined;
-    case "file":
-      // Single storage class for both local-only and cloud-backed file
-      // vaults — the active chunk and warm cache live at the same chunkDir
-      // path, so no separate "active" or "cache" class is meaningful.
-      return s.storageClass === "" ? "Pick a storage class" : undefined;
-    case "jsonl":
-      return s.nodeId === "" ? "Pick a node" : undefined;
-  }
 }
 
 // ---------------------------------------------------------------------------

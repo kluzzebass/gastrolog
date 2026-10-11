@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { freeOfTotalLabel, storageVerdictLabel, thresholdLabel } from "./StorageCard";
+import { freeOfTotalLabel, storageVerdictLabel, thresholdLabel } from "./storageLabels";
 
 // The header's space figure names both numbers — free against the
 // volume's total — instead of an unlabeled "a / b".

@@ -3,7 +3,8 @@ import { render } from "@testing-library/react";
 import { Timestamp } from "@bufbuild/protobuf";
 import { NodeStats } from "../../api/gen/gastrolog/v1/cluster_pb";
 import { HelpProvider } from "../../hooks/useHelp";
-import { SystemStatsView, formatRaftContact, leaderLabel, nodeStatsEmptyText } from "./SystemStatsView";
+import { SystemStatsView } from "./SystemStatsView";
+import { formatRaftContact, leaderLabel, nodeStatsEmptyText } from "./nodeStatsText";
 
 const NOW_MS = 1_800_000_000_000;
 

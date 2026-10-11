@@ -5,7 +5,8 @@ import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 
 const mocks = installMockClients();
 
-import { IngestersSettings, ingesterModeBadge } from "./IngestersSettings";
+import { IngestersSettings } from "./IngestersSettings";
+import { ingesterModeBadge } from "./ingesterLabels";
 import { GetSystemResponse, IngesterMode } from "../../api/gen/gastrolog/v1/system_pb";
 import { renderWritable } from "../../testing/renderWritable";
 

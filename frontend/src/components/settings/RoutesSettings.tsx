@@ -15,7 +15,8 @@ import { Checkbox } from "./Checkbox";
 import { HelpLink } from "../HelpLink";
 import type { SettingsTab } from "./SettingsDialog";
 import { sortByName } from "../../lib/sort";
-import { VaultType, type RouteConfig } from "../../api/gen/gastrolog/v1/system_pb";
+import type { RouteConfig } from "../../api/gen/gastrolog/v1/system_pb";
+import { destinationState, displayExpression, type DestinationVault } from "./routeDisplay";
 
 // The route's gating predicate is the inline expression on the first
 // MatchStage. Planned stage kinds (enrich, redact, sample, fork,
@@ -25,18 +26,6 @@ function routeExpression(r: RouteConfig): string {
     if (stage.stage.case === "match") return stage.stage.value.expression;
   }
   return "";
-}
-
-/**
- * The expression as the card header shows it: a `_vault` comparison against a
- * configured vault's ID reads with the vault's name in its place. An ID no
- * vault carries stays as written.
- */
-export function displayExpression(expr: string, vaults: ReadonlyArray<{ id: string; name: string }>): string {
-  return expr.replace(/(_vault\s*(?:==?|!=)\s*")([^"]*)(")/g, (match, open: string, id: string, close: string) => {
-    const vault = vaults.find((v) => v.id === id);
-    return vault?.name ? `${open}${vault.name}${close}` : match;
-  });
 }
 
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
@@ -371,20 +360,6 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
       })}
     </SettingsSection>
   );
-}
-
-type DestinationVault = { id: string; name: string; type: VaultType; enabled: boolean };
-
-/**
- * What a destination candidate is besides a name: a JSONL sink cannot be
- * searched, and a disabled vault has no instance to append to. Both remain
- * selectable — a route may be configured ahead of enabling its vault.
- */
-export function destinationState(v: Pick<DestinationVault, "type" | "enabled">): string | undefined {
-  const notes: string[] = [];
-  if (v.type === VaultType.JSONL) notes.push("JSONL sink, write-only");
-  if (!v.enabled) notes.push("disabled, not accepting records");
-  return notes.length > 0 ? notes.join("; ") : undefined;
 }
 
 // DestinationsEditor renders a flat checkbox list — every destination is
