@@ -57,7 +57,6 @@ type mergeState struct {
 	lazyPending []vaultChunk
 	lazyNext    int
 	lazyResume  map[glid.GLID]map[chunk.ChunkID]resumeInfo
-	lazyOverlap bool // adjacent chunks overlap in order-by time
 }
 
 // cleanup stops all active scanners.
@@ -92,11 +91,10 @@ func (ms *mergeState) findScanner(vaultID glid.GLID, chunkID chunk.ChunkID) *act
 	return nil
 }
 
-func (ms *mergeState) initLazyPrime(allChunks []vaultChunk, resumeMap map[glid.GLID]map[chunk.ChunkID]resumeInfo, q Query) {
+func (ms *mergeState) initLazyPrime(allChunks []vaultChunk, resumeMap map[glid.GLID]map[chunk.ChunkID]resumeInfo) {
 	ms.lazyResume = resumeMap
 	ms.lazyPending = filterPendingChunks(allChunks, resumeMap, ms.chunkPositions)
 	ms.lazyNext = 0
-	ms.lazyOverlap = vaultChunksOverlap(ms.lazyPending, q.OrderBy)
 }
 
 func (ms *mergeState) peekTopTS(orderBy OrderBy) (time.Time, bool) {
@@ -124,20 +122,19 @@ func filterPendingChunks(
 	return pending
 }
 
-// vaultChunksOverlap reports whether adjacent chunks in the planner sort order
-// have overlapping order-by time ranges. When false, only one chunk can hold
-// the current merge frontier and scanners open one at a time.
-func vaultChunksOverlap(chunks []vaultChunk, orderBy OrderBy) bool {
-	if len(chunks) < 2 {
-		return false
-	}
+// chunkCompetes reports whether a chunk not yet opened can hold a record at
+// or ahead of top in query order: forward, one whose order-by range starts at
+// or before top; reverse, one whose range ends at or after it. Equality
+// competes, since records sharing top's timestamp are ordered by EventID
+// across chunks. A zero bound is unknown and always competes.
+func chunkCompetes(meta chunk.ChunkMeta, top time.Time, orderBy OrderBy, reverse bool) bool {
 	startTS, endTS := chunkTimeBounds(orderBy)
-	for i := 0; i+1 < len(chunks); i++ {
-		if endTS(chunks[i+1].meta).After(startTS(chunks[i].meta)) {
-			return true
-		}
+	if reverse {
+		end := endTS(meta)
+		return end.IsZero() || !end.Before(top)
 	}
-	return false
+	start := startTS(meta)
+	return start.IsZero() || !start.After(top)
 }
 
 func chunkTimeBounds(orderBy OrderBy) (startTS, endTS func(chunk.ChunkMeta) time.Time) {
@@ -149,11 +146,6 @@ func chunkTimeBounds(orderBy OrderBy) (startTS, endTS func(chunk.ChunkMeta) time
 		return func(m chunk.ChunkMeta) time.Time { return m.IngestStart },
 			func(m chunk.ChunkMeta) time.Time { return m.IngestEnd }
 	}
-}
-
-func chunkTimeUpper(meta chunk.ChunkMeta, orderBy OrderBy) time.Time {
-	_, endTS := chunkTimeBounds(orderBy)
-	return endTS(meta)
 }
 
 // advanceScanner advances the scanner for the given entry, pushing the next
@@ -394,7 +386,7 @@ func (e *Engine) primeHeapWithResume(
 	resumeMap map[glid.GLID]map[chunk.ChunkID]resumeInfo,
 	ms *mergeState,
 ) error {
-	ms.initLazyPrime(allChunks, resumeMap, q)
+	ms.initLazyPrime(allChunks, resumeMap)
 	return e.lazyOpenCompeting(ctx, q, ms)
 }
 
@@ -416,28 +408,18 @@ func (e *Engine) primeHeap(
 	allChunks []vaultChunk,
 	ms *mergeState,
 ) error {
-	ms.initLazyPrime(allChunks, nil, q)
+	ms.initLazyPrime(allChunks, nil)
 	return e.lazyOpenCompeting(ctx, q, ms)
 }
 
-// lazyOpenCompeting opens pending chunks that may contribute the next merge
-// record. For non-overlapping chunk time ranges only one scanner is active
-// at a time; overlapping ranges open every chunk whose upper bound can still
-// beat the current heap top.
+// lazyOpenCompeting opens pending chunks, in planner order, while the next one
+// can still compete for the next merge record. Planner order sorts forward by
+// range start and reverse by range end, so the first chunk that cannot
+// compete ends the walk: none after it can either.
 func (e *Engine) lazyOpenCompeting(ctx context.Context, q Query, ms *mergeState) error {
 	for ms.lazyNext < len(ms.lazyPending) {
-		if ms.h.Len() > 0 {
-			if !ms.lazyOverlap {
-				break
-			}
-			topTS, ok := ms.peekTopTS(q.OrderBy)
-			if !ok {
-				break
-			}
-			upper := chunkTimeUpper(ms.lazyPending[ms.lazyNext].meta, q.OrderBy)
-			if !upper.IsZero() && upper.Before(topTS) {
-				break
-			}
+		if top, ok := ms.peekTopTS(q.OrderBy); ok && !chunkCompetes(ms.lazyPending[ms.lazyNext].meta, top, q.OrderBy, q.Reverse()) {
+			break
 		}
 		if err := e.lazyOpenOne(ctx, q, ms); err != nil {
 			return err

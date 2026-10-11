@@ -8,22 +8,26 @@ import (
 	"gastrolog/internal/glid"
 )
 
-// A token whose last record had no ingester identity carries no event, and
-// ApplyResumeCursor then keeps the identity-less bounds.
-func TestApplyResumeCursorWithoutIdentityKeepsExclusiveReverseBound(t *testing.T) {
+// The highwater bound keeps the boundary timestamp in reach in both
+// directions, whether or not the cursor carries an identity: the cursor, not
+// the bound, decides which records at that timestamp were already emitted.
+func TestApplyResumeCursorKeepsTheBoundaryTimestampInReach(t *testing.T) {
 	hw := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
-	q := Query{IsReverse: true}
-	ApplyResumeCursor(&q, &ResumeToken{HighwaterTS: hw})
-	if !q.End.Equal(hw) {
-		t.Fatalf("identity-less reverse bound = %v, want exclusive at %v", q.End, hw)
-	}
-	q = Query{IsReverse: true}
-	ApplyResumeCursor(&q, &ResumeToken{HighwaterTS: hw, HighwaterEvent: chunk.EventID{IngesterID: glid.New(), IngestTS: hw, IngestSeq: 1}})
-	if !q.End.Equal(hw.Add(time.Nanosecond)) {
-		t.Fatalf("identified reverse bound = %v, want one tick past %v", q.End, hw)
-	}
-	if q.ResumeAfterTS.IsZero() || q.ResumeAfterEvent.IngesterID.IsZero() {
-		t.Fatal("cursor was not installed on the query")
+	identified := chunk.EventID{IngesterID: glid.New(), IngestTS: hw, IngestSeq: 1}
+	for _, event := range []chunk.EventID{{}, identified} {
+		q := Query{IsReverse: true}
+		ApplyResumeCursor(&q, &ResumeToken{HighwaterTS: hw, HighwaterEvent: event})
+		if !q.End.Equal(hw.Add(time.Nanosecond)) {
+			t.Errorf("event %v: reverse bound = %v, want one tick past %v", event, q.End, hw)
+		}
+		q = Query{}
+		ApplyResumeCursor(&q, &ResumeToken{HighwaterTS: hw, HighwaterEvent: event})
+		if !q.Start.Equal(hw) {
+			t.Errorf("event %v: forward bound = %v, want inclusive at %v", event, q.Start, hw)
+		}
+		if !q.ResumeAfterTS.Equal(hw) || q.ResumeAfterEvent != event {
+			t.Errorf("event %v: cursor was not installed on the query", event)
+		}
 	}
 }
 
