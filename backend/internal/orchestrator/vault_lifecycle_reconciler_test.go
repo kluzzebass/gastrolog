@@ -1813,7 +1813,7 @@ func TestSweepNodesOutsidePlacementPrunesHolderClaims(t *testing.T) {
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "leader-node", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepNodesOutsidePlacement()
 

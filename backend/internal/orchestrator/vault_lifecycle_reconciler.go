@@ -1910,8 +1910,8 @@ func (r *VaultLifecycleReconciler) reconcileNodesOutsidePlacement(v *reconcileVi
 			note(nodeID)
 		}
 	}
-	if r.fsm != nil {
-		for _, seg := range r.fsm.ListCompletedSegments() {
+	if fsm := r.fsm.Load(); fsm != nil {
+		for _, seg := range fsm.ListCompletedSegments() {
 			for _, nodeID := range seg.Holders {
 				note(nodeID)
 			}
