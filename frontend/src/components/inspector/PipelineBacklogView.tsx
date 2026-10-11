@@ -6,6 +6,12 @@ import { protoToInstant, instantToDate, formatDateTimeShort } from "../../utils/
 import { BYTES_MAX_CHARS, COUNT_MAX_CHARS, formatBytes, formatCount } from "../../utils/units";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { LiveValue } from "../LiveValue";
+import { HelpButton } from "../HelpButton";
+
+export const PIPELINE_BACKLOG_HELP_REF = "inspector-vaults#pipeline-backlog";
+
+/** The panel's empty state: names where the figures come from, so their absence is attributable. */
+export const PIPELINE_BACKLOG_EMPTY_TEXT = "The connected node reported no pipeline backlog for this vault.";
 
 interface PipelineBacklogViewProps {
   vaultId: string;
@@ -73,7 +79,7 @@ function ClusterStagingTable({
       <table className="w-full border-collapse">
         <thead>
           <tr className={`border-b ${rowBorder}`}>
-            <th className={thClass(c)}>Area</th>
+            <th className={thClass(c)}>Staging area</th>
             <th className={`${thClass(c)} text-right`}>Segments</th>
             <th className={`${thClass(c)} text-right`}>Bytes</th>
           </tr>
@@ -195,7 +201,29 @@ export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogV
   if (isLoading) {
     return <LoadingPlaceholder dark={dark} />;
   }
-  if (!backlog) return null;
+
+  const heading = (
+    <div className="flex items-center gap-2">
+      <h3
+        className={`flex items-center gap-1.5 text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+      >
+        Pipeline backlog
+        <HelpButton helpRef={PIPELINE_BACKLOG_HELP_REF} />
+      </h3>
+      <DegradedPeersBadge report={contribution} dark={dark} />
+    </div>
+  );
+
+  if (!backlog) {
+    return (
+      <section className="flex flex-col gap-4">
+        {heading}
+        <div className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}>
+          {PIPELINE_BACKLOG_EMPTY_TEXT}
+        </div>
+      </section>
+    );
+  }
 
   const eligible = backlog.eligibleSegments;
   const registry = backlog.registrySegments;
@@ -234,20 +262,13 @@ export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogV
 
   return (
     <section className="flex flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <h3
-          className={`text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
-        >
-          Pipeline backlog
-        </h3>
-        <DegradedPeersBadge report={contribution} dark={dark} />
-      </div>
+      {heading}
 
       <div className={`rounded-lg border overflow-x-auto ${border}`}>
         <table className="w-full border-collapse">
           <thead>
             <tr className={`border-b ${rowBorder}`}>
-              <th className={thClass(c)}>Registry</th>
+              <th className={thClass(c)}>Eligible / registry segments</th>
               <th className={thClass(c)}>Registry records</th>
               <th className={thClass(c)}>Open manifest</th>
               <th className={thClass(c)}>Oldest unchunked ingest</th>
@@ -268,8 +289,8 @@ export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogV
               </td>
               <td className={tdClass}>
                 <HeadlineValue
-                  value={`${formatCount(backlog.openManifestRefs)} refs · ${formatCount(backlog.openManifestRecords)} rec`}
-                  reserve={COUNT_MAX_CHARS + " refs · ".length + COUNT_MAX_CHARS + " rec".length}
+                  value={`${formatCount(backlog.openManifestRefs)} segments · ${formatCount(backlog.openManifestRecords)} records`}
+                  reserve={COUNT_MAX_CHARS + " segments · ".length + COUNT_MAX_CHARS + " records".length}
                   dark={dark}
                 />
               </td>
@@ -285,14 +306,14 @@ export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogV
         <h3
           className={`text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
         >
-          Segment staging (cluster total)
+          Staging areas (cluster total)
         </h3>
         <ClusterStagingTable rows={clusterStaging} dark={dark} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
         <NodeSegmentTable
-          title="Segmentation (origins)"
+          title="Origins (segmentation)"
           colA={{ label: "Working", get: (r) => ({ count: r.working, bytes: r.workingBytes }) }}
           colB={{ label: "Completed", get: (r) => ({ count: r.staged, bytes: r.stagedBytes }) }}
           rows={nodeRows}
@@ -301,9 +322,9 @@ export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogV
         />
 
         <NodeSegmentTable
-          title="Distribution (homes)"
-          colA={{ label: "Head", get: (r) => ({ count: r.head, bytes: r.headBytes }) }}
-          colB={{ label: "Pre-head", get: (r) => ({ count: r.preHead, bytes: r.preHeadBytes }) }}
+          title="Homes (collection)"
+          colA={{ label: "Pre-head", get: (r) => ({ count: r.preHead, bytes: r.preHeadBytes }) }}
+          colB={{ label: "Head", get: (r) => ({ count: r.head, bytes: r.headBytes }) }}
           rows={nodeRows}
           dark={dark}
           nodeNameOf={nodes.nameOf}
