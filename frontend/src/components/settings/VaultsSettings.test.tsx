@@ -1137,5 +1137,6 @@ describe("vault form eligibility and gating", () => {
     expect(notes.map((n) => n.textContent)).toEqual([
       "Fixed at vault creation — to change it, create a new vault and migrate data via retention routing.",
     ]);
+    expect(getByLabelText("Cloud Storage").closest(".flex-col")!.textContent).not.toContain("select to make this vault cloud-backed");
   });
 });

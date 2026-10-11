@@ -248,8 +248,8 @@ export function VaultStorageForm({
           <FormField
             label="Cloud Storage"
             dark={dark}
-            description="Optional — select to make this vault cloud-backed"
-            disabledReason={cloudLocked ? "Fixed at vault creation — to change it, create a new vault and migrate data via retention routing." : undefined}
+            description={cloudLocked ? undefined : "Optional — select to make this vault cloud-backed"}
+            disabledReason={cloudLocked ?"Fixed at vault creation — to change it, create a new vault and migrate data via retention routing." : undefined}
             helpRef={CLOUD_STORAGE_HELP_REF}
           >
             <EligibilitySelect
