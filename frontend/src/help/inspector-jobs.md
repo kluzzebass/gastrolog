@@ -41,13 +41,10 @@ Some scheduled work is created per vault or chunk. Names follow predictable patt
 | `pipeline-chunk-cron:*` | `pipeline-chunk-cron:<vault-id>` | Pipeline chunk cron rotation for a vault |
 | `post-seal:*` | `post-seal:<vault-id>:<chunk-id>` | Post-seal pipeline for a chunk |
 | `cloud-upload:*` | `cloud-upload:<vault-id>:<chunk-id>` | Upload sealed chunk to cloud storage — one job per chunk, shared by the live seal effect and the catch-up sweep |
-| `replicate:*` | `replicate:<vault-id>:<chunk-id>` | Replicate a sealed chunk to followers |
-| `replication-catchup:*` | `replication-catchup:<vault-id>:<node-id>` | Catch up sealed chunks to a follower |
 | `glcb-catchup:*` | `glcb-catchup:<vault-id>:<chunk-id>` | Pull this home's missing copy of a sealed chunk from a peer home |
 | `index-rebuild:*` | `index-rebuild:<vault-id>:<chunk-id>` | Build missing indexes for one chunk |
 | `home-index-sweep:*` | `home-index-sweep:<vault-id>` | Build missing indexes for the chunks this home holds of a vault, once its vault instance and home registration both exist |
-| `drain:*` | `drain:<vault-id>` | Drain a vault off this node |
 
-Tearing a vault down on a node — deleting it, unregistering it, removing its placement, or finishing a drain — cancels that vault's pending `post-seal`, `index-rebuild` and `home-index-sweep` jobs on that node.
+Tearing a vault down on a node — deleting it, unregistering it, or removing its placement — cancels that vault's pending `post-seal`, `index-rebuild`, `home-index-sweep`, `glcb-catchup` and `cloud-upload` jobs on that node.
 
 Task rows (one-time jobs) still show a human description in the card header when the scheduler has one.

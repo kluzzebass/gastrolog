@@ -40,7 +40,7 @@ func (f *Forwarder) Forward(ctx context.Context, data []byte) (uint64, error) {
 	}
 	defer h.Release()
 
-	ctx, cancel := context.WithTimeout(ctx, ReplicationTimeout)
+	ctx, cancel := context.WithTimeout(ctx, RaftApplyTimeout)
 	defer cancel()
 	client := NewForwardApplyClient(h.GRPC())
 	resp, err := client.ForwardApply(ctx, &gastrologv1.ForwardApplyRequest{Command: data})

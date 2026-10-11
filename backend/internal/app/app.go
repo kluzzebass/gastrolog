@@ -433,21 +433,6 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	if cfg.LogFilter != nil {
 		go WatchLogLevels(ctx, cfg.LogFilter, cfgStore, configSignal, logger)
 	}
-	disp.catchupScheduler = func(vaultID glid.GLID, followerNodeIDs []string) {
-		orch.ScheduleCatchup(vaultID, followerNodeIDs)
-	}
-
-	// Wire follower-driven replica catchup. The cluster server's
-	// RequestReplicaCatchup handler delegates here; the orchestrator
-	// validates leadership, filters chunk eligibility, and fans out pushes
-	// asynchronously via the existing replicateToFollower machinery.
-	if clusterSrv != nil {
-		clusterSrv.SetReplicaCatchupFn(func(ctx context.Context, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error) {
-			n, err := orch.CatchupSelectedChunks(ctx, vaultID, requesterNodeID, chunkIDs)
-			return int(n), err
-		})
-	}
-
 	if err := startOrchestrator(ctx, logger, orch, appSys, factories); err != nil {
 		return err
 	}
@@ -741,13 +726,9 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		}
 	}
 
-	// Wire cross-node chunk migration and replication.
+	// Wire cross-node chunk migration.
 	chunkTransferrer := cluster.NewChunkTransferrer(peerConns)
 	orch.SetRemoteTransferrer(chunkTransferrer)
-
-	// Vault replication: unified ordered stream per vault per follower.
-	chunkReplicator := cluster.NewChunkReplicator(peerConns, compVaultReplicator.Apply(logger))
-	orch.SetChunkReplicator(chunkReplicator)
 
 	// Same readiness gate for bulk chunk imports.
 	clusterSrv.SetRecordImporter(func(ctx context.Context, vaultID glid.GLID, next chunk.RecordIterator) error {
@@ -756,17 +737,10 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		}
 		return orch.ImportChunkRecords(ctx, vaultID, next)
 	})
-	clusterSrv.SetVaultRecordImporter(func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
-		if err := waitForOrch(ctx); err != nil {
-			return err
-		}
-		return orch.ImportToVault(ctx, vaultID, chunkID, next)
-	})
 	searchForwarder := cluster.NewSearchForwarder(peerConns)
 	clusterSrv.SetSearchExecutor(newSearchExecutor(orch))
 	clusterSrv.SetContextExecutor(newContextExecutor(orch))
 	clusterSrv.SetListChunksExecutor(newListChunksExecutor(orch))
-	clusterSrv.SetWaitVaultReadyExecutor(orch.WaitVaultReady)
 	clusterSrv.SetPipelineBacklogDiskExecutor(newPipelineBacklogDiskExecutor(orch))
 	clusterSrv.SetGetIndexesExecutor(newGetIndexesExecutor(orch))
 	clusterSrv.SetValidateVaultExecutor(newValidateVaultExecutor(orch))
@@ -1854,7 +1828,7 @@ func wireClusterRaftApplies(clusterSrv *cluster.Server, groupMgr *raftgroup.Grou
 		if g == nil {
 			return 0, fmt.Errorf("raft group %s not found", groupID)
 		}
-		future := g.Raft.Apply(data, cluster.ReplicationTimeout)
+		future := g.Raft.Apply(data, cluster.RaftApplyTimeout)
 		if err := future.Error(); err != nil {
 			return 0, err
 		}

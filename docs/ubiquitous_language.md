@@ -64,8 +64,7 @@ for append-heavy write patterns and time-ordered reads.
 - **Record** — a single log entry: `SourceTS`, `IngestTS`, `WriteTS`, `EventID`,
   `Attrs`, `Raw`. The pipeline carries `record.Record`; query results carry
   `chunk.Record`, which adds `Ref` and `VaultID`, populated by the query engine.
-  Both types also carry `WaitForReplica`, set when the ingester supplied an
-  ack channel; nothing reads it — the ack travels on the ingest message (see
+  The ingest ack travels on the ingest message, not the record (see
   [Ack semantics](#ack-semantics)).
 
 - **EventID** — compound identity for a record: `IngesterID + NodeID + IngestTS +
@@ -669,10 +668,7 @@ How an operator-issued RPC finds the node that should execute it. See
   interceptor forwards to another node, `cluster.ForwardRPC`),
   **eviction** (asking a node to drop a chunk copy), **remove node**,
   **suffrage** (voter/nonvoter changes), **chunk transfer** (streaming a
-  chunk to a new home), **chunk wait** (waiting for a vault to be ready on
-  a peer), **replicate** (the `ChunkReplicator` sealed-chunk push stream),
-  **replicate catchup** (the `ChunkReplicator` catch-up request), **segment
-  pull** (pipeline segment bytes and GLCB catch-up pulls),
+  chunk to a new home), **segment pull** (pipeline segment bytes and GLCB catch-up pulls),
   **file transfer** (managed files), **raft**.
 
 ---
@@ -717,8 +713,7 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 - **Vault readiness** — a vault on this node is "ready" iff it has a local
   instance AND that instance's `IsFSMReady()` callback returns `true` (i.e.
   the vault-ctl group's FSM has applied at least one entry — a command or a
-  configuration — on this node, or restored from a snapshot; that first apply
-  wakes `WaitVaultReady` callers). An instance whose vault-ctl group creation is
+  configuration — on this node, or restored from a snapshot). An instance whose vault-ctl group creation is
   still deferred on this node is not ready; on a node without vault-ctl
   Raft the callback is nil and the instance is ready. Canonical definition in
   [`vault_readiness.go`](../backend/internal/orchestrator/vault_readiness.go).
@@ -1050,16 +1045,6 @@ is one of the vault's homes.
 - **ChunkGLCBPuller** — streams a sealed chunk's GLCB from a peer home for
   GLCB catch-up. [`cluster/chunk_glcb_puller.go`](../backend/internal/cluster/chunk_glcb_puller.go).
 
-- **ChunkReplicator** — record-stream push of one sealed chunk to a peer
-  (`ImportSealedChunk`: Begin → Records → Commit on an ordered stream per
-  `(vaultID, nodeID)`), plus the follower→leader `RequestReplicaCatchup`
-  request. Every production caller — post-seal replication, catch-up of new
-  followers, the missing-replica sweep and the catch-up request handler —
-  returns early for a vault registered with the ingest pipeline, and the
-  pipeline registers every vault its node homes; the one unconditional
-  caller, the rebalance mode of `DrainInstance`, has no production caller.
-  [`cluster/chunk_replicator.go`](../backend/internal/cluster/chunk_replicator.go).
-
 - **Forwarder** — synchronous forwarder of pre-marshaled cluster-ctl config
   commands to the cluster-ctl leader (`ForwardApply`), used by raftstore on
   follower nodes.
@@ -1094,7 +1079,7 @@ is one of the vault's homes.
 - **PeerConns** — shared gRPC connection pool: up to
   `DefaultServicePoolMaxPerPeer` service connections per peer node, reused by
   all callers (Broadcaster, SearchForwarder, SegmentPuller, ChunkGLCBPuller,
-  the apply forwarders, ChunkReplicator). `Invalidate(nodeID, err)` drops a
+  the apply forwarders). `Invalidate(nodeID, err)` drops a
   stuck connection so the next call re-dials.
 
 - **MultiRaftTransport** — per-node multiplexing transport for Raft RPCs.
@@ -1785,7 +1770,7 @@ Error values that cross bounded contexts:
   catch-up). Acked by a chunk holder receipt committed to vault-ctl.
 - **Metadata replication** (vault-ctl Raft) — propagating chunk-create /
   seal / delete / upload events. Done by hraft via multiraft transport.
-  Acked by Raft majority; bounded by `ReplicationTimeout`.
+  Acked by Raft majority; bounded by `RaftApplyTimeout`.
 - **Apply forwarding** — follower → leader forwarding of a write command.
   Done by `VaultApplyForwarder`, `VaultCtlChunkApplyForwarder`, or (for
   cluster-ctl Raft) `Forwarder`. This is not replication; it's routing to the

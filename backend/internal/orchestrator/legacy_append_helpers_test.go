@@ -28,8 +28,6 @@ func (o *Orchestrator) AppendToVault(vaultID glid.GLID, leaderChunkID chunk.Chun
 		return err
 	}
 	if sealedID != (chunk.ChunkID{}) {
-		// Outside the lock: schedulePostSeal is self-locking, and calling it
-		// under o.mu deadlocks behind a queued writer (recursive RLock).
 		o.schedulePostSeal(vaultID, cm, sealedID)
 	}
 	return nil
@@ -49,9 +47,6 @@ func (o *Orchestrator) appendToVaultLocked(vaultID glid.GLID, leaderChunkID chun
 	vaultInst := vault.Instance
 	if vaultInst == nil {
 		return nil, chunk.ChunkID{}, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
-	}
-	if _, draining := o.vaultDraining[vaultDrainKey(vaultID)]; draining {
-		return nil, chunk.ChunkID{}, ErrVaultDraining
 	}
 	cm := vaultInst.Chunks
 
@@ -115,9 +110,6 @@ func (o *Orchestrator) Ingest(rec chunk.Record) error {
 	for _, vid := range table.Match(prec.Attrs, routing.IngestSource(&prec)) {
 		vault := o.vaults[vid]
 		if vault == nil || !vault.Enabled || vault.Instance == nil {
-			continue
-		}
-		if _, draining := o.vaultDraining[vaultDrainKey(vid)]; draining {
 			continue
 		}
 		if _, _, err := vault.Instance.Chunks.Append(rec); err != nil {

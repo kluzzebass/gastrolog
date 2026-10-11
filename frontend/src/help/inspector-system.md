@@ -104,8 +104,8 @@ directions merged.
 - **rpc pool N** lanes are the pooled RPC connections, numbered by their slot
   in the pool. The detail lists the purposes the lane has carried — search,
   chunk apply, vault apply, broadcast, forward, forward RPC, eviction, remove
-  node, suffrage, chunk transfer, chunk wait, replicate, replicate catchup,
-  segment pull, file transfer, raft — in the backend's order. A purpose that
+  node, suffrage, chunk transfer, segment pull, file transfer, raft — in the
+  backend's order. A purpose that
   used the lane during the last stats interval reads normally; one that did
   not is dimmed. Hover a purpose for its state.
 

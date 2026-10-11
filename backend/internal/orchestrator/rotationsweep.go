@@ -65,7 +65,7 @@ func (o *Orchestrator) pipelineConfigReconcile() {
 }
 
 // ReconcilePlacements aligns every local vault instance's role and (for
-// leaders) sealed-chunk replication targets with the current placement
+// leaders) follower targets with the current placement
 // config, then republishes the pipeline routing table. This is the
 // event-driven successor to the retired 15s placement sweep:
 // the FSM config dispatcher calls it when a change lands that can move roles
@@ -127,7 +127,7 @@ func (o *Orchestrator) ReconcilePlacements(ctx context.Context) {
 }
 
 // ReconcileVaultPlacement aligns ONE local vault instance's role and (for a
-// leader) sealed-chunk replication targets with the current placement config.
+// leader) follower targets with the current placement config.
 // The FSM config dispatcher calls it on every single-vault placement change
 // (NotifyVaultPlacementsSet, NotifyVaultPut) so role and FollowerTargets move
 // the instant placements change — the two edges the retired sweep used to
@@ -199,10 +199,8 @@ func (o *Orchestrator) ReconcileVaultPlacement(ctx context.Context, vaultID glid
 // — ExpectedFrom is literally derived from FollowerTargets, and a holder
 // outside them has no vault instance left to maintain its claim — so the
 // reassignment is their exact upstream edge. The other three categories in that set are not this event's:
-// missing-replica catchup for a newly added follower is already dispatcher-owned
-// (catchupScheduler / newFollowersForInstance) and, on pipeline vaults, carries
-// holder-receipt ack/revoke that must not race a GLCB build that is merely
-// mid-flight; stale-leader-FSM and abandoned-transfer are grace-period GCs whose
+// missing-replica catchup carries holder-receipt ack/revoke that must not race
+// a GLCB build that is merely mid-flight; stale-leader-FSM and abandoned-transfer are grace-period GCs whose
 // edge is elapsed time, not membership. They keep their existing lead-gained
 // wake and the periodic backstop.
 //
@@ -309,9 +307,9 @@ func replicationTargetNodes(targets []system.ReplicationTarget) []string {
 	return ids
 }
 
-// refreshFollowerTargets refreshes a leader instance's sealed-chunk replication
-// targets from the current placement config. Called from ReconcileVaultPlacement
-// / ReconcilePlacements on the placement event (caller holds o.mu.RLock). Logs
+// refreshFollowerTargets refreshes a leader instance's follower targets from
+// the current placement config. Called from ReconcileVaultPlacement /
+// ReconcilePlacements on the placement event (caller holds o.mu.RLock). Logs
 // only on change so reconfiguration is auditable without noise, and reports
 // whether the target set moved so the caller can wake the reconciler's
 // outside-placement prune (wakeOutsidePlacementPrune) — a leader whose

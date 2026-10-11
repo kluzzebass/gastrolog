@@ -2,10 +2,9 @@ package vaultraft
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,32 +15,18 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
-// readyCounter counts ready callbacks and closes fired on the first.
-type readyCounter struct {
-	n     atomic.Int64
-	once  sync.Once
-	fired chan struct{}
-}
-
-func newReadyCounter() *readyCounter { return &readyCounter{fired: make(chan struct{})} }
-
-func (c *readyCounter) callback() {
-	c.n.Add(1)
-	c.once.Do(func() { close(c.fired) })
-}
-
-func requireFired(t *testing.T, c *readyCounter, what string) {
+// requireReady waits for the FSM's first applied entry.
+func requireReady(t *testing.T, f *FSM, what string) {
 	t.Helper()
-	select {
-	case <-c.fired:
-	case <-time.After(waittest.Failsafe):
-		t.Fatalf("%s: ready callback never fired", what)
+	ctx, cancel := context.WithTimeout(context.Background(), waittest.Failsafe)
+	defer cancel()
+	if err := f.ApplyWait().Wait(ctx, 1); err != nil {
+		t.Fatalf("%s: FSM never became ready: %v", what, err)
 	}
 }
 
-// Each kind of first entry makes the FSM ready and fires its ready callback
-// exactly once; later entries never fire it again.
-func TestFSMReadyFiresOnceOnFirstEntry(t *testing.T) {
+// Each kind of first entry makes the FSM ready, and later entries keep it so.
+func TestFSMReadyOnFirstEntry(t *testing.T) {
 	snapshotOf := func(t *testing.T) io.ReadCloser {
 		src := NewFSM()
 		vaultID := glid.New()
@@ -74,18 +59,13 @@ func TestFSMReadyFiresOnceOnFirstEntry(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := NewFSM()
-			c := newReadyCounter()
-			f.SetOnReady(c.callback)
-			if f.Ready() || c.n.Load() != 0 {
-				t.Fatalf("fresh FSM: ready=%v callbacks=%d, want not ready and none", f.Ready(), c.n.Load())
+			if f.Ready() {
+				t.Fatal("fresh FSM reports ready before any entry")
 			}
 
 			tc.first(t, f)
 			if !f.Ready() {
 				t.Fatal("FSM not ready after its first entry")
-			}
-			if got := c.n.Load(); got != 1 {
-				t.Fatalf("ready callbacks after the first entry = %d, want 1", got)
 			}
 
 			f.StoreConfiguration(20, hraft.Configuration{})
@@ -93,54 +73,16 @@ func TestFSMReadyFiresOnceOnFirstEntry(t *testing.T) {
 			if err := f.Restore(snapshotOf(t)); err != nil {
 				t.Fatalf("second Restore: %v", err)
 			}
-			if got := c.n.Load(); got != 1 {
-				t.Fatalf("ready callbacks after later entries = %d, want 1", got)
+			if !f.Ready() {
+				t.Fatal("FSM not ready after later entries")
 			}
 		})
-	}
-}
-
-// A callback registered after the FSM became ready runs at registration; once
-// the one-shot has fired, a replacement callback never runs.
-func TestFSMReadyCallbackRegisteredLate(t *testing.T) {
-	f := NewFSM()
-	f.StoreConfiguration(1, hraft.Configuration{})
-
-	late := newReadyCounter()
-	f.SetOnReady(late.callback)
-	if got := late.n.Load(); got != 1 {
-		t.Fatalf("callback registered on a ready FSM ran %d times, want 1", got)
-	}
-
-	replacement := newReadyCounter()
-	f.SetOnReady(replacement.callback)
-	f.Apply(&hraft.Log{Index: 2, Data: MarshalNoop()})
-	if got := replacement.n.Load(); got != 0 {
-		t.Fatalf("replacement callback ran %d times after the one-shot fired, want 0", got)
-	}
-}
-
-// Registration racing the first entry fires the callback exactly once,
-// whichever lands first.
-func TestFSMReadyRegistrationRacingFirstEntry(t *testing.T) {
-	for i := range 500 {
-		f := NewFSM()
-		c := newReadyCounter()
-		var wg sync.WaitGroup
-		wg.Go(func() { f.SetOnReady(c.callback) })
-		wg.Go(func() { f.StoreConfiguration(1, hraft.Configuration{}) })
-		wg.Go(func() { f.Apply(&hraft.Log{Index: 2, Data: MarshalNoop()}) })
-		wg.Wait()
-		if got := c.n.Load(); got != 1 {
-			t.Fatalf("iteration %d: ready callbacks = %d, want exactly 1", i, got)
-		}
 	}
 }
 
 type readyNode struct {
 	id        string
 	fsm       *FSM
-	ready     *readyCounter
 	store     *hraft.InmemStore
 	snaps     *hraft.InmemSnapshotStore
 	transport *hraft.InmemTransport
@@ -150,8 +92,6 @@ type readyNode struct {
 func (n *readyNode) start(t *testing.T) {
 	t.Helper()
 	n.fsm = NewFSM()
-	n.ready = newReadyCounter()
-	n.fsm.SetOnReady(n.ready.callback)
 	_, n.transport = hraft.NewInmemTransportWithTimeout(hraft.ServerAddress(n.id), 500*time.Millisecond)
 	cfg := hraft.DefaultConfig()
 	cfg.LocalID = hraft.ServerID(n.id)
@@ -208,10 +148,7 @@ func TestFSMReadyOnFreshGroupWithoutCommands(t *testing.T) {
 	}
 
 	for _, n := range nodes {
-		requireFired(t, n.ready, n.id)
-		if !n.fsm.Ready() {
-			t.Errorf("%s: ready callback fired but Ready() is false", n.id)
-		}
+		requireReady(t, n.fsm, n.id)
 		if got := len(n.fsm.Vaults()); got != 0 {
 			t.Errorf("%s: %d vault sub-FSMs, want none: no command was applied", n.id, got)
 		}
@@ -223,11 +160,5 @@ func TestFSMReadyOnFreshGroupWithoutCommands(t *testing.T) {
 	}
 	restarted.start(t)
 	connectAll(nodes)
-	requireFired(t, restarted.ready, restarted.id+" after restart")
-
-	for _, n := range nodes {
-		if got := n.ready.n.Load(); got != 1 {
-			t.Errorf("%s: ready callbacks = %d, want 1", n.id, got)
-		}
-	}
+	requireReady(t, restarted.fsm, restarted.id+" after restart")
 }

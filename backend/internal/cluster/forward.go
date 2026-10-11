@@ -45,12 +45,6 @@ type ContextExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.
 // ListChunksExecutor lists chunks in a local vault for remote requests.
 type ListChunksExecutor func(ctx context.Context, vaultID glid.GLID) ([]*gastrologv1.ChunkMeta, error)
 
-// WaitVaultReadyExecutor blocks until a local vault is registered and ready to
-// accept transferred records, or ctx is cancelled. Used by the
-// ForwardWaitVaultReady handler so a draining source node can block on the
-// target's vault-ready signal instead of polling ForwardListChunks.
-type WaitVaultReadyExecutor func(ctx context.Context, vaultID glid.GLID) error
-
 // PipelineBacklogDiskExecutor returns local on-disk segment counts for remote
 // GetPipelineBacklog fan-out.
 type PipelineBacklogDiskExecutor func(ctx context.Context, vaultID glid.GLID) (*gastrologv1.ForwardGetPipelineBacklogResponse, error)
@@ -99,10 +93,6 @@ type ExportToVaultExecutor func(ctx context.Context, expression string, targetVa
 // Used by the ForwardImportRecords handler for cross-node chunk migration.
 type RecordImporter func(ctx context.Context, vaultID glid.GLID, next chunk.RecordIterator) error
 
-// VaultRecordImporter imports records as a sealed chunk in a vault,
-// preserving the original chunk ID. Used for sealed-chunk replication.
-type VaultRecordImporter func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
-
 // ManagedFileReader opens a managed file for streaming to a peer.
 // Returns the original filename, a ReadCloser for the content, and the SHA256 hex hash.
 type ManagedFileReader func(fileID string) (name string, rc io.ReadCloser, sha256hex string, err error)
@@ -140,11 +130,6 @@ func (s *Server) SetRecordImporter(fn RecordImporter) {
 	s.recordImporter = fn
 }
 
-// SetVaultRecordImporter injects the callback for chunk-ID-preserving sealed-chunk imports.
-func (s *Server) SetVaultRecordImporter(fn VaultRecordImporter) {
-	s.vaultRecordImporter = fn
-}
-
 // SetSearchExecutor injects the callback for handling remote search requests.
 func (s *Server) SetSearchExecutor(fn SearchExecutor) {
 	s.searchExecutor = fn
@@ -177,12 +162,6 @@ func (s *Server) SetContextExecutor(fn ContextExecutor) {
 // SetListChunksExecutor injects the callback for handling remote ListChunks requests.
 func (s *Server) SetListChunksExecutor(fn ListChunksExecutor) {
 	s.listChunksExecutor = fn
-}
-
-// SetWaitVaultReadyExecutor injects the callback for handling remote
-// WaitVaultReady requests (drain synchronization).
-func (s *Server) SetWaitVaultReadyExecutor(fn WaitVaultReadyExecutor) {
-	s.waitVaultReadyExecutor = fn
 }
 
 // SetPipelineBacklogDiskExecutor injects the callback for remote pipeline backlog disk counts.
@@ -435,8 +414,7 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 	batch := newForwardSearchBatch(histogram)
 	for rec, iterErr := range searchIter {
 		if iterErr != nil {
-			// EOF can occur when a chunk is deleted mid-read (e.g., ImportToVault
-			// replacing a forwarded-record chunk on a follower). Treat as
+			// EOF can occur when a chunk is deleted mid-read. Treat as
 			// end-of-results — the data is still available via retry.
 			if errors.Is(iterErr, io.EOF) || errors.Is(iterErr, fs.ErrNotExist) {
 				break
@@ -616,34 +594,6 @@ func (s *Server) forwardListChunks(ctx context.Context, req *gastrologv1.Forward
 		return nil, status.Errorf(codes.Internal, "list chunks: %v", err)
 	}
 	return &gastrologv1.ForwardListChunksResponse{Chunks: chunks}, nil
-}
-
-// forwardWaitVaultReady handles the ForwardWaitVaultReady RPC. Blocks until
-// the named local vault is registered and ready to accept transferred
-// records, or the RPC's context is cancelled (the caller's drain context, or
-// its deadline). Replaces the source-side ForwardListChunks poll used by
-// DrainVault.
-func (s *Server) forwardWaitVaultReady(ctx context.Context, req *gastrologv1.ForwardWaitVaultReadyRequest) (*gastrologv1.ForwardWaitVaultReadyResponse, error) {
-	if s.waitVaultReadyExecutor == nil {
-		return nil, status.Error(codes.Unavailable, "wait vault ready executor not configured")
-	}
-	vaultID, err := parseVaultID(req.GetVaultId())
-	if err != nil {
-		return nil, err
-	}
-	if err := s.waitVaultReadyExecutor(ctx, vaultID); err != nil {
-		// Context cancellation/deadline is the caller's own timeout expiring;
-		// surface it as Canceled/DeadlineExceeded so the source classifies it
-		// as "gave up waiting", not a server fault.
-		if errors.Is(err, context.Canceled) {
-			return nil, status.Error(codes.Canceled, err.Error())
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, status.Error(codes.DeadlineExceeded, err.Error())
-		}
-		return nil, status.Errorf(codes.Internal, "wait vault ready: %v", err)
-	}
-	return &gastrologv1.ForwardWaitVaultReadyResponse{}, nil
 }
 
 // forwardGetPipelineBacklog handles ForwardGetPipelineBacklog RPCs.
@@ -894,44 +844,6 @@ func (s *Server) forwardVaultApply(ctx context.Context, req *gastrologv1.Forward
 		return nil, status.Errorf(codes.Internal, "vault apply: %v", err)
 	}
 	return &gastrologv1.ForwardVaultApplyResponse{AppliedIndex: appliedIndex}, nil
-}
-
-// requestReplicaCatchup handles the RequestReplicaCatchup RPC. Sent
-// follower → placement leader: the follower's lifecycle reconciler has
-// computed its FSM-vs-disk diff (SweepMissingReplicas) and is asking
-// the leader to re-push specific sealed chunks via the existing
-// replicateToFollower machinery. The leader-side handler returns the
-// number of chunks for which a push was actually scheduled (after
-// filtering tombstoned / cloud-backed / locally-missing). Pushes
-// happen asynchronously inside the orchestrator handler — this RPC
-// returns as soon as the requests are scheduled, not when delivery
-// completes.
-func (s *Server) requestReplicaCatchup(ctx context.Context, req *gastrologv1.RequestReplicaCatchupRequest) (*gastrologv1.RequestReplicaCatchupResponse, error) {
-	if s.replicaCatchupFn == nil {
-		return nil, status.Error(codes.Unavailable, "replica catchup function not configured")
-	}
-	if len(req.GetVaultId()) != glid.Size {
-		return nil, status.Errorf(codes.InvalidArgument, "vault_id: expected %d bytes, got %d", glid.Size, len(req.GetVaultId()))
-	}
-	vaultID := glid.FromBytes(req.GetVaultId())
-	chunkIDs := make([]chunk.ChunkID, 0, len(req.GetChunkIds()))
-	for i, raw := range req.GetChunkIds() {
-		if len(raw) != 16 {
-			return nil, status.Errorf(codes.InvalidArgument, "chunk_ids[%d]: expected 16 bytes, got %d", i, len(raw))
-		}
-		var id chunk.ChunkID
-		copy(id[:], raw)
-		chunkIDs = append(chunkIDs, id)
-	}
-	requesterNodeID := string(req.GetRequesterNodeId())
-	if requesterNodeID == "" {
-		return nil, status.Error(codes.InvalidArgument, "requester_node_id is required")
-	}
-	scheduled, err := s.replicaCatchupFn(ctx, vaultID, chunkIDs, requesterNodeID)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "replica catchup: %v", err)
-	}
-	return &gastrologv1.RequestReplicaCatchupResponse{Scheduled: uint32(scheduled)}, nil //nolint:gosec // G115: bounded by request slice length
 }
 
 // forwardRemoveNode handles the ForwardRemoveNode RPC on the leader.
@@ -1270,10 +1182,6 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:    forwardListChunksHandler,
 		},
 		{
-			MethodName: "ForwardWaitVaultReady",
-			Handler:    forwardWaitVaultReadyHandler,
-		},
-		{
 			MethodName: "ForwardGetPipelineBacklog",
 			Handler:    forwardGetPipelineBacklogHandler,
 		},
@@ -1337,18 +1245,8 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			MethodName: "ForwardVaultApply",
 			Handler:    forwardVaultApplyHandler,
 		},
-		{
-			MethodName: "RequestReplicaCatchup",
-			Handler:    requestReplicaCatchupHandler,
-		},
 	},
 	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "ChunkReplication",
-			Handler:       chunkReplicationStreamHandler,
-			ClientStreams: true,
-			ServerStreams: true,
-		},
 		{
 			StreamName:    "ForwardImportRecords",
 			Handler:       forwardImportRecordsStreamHandler,
@@ -1401,7 +1299,6 @@ type clusterServiceServer interface {
 	broadcast(context.Context, *gastrologv1.BroadcastRequest) (*gastrologv1.BroadcastResponse, error)
 	forwardGetContext(context.Context, *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error)
 	forwardListChunks(context.Context, *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error)
-	forwardWaitVaultReady(context.Context, *gastrologv1.ForwardWaitVaultReadyRequest) (*gastrologv1.ForwardWaitVaultReadyResponse, error)
 	forwardGetPipelineBacklog(context.Context, *gastrologv1.ForwardGetPipelineBacklogRequest) (*gastrologv1.ForwardGetPipelineBacklogResponse, error)
 	forwardGetIndexes(context.Context, *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error)
 	forwardValidateVault(context.Context, *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error)
@@ -1491,25 +1388,6 @@ func forwardListChunksHandler(srv any, ctx context.Context, dec func(any) error,
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardListChunks(ctx, req.(*gastrologv1.ForwardListChunksRequest))
-	}
-	return interceptor(ctx, req, info, handler)
-}
-
-func forwardWaitVaultReadyHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	req := &gastrologv1.ForwardWaitVaultReadyRequest{}
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-	s := srv.(*Server)
-	if interceptor == nil {
-		return s.forwardWaitVaultReady(ctx, req)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/gastrolog.v1.ClusterService/ForwardWaitVaultReady",
-	}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return s.forwardWaitVaultReady(ctx, req.(*gastrologv1.ForwardWaitVaultReadyRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }
@@ -1624,25 +1502,6 @@ func forwardRemoveNodeHandler(srv any, ctx context.Context, dec func(any) error,
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardRemoveNode(ctx, req.(*gastrologv1.ForwardRemoveNodeRequest))
-	}
-	return interceptor(ctx, req, info, handler)
-}
-
-func requestReplicaCatchupHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	req := &gastrologv1.RequestReplicaCatchupRequest{}
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-	s := srv.(*Server)
-	if interceptor == nil {
-		return s.requestReplicaCatchup(ctx, req)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/gastrolog.v1.ClusterService/RequestReplicaCatchup",
-	}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return s.requestReplicaCatchup(ctx, req.(*gastrologv1.RequestReplicaCatchupRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

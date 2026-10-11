@@ -12,9 +12,6 @@ const (
 	PurposeRemoveNode  = "remove-node"
 	PurposeSuffrage    = "suffrage"
 	PurposeChunkXfer   = "chunk-xfer"
-	PurposeChunkWait   = "chunk-wait"
-	PurposeReplicate   = "replicate"
-	PurposeReplCatchup = "repl-catchup"
 	PurposeSegmentPull = "segment-pull"
 	PurposeFileXfer    = "file-xfer"
 	PurposeRaft        = "raft"
@@ -33,9 +30,6 @@ var AllPurposes = []string{
 	PurposeRemoveNode,
 	PurposeSuffrage,
 	PurposeChunkXfer,
-	PurposeChunkWait,
-	PurposeReplicate,
-	PurposeReplCatchup,
 	PurposeSegmentPull,
 	PurposeFileXfer,
 	PurposeRaft,

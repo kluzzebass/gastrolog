@@ -2401,10 +2401,10 @@ func (s *importState) writeRecord(rec chunk.Record) error {
 		AttrOffset: uint32(s.attrOffset),   //nolint:gosec // G115: bounded by rotation policy
 		AttrSize:   uint16(len(attrBytes)), //nolint:gosec // G115: bounded by attr encoding
 		// EventID fields preserve cluster-wide record identity through
-		// ImportRecords (cross-node sealed-chunk replication, MoveChunk,
-		// catchup paths). Without these, follower-replicated chunks land
-		// with zero EventIDs and histogram dedup can't match them
-		// against leader-original records → silent double-count.
+		// ImportRecords (MoveChunk, cross-node chunk transfer). Without
+		// these, imported chunks land with zero EventIDs and histogram
+		// dedup can't match them against the original records → silent
+		// double-count.
 		IngestSeq:  rec.EventID.IngestSeq,
 		IngesterID: rec.EventID.IngesterID,
 		NodeID:     rec.EventID.NodeID,

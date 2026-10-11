@@ -1,8 +1,8 @@
 package orchestrator
 
 // schedulePostSeal registers "post-seal:<vault>:<chunk>". Several independent
-// paths reach it for one chunk with no coordination — postSealWork from ingest,
-// two direct calls in vault_ops, vault_drain, and the reconciler's
+// paths reach it for one chunk with no coordination — postSealWork, two direct
+// calls in vault_ops, and the reconciler's
 // sealLocalActive / sealMetadataOnlyOrphan — and plain RunOnce overwrites the
 // registry entry without stopping the job already running, so the work would run
 // twice. It is not idempotent: sealToGLCB rebuilds the GLCB from the record

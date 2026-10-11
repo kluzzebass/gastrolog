@@ -59,14 +59,11 @@ linters:
       # vault_lifecycle_reconciler.go: the reconciler itself.
       # reconfig_vaults.go: vault teardown / drainSweep (sealAndDeleteAllChunks
       #   uses DeleteNoAnnounce for local-only teardown cleanup).
-      # vault_ops.go: replaceForwardedChunk (catchup-replicate cleanup).
       # internal/chunk: where DeleteNoAnnounce is defined.
       - linters: [forbidigo]
         path: "internal/orchestrator/vault_lifecycle_reconciler\\.go"
       - linters: [forbidigo]
         path: "internal/orchestrator/reconfig_vaults\\.go"
-      - linters: [forbidigo]
-        path: "internal/orchestrator/vault_ops\\.go"
       - linters: [forbidigo]
         path: "internal/chunk/announcer\\.go"
       - linters: [forbidigo]
@@ -79,8 +76,6 @@ linters:
       # buildVaultInstance. See gastrolog-51gme.
       - linters: [forbidigo]
         path: "internal/orchestrator/archival_sweep\\.go"
-      - linters: [forbidigo]
-        path: "internal/orchestrator/vault_drain\\.go"
       - linters: [forbidigo]
         path: "internal/orchestrator/vault_transfers\\.go"
       # CLI tools intentionally use fmt.Print* for human-facing output;

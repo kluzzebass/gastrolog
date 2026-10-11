@@ -12,12 +12,11 @@ package orchestrator
 //
 //   - The receipt protocol (CmdRequestDelete + acks + CmdFinalizeDelete)
 //     is the sole chunk-delete path. Retention, archival expiry, missing
-//     cloud blobs, vault drain and transfer/migration source-expire all
-//     route through deleteChunk. A forbidigo lint rule rejects direct
+//     cloud blobs and transfer/migration source-expire all route through
+//     deleteChunk. A forbidigo lint rule rejects direct
 //     chunk.DeleteNoAnnounce / DeleteSilent callers outside a small
-//     allow-list (this file, vault teardown, replaceForwardedChunk,
-//     chunk-package internals), so the receipt protocol stays the single
-//     execution API.
+//     allow-list (this file, vault teardown, chunk-package internals), so
+//     the receipt protocol stays the single execution API.
 //   - pendingDeletes — preserved across snapshot install and processed by
 //     ReconcileFromSnapshot — is the primary catch-up path for deletes
 //     this node owes. SweepLocalOrphans covers the gap pendingDeletes
@@ -68,8 +67,8 @@ import (
 // *Orchestrator back-pointer so the coupling surface is visible at the type
 // level and the reconciler is testable with a fake host instead of a full
 // orchestrator. *Orchestrator satisfies it (the accessor methods below adapt
-// the private pipeline / alert-sink / chunk-replicator fields, which an
-// interface cannot expose directly).
+// the private pipeline / alert-sink fields, which an interface cannot expose
+// directly).
 type reconcilerHost interface {
 	// Pipeline-vault topology and recovery.
 	isPipelineIngestVault(vaultID glid.GLID) bool
@@ -98,7 +97,6 @@ type reconcilerHost interface {
 	// VaultAlarmLabel names a vault for alarm text: quoted configured name,
 	// or the bare ID when the config does not resolve.
 	VaultAlarmLabel(vaultID glid.GLID) string
-	chunkReplicatorForReconcile() ChunkReplicator
 }
 
 // VaultLifecycleReconciler owns chunk-lifecycle execution for a single
@@ -108,7 +106,7 @@ type reconcilerHost interface {
 // The reconciler is the canonical caller of `chunk.DeleteNoAnnounce`
 // and the SilentDeleter shortcut. A forbidigo lint rule blocks direct
 // calls from anywhere else in the orchestrator package outside a small
-// allow-list (vault teardown, replaceForwardedChunk).
+// allow-list (vault teardown).
 type VaultLifecycleReconciler struct {
 	vaultID     glid.GLID
 	vaultInst   *VaultInstance
@@ -174,10 +172,8 @@ func NewVaultLifecycleReconciler(orch reconcilerHost, vaultID glid.GLID, vaultIn
 	}
 }
 
-// The three accessors below adapt private *Orchestrator fields into the
+// The accessors below adapt private *Orchestrator fields into the
 // reconcilerHost interface; an interface cannot expose struct fields directly.
-// They are behavior-preserving thin wrappers over the former direct field
-// pokes (r.orch.pipeline.RecoverVault, r.orch.alerts, r.orch.chunkReplicator).
 
 // recoverPipelineVault drives pipeline recovery for a vault (adapts o.pipeline).
 // A nil pipeline is a no-op: it preserves the former call site's explicit
@@ -194,10 +190,6 @@ func (o *Orchestrator) recoverPipelineVault(ctx context.Context, vaultID glid.GL
 
 // alertSink exposes the orchestrator's alert sink (nil when unwired).
 func (o *Orchestrator) alertSink() alert.Sink { return o.alerts }
-
-// chunkReplicatorForReconcile exposes the chunk replicator transport (nil when
-// unwired). Named distinctly from the chunkReplicator field it returns.
-func (o *Orchestrator) chunkReplicatorForReconcile() ChunkReplicator { return o.chunkReplicator }
 
 // Wire installs the reconciler's callbacks on the given vault-ctl FSM. Must
 // be called once after the FSM is constructed. Idempotent — repeat
@@ -340,7 +332,7 @@ func (r *VaultLifecycleReconciler) projectAllSealedFromFSM(fsm *vaultctlfsm.FSM)
 // completing, the FSM is left with State=Sealing entries while the local
 // chunk Manager has the active-form files closed and sealed but no
 // data.glcb. Anything gating on Sealed (cloud upload, retention,
-// replication catchup) waits forever for the second announcement that
+// GLCB catch-up) waits forever for the second announcement that
 // won't come without help.
 //
 // Recovery: schedule PostSealProcess for each Sealing entry whose chunk
@@ -1356,34 +1348,25 @@ func (r *VaultLifecycleReconciler) sweepTombstonedChunkStaging() {
 	}
 }
 
-// SweepMissingReplicas walks the FSM's sealed-chunk manifest and asks
-// every placement peer to re-push any sealed chunks this node should
-// have but doesn't. This is the create-side mirror of SweepLocalOrphans:
+// SweepMissingReplicas walks the FSM's sealed-chunk manifest and pulls
+// from a peer home the GLCB of every sealed chunk this home should hold but
+// doesn't (GLCB catch-up), then reconciles its chunk holder receipts against
+// the bytes on disk. This is the create-side mirror of SweepLocalOrphans:
 // where SweepLocalOrphans cleans up local files the FSM has tombstoned,
-// SweepMissingReplicas pulls in local files the FSM expects but the
-// disk lacks. Together with SweepPendingObligations these three sweeps
-// give a node "every 20s, reconcile my local store against my replicated
-// FSM in both directions."
+// SweepMissingReplicas pulls in local files the FSM expects but the disk
+// lacks.
 //
 // Failure modes this sweep recovers from:
 //
-//   - Leader sealed a chunk while a follower was offline;
-//     replicateToFollower's gRPC push failed; no retry queue exists at
-//     the leader. Vault-ctl Raft caught the follower's FSM up via
-//     snapshot install or log replay on rejoin so the manifest entry is
-//     present, but the actual chunk records aren't on disk.
+//   - A home missed a chunk's build while it was down or wedged, and the
+//     segments it would have built from have since been released.
 //
-//   - Leadership transferred to a node that joined the placement set
-//     after some chunks were written. The new leader's FSM has the
-//     manifest entry (replicated via vault-ctl Raft) but its local
-//     chunk manager never received the bytes. The old chunks live on
-//     the prior replica set; the new leader must pull them from a peer.
+//   - Leadership or placement moved to a node that joined after some chunks
+//     were sealed. Its FSM has the manifest entries (replicated via vault-ctl
+//     Raft) but its chunk root never received the bytes.
 //
-// Both roles run this sweep. The peer set is asymmetric by role:
-// followers ask the leader (FollowerTargets is empty on followers,
-// LeaderNodeID points at the leader); the leader asks every follower
-// (FollowerTargets enumerates them). Cloud-backed chunks live in shared
-// object storage and are skipped — they are not a local-replica concern.
+// Cloud-backed chunks are skipped: the cloud object is their durable copy.
+// No-op for vaults that are not pipeline vaults on this node.
 func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 	if v := r.gatherReconcileView(); v != nil {
 		r.reconcileMissingReplicas(v)
@@ -1394,96 +1377,10 @@ func (r *VaultLifecycleReconciler) reconcileMissingReplicas(v *reconcileView) {
 	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
 	}
-	// Pipeline vaults: register local GLCBs by path; never record-stream catchup.
-	if r.orch != nil && r.orch.isPipelineIngestVault(r.vaultID) {
-		r.syncPipelineSealedGLCBs(v)
+	if r.orch == nil || !r.orch.isPipelineIngestVault(r.vaultID) {
 		return
 	}
-	if r.orch == nil {
-		return
-	}
-	replicator := r.orch.chunkReplicatorForReconcile()
-	if replicator == nil {
-		return // no transport wired; cluster mode requires a replicator
-	}
-
-	peers := r.replicationPeers()
-	if len(peers) == 0 {
-		return // nothing to ask
-	}
-
-	// Local index of what's on disk so the diff is O(N+M) not O(N×M).
-	if v.localListErr != nil {
-		return
-	}
-
-	// Walk the FSM manifest and collect the missing-locally subset.
-	type missingEntry struct {
-		id       chunk.ChunkID
-		writeEnd time.Time
-	}
-	var missing []missingEntry
-	for _, e := range v.entries {
-		if !e.IsSealed() {
-			continue
-		}
-		if e.CloudBacked {
-			continue // shared bucket; no local replica needed
-		}
-		if v.have[e.ID] {
-			continue
-		}
-		missing = append(missing, missingEntry{id: e.ID, writeEnd: e.WriteEnd})
-	}
-
-	if len(missing) == 0 {
-		return
-	}
-
-	// Oldest-first so search/catchup converges on the historical tail
-	// before chasing the freshest seals still in flight on the wire.
-	sort.Slice(missing, func(i, j int) bool {
-		return missing[i].writeEnd.Before(missing[j].writeEnd)
-	})
-
-	totalMissing := len(missing)
-	if totalMissing > maxMissingReplicaCatchupPerSweep {
-		missing = missing[:maxMissingReplicaCatchupPerSweep]
-		r.logger.Debug("missing-replica sweep: batching catchup request",
-			"missing_total", totalMissing, "batch", len(missing))
-	}
-
-	chunkIDs := make([]chunk.ChunkID, len(missing))
-	for i, m := range missing {
-		chunkIDs[i] = m.id
-	}
-
-	r.logger.Debug("missing-replica sweep: requesting catchup",
-		"peers", peers, "missing", len(chunkIDs), "missing_total", totalMissing)
-
-	// Ask every peer. Whichever peer has a given chunk schedules the
-	// push; peers that don't have it return scheduled=0 silently. The
-	// receiver dedupes if multiple peers push the same chunk because
-	// the second arrival hits the local-already-present gate.
-	for _, peerNodeID := range peers {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		scheduled, err := replicator.RequestReplicaCatchup(
-			ctx, peerNodeID, r.vaultID, chunkIDs, r.localNodeID)
-		cancel()
-		if err != nil {
-			// The next sweep tick will retry. Causes: peer changed after
-			// we resolved placement state, peer unreachable, peer connection
-			// warming up. None terminal — the FSM diff is local state, so
-			// we converge on the next tick.
-			r.logger.Warn("missing-replica sweep: request failed",
-				"peer", peerNodeID, "missing", len(chunkIDs), "error", err)
-			continue
-		}
-		if scheduled > 0 {
-			r.logger.Info("missing-replica sweep: peer scheduled pushes",
-				"peer", peerNodeID, "scheduled", scheduled, "requested", len(chunkIDs))
-		}
-	}
+	r.syncPipelineSealedGLCBs(v)
 }
 
 // syncPipelineSealedGLCBs is the pipeline vault's replica reconcile: pull
@@ -1588,33 +1485,6 @@ func (r *VaultLifecycleReconciler) commitChunkHolderReceipts(ack, revoke []chunk
 		r.logger.Info("chunk holder claims revoked — bytes missing locally; replica catch-up will re-earn",
 			"vault", r.vaultID, "chunks", len(revoke))
 	}
-}
-
-// replicationPeers returns the placement-peer node IDs this reconciler
-// should ask for missing chunks. Followers ask the leader; leaders ask
-// every follower target. Self is always excluded. Empty IDs (transient
-// unknown state during placement transitions) are filtered so we don't
-// dial nowhere.
-func (r *VaultLifecycleReconciler) replicationPeers() []string {
-	if r.vaultInst == nil {
-		return nil
-	}
-	if r.vaultInst.IsFollower {
-		if r.vaultInst.LeaderNodeID == "" || r.vaultInst.LeaderNodeID == r.localNodeID {
-			return nil
-		}
-		return []string{r.vaultInst.LeaderNodeID}
-	}
-	peers := make([]string, 0, len(r.vaultInst.FollowerTargets))
-	seen := map[string]bool{r.localNodeID: true}
-	for _, t := range r.vaultInst.FollowerTargets {
-		if t.NodeID == "" || seen[t.NodeID] {
-			continue
-		}
-		peers = append(peers, t.NodeID)
-		seen[t.NodeID] = true
-	}
-	return peers
 }
 
 // abandonedTransferAnnounceGCAge bounds how long a transfer-introduced

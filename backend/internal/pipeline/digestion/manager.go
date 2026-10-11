@@ -99,11 +99,10 @@ func buildRecord(msg ingestion.IngestMessage) *record.Record {
 	}
 
 	return &record.Record{
-		SourceTS:       msg.SourceTS,
-		IngestTS:       msg.EventID.IngestTS,
-		EventID:        msg.EventID,
-		Attrs:          attrs,
-		Raw:            raw,
-		WaitForReplica: msg.Ack != nil,
+		SourceTS: msg.SourceTS,
+		IngestTS: msg.EventID.IngestTS,
+		EventID:  msg.EventID,
+		Attrs:    attrs,
+		Raw:      raw,
 	}
 }

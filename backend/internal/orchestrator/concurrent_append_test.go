@@ -7,7 +7,6 @@ import (
 	"gastrolog/internal/glid"
 	"io"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,8 +15,6 @@ import (
 	chunkfile "gastrolog/internal/chunk/file"
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/query"
-	"gastrolog/internal/system"
-	sysmem "gastrolog/internal/system/memory"
 )
 
 // TestConcurrentAppendAttrIntegrity guards attr.log integrity under
@@ -237,112 +234,6 @@ func TestCursorOpenDuringSeal(t *testing.T) {
 }
 
 // ==========================================================================
-// ImportToVault cursor verification
-// ==========================================================================
-
-// TestImportToInstanceCursorVerified imports records to a file-backed instance and
-// verifies every record via cursor — not just metadata RecordCount.
-func TestImportToInstanceCursorVerified(t *testing.T) {
-	t.Parallel()
-
-	vaultID := glid.New()
-	nodeID := "test-node"
-
-	dir := t.TempDir()
-	cm, err := chunkfile.NewManager(chunkfile.Config{
-		Dir: dir, Now: time.Now, RotationPolicy: chunk.NewRecordCountPolicy(10000),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	im := indexfile.NewManager(dir, nil, nil, cm)
-
-	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
-
-	vaultInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
-	orch.RegisterVault(NewVault(vaultID, vaultInst))
-	t.Cleanup(func() {
-		orch.Stop()
-		_ = cm.Close()
-	})
-
-	// Build records with distinct content.
-	const recordCount = 200
-	chunkID := chunk.NewChunkID()
-	records := make([]chunk.Record, recordCount)
-	for i := range recordCount {
-		records[i] = chunk.Record{
-			SourceTS: time.Date(2025, 1, 1, 0, 0, i, 0, time.UTC),
-			IngestTS: time.Date(2025, 1, 1, 0, 0, i, 0, time.UTC),
-			Raw:      fmt.Appendf(nil, "import-verify-%d", i),
-			Attrs:    chunk.Attributes{"idx": fmt.Sprintf("%d", i)},
-			EventID: chunk.EventID{
-				IngesterID: glid.New(),
-				IngestSeq:  uint32(i),
-			},
-		}
-	}
-
-	// Import via orchestrator.
-	iter := testIterFromSlice(records)
-	if err := orch.ImportToVault(context.Background(), vaultID, chunkID, iter); err != nil {
-		t.Fatalf("ImportToVault: %v", err)
-	}
-
-	// Check metadata.
-	meta, err := cm.Meta(chunkID)
-	if err != nil {
-		t.Fatalf("Meta(%s): %v", chunkID, err)
-	}
-	if meta.RecordCount != int64(recordCount) {
-		t.Errorf("metadata RecordCount=%d, expected %d", meta.RecordCount, recordCount)
-	}
-
-	// Cursor-verify every record.
-	cursor, err := cm.OpenCursor(chunkID)
-	if err != nil {
-		t.Fatalf("OpenCursor: %v", err)
-	}
-	defer cursor.Close()
-
-	for i := range recordCount {
-		rec, _, err := cursor.Next()
-		if err != nil {
-			t.Fatalf("record %d: cursor.Next: %v", i, err)
-		}
-		expected := fmt.Sprintf("import-verify-%d", i)
-		if string(rec.Raw) != expected {
-			t.Errorf("record %d: raw=%q, want %q", i, string(rec.Raw), expected)
-		}
-		// Note: ImportRecords does not preserve EventID.IngestSeq in its
-		// idx.log encoding (writeRecord omits it). This is a known gap —
-		// filed separately if needed.
-		expectedIdx := fmt.Sprintf("%d", i)
-		if rec.Attrs["idx"] != expectedIdx {
-			t.Errorf("record %d: attrs[idx]=%q, want %q", i, rec.Attrs["idx"], expectedIdx)
-		}
-	}
-
-	// Verify no extra records.
-	_, _, err = cursor.Next()
-	if !errors.Is(err, chunk.ErrNoMoreRecords) {
-		t.Errorf("expected ErrNoMoreRecords after %d records, got %v", recordCount, err)
-	}
-}
-
-func testIterFromSlice(records []chunk.Record) chunk.RecordIterator {
-	i := 0
-	return func() (chunk.Record, error) {
-		if i >= len(records) {
-			return chunk.Record{}, chunk.ErrNoMoreRecords
-		}
-		r := records[i]
-		i++
-		return r, nil
-	}
-}
-
-// ==========================================================================
 // Remote import succeeds but source delete fails
 // ==========================================================================
 
@@ -463,126 +354,6 @@ func TestCloudUploadFailureRetainsChunk(t *testing.T) {
 // ==========================================================================
 // Drain concurrent with active ingestion
 // ==========================================================================
-
-// TestDrainConcurrentWithIngestion starts a drain while records are still
-// being ingested. Verifies no records are lost — they end up on either the
-// source (if ingested before drain) or the destination (if drained).
-func TestDrainConcurrentWithIngestion(t *testing.T) {
-	t.Parallel()
-
-	vaultID := glid.New()
-	routeID := glid.New()
-
-	store := sysmem.NewStore()
-	_ = store.PutVault(context.Background(), system.VaultConfig{
-		ID: vaultID, Name: "drain-concurrent",
-	})
-	_ = vaultID // legacy fixture handle; vault registered above is the only canonical config
-	// Match expression is inlined on the route via Stages.
-	_ = store.PutRoute(context.Background(), system.RouteConfig{
-		ID: routeID, Name: "default",
-		Stages:       []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}},
-		Destinations: []glid.GLID{vaultID}, Enabled: true,
-	})
-
-	// Source node.
-	srcDir := t.TempDir()
-	srcCM, err := chunkfile.NewManager(chunkfile.Config{
-		Dir: srcDir, Now: time.Now, RotationPolicy: chunk.NewRecordCountPolicy(100),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	srcIM := indexfile.NewManager(srcDir, nil, nil, srcCM)
-
-	orchA := newTestOrch(t, Config{
-		LocalNodeID:  "node-A",
-		SystemLoader: &transitionSystemLoader{store: store},
-	})
-
-	srcInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
-	orchA.RegisterVault(NewVault(vaultID, srcInst))
-
-	// Destination node.
-	dstDir := t.TempDir()
-	dstCM, err := chunkfile.NewManager(chunkfile.Config{
-		Dir: dstDir, Now: time.Now, RotationPolicy: chunk.NewRecordCountPolicy(10000),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	dstIM := indexfile.NewManager(dstDir, nil, nil, dstCM)
-
-	orchB := newTestOrch(t, Config{
-		LocalNodeID:  "node-B",
-		SystemLoader: &transitionSystemLoader{store: store},
-	})
-	dstInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
-	orchB.RegisterVault(NewVault(vaultID, dstInst))
-
-	orchA.SetRemoteTransferrer(&directTransferrer{nodes: map[string]*Orchestrator{"node-B": orchB}})
-
-	t.Cleanup(func() {
-		orchA.Stop()
-		orchB.Stop()
-		_ = srcCM.Close()
-		_ = dstCM.Close()
-	})
-
-	// Ingest 500 records first (some sealed via rotation).
-	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
-	for i := range 500 {
-		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := orchA.AppendToVault(vaultID, chunk.ChunkID{}, chunk.Record{
-			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "pre-drain-%d", i),
-		}); err != nil {
-			t.Fatalf("pre-drain append %d: %v", i, err)
-		}
-	}
-
-	// Start drain + concurrent ingestion.
-	var wg sync.WaitGroup
-	var postDrainAppends atomic.Int64
-
-	// Goroutine: continue ingesting.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := range 200 {
-			ts := t0.Add(time.Duration(500+i) * time.Microsecond)
-			err := orchA.AppendToVault(vaultID, chunk.ChunkID{}, chunk.Record{
-				IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "during-drain-%d", i),
-			})
-			if err != nil {
-				// Expected: some appends may fail after vault unregisters.
-				break
-			}
-			postDrainAppends.Add(1)
-		}
-	}()
-
-	// Start drain.
-	if err := orchA.DrainVault(context.Background(), vaultID, "node-B"); err != nil {
-		t.Fatalf("DrainVault: %v", err)
-	}
-
-	// Wait for drain job.
-	waitForDrainJob(t, orchA, vaultID)
-	wg.Wait()
-
-	t.Logf("post-drain appends accepted: %d", postDrainAppends.Load())
-
-	// Count records on both nodes.
-	srcCount := cursorCountRecords(t, srcCM)
-	dstCount := cursorCountRecords(t, dstCM)
-	t.Logf("src=%d, dst=%d, total=%d", srcCount, dstCount, srcCount+dstCount)
-
-	// Total should be at least 500 (pre-drain). Some during-drain records
-	// may have been accepted before the vault was unregistered.
-	if srcCount+dstCount < 500 {
-		t.Errorf("expected at least 500 total records, got %d", srcCount+dstCount)
-	}
-}
 
 // ==========================================================================
 // Seal failure handling

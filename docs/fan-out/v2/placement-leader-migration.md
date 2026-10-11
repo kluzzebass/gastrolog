@@ -44,14 +44,13 @@ Primary write-path and role wiring to audit/refactor:
 | Area | Files | Current placement-leader coupling |
 |---|---|---|
 | Instance role derivation | `backend/internal/orchestrator/reconfig_vaults.go` | Sets `IsFollower`, `LeaderNodeID`, `FollowerTargets` from `LeaderNodeID()` / `LeaderStorageID()` |
-| Active-chunk append / replica fan-out | `backend/internal/orchestrator/vault_ops.go`, `ingest.go` | `ShouldForwardToFollowers`, follower append rejection |
+| Active-chunk append | `backend/internal/orchestrator/vault_ops.go`, `ingest.go` | Follower append rejection |
 | Route remote resolution | `backend/internal/orchestrator/reconfig_routes.go` | `LeaderNodeID` for remote vault node |
 | Retention driver | `backend/internal/orchestrator/retention.go` | Only placement leader runs retention sweep |
 | Registry / query leader shortcuts | `backend/internal/orchestrator/registry.go` | `!IsFollower` filters for query/forward |
 | Placement reconcile | `backend/internal/app/placement.go` | Elects/maintains `VaultPlacement.Leader` bit |
 | Config dispatch | `backend/internal/app/dispatch.go` | Refreshes `LeaderNodeID` on placement change |
 | Remote query routing | `backend/internal/server/query_remote.go`, `query_context.go` | `LeaderNodeID` for remote vault |
-| Cluster catchup | `backend/internal/cluster/forward.go`, `chunk_replicator.go` | Placement-leader RPC handlers |
 | Schema / helpers | `backend/internal/system/storage.go` | `VaultPlacement.Leader`, `LeaderNodeID()`, `LeaderStorageID()` |
 | Vault config surface | `backend/internal/system/vault.go`, `config.go` | Placement mirrored on `VaultConfig` |
 | Proto | `backend/api/proto/gastrolog/v1/system.proto` | `VaultPlacement.leader` field comment |

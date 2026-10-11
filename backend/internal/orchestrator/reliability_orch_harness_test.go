@@ -84,8 +84,7 @@ type orchRelNode struct {
 // ListAllChunkMetas, the scheduler, vault readiness gating, and the
 // vault-ctl Raft group built via createVaultRaftGroupVaultCtl.
 //
-// Cross-node cluster RPCs (RecordForwarder, RemoteTransferrer,
-// ChunkReplicator) are left nil — scenarios that need them should stub via
+// Cross-node cluster RPCs (RecordForwarder, RemoteTransferrer) are left nil — scenarios that need them should stub via
 // direct in-process shims. The default harness exercises replication
 // through vault-ctl Raft only, which is the primary target for
 // metadata-divergence tests.
@@ -845,7 +844,7 @@ func (h *orchRelHarness) startNode(id string) {
 		if g == nil {
 			return 0, fmt.Errorf("raft group %s not found", groupID)
 		}
-		future := g.Raft.Apply(data, cluster.ReplicationTimeout)
+		future := g.Raft.Apply(data, cluster.RaftApplyTimeout)
 		if err := future.Error(); err != nil {
 			return 0, err
 		}
