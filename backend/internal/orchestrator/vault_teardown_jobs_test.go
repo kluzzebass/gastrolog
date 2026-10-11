@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"gastrolog/internal/chunk"
@@ -23,19 +24,24 @@ func (m blockingIndexManager) BuildIndexes(context.Context, chunk.ChunkID) error
 	return nil
 }
 
-// pendingChunkJobs is one vault's set of pending post-seal and index jobs.
+// pendingChunkJobs is one vault's set of pending per-chunk jobs.
 type pendingChunkJobs struct {
-	vaultID  glid.GLID
-	postSeal string
-	rebuild  string
-	sweep    string
+	vaultID     glid.GLID
+	postSeal    string
+	rebuild     string
+	sweep       string
+	glcbCatchup string
+	cloudUpload string
 }
 
-func (p pendingChunkJobs) names() []string { return []string{p.postSeal, p.rebuild, p.sweep} }
+func (p pendingChunkJobs) names() []string {
+	return []string{p.postSeal, p.rebuild, p.sweep, p.glcbCatchup, p.cloudUpload}
+}
 
 // registerVaultWithPendingJobs registers a vault on o and leaves a post-seal
-// job, an index-rebuild job and a home index sweep pending for it. The
-// index rebuild is scheduled through the production scheduling path.
+// job, an index-rebuild job, a home index sweep, a replica catch-up pull and
+// a cloud upload pending for it. The index rebuild is scheduled through the
+// production scheduling path.
 func registerVaultWithPendingJobs(t *testing.T, o *Orchestrator, release <-chan struct{}) pendingChunkJobs {
 	t.Helper()
 	vaultID := glid.New()
@@ -45,30 +51,36 @@ func registerVaultWithPendingJobs(t *testing.T, o *Orchestrator, release <-chan 
 
 	chunkID := chunk.NewChunkID()
 	p := pendingChunkJobs{
-		vaultID:  vaultID,
-		postSeal: postSealJobName(vaultID, chunkID),
-		rebuild:  indexRebuildJobName(vaultID, chunkID),
-		sweep:    homeIndexSweepJobName(vaultID),
+		vaultID:     vaultID,
+		postSeal:    postSealJobName(vaultID, chunkID),
+		rebuild:     indexRebuildJobName(vaultID, chunkID),
+		sweep:       homeIndexSweepJobName(vaultID),
+		glcbCatchup: glcbCatchupJobName(vaultID, chunkID),
+		cloudUpload: cloudUploadJobName(vaultID, chunkID),
 	}
 	block := func() { <-release }
-	if err := o.Scheduler().RunOnce(p.postSeal, block); err != nil {
-		t.Fatalf("schedule post-seal: %v", err)
-	}
-	if err := o.Scheduler().RunOnce(p.sweep, block); err != nil {
-		t.Fatalf("schedule home index sweep: %v", err)
+	for _, name := range []string{p.postSeal, p.sweep, p.glcbCatchup, p.cloudUpload} {
+		if err := o.Scheduler().RunOnce(name, block); err != nil {
+			t.Fatalf("schedule %s: %v", name, err)
+		}
 	}
 	o.scheduleIndexRebuildIfNeeded(context.Background(), vaultID, inst, chunk.ChunkMeta{ID: chunkID, Sealed: true})
+	o.markBackfillFailure(vaultID, chunkID, errors.New("upload failed"), true)
 
 	for _, name := range p.names() {
 		if !o.Scheduler().HasJob(name) {
 			t.Fatalf("premise: job %q is pending before teardown", name)
 		}
 	}
+	if !o.vaultHasBackfillFailures(vaultID) {
+		t.Fatal("premise: cloud-upload backoff state is on record before teardown")
+	}
 	return p
 }
 
 // Every path that closes a vault's managers cancels that vault's pending
-// post-seal and index jobs, and leaves every other vault's jobs alone.
+// per-chunk jobs and cloud-upload backoff state, and leaves every other
+// vault's alone.
 func TestVaultTeardownCancelsPendingChunkJobs(t *testing.T) {
 	t.Parallel()
 	paths := []struct {
@@ -120,6 +132,12 @@ func TestVaultTeardownCancelsPendingChunkJobs(t *testing.T) {
 				if !orch.Scheduler().HasJob(name) {
 					t.Errorf("job %q of another vault was cancelled", name)
 				}
+			}
+			if orch.vaultHasBackfillFailures(removed.vaultID) {
+				t.Error("cloud-upload backoff state of the torn-down vault survived teardown")
+			}
+			if !orch.vaultHasBackfillFailures(kept.vaultID) {
+				t.Error("cloud-upload backoff state of another vault was dropped")
 			}
 		})
 	}

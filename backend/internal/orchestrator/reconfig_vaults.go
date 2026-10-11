@@ -278,25 +278,22 @@ func (o *Orchestrator) listClusterChunkMetasLocked(vaultID glid.GLID) ([]chunk.C
 func (o *Orchestrator) removeVaultJobs(_ glid.GLID, vault *Vault) {
 	if vaultInst := vault.Instance; vaultInst != nil {
 		delete(o.retention, retentionKey(vaultInst.VaultID, vaultInst.StorageID))
-		// Cancel pending cloud-upload jobs (both the catch-up sweep's and the
-		// live seal effect's — they share one name now) and drop any stranded
-		// backoff/alarm state for this vault. Without this, a vault that
-		// leaves this node mid-backoff keeps its cloud-backfill-stuck alarm
-		// standing until the next evaluateCloudHealth sweep notices (or
-		// forever, if this node never runs that sweep for the vault
-		// again).
-		o.scheduler.RemoveJobsByPrefix(cloudUploadJobPrefix(vaultInst.VaultID))
-		o.purgeBackfillFailuresForVault(vaultInst.VaultID)
 	}
 }
 
-// cancelPendingChunkJobs cancels a vault's pending post-seal and index jobs,
+// cancelPendingChunkJobs cancels a vault's pending per-chunk jobs — post-seal,
+// index rebuild, home index sweep, replica catch-up pull and cloud upload —
 // which read through its chunk and index managers: run after the vault closes,
-// they would act on closed managers.
+// they would act on closed managers. It also drops the vault's cloud-upload
+// backoff/alarm state, which no sweep on this node revisits once the vault is
+// gone, so its cloud-backfill-stuck alarm would otherwise stay standing.
 func (o *Orchestrator) cancelPendingChunkJobs(vaultID glid.GLID) {
 	o.scheduler.RemoveJobsByPrefix(postSealJobPrefix(vaultID))
 	o.scheduler.RemoveJobsByPrefix(indexRebuildJobPrefix(vaultID))
 	o.scheduler.RemoveJob(homeIndexSweepJobName(vaultID))
+	o.scheduler.RemoveJobsByPrefix(glcbCatchupVaultJobPrefix(vaultID))
+	o.scheduler.RemoveJobsByPrefix(cloudUploadJobPrefix(vaultID))
+	o.purgeBackfillFailuresForVault(vaultID)
 }
 
 // teardownVault performs the common cleanup for all vault removal paths:
@@ -307,11 +304,6 @@ func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	o.decommissionVaultControlPlaneRaftGroup(id)
 
 	o.cancelPendingChunkJobs(id)
-	// Same reasoning as removeVaultJobs: a torn-down vault must not leave a
-	// stranded cloud-backfill-stuck alarm behind, and an in-flight upload
-	// must not outlive the chunk manager it reads through.
-	o.scheduler.RemoveJobsByPrefix(cloudUploadJobPrefix(id))
-	o.purgeBackfillFailuresForVault(id)
 
 	// Remove the per-instance retention runner.
 	if vaultInst := vault.Instance; vaultInst != nil {
