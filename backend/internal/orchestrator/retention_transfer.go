@@ -400,19 +400,11 @@ func (r *retentionRunner) tryLocalTransferCopy(targetID glid.GLID, id chunk.Chun
 		}
 	}
 
-	r.orch.mu.RLock()
-	var rec *VaultLifecycleReconciler
-	if vault := r.orch.vaults[targetID]; vault != nil && vault.Instance != nil {
-		rec = vault.Instance.Reconciler
-	}
-	r.orch.mu.RUnlock()
-	if rec != nil {
-		// Same holder-receipt seam runGLCBPull uses after a successful
-		// cross-node pull: the copied GLCB is now on the target vault's
-		// canonical path, so the lazy resolver makes it queryable on first
-		// lookup and this proposes the target's AckChunkHolder receipt
-		// event-driven.
-		rec.ackOwnHolderReceipt(entry)
+	// The copied GLCB is now on the target vault's canonical path, exactly as
+	// after runGLCBPull's cross-node pull; the lazy resolver makes it
+	// queryable on first lookup.
+	if ti := r.orch.findLocalVaultInstance(targetID); ti != nil {
+		r.orch.onGLCBLanded(targetID, ti, entry)
 	}
 }
 

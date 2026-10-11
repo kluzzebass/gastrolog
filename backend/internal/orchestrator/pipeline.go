@@ -252,12 +252,12 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 
 // onPipelineChunkBuilt handles a freshly-built pipeline GLCB on this home.
 // Queryability needs no action — the lazy on-miss GLCB resolver serves the
-// chunk on first lookup the moment its FSM entry and file both exist. Two
-// build-completion effects remain event-driven here: the home's holder receipt
-// (build completion is the byte-presence proof the receipt asserts, and it
-// covers the build-finishes-after-seal ordering gap where onSeal fired before
-// the file existed), and — once the chunk is fully Sealed — its cloud upload.
-// A Sealing-only entry defers both to the later seal.
+// chunk on first lookup the moment its FSM entry and file both exist. The
+// build is a GLCB landing on this home (onGLCBLanded — the blob is final
+// whether or not the seal has committed, and the receipt here covers the
+// build-finishes-after-seal gap where onSeal fired before the file existed),
+// and once the chunk is fully Sealed it is also due its cloud upload. A
+// Sealing-only entry defers the upload to the later seal.
 func (o *Orchestrator) onPipelineChunkBuilt(vaultID glid.GLID, fsm *vaultctlfsm.FSM, id chunk.ChunkID) {
 	e := fsm.Get(id)
 	if e == nil {
@@ -268,24 +268,74 @@ func (o *Orchestrator) onPipelineChunkBuilt(vaultID glid.GLID, fsm *vaultctlfsm.
 		return
 	}
 	ti := o.findLocalVaultInstance(vaultID)
-	if ti == nil || ti.Reconciler == nil {
+	if ti == nil {
 		// Boot ordering: OnBuilt can fire from chunking recovery before the
-		// vault instance/reconciler exists. The catch-up sweep re-earns the
-		// holder receipt, but the skip must be visible — a node once held
-		// 297 complete GLCBs its chunk manager knew nothing about, and
+		// vault instance exists. The instance's arrival sweeps this home's
+		// GLCBs (scheduleHomeIndexSweep) and the catch-up sweep re-earns the
+		// holder receipt, but the skip must be visible — a node once held 297
+		// complete GLCBs its chunk manager knew nothing about, and
 		// retention/backfill/queries all starved with zero log lines.
-		o.noteRegisterSkip(vaultID, id, "vault instance or reconciler not ready")
+		o.noteRegisterSkip(vaultID, id, "vault instance not ready")
 		return
 	}
-	// The blob this node just built is final whether or not the seal has
-	// committed, so its secondary indexes are built now. Nothing else builds
-	// them for a pipeline-sealed chunk: the legacy post-seal path is not used
-	// and the missing-index sweep runs only at startup.
-	o.scheduleIndexRebuildIfNeeded(context.Background(), vaultID, ti, manifestEntryToChunkMeta(*e, true))
-	ti.Reconciler.ackOwnHolderReceipt(*e)
+	o.onGLCBLanded(vaultID, ti, *e)
 	if e.State == chunk.ChunkStateSealed {
 		o.schedulePipelineCloudUpload(vaultID, id)
 	}
+}
+
+// onGLCBLanded runs what this home owes a chunk whose GLCB is now in its chunk
+// root: secondary indexes for its copy — any home can become the vault leader
+// that serves searches — and its holder receipt. Every path that puts a GLCB
+// on a home calls it: a local build, a replica catch-up pull, a
+// retention-transfer copy, and the seal apply for a copy the home already
+// holds.
+func (o *Orchestrator) onGLCBLanded(vaultID glid.GLID, ti *VaultInstance, e vaultctlfsm.ManifestEntry) {
+	if ti.Indexes != nil {
+		o.scheduleIndexRebuildIfNeeded(context.Background(), vaultID, ti, manifestEntryToChunkMeta(e, true))
+	}
+	if ti.Reconciler != nil {
+		ti.Reconciler.ackOwnHolderReceipt(e)
+	}
+}
+
+// homeHoldsGLCB reports whether this node is a pipeline home of the vault and
+// the chunk's GLCB is in its chunk root.
+func (o *Orchestrator) homeHoldsGLCB(vaultID glid.GLID, id chunk.ChunkID) bool {
+	root, ok := o.pipelineVaultChunkRoot(vaultID)
+	if !ok {
+		return false
+	}
+	_, err := os.Stat(chunking.ChunkGLCBPath(root, id))
+	return err == nil
+}
+
+// scheduleHomeIndexSweep sweeps a pipeline home's GLCBs for missing secondary
+// indexes once both things that make them indexable exist: the vault instance
+// and the vault's home registration with a vault-ctl handle. The arrival of
+// each calls it, and it acts only when the other is already there. A GLCB that
+// landed while either was missing — a build that finished before the instance
+// existed — has no event of its own left to index it.
+func (o *Orchestrator) scheduleHomeIndexSweep(vaultID glid.GLID, ti *VaultInstance) {
+	if ti == nil || ti.Indexes == nil {
+		return
+	}
+	if _, _, ok := o.pipelineGLCBSource(vaultID); !ok {
+		return
+	}
+	name := homeIndexSweepJobName(vaultID)
+	o.scheduler.Describe(name, fmt.Sprintf("Build missing indexes for the GLCBs this home holds of vault %s", vaultID))
+	if _, err := o.scheduler.RunOnceIfAbsent(name, func() {
+		if err := o.rebuildVaultIndexes(context.Background(), vaultID, ti); err != nil {
+			o.logger.Warn("home index sweep failed", "vault", vaultID, "error", err)
+		}
+	}); err != nil {
+		o.logger.Warn("failed to schedule home index sweep", "vault", vaultID, "error", err)
+	}
+}
+
+func homeIndexSweepJobName(vaultID glid.GLID) string {
+	return "home-index-sweep:" + vaultID.String()
 }
 
 // noteRegisterSkip surfaces silently-skipped GLCB registrations, throttled
@@ -732,6 +782,9 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 		chunkHomes[vid] = chunkEnabled
 		o.reconcileChunkCron(vid, chunkEnabled, cronExpr)
 		o.finishPendingPipelineCtlRestore(vid)
+		if v := o.vaults[vid]; chunkEnabled && v != nil {
+			o.scheduleHomeIndexSweep(vid, v.Instance)
+		}
 	}
 
 	o.rewireChunkHomesAfterReload(chunkHomes)

@@ -244,6 +244,7 @@ func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig
 	vault.Enabled = vaultCfg.Enabled
 	vault.StorageType = string(vaultCfg.Type)
 	o.RegisterVault(vault)
+	o.scheduleHomeIndexSweep(vaultCfg.ID, instance)
 	if o.alerts != nil {
 		o.alerts.Clear("vault-init", vaultCfg.ID.String())
 	}
