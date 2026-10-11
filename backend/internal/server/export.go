@@ -216,7 +216,7 @@ func (s *QueryServer) runExportJob(
 // cluster. The pipeline consumes the remote stream itself, so only its own
 // working set lands on this node — not a second copy of every remote record.
 func (s *QueryServer) exportPipelineRecords(ctx context.Context, eng *query.Engine, q query.Query, pipeline *querylang.Pipeline, budget *query.Budget) ([]chunk.Record, error) {
-	remoteIter, _, _ := s.collectRemote(ctx, q)
+	remoteIter, _, _ := s.collectRemoteForPipeline(ctx, q, pipeline)
 	result, err := eng.RunPipelineWithRemote(ctx, q, pipeline, remoteIter, budget)
 	if err != nil {
 		return nil, fmt.Errorf("pipeline execution: %w", err)

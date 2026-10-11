@@ -95,7 +95,7 @@ func (s *QueryServer) startRemoteFollows(ctx context.Context, q query.Query) <-c
 		return nil
 	}
 
-	queryExpr := q.String()
+	queryExpr := forwardedQueryExpression(q)
 	merged := make(chan *apiv1.Record, 64)
 	var wg sync.WaitGroup
 

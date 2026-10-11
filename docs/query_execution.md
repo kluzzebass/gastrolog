@@ -330,6 +330,20 @@ same predicate, values are quoted whenever the lexer could not take them as a
 bareword (the empty string included), and a pipeline without a filter prints
 with its leading `|`. A round-trip test and a fuzzer pin this.
 
+The directives travel in the same text, written by `forwardedQueryExpression`
+next to the parser that reads them back: the filter, then `start=`, `end=`,
+`source_start=`, `source_end=` (absolute, nanosecond timestamps), `reverse=`,
+`order=`, `limit=` and `pos=`. A peer therefore scans under exactly the bounds,
+ordering and position the coordinator's own scan uses — a vault led on another
+node honours a source-time window or a `pos=` address the same way a local one
+does. A legacy token/key-value query is folded into its filter first, so it
+never reaches a peer as an unfiltered scan. What the text does not carry
+travels in the request beside it: the resume cursor in `ResumeToken`, the
+partial-aggregate request in `PartialAggregates`. A test fails when a
+`query.Query` field is neither round-tripped through the wire form nor named
+with the channel that carries it instead. `Query.String()` is a display form
+for Explain, not the wire.
+
 The coordinator determines which vaults live on peer nodes via
 `remoteVaultsByNode()`. For each remote vault, a streaming `ForwardSearch` RPC
 is opened. Results flow back without buffering — `kWayMerge()` performs
@@ -385,10 +399,14 @@ the default ordering.
 
 ## Query Memory Budget
 
-Pipeline operators control their own result limits, so `RunPipeline` clears the
-incoming `Limit` before scanning: a scan limit would cut an aggregator's or a
-sort's *input*, making `| stats count` report the count of an arbitrary prefix
-and `| sort` order one. What bounds the work instead is a per-query memory
+Pipeline operators control their own result limits, so the incoming `Limit`
+caps a pipeline's output and never its scan: a scan limit would cut an
+aggregator's or a sort's *input*, making `| stats count` report the count of an
+arbitrary prefix and `| sort` order one. The scan reads every match unless a
+`head` is reached through operators that keep every record (`eval`, `rename`,
+`fields`, `lookup`); then the head's N is all the pipeline can consume, and
+that N is the scan limit. A `where` or `dedup` ahead of the head drops records,
+so it scans every match. What bounds the work instead is a per-query memory
 budget (`query.MaxQueryMemoryBytes`, 256 MiB), which bounds retained bytes
 without changing the answer.
 
@@ -433,7 +451,10 @@ A pipeline the cluster cannot answer by merging per-node results — a `head`,
 `tail`, or `slice` that would otherwise apply once per node, a `dedup` whose
 window spans nodes, or an aggregate like `dcount`/`median`/`values` that
 cannot be recombined from partials — runs once on the coordinator over every
-node's records. Those records are
+node's records. Every peer scans for it under the pipeline's scan limit
+(`query.PipelineScanLimit`), the same one the coordinator's local scan uses,
+never under the client's page size: the page size caps what the pipeline
+returns, not what it reads. Those records are
 *streamed* through it, merged with the local scan in query order, not collected
 first: the coordinator retains only what the pipeline's own operators hold, so
 memory tracks the answer rather than the match set. An uncapped `sort` is the

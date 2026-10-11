@@ -1716,7 +1716,7 @@ func TestMultiNode_PaginatedReverseSearchRemoteOnly(t *testing.T) {
 		// correct value. If this asserts fails, the merge-level highwater
 		// has stopped propagating into the resume token, and the next
 		// page's q.End will not be narrowed for the upstream-narrowed
-		// q.String() forwarded to the remote, eventually surfacing as the
+		// query forwarded to the remote, eventually surfacing as the
 		// "scroll jumps backward in time" symptom under chunk staleness.
 		if hasMore {
 			var pt gastrologv1.ResumeToken

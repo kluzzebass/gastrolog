@@ -736,7 +736,7 @@ func normalizedRange(start, end time.Time) (time.Time, time.Time, bool) {
 // max(IngestEnd). With remotes seeing different chunk sets, the resulting
 // bucket grids don't align and mergeHistogramBuckets — which matches by
 // exact TimestampMs — emits a fragmented histogram split across unrelated
-// time ranges. Resolving here, before q.String() is forwarded, makes the
+// time ranges. Resolving here, before the query is forwarded, makes the
 // remotes parse concrete start=/end= directives and skip deriveTimeRange.
 //
 // Bounded queries (last=5m, explicit start=/end=) are no-ops.
