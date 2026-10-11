@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, mock } from "bun:test";
-import { render, fireEvent, waitFor } from "@testing-library/react";
+import { act, fireEvent, waitFor } from "@testing-library/react";
 import { installMockClients, m } from "../../../test/api-mock";
 import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 import { encode } from "../../api/glid";
@@ -9,7 +9,7 @@ const mocks = installMockClients();
 
 import { VaultsSettings } from "./VaultsSettings";
 import { TRANSFER_HELP_REF, transferSourceIneligibility, transferTargetOptions } from "./transferEligibility";
-import { VaultConfig, VaultType } from "../../api/gen/gastrolog/v1/system_pb";
+import { GetSystemResponse, VaultConfig, VaultType } from "../../api/gen/gastrolog/v1/system_pb";
 import { renderWritable } from "../../testing/renderWritable";
 
 /** Create a distinct 16-byte Uint8Array test ID from a small number. */
@@ -642,5 +642,154 @@ describe("transfer target picker", () => {
     expect(getByRole("note").textContent).toContain(
       "Transfer records to another vault unchanged is not eligible — this vault is cloud-backed.",
     );
+  });
+});
+
+// Real messages: the system query compares writes with the proto's own
+// equals, which needs every repeated field present.
+const placedVault = new VaultConfig({
+  id: testId(1),
+  name: "vault-alpha",
+  enabled: true,
+  type: VaultType.FILE,
+  storageClass: 1,
+  replicationFactor: 1,
+  placements: [{ storageId: testId(50), leader: true }],
+});
+const gatedInit = {
+  vaults: [placedVault],
+  nodeConfigs: [{ id: testId(40), name: "node-1" }, { id: testId(41), name: "node-2" }],
+  nodeStorageConfigs: [{ nodeId: testId(40), fileStorages: [{ id: testId(50), storageClass: 1 }] }],
+};
+const gatedConfig = new GetSystemResponse(gatedInit);
+
+describe("VaultsSettings create gates", () => {
+  test("a name conflict disables Create and says which name is taken, until the clash goes", async () => {
+    // With no generated name the form falls back to "vault", which a vault
+    // of that name takes — no async placeholder in the path.
+    m(mocks.systemClient, "generateName").mockRejectedValueOnce(new Error("unavailable"));
+    const taken = new VaultConfig({ id: testId(3), name: "vault", enabled: true, type: VaultType.MEMORY, replicationFactor: 1 });
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], new GetSystemResponse({ ...gatedInit, vaults: [placedVault, taken] }));
+    const { getByText, queryByText } = renderWritable(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    fireEvent.click(getByText("Add Vault"));
+    expect(getByText('A vault named "vault" already exists')).toBeTruthy();
+    expect(getByText("Create").closest("button")!.disabled).toBe(true);
+
+    act(() => {
+      qc.setQueryData(["system"], gatedConfig);
+    });
+    await waitFor(() => {
+      expect(queryByText('A vault named "vault" already exists')).toBeNull();
+    });
+  });
+
+  test("a missing storage class disables Create with the reason, until one is picked", async () => {
+    m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], gatedConfig);
+    const { getByText, findByText, getByLabelText, queryByText } = renderWritable(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    fireEvent.click(getByText("Add Vault"));
+    expect(await findByText("Pick a storage class")).toBeTruthy();
+    expect(getByText("Create").closest("button")!.disabled).toBe(true);
+
+    fireEvent.change(getByLabelText("Storage Class"), { target: { value: "1" } });
+    await waitFor(() => {
+      expect(queryByText("Pick a storage class")).toBeNull();
+      expect(getByText("Create").closest("button")!.disabled).toBe(false);
+    });
+  });
+
+  test("the replication factor names its cap only once the spinner reaches it", async () => {
+    m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], gatedConfig);
+    const { getByText, findByText, getByLabelText, queryByText } = renderWritable(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    fireEvent.click(getByText("Add Vault"));
+    await findByText("Create");
+    // One class-1 file storage: RF=1 is already the cap.
+    fireEvent.change(getByLabelText("Storage Class"), { target: { value: "1" } });
+    expect(await findByText(/Capped at 1: 1 file storage\(s\) of class 1/)).toBeTruthy();
+
+    // Two nodes: a memory vault at RF=1 is under its cap, so nothing is said.
+    fireEvent.change(getByLabelText("Storage Type"), { target: { value: "memory" } });
+    await waitFor(() => expect(queryByText(/Capped at/)).toBeNull());
+
+    fireEvent.click(getByLabelText("Increase"));
+    expect(await findByText(/Capped at 2: the cluster has 2 node\(s\)/)).toBeTruthy();
+  });
+});
+
+describe("VaultsSettings delete gates and consequences", () => {
+  test("a vault a route sends to cannot be deleted, and the reason names the route", () => {
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], new GetSystemResponse({
+      ...gatedInit,
+      routes: [{ id: testId(70), name: "to-alpha", destinations: [{ vaultId: testId(1) }] }],
+    }));
+    const { getByText } = renderWritable(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expandVault(getByText);
+    expect(getByText("Delete").closest("button")!.disabled).toBe(true);
+    expect(getByText("Destination of route to-alpha — remove it there first")).toBeTruthy();
+  });
+
+  test("with no route reference Delete is enabled", () => {
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], gatedConfig);
+    const { getByText, queryByText } = renderWritable(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expandVault(getByText);
+    expect(getByText("Delete").closest("button")!.disabled).toBe(false);
+    expect(queryByText(/remove it there first/)).toBeNull();
+  });
+
+  test("the confirm step names the placements and says what happens to the data files", () => {
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], gatedConfig);
+    const { getByText, getByLabelText } = renderWritable(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expandVault(getByText);
+    fireEvent.click(getByText("Delete"));
+
+    expect(getByText(/Removes "vault-alpha" and its 1 placement\(s\) on node-1/)).toBeTruthy();
+    expect(getByText(/chunk files stay on disk/)).toBeTruthy();
+
+    fireEvent.click(getByLabelText("Delete data files"));
+    expect(getByText(/chunk files are erased from every placement node/)).toBeTruthy();
+    expect(getByText("Yes")).toBeTruthy();
+  });
+
+  test("a memory vault's confirm step says its records go with it", () => {
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], new GetSystemResponse({
+      ...gatedInit,
+      vaults: [new VaultConfig({ id: testId(2), name: "vault-mem", enabled: true, type: VaultType.MEMORY, replicationFactor: 1 })],
+    }));
+    const { getByText, queryByLabelText } = renderWritable(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    fireEvent.click(getByText("vault-mem"));
+    fireEvent.click(getByText("Delete"));
+
+    expect(getByText(/Removes "vault-mem", which has no placements/)).toBeTruthy();
+    expect(getByText(/live only in memory/)).toBeTruthy();
+    expect(queryByLabelText("Delete data files")).toBeNull();
   });
 });

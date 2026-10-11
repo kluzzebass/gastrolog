@@ -21,7 +21,7 @@ import { CloudServiceFields } from "./CloudServiceFields";
 import { Button } from "./Buttons";
 import { NodeSelect } from "./NodeSelect";
 import { useTestCloudService } from "../../api/hooks/useVaults";
-import { endpointBlocked } from "../../utils/endpointScheme";
+import { endpointBlocked, endpointSchemeReason } from "../../utils/endpointScheme";
 import { useReadOnly } from "../../hooks/useReadOnly";
 
 // ─── Cloud Storage Add Form ──────────────────────────────────
@@ -114,6 +114,11 @@ export function StorageSettings({ dark, onOpenInspector }: Readonly<{ dark: bool
   const existingNames = new Set(cloudServices.map((s) => s.name));
   const effectiveName = addForm.name.trim() || addForm.namePlaceholder || "cloud-service";
   const nameConflict = existingNames.has(effectiveName);
+  const bucketMissing = addForm.provider === "azure" ? !addForm.container.trim() : !addForm.bucket.trim();
+  let createDisabledReason: string | undefined;
+  if (nameConflict) createDisabledReason = `A cloud storage named "${effectiveName}" already exists`;
+  else if (bucketMissing) createDisabledReason = addForm.provider === "azure" ? "Container is required" : "Bucket is required";
+  else if (endpointBlocked(addForm.provider, addForm.endpoint)) createDisabledReason = endpointSchemeReason;
 
   const nodeNameMap = buildNodeNameMap(nodeConfigs);
 
@@ -294,6 +299,7 @@ export function StorageSettings({ dark, onOpenInspector }: Readonly<{ dark: bool
               onCreate={handleCreateStorage}
               isPending={setNodeStorage.isPending}
               createDisabled={!storageClass.trim() || isNaN(parseInt(storageClass, 10))}
+              createDisabledReason="Storage class is required"
             >
               <NodeSelect value={storageNodeId} onChange={setStorageNodeId} dark={dark} />
               <FormField label="Name" dark={dark}>
@@ -431,11 +437,8 @@ export function StorageSettings({ dark, onOpenInspector }: Readonly<{ dark: bool
               onCancel={() => dispatchAdd({ type: "close" })}
               onCreate={handleCreate}
               isPending={putCloudService.isPending}
-              createDisabled={
-                nameConflict ||
-                (addForm.provider === "azure" ? !addForm.container.trim() : !addForm.bucket.trim()) ||
-                endpointBlocked(addForm.provider, addForm.endpoint)
-              }
+              createDisabled={nameConflict || bucketMissing || endpointBlocked(addForm.provider, addForm.endpoint)}
+              createDisabledReason={createDisabledReason}
             >
               <FormField label="Name" dark={dark}>
                 <TextInput
@@ -496,18 +499,22 @@ function TestCloudButton({
   const testCloud = useTestCloudService();
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  const hasRequired =
-    provider !== "" &&
-    ((provider === "s3" && values.bucket !== "") ||
-      (provider === "azure" && values.container !== "" && values.connectionString !== "") ||
-      (provider === "gcs" && values.bucket !== "") ||
-      provider === "memory");
+  let disabledReason: string | undefined;
+  if (provider === "") {
+    disabledReason = "Pick a provider";
+  } else if (provider === "azure" && (values.container === "" || values.connectionString === "")) {
+    disabledReason = "Container and Connection String are required";
+  } else if ((provider === "s3" || provider === "gcs") && values.bucket === "") {
+    disabledReason = "Bucket is required";
+  } else if (endpointBlocked(provider, values.endpoint)) {
+    disabledReason = endpointSchemeReason;
+  }
 
   return (
     <div className="flex items-center gap-3">
       <button
         type="button"
-        disabled={testCloud.isPending || !hasRequired || endpointBlocked(provider, values.endpoint) || readOnly}
+        disabled={testCloud.isPending || disabledReason !== undefined || readOnly}
         onClick={() => {
           setResult(null);
           testCloud.mutate(
@@ -538,6 +545,11 @@ function TestCloudButton({
       >
         {testCloud.isPending ? "Testing..." : "Test Connection"}
       </button>
+      {disabledReason && !readOnly && (
+        <span className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>
+          {disabledReason}
+        </span>
+      )}
       {result && (
         <span className={`text-[0.8em] ${result.success ? "text-green-400" : "text-severity-error"}`}>
           {result.message}

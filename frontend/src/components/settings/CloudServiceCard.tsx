@@ -8,7 +8,7 @@ import {
 import { useTestCloudService } from "../../api/hooks/useVaults";
 import { useEditState } from "../../hooks/useEditState";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { endpointBlocked } from "../../utils/endpointScheme";
+import { endpointBlocked, endpointSchemeReason } from "../../utils/endpointScheme";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
@@ -214,6 +214,7 @@ export function CloudServiceCard({
               );
             }}
             disabled={testCloud.isPending || !edit.provider || endpointInvalid}
+            disabledReason={endpointInvalid ? endpointSchemeReason : undefined}
           >
             {testCloud.isPending ? "Testing..." : "Test Connection"}
           </Button>
@@ -230,6 +231,7 @@ export function CloudServiceCard({
           <Button
             onClick={() => handleSave(encode(service.id), edit)}
             disabled={putCloudService.isPending || !isDirty(encode(service.id)) || endpointInvalid}
+            disabledReason={endpointInvalid ? endpointSchemeReason : undefined}
           >
             {putCloudService.isPending ? "Saving..." : "Save"}
           </Button>

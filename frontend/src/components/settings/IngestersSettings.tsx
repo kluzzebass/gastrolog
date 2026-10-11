@@ -11,7 +11,7 @@ import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { IngesterCommonFields } from "./IngesterCommonFields";
-import { IngesterParamsForm, isIngesterParamsValid, listenAddrConflict } from "./ingester-params";
+import { IngesterParamsForm, isIngesterParamsValid, missingIngesterParamsReason, listenAddrConflict } from "./ingester-params";
 import { Button } from "./Buttons";
 import { NodeBadge } from "./NodeBadge";
 import { sortByName } from "../../lib/sort";
@@ -135,6 +135,10 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
   const newPortCheck = useCheckListenAddrs(newType, newParams, "", newNodeIds, newAllNodes);
   const newPortError = !newAddrConflict && newPortCheck.data && !newPortCheck.data.success ? newPortCheck.data.message : null;
   const newListenError = newAddrConflict ?? newPortError;
+  // The listen error already shows as its own line inside the form.
+  const createDisabledReason = nameConflict
+    ? `An ingester named "${effectiveName}" already exists`
+    : missingIngesterParamsReason(newType, newParams);
 
   const defaults = (id: string) => {
     const ing = ingesters.find((i) => encode(i.id) === id);
@@ -208,6 +212,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
           onCreate={handleCreate}
           isPending={putIngester.isPending}
           createDisabled={nameConflict || !!newListenError || !isIngesterParamsValid(newType, newParams)}
+          createDisabledReason={createDisabledReason}
           typeBadge={newType}
         >
           <IngesterCommonFields
@@ -344,6 +349,7 @@ function IngesterCard({
           <Button
             onClick={() => onSave(encode(ing.id))}
             disabled={isSaving || !isDirty || !!listenError || !isIngesterParamsValid(ing.type, edit.params)}
+            disabledReason={missingIngesterParamsReason(ing.type, edit.params)}
           >
             {isSaving ? "Saving..." : "Save"}
           </Button>

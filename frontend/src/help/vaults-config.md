@@ -68,6 +68,16 @@ Cloud-backed vaults also have:
 
 Expand a vault card to edit its name or enable/disable it. The storage shape is fixed once the vault has chunks.
 
+## Deleting a Vault
+
+**Delete** on a vault card removes the vault and every placement it has, on every node; the confirm step lists what goes. A vault that is a [route](help:routing) destination cannot be deleted — the Delete button stays disabled and names the route; remove the vault from the route's destinations first.
+
+What happens to the data depends on the storage type:
+
+- **File** — the chunk files stay on disk, unreachable, unless **Delete data files** is ticked, which erases the vault directory on every placement node.
+- **Memory** — the records live only in memory and are gone with the vault.
+- **JSONL** — the sink file stays on disk.
+
 ## Rotation and Retention Policies
 
 Policies are shared resources created in the [Policies](settings:policies) tab and referenced by name in vault settings. This lets multiple vaults share the same rotation or retention schedule.

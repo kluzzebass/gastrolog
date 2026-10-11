@@ -27,6 +27,10 @@ In a [cluster](help:clustering), rotation is managed by the [node](help:clusteri
 
 **Rotate** on a vault's settings card (or `gastrolog seal <vault>`) seals every open chunk in the vault that holds records, without waiting for the policy. The reply says how many chunks were sealed; when nothing open holds records, it says so instead of reporting success. The request can be sent to any node — it runs on the vault's leader. If vault leadership is still moving between nodes (for example right after a restart), the seal is refused as unavailable and can simply be retried.
 
+## Deleting a Policy
+
+A policy in use can be deleted; the vault cards it is used by are listed on the policy card, and the confirm step names them. Those vaults have their rotation policy cleared: their active chunks no longer seal on schedule until another policy is assigned, though **Rotate** still seals them by hand.
+
 ## Example
 
 A policy with `maxBytes: "256MB"` and `maxAge: "1h"` will seal the chunk when it reaches 256 MB **or** when it has been open for one hour, whichever comes first.

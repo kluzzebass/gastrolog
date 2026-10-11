@@ -32,6 +32,10 @@ What happens depends on the vault's [Retention Disposition](help:vaults-config):
 - **Delete** (default) and **Route** both destroy the original chunk — indexes first, then the chunk data — and decide the records' fate via the routing engine: with `route`, the chunk's records are streamed through the routing engine with `source = retention-trigger(vault)`, and if any [retention-trigger route](help:routing) matches, they're re-appended to that route's destination vaults (per-record filtering applies); with `delete`, or with `route` and no matching route, the records are simply dropped.
 - **Transfer** skips the routing engine entirely: the sealed chunk itself is re-homed unchanged to the vault's **Transfer Target**. No decode, no re-ingest, no per-record filtering — the chunk's records and identity are untouched, only its retention clock resets at the destination. The original chunk is only removed from the source once the target confirms it holds the chunk.
 
+## Deleting a Policy
+
+A policy in use can be deleted; the vaults it is used by are listed on the policy card, and the confirm step names them. Those vaults have their retention policy cleared: nothing expires until another policy is assigned, and only the default floor remains, which refuses but never destroys.
+
 ## How Retention Runs
 
 Retention policies are evaluated periodically by a [background scheduler](help:inspector-jobs). On each run:

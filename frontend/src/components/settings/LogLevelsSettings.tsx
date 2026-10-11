@@ -133,6 +133,10 @@ export function LogLevelsSettings({ dark }: Props) {
   const ruleErrors = validateRules(currentRules);
   const hasErrors = Object.keys(ruleErrors).length > 0;
   const hasAnyNonEmpty = currentRules.some((r) => r.pattern.trim() !== "");
+  const onlyEmptyRules = currentRules.length > 0 && !hasAnyNonEmpty;
+  let saveDisabledReason: string | undefined;
+  if (hasErrors) saveDisabledReason = "Fix the flagged patterns";
+  else if (onlyEmptyRules) saveDisabledReason = "Enter a pattern or remove the empty rule";
 
   const columnHeader = `text-[0.75em] uppercase tracking-wide ${c("text-text-muted", "text-light-text-muted")}`;
   const emptyLine = `text-[0.85em] italic ${c("text-text-muted", "text-light-text-muted")}`;
@@ -159,7 +163,8 @@ export function LogLevelsSettings({ dark }: Props) {
             )}
             <Button
               onClick={save}
-              disabled={!dirty || putLogLevels.isPending || hasErrors || (currentRules.length > 0 && !hasAnyNonEmpty)}
+              disabled={!dirty || putLogLevels.isPending || hasErrors || onlyEmptyRules}
+              disabledReason={saveDisabledReason}
               dark={dark}
             >
               {putLogLevels.isPending ? "Saving..." : "Save"}
@@ -213,7 +218,6 @@ export function LogLevelsSettings({ dark }: Props) {
                       value={r.pattern}
                       onChange={(v) => updateRule(idx, { pattern: v })}
                       error={!!ruleErrors[idx]}
-                      title={ruleErrors[idx]}
                       highlighted={isHighlighted}
                       examples={[
                         "orchestrator",
@@ -222,6 +226,9 @@ export function LogLevelsSettings({ dark }: Props) {
                         "ingester.**.conn",
                       ]}
                     />
+                    {ruleErrors[idx] && (
+                      <span className="text-[0.75em] text-severity-error">{ruleErrors[idx]}</span>
+                    )}
                   </div>
                   <SelectInput
                     dark={dark}

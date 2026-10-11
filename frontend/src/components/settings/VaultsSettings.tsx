@@ -103,24 +103,35 @@ function extractErrorMessage(err: unknown, fallback: string): string {
 }
 
 export function isStorageComplete(s: StorageEntry, _hasCloudServices: boolean): boolean {
-  if (
-    s.type !== "jsonl" &&
-    s.retentionDisposition === "transfer" &&
-    (s.retentionTransferTarget === "" || transferSourceIneligibility(s) !== undefined)
-  ) {
-    return false;
+  return storageIncompleteReason(s) === undefined;
+}
+
+/** Why the storage shape cannot be saved yet, or undefined when it can. */
+export function storageIncompleteReason(s: StorageEntry): string | undefined {
+  if (s.type !== "jsonl" && s.retentionDisposition === "transfer") {
+    const sourceReason = transferSourceIneligibility(s);
+    if (sourceReason !== undefined) return `Transfer is not available: ${sourceReason}`;
+    if (s.retentionTransferTarget === "") return "Pick a transfer target";
   }
   switch (s.type) {
     case "memory":
-      return true;
+      return undefined;
     case "file":
       // Single storage class for both local-only and cloud-backed file
       // vaults — the active chunk and warm cache live at the same chunkDir
       // path, so no separate "active" or "cache" class is meaningful.
-      return s.storageClass !== "";
+      return s.storageClass === "" ? "Pick a storage class" : undefined;
     case "jsonl":
-      return s.nodeId !== "";
+      return s.nodeId === "" ? "Pick a node" : undefined;
   }
+}
+
+/** Why the replication factor stops where it does, shown only at the cap. */
+function rfCapReason(s: { type: VaultTypeLabel; storageClass: string }, cap: number): string {
+  if (s.type === "memory") return `Capped at ${String(cap)}: the cluster has ${String(cap)} node(s)`;
+  const sc = parseInt(s.storageClass, 10) || 0;
+  if (sc === 0) return "Capped at 1 until a storage class is picked";
+  return `Capped at ${String(cap)}: ${String(cap)} file storage(s) of class ${String(sc)}, one copy each`;
 }
 
 // ---------------------------------------------------------------------------
@@ -414,7 +425,16 @@ export function VaultStorageForm({
       )}
 
       {storage.type !== "jsonl" && (
-        <FormField label="Replication Factor" dark={dark} description="1 = none, 2 = redundant, 3+ = fault tolerant" helpRef="storage-config#how-vaults-use-file-storages">
+        <FormField
+          label="Replication Factor"
+          dark={dark}
+          description={
+            maxRF !== undefined && (parseInt(storage.replicationFactor, 10) || 1) >= maxRF
+              ? `1 = none, 2 = redundant, 3+ = fault tolerant. ${rfCapReason(storage, maxRF)}`
+              : "1 = none, 2 = redundant, 3+ = fault tolerant"
+          }
+          helpRef="storage-config#how-vaults-use-file-storages"
+        >
           <SpinnerInput
             value={storage.replicationFactor}
             onChange={(v) => onUpdate({ replicationFactor: v })}
@@ -514,6 +534,9 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
   // Validation: storage shape complete, no name conflict.
   const storageComplete = isStorageComplete(addForm.storage, cloudServiceOptions.length > 0);
   const createDisabled = nameConflict || !storageComplete;
+  let createDisabledReason: string | undefined;
+  if (nameConflict) createDisabledReason = `A vault named "${effectiveName}" already exists`;
+  else if (!storageComplete) createDisabledReason = storageIncompleteReason(addForm.storage);
 
   // Auto-expand a vault when navigated to from another view.
   const [consumedExpandTarget, setConsumedExpandTarget] = useState<string | null>(null);
@@ -591,6 +614,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
           onCreate={handleCreate}
           isPending={isPending}
           createDisabled={createDisabled}
+          createDisabledReason={createDisabledReason}
         >
           <FormField label="Name" dark={dark}>
             <TextInput

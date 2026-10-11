@@ -8,6 +8,8 @@ interface AddFormCardProps {
   onCreate: () => void;
   isPending: boolean;
   createDisabled?: boolean;
+  /** One line stating why Create is disabled, shown beside it while it is. */
+  createDisabledReason?: string;
   typeBadge?: string;
   children: React.ReactNode;
 }
@@ -18,6 +20,7 @@ export function AddFormCard({
   onCreate,
   isPending,
   createDisabled,
+  createDisabledReason,
   typeBadge,
   children,
 }: Readonly<AddFormCardProps>) {
@@ -48,7 +51,12 @@ export function AddFormCard({
           <Button variant="ghost" onClick={onCancel} dark={dark} bordered>
             Cancel
           </Button>
-          <Button onClick={onCreate} disabled={isPending || createDisabled}>
+          <Button
+            onClick={onCreate}
+            disabled={isPending || createDisabled}
+            disabledReason={createDisabled ? createDisabledReason : undefined}
+            dark={dark}
+          >
             {isPending ? "Creating..." : "Create"}
           </Button>
         </div>

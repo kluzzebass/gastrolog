@@ -219,3 +219,44 @@ describe("RoutesSettings", () => {
     });
   });
 });
+
+describe("RoutesSettings create gates", () => {
+  // With no generated name the form falls back to "route", which a route of
+  // that name takes.
+  test("a name conflict disables Create and says which name is taken", () => {
+    m(mocks.systemClient, "generateName").mockRejectedValueOnce(new Error("unavailable"));
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], {
+      ...sampleConfig,
+      routes: [{ ...sampleConfig.routes[0]!, name: "route" }],
+    });
+    const { getByText } = renderWritable(<RoutesSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    fireEvent.click(getByText("Add Route"));
+
+    expect(getByText('A route named "route" already exists')).toBeTruthy();
+    expect(getByText("Create").closest("button")!.disabled).toBe(true);
+  });
+
+  test("no destination disables Create with the reason, until one is picked", async () => {
+    m(mocks.systemClient, "generateName").mockRejectedValueOnce(new Error("unavailable"));
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], sampleConfig);
+    const { getByText, queryByText } = renderWritable(<RoutesSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    fireEvent.click(getByText("Add Route"));
+
+    expect(getByText("Pick at least one destination")).toBeTruthy();
+    expect(getByText("Create").closest("button")!.disabled).toBe(true);
+
+    fireEvent.click(getByText("vault-alpha"));
+    await waitFor(() => {
+      expect(queryByText("Pick at least one destination")).toBeNull();
+      expect(getByText("Create").closest("button")!.disabled).toBe(false);
+    });
+  });
+});
