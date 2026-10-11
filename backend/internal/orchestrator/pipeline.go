@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/cluster"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/orchestrator/pipeline"
@@ -324,27 +323,15 @@ func (o *Orchestrator) vaultCtlHandle(vaultID glid.GLID) (*vaultctlfsm.FSM, vaul
 	if o.groupMgr == nil {
 		return nil, nil, nil, false
 	}
-	gid := raftgroup.VaultControlPlaneGroupID(vaultID)
-	g := o.groupMgr.GetGroup(gid)
+	g := o.vaultCtlGroup(vaultID)
 	if g == nil {
 		return nil, nil, nil, false
 	}
-	var fsm *vaultctlfsm.FSM
-	switch raw := g.FSM.(type) {
-	case *vaultctlfsm.FSM:
-		fsm = raw
-	case *vaultraft.FSM:
-		fsm = raw.EnsureVaultFSM(vaultID)
-	}
+	fsm := vaultCtlSubFSM(g, vaultID)
 	if fsm == nil {
 		return nil, nil, nil, false
 	}
-	var applier vaultctlfsm.Applier
-	if o.peerConns != nil {
-		applier = cluster.NewVaultCtlChunkApplyForwarder(g.Raft, gid, vaultID, groupApplyWait(g), o.peerConns, cluster.ReplicationTimeout)
-	} else {
-		applier = &vaultCtlApplier{o: o, vaultID: vaultID}
-	}
+	applier := o.vaultCtlChunkApplier(g, vaultID)
 	raft := g.Raft
 	localID := o.localNodeID
 	isLeader := func() bool {

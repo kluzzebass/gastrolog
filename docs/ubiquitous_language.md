@@ -621,7 +621,9 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 - **Vault readiness** — a vault on this node is "ready" iff it has a local
   instance AND that instance's `IsFSMReady()` callback returns `true` (i.e.
   the vault-ctl Raft has applied at least one log entry on this node, or
-  restored from a snapshot). Canonical definition in
+  restored from a snapshot). An instance whose vault-ctl group creation is
+  still deferred on this node is not ready; on a node without vault-ctl
+  Raft the callback is nil and the instance is ready. Canonical definition in
   [`vault_readiness.go`](../backend/internal/orchestrator/vault_readiness.go).
   Checked by every read and write path before touching vault state.
 

@@ -24,9 +24,12 @@ const readinessRefreshInterval = 500 * time.Millisecond
 //      data.
 //   2. Every local instance's FSM has applied at least one log entry (or has
 //      restored from a snapshot). Before this, the instance manifest is
-//      incomplete — acting on it risks data loss or divergent state. A nil
-//      IsFSMReady callback is the single-node/memory instance case and is
-//      treated as always ready.
+//      incomplete — acting on it risks data loss or divergent state. An
+//      instance whose vault-ctl group has not been created on this node yet
+//      (creation deferred until every cluster node resolves) is not ready
+//      either. A nil IsFSMReady callback means this node runs no vault-ctl
+//      Raft at all (single-node/memory mode): the instance's own chunk
+//      manager is authoritative and it is always ready.
 //
 // The readiness gate applies to ingest, query, and control paths on the
 // local node. RPC-level fallbacks (forward to a peer) live above this
@@ -58,15 +61,13 @@ func (v *Vault) ReadinessErr() error {
 
 // signalVaultReadyChange wakes every goroutine blocked in WaitVaultReady so
 // it can re-evaluate the readiness predicate. Called after any vault registry
-// mutation (register, instance add/remove, unregister). Safe to call while
-// holding o.mu — notify.Signal uses its own leaf mutex.
+// mutation (register, instance add/remove, unregister) and after
+// RefreshVaultCtlMembers binds instances to vault-ctl groups it created.
+// Safe to call while holding o.mu — notify.Signal uses its own leaf mutex.
 //
-// Registry mutations are the complete set of readiness transitions for the
-// drain-target use case: a vault's local instance is only ever built (via
-// AddVault / AddVaultInstance) once its vault-ctl Raft group already spans
-// every node and has applied past index 0, so ReadinessErr's IsFSMReady gate
-// is already satisfied at the moment the instance lands in the registry —
-// there is no separate async "FSM became ready" edge to notify here.
+// The vault-ctl group's first apply (IsFSMReady turning true) is not an edge
+// signalled here: a waiter that re-evaluates before its group has applied
+// waits for the next signal or its context deadline.
 func (o *Orchestrator) signalVaultReadyChange() {
 	if o.vaultReadySignal != nil {
 		o.vaultReadySignal.Notify()

@@ -562,18 +562,18 @@ func (o *Orchestrator) scheduleAfterVaultCtlRestore(vaultID glid.GLID) {
 }
 
 func (o *Orchestrator) runAfterVaultCtlRestore(vaultID glid.GLID) {
-	o.mu.RLock()
-	vault := o.vaults[vaultID]
+	// Snapshot install swaps in new vaultctlfsm sub-FSM objects: bind the
+	// vault and its instance to the replacements before reconciling.
+	if g := o.vaultCtlGroup(vaultID); g != nil {
+		o.bindVaultCtlGroup(vaultID, g)
+	}
+	o.mu.Lock()
 	var t *VaultInstance
-	if vault != nil {
+	if vault := o.vaults[vaultID]; vault != nil {
 		t = vault.Instance
 	}
-	o.mu.RUnlock()
-
-	// Snapshot install swaps in new vaultctlfsm sub-FSM objects — rebind
-	// reconciler + instance callbacks before reconciling. See
-	// rewireVaultInstanceAfterCtlRestore.
-	liveFSM := o.rewireVaultInstanceAfterCtlRestore(vaultID, t)
+	liveFSM := o.bindVaultInstanceToCtlLocked(vaultID, t)
+	o.mu.Unlock()
 	if t != nil && t.Reconciler != nil && liveFSM != nil {
 		t.Reconciler.ReconcileFromSnapshot(liveFSM)
 	}
