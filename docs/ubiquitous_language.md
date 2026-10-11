@@ -503,7 +503,16 @@ one segmented file set, one batch-writer goroutine.
 
 - **Placement manager** — the subsystem that owns placement decisions. Runs
   on the cluster-ctl Raft leader, reacts to node join/leave, vault create/delete,
-  and ingester changes.
+  and ingester changes. Only a live node takes a placement it does not already
+  hold; a node in any other state keeps what it holds, and so does a live node
+  whose heartbeat has lapsed.
+
+- **Working replica** — a placement member that counts toward the vault's
+  replication factor: its node is live or draining and its storage for the
+  vault is not under disk protect. A **degraded member** — on an unreachable,
+  maintenance or decommissioning node, or under disk protect — is retained but
+  not counted, and the placement manager backfills a follower on a live node
+  until it recovers.
 
 - **Removal gate** — a leader-side check that runs before a node removal
   commits, refusing removals that would cost data or redundancy. Two gates
