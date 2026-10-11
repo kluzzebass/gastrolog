@@ -11,7 +11,7 @@ import { AddFormCard } from "../AddFormCard";
 import { PreviewTable } from "./PreviewTable";
 import { ColumnPickers } from "./ColumnPickers";
 import { FileDropZone } from "../FileDropZone";
-import { type CSVLookupDraft, type LookupSectionProps, emptyCsvDraft, csvLookupEqual } from "./types";
+import { type CSVLookupDraft, type LookupSectionProps, emptyCsvDraft, csvLookupEqual, fileLookupIncompleteReason } from "./types";
 import type { CSVLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 import { useReadOnly } from "../../../hooks/useReadOnly";
 
@@ -203,7 +203,8 @@ export function CsvAddForm({
       onCancel={onCancel}
       onCreate={handleCreate}
       isPending={putConfig.isPending}
-      createDisabled={!draft.name.trim() && !namePlaceholder}
+      createDisabled={fileLookupIncompleteReason(draft.name, namePlaceholder, draft.fileId) !== undefined}
+      createDisabledReason={fileLookupIncompleteReason(draft.name, namePlaceholder, draft.fileId)}
       typeBadge="csv"
     >
       <FormField label="Name" description="Table name used in queries, e.g. | lookup assets ip" dark={dark}>

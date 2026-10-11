@@ -10,7 +10,7 @@ import { SettingsCard } from "../SettingsCard";
 import { AddFormCard } from "../AddFormCard";
 import { FileDropZone } from "../FileDropZone";
 import { ColumnPickers } from "./ColumnPickers";
-import { type JSONFileLookupDraft, type LookupSectionProps, emptyJsonDraft } from "./types";
+import { type JSONFileLookupDraft, type LookupSectionProps, emptyJsonDraft, fileLookupIncompleteReason } from "./types";
 import type { JSONFileLookupEntry, YAMLFileLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 import { PreviewTable, parseTabularResult } from "./PreviewTable";
 import { useReadOnly } from "../../../hooks/useReadOnly";
@@ -219,7 +219,8 @@ export function FileLookupAddForm({
       onCancel={onCancel}
       onCreate={handleCreate}
       isPending={putConfig.isPending}
-      createDisabled={!draft.name.trim() && !namePlaceholder}
+      createDisabled={fileLookupIncompleteReason(draft.name, namePlaceholder, draft.fileId) !== undefined}
+      createDisabledReason={fileLookupIncompleteReason(draft.name, namePlaceholder, draft.fileId)}
       typeBadge={spec.typeBadge}
     >
       <FormField label="Name" description="Table name used in queries, e.g. | lookup hosts" dark={dark}>

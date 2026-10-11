@@ -256,3 +256,13 @@ export function staticLookupEqual(draft: StaticLookupDraft, saved: StaticLookupE
   }
   return true;
 }
+
+/**
+ * Why a file-backed lookup (CSV, JSON, YAML) cannot be created yet: an entry
+ * with no file is dropped on save, so Create waits for one.
+ */
+export function fileLookupIncompleteReason(name: string, namePlaceholder: string | undefined, fileId: string): string | undefined {
+  if (!name.trim() && !namePlaceholder) return "Name is required";
+  if (!fileId) return "Select a file first";
+  return undefined;
+}
