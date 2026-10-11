@@ -332,6 +332,16 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
    */
   clusterAddress = "";
 
+  /**
+   * How long a received stats broadcast stays queryable on the responding
+   * node, as a Go duration string (a multiple of the broadcast interval). A
+   * node's stats older than this are no longer served, so a UI that still
+   * shows them is showing a copy the cluster itself has let go of.
+   *
+   * @generated from field: string stats_ttl = 9;
+   */
+  statsTtl = "";
+
   constructor(data?: PartialMessage<GetClusterStatusResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -347,6 +357,7 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
     { no: 5, name: "local_stats", kind: "message", T: RaftStats },
     { no: 6, name: "local_node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 8, name: "cluster_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 9, name: "stats_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetClusterStatusResponse {
@@ -651,6 +662,17 @@ export class ClusterNode extends Message<ClusterNode> {
    */
   lastSeen?: Timestamp;
 
+  /**
+   * Instant the responding node received the broadcast that `stats` carries
+   * (the sampling instant itself for the responding node's own stats). Unset
+   * exactly when `stats` is unset. Every stats surface shows its age from
+   * this, so the operator reads a broadcast value as "as of then", never as
+   * a live reading.
+   *
+   * @generated from field: google.protobuf.Timestamp stats_received_at = 13;
+   */
+  statsReceivedAt?: Timestamp;
+
   constructor(data?: PartialMessage<ClusterNode>) {
     super();
     proto3.util.initPartial(data, this);
@@ -671,6 +693,7 @@ export class ClusterNode extends Message<ClusterNode> {
     { no: 10, name: "state", kind: "enum", T: proto3.getEnumType(NodeState) },
     { no: 11, name: "state_since", kind: "message", T: Timestamp },
     { no: 12, name: "last_seen", kind: "message", T: Timestamp },
+    { no: 13, name: "stats_received_at", kind: "message", T: Timestamp },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ClusterNode {

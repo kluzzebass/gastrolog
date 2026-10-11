@@ -264,8 +264,11 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
   );
 }
 
-function IngesterNodeBadge({ nodeIds, allNodes, mode, dark }: Readonly<{ nodeIds: Uint8Array[]; allNodes: boolean; mode: IngesterMode; dark: boolean }>) {
-  if (allNodes || mode === IngesterMode.PASSIVE) return <Badge variant="info" dark={dark}>all nodes</Badge>;
+// IngesterNodeBadge reads the ingester's saved eligibility config, exactly
+// as the dispatcher evaluates it: all nodes when `allNodes` is set or no
+// node is pinned, otherwise the pin list. The ingester's mode plays no part.
+export function IngesterNodeBadge({ nodeIds, allNodes, dark }: Readonly<{ nodeIds: Uint8Array[]; allNodes: boolean; dark: boolean }>) {
+  if (allNodes || nodeIds.length === 0) return <Badge variant="info" dark={dark}>all nodes</Badge>;
   if (nodeIds.length > 1) return <Badge variant="muted" dark={dark}>{String(nodeIds.length)} nodes</Badge>;
   if (nodeIds.length === 1) return <NodeBadge nodeId={idFromBytes(nodeIds[0]!)} dark={dark} />; // NOSONAR — length check guards access
   return null;
@@ -323,7 +326,7 @@ function IngesterCard({
       headerRight={
         <span className="flex items-center gap-2">
           <Badge variant="muted" dark={dark}>{mode === IngesterMode.PASSIVE ? "listener" : "active"}</Badge>
-          <IngesterNodeBadge nodeIds={ing.nodeIds} allNodes={ing.allNodes} mode={mode} dark={dark} />
+          <IngesterNodeBadge nodeIds={ing.nodeIds} allNodes={ing.allNodes} dark={dark} />
           {!ing.enabled && (
             <Badge variant="muted" dark={dark}>disabled</Badge>
           )}

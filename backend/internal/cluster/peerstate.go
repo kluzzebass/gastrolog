@@ -228,6 +228,24 @@ func (p *PeerState) Get(senderID string) *gastrologv1.NodeStats {
 	return e.stats
 }
 
+// StatsReceivedAt returns when the stats Get returns for senderID arrived, or
+// the zero time when Get would return nil — the two agree on the TTL so a
+// caller never gets an age for stats it is not shown.
+func (p *PeerState) StatsReceivedAt(senderID string) time.Time {
+	p.mu.RLock()
+	e, ok := p.entries[senderID]
+	p.mu.RUnlock()
+	if !ok || time.Since(e.received) > p.ttl {
+		return time.Time{}
+	}
+	return e.received
+}
+
+// StatsTTL is how long a received broadcast stays queryable through Get.
+func (p *PeerState) StatsTTL() time.Duration {
+	return p.ttl
+}
+
 // FindVaultStats scans all live peers for a VaultStats matching the given ID.
 // Returns nil if no peer reports stats for this vault.
 func (p *PeerState) FindVaultStats(vaultID string) *gastrologv1.VaultStats {

@@ -97,7 +97,68 @@ function chunkSizeCellTitle(chunk: ChunkMeta): string | undefined {
   if (diskBytes > 0) {
     return `${formatBytes(Number(chunk.bytes))} → ${formatBytes(diskBytes)} on disk`;
   }
-  return undefined;
+  return "logical record bytes — no on-disk size recorded for this chunk";
+}
+
+/** Which quantity the chunk list's Size column shows for one row. */
+export type ChunkSizeKind = "disk" | "cloud" | "logical";
+
+// chunkSizeCell names the currency of the number it returns: the local
+// on-disk claim when there is one; the cloud object's size for a
+// cloud-backed chunk with no local copy; the logical record bytes when the
+// chunk records no on-disk size at all. The column labels the two
+// non-disk kinds so three currencies never share one unmarked number.
+export function chunkSizeCell(chunk: ChunkMeta): { bytes: number; kind: ChunkSizeKind } {
+  const diskBytes = Number(chunk.diskBytes);
+  if (chunk.cloudBacked && diskBytes === 0) {
+    return { bytes: Number(chunk.cloudBytes), kind: "cloud" };
+  }
+  if (diskBytes > 0) {
+    return { bytes: diskBytes, kind: "disk" };
+  }
+  return { bytes: Number(chunk.bytes), kind: "logical" };
+}
+
+// VaultHoldingsBadges is the card header's chunk / record / size summary.
+// The chunk list is a fan-out to every node hosting the vault; until it
+// returns there is no count to show, and a zero would be a false one.
+export function VaultHoldingsBadges({
+  chunks,
+  dark,
+}: Readonly<{ chunks: readonly ChunkMeta[] | undefined; dark: boolean }>) {
+  if (chunks === undefined) {
+    return (
+      <Badge variant="muted" dark={dark} title="chunk list not yet collected from the hosting nodes">
+        loading chunks…
+      </Badge>
+    );
+  }
+  const chunkCount = chunks.length;
+  const recordCount = chunks.reduce((sum, c) => sum + Number(c.recordCount), 0);
+  // Summed per-chunk LOCAL disk claim — the quantity the max-size bound
+  // measures. A cloud-backed chunk with no local copy contributes 0: the
+  // object is in the cloud store, not on disk here.
+  const sizeBytes = chunks.reduce((sum, c) => sum + chunkDiskClaimBytes(c), 0);
+  return (
+    <>
+      <Badge variant="muted" dark={dark}>
+        {chunkCount.toLocaleString()} chunks
+      </Badge>
+      <Badge variant="muted" dark={dark}>
+        {recordCount.toLocaleString()} records
+      </Badge>
+      <Badge
+        variant="muted"
+        dark={dark}
+        title="sum of each chunk's local on-disk claim as reported by the hosting nodes; cloud-backed chunks with no local copy count 0"
+      >
+        <LiveValue dark={dark} tone="inherit" reserve={BYTES_MAX_CHARS}>
+          {formatBytes(sizeBytes)}
+        </LiveValue>
+        {" on disk"}
+      </Badge>
+    </>
+  );
 }
 
 // vaultAdmissionCauseLabels maps the backend's admission-refusal cause enum
@@ -165,17 +226,8 @@ export function VaultCard({
   // ListVaults stats rely on periodic peer broadcasts and flicker.
   const { data: chunks } = useChunks(vault.id);
   const chunksContribution = useChunksContribution(vault.id);
-  const chunkCount = chunks?.length ?? 0;
-  const recordCount = (chunks ?? []).reduce((sum, c) => sum + Number(c.recordCount), 0);
-  // Vault size = summed per-chunk local disk claim — the same quantity the
-  // max-size bound measures. An evicted cloud-backed chunk contributes 0,
-  // not its logical bytes (the object is still in the cloud store, not on
-  // this node).
-  const sizeBytes = (chunks ?? []).reduce(
-    (sum, c) => sum + chunkDiskClaimBytes(c),
-    0,
-  );
   const refusingCauses = vaultRefusingCauseLabels(vault.admissionRefused);
+  const backlogAtBudget = vault.admissionRefused.some((r) => r.cause === VaultAdmissionCause.BACKLOG_BUDGET);
 
   return (
     <ExpandableCard
@@ -197,17 +249,7 @@ export function VaultCard({
             </Badge>
           )}
           <DegradedPeersBadge report={chunksContribution} dark={dark} />
-          <Badge variant="muted" dark={dark}>
-            {chunkCount.toLocaleString()} chunks
-          </Badge>
-          <Badge variant="muted" dark={dark}>
-            {recordCount.toLocaleString()} records
-          </Badge>
-          <Badge variant="muted" dark={dark}>
-            <LiveValue dark={dark} tone="inherit" reserve={BYTES_MAX_CHARS}>
-              {formatBytes(sizeBytes)}
-            </LiveValue>
-          </Badge>
+          <VaultHoldingsBadges chunks={chunks} dark={dark} />
           {onOpenSettings && (
             <CrossLinkBadge dark={dark} title="Open in Settings" onClick={onOpenSettings}>
               <CogIcon className="w-3 h-3" />
@@ -221,7 +263,7 @@ export function VaultCard({
         <VaultLeaderSummary vaultId={vault.id} vaultTypeLabel={vault.typeLabel} dark={dark} />
         <VaultThroughputSection vaultId={vault.id} dark={dark} />
         <VaultStageCountersSection vaultId={vault.id} dark={dark} />
-        <PipelineBacklogView vaultId={vault.id} dark={dark} />
+        <PipelineBacklogView vaultId={vault.id} backlogAtBudget={backlogAtBudget} dark={dark} />
         <ChunkList vaultId={vault.id} dark={dark} />
       </div>
     </ExpandableCard>
@@ -1054,19 +1096,22 @@ function ChunkRow({
             {formatExactCount(chunk.recordCount)}
           </LiveValue>
         </td>
-        <td className="px-4 py-2 text-right" title={chunkSizeCellTitle(chunk)}>
-          {chunk.cloudBacked && Number(chunk.diskBytes) === 0 && Number(chunk.cloudBytes) > 0 ? (
-            // Cloud-only: show the GLCB's cloud object size, italic to mark
-            // that no local copy backs the number. Display only — the local
-            // disk claim (and the vault size badge) still counts it as zero.
-            <LiveValue dark={dark} tone="muted" reserve={BYTES_MAX_CHARS} className="italic">
-              {formatBytes(Number(chunk.cloudBytes))}
-            </LiveValue>
-          ) : (
-            <LiveValue dark={dark} tone="muted" reserve={BYTES_MAX_CHARS}>
-              {formatBytes(chunkDiskClaimBytes(chunk))}
-            </LiveValue>
-          )}
+        <td className="px-4 py-2 text-right whitespace-nowrap" title={chunkSizeCellTitle(chunk)}>
+          {(() => {
+            const size = chunkSizeCell(chunk);
+            return (
+              <>
+                {size.kind !== "disk" && (
+                  <span className={`mr-1.5 text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>
+                    {size.kind}
+                  </span>
+                )}
+                <LiveValue dark={dark} tone="muted" reserve={BYTES_MAX_CHARS}>
+                  {formatBytes(size.bytes)}
+                </LiveValue>
+              </>
+            );
+          })()}
         </td>
       </tr>
       {isExpanded && (

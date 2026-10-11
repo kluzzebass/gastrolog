@@ -12,7 +12,7 @@ import { ExpandableCard } from "./ExpandableCard";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { extractMessage } from "../../utils/errors";
 import type { GetSettingsResponse } from "../../api/gen/gastrolog/v1/system_pb";
-import { useReadOnly } from "../../hooks/useReadOnly";
+import { ReadOnlyProvider, useReadOnly } from "../../hooks/useReadOnly";
 
 // ── Form reducer ─────────────────────────────────────────────────────
 
@@ -137,6 +137,18 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
   const certs = certData?.certificates ?? [];
   const certIdSet = new Set(certs.map((c) => encode(c.id)));
 
+  // The header badge reads what is saved, never the draft: a draft is a
+  // proposal until Save, and Save forces TLS off when the saved certificate
+  // is gone — that is said here, not discovered after the fact.
+  const savedTlsEnabled = data?.tls?.enabled ?? false;
+  const savedTlsCertMissing =
+    savedTlsEnabled && certData !== undefined && !certIdSet.has(data?.tls?.defaultCert ?? "");
+
+  // Under --no-auth the authentication and password-policy settings are
+  // not consulted; a form that accepts edits into them would be saving
+  // into a mode that ignores them.
+  const authReadOnly = readOnly || !!noAuth;
+
   if (data && !s.initialized) {
     dispatch({ type: "init", data });
   }
@@ -245,6 +257,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
             monoTitle={false}
             typeBadge={noAuth ? noAuthBadge : undefined}
           >
+            <ReadOnlyProvider readOnly={authReadOnly}>
             <div className={`flex flex-col gap-4 ${noAuth ? "opacity-50" : ""}`} aria-disabled={noAuth || undefined}>
               <FormField
                 label="Token Duration"
@@ -342,6 +355,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                 )}
               </FormField>
             </div>
+            </ReadOnlyProvider>
           </ExpandableCard>
 
           <ExpandableCard
@@ -353,6 +367,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
             monoTitle={false}
             typeBadge={noAuth ? noAuthBadge : undefined}
           >
+            <ReadOnlyProvider readOnly={authReadOnly}>
             <div className={`flex flex-col gap-4 ${noAuth ? "opacity-50" : ""}`} aria-disabled={noAuth || undefined}>
               <div className="flex items-baseline gap-4">
                 <FormField
@@ -391,6 +406,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                 <Checkbox checked={s.forbidAnimalNoise} onChange={set("forbidAnimalNoise")} label="Forbid animal noises (moo, woof, meow, ...)" dark={dark} />
               </div>
             </div>
+            </ReadOnlyProvider>
           </ExpandableCard>
 
           <ExpandableCard
@@ -479,10 +495,15 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
             expanded={isExpanded("tls")}
             onToggle={() => toggle("tls")}
             monoTitle={false}
-            typeBadge={s.tlsEnabled ? "enabled" : undefined}
-            typeBadgeAccent={s.tlsEnabled}
+            typeBadge={savedTlsEnabled ? { text: "enabled", title: "saved configuration serves HTTPS", helpRef: "service-settings#tls-configuration" } : undefined}
+            typeBadgeAccent={savedTlsEnabled}
           >
             <div className="flex flex-col gap-4">
+              {savedTlsCertMissing && (
+                <p className="text-[0.8em] text-severity-warn">
+                  The saved default certificate no longer exists. HTTPS cannot be served from it, and the next save turns TLS off.
+                </p>
+              )}
               <FormField
                 label="Default certificate"
                 description="Certificate used for HTTPS. Set in Certificates tab."

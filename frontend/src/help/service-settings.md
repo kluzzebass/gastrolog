@@ -33,3 +33,5 @@ When a [certificate](help:certificates) is configured as the default, additional
 |---------|-------------|
 | **TLS Enabled** | Enable the HTTPS listener (defaults to API port + 1, e.g. `:4565`) |
 | **HTTP to HTTPS Redirect** | Redirect plain HTTP requests to the HTTPS port |
+
+The **enabled** badge on the TLS card reflects the saved configuration, not unsaved edits. If the saved default certificate has since been deleted, the card says so: HTTPS cannot be served from it, and the next save turns TLS off.

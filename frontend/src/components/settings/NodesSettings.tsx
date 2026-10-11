@@ -4,6 +4,8 @@ import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { useConfig, usePutNodeConfig } from "../../api/hooks/useSystem";
 import { useSettings } from "../../api/hooks/useSettings";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
+import { useNodeRegistry } from "../../api/hooks/useNodes";
+import type { EntityID } from "../../api/model/id";
 import { useSetNodeSuffrage } from "../../api/hooks/useSetNodeSuffrage";
 import { useCreateJoinToken } from "../../api/hooks/useCreateJoinToken";
 import { useJoinCluster } from "../../api/hooks/useJoinCluster";
@@ -60,6 +62,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { data: configData, isLoading: configLoading } = useConfig();
   const { data: settingsData, isLoading: settingsLoading } = useSettings();
   const { data: clusterData } = useClusterStatus();
+  const registry = useNodeRegistry();
   const putNodeConfig = usePutNodeConfig();
   const setNodeSuffrage = useSetNodeSuffrage();
   const removeNode = useRemoveNode();
@@ -164,7 +167,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                   {clusterEnabled && node.suffrage === ClusterNodeSuffrage.NONVOTER && (
                     <Badge variant="muted" dark={dark} title="Nonvoter — replicates the log but has no vote and cannot become leader" helpRef={NODE_ROLES_HELP_REF}>nonvoter</Badge>
                   )}
-                  {isLocal && (
+                  {registry.isLocal(node.id as EntityID) && (
                     <Badge variant="muted" dark={dark}>this node</Badge>
                   )}
                 </div>
@@ -384,8 +387,10 @@ function JoinInfoCard({ dark, clusterAddress }: Readonly<{ dark: boolean; cluste
   const displayToken = minted
     ? (showToken ? minted.token : middleTruncate(minted.token, 13, 8, 4))
     : "";
+  // The new node's own cluster listen address is its own choice; the
+  // command leaves it at the server default rather than dictate a port.
   const joinCmd = minted
-    ? `gastrolog server --join-addr ${clusterAddress || "<cluster-addr>"} --join-token ${minted.token} --cluster-addr :4575`
+    ? `gastrolog server --join-addr ${clusterAddress || "<cluster-addr>"} --join-token ${minted.token}`
     : "";
 
   return (

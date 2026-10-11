@@ -4,7 +4,7 @@ The Vaults tab shows each configured [vault](help:storage) with its [chunks](hel
 
 ## Vault Overview
 
-Each vault lists its name, type, enabled/disabled status, total chunk count, and record count. Expand a vault to see its chunk timeline. The list is flat and sorted by name, whichever [node](help:clustering-nodes) you are connected to; where a vault's copies live is in its **Topology** section.
+Each vault lists its name, type, enabled/disabled status, chunk count, record count, and on-disk size. The counts come from the chunk list, collected from every node hosting the vault; until that collection returns, the header shows **loading chunks…** rather than a count. The size is the sum of each chunk's local on-disk claim as the hosting nodes report it — a cloud-backed chunk with no local copy counts 0, so a vault largely in the cloud reads small here by design. Expand a vault to see its chunk timeline. The list is flat and sorted by name, whichever [node](help:clustering-nodes) you are connected to; where a vault's copies live is in its **Topology** section.
 
 ## Refusal
 
@@ -12,7 +12,7 @@ A **refusing** badge appears on the header when the vault is currently refusing 
 
 ## Chunks
 
-Each chunk shows its ID, time range, per-node seal pips, record count, and size. The active chunk is the one currently accepting writes — all others are sealed and immutable. Chunks are sealed according to the vault's [rotation policy](help:policy-rotation).
+Each chunk shows its ID, time range, per-node seal pips, record count, and size. The Size column is the chunk's on-disk size; a value marked **cloud** is the cloud object's size for a cloud-backed chunk with no local copy, and one marked **logical** is the record bytes of a chunk that records no on-disk size. The active chunk is the one currently accepting writes — all others are sealed and immutable. Chunks are sealed according to the vault's [rotation policy](help:policy-rotation).
 
 ## Seal Pips
 

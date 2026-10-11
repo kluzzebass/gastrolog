@@ -39,10 +39,44 @@ function mergeSparks(a: readonly number[], b: readonly number[]): number[] {
   return out;
 }
 
-function addRow(map: Map<string, MergedPeerLane>, row: PeerConnStat): void {
+interface OrientedTraffic {
+  sent: bigint;
+  received: bigint;
+  txPerSec: number;
+  rxPerSec: number;
+  txSpark: number[];
+  rxSpark: number[];
+}
+
+// A row is reported by the node that owns the connection: bytesSent/tx are
+// that node's outbound. A row from the peer is mirrored so every lane is
+// oriented from viewNode's side — the peer's outbound is viewNode's inbound.
+function orientRow(row: PeerConnStat, mirrored: boolean): OrientedTraffic {
+  if (mirrored) {
+    return {
+      sent: row.bytesReceived,
+      received: row.bytesSent,
+      txPerSec: row.rxBytesPerSec,
+      rxPerSec: row.txBytesPerSec,
+      txSpark: row.rxSpark,
+      rxSpark: row.txSpark,
+    };
+  }
+  return {
+    sent: row.bytesSent,
+    received: row.bytesReceived,
+    txPerSec: row.txBytesPerSec,
+    rxPerSec: row.rxBytesPerSec,
+    txSpark: row.txSpark,
+    rxSpark: row.rxSpark,
+  };
+}
+
+function addRow(map: Map<string, MergedPeerLane>, row: PeerConnStat, mirrored: boolean): void {
   if (row.lane === "inbound") {
     return;
   }
+  const { sent, received, txPerSec, rxPerSec, txSpark, rxSpark } = orientRow(row, mirrored);
   const key = laneMergeKey(row);
   const existing = map.get(key);
   const purposes = new Set(existing?.purposes);
@@ -64,12 +98,12 @@ function addRow(map: Map<string, MergedPeerLane>, row: PeerConnStat): void {
     groupId: row.lane === "raft" ? row.groupId : "",
     purposes: [...purposes].sort(),
     purposesWindow: [...purposesWindow].sort(),
-    bytesSent: (existing?.bytesSent ?? 0) + Number(row.bytesSent),
-    bytesReceived: (existing?.bytesReceived ?? 0) + Number(row.bytesReceived),
-    txBytesPerSec: (existing?.txBytesPerSec ?? 0) + row.txBytesPerSec,
-    rxBytesPerSec: (existing?.rxBytesPerSec ?? 0) + row.rxBytesPerSec,
-    txSpark: mergeSparks(existing?.txSpark ?? [], row.txSpark),
-    rxSpark: mergeSparks(existing?.rxSpark ?? [], row.rxSpark),
+    bytesSent: (existing?.bytesSent ?? 0) + Number(sent),
+    bytesReceived: (existing?.bytesReceived ?? 0) + Number(received),
+    txBytesPerSec: (existing?.txBytesPerSec ?? 0) + txPerSec,
+    rxBytesPerSec: (existing?.rxBytesPerSec ?? 0) + rxPerSec,
+    txSpark: mergeSparks(existing?.txSpark ?? [], txSpark),
+    rxSpark: mergeSparks(existing?.rxSpark ?? [], rxSpark),
   });
 }
 
@@ -170,7 +204,11 @@ export function mergedPurposesWindow(lane: MergedPeerLane): ReadonlySet<string> 
 
 type PeerConnStatsView = Pick<NodeStats, "peerConnections">;
 
-/** Merge viewNode→peer and peer→viewNode peer_connections into link lanes. */
+/**
+ * Merge viewNode→peer and peer→viewNode peer_connections into link lanes,
+ * every lane oriented from viewNode: Tx is what viewNode sends on the link,
+ * Rx what it receives, whichever node owns the connection.
+ */
 export function mergePeerTraffic(
   viewNodeId: EntityID,
   viewStats: PeerConnStatsView | null | undefined,
@@ -183,13 +221,13 @@ export function mergePeerTraffic(
     if (asEntityID(row.peer) !== peerId) {
       continue;
     }
-    addRow(map, row);
+    addRow(map, row, false);
   }
   for (const row of peerStats?.peerConnections ?? []) {
     if (asEntityID(row.peer) !== viewNodeId) {
       continue;
     }
-    addRow(map, row);
+    addRow(map, row, true);
   }
 
   if (map.size === 0) {

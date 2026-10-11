@@ -37,5 +37,7 @@ MMDB lookups with no uploaded file will automatically use the auto-downloaded da
 
 ## Used By
 
+A file's card lists the lookups whose saved configuration references one of its versions — **used by: lookup geoip**. The filename plays no part: a City database no lookup has been pointed at shows no usage, and a lookup may read a file of any name.
+
 - **Lookups**: MMDB files for `| lookup geoip` and `| lookup asn` can be uploaded here or via the convenience drop zone in [Lookups settings](settings:lookups).
 - **JSON File Lookups**: JSON data files referenced by JSON file lookups.

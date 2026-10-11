@@ -12,9 +12,11 @@ When running in cluster mode, the Nodes tab shows a **cluster info card** with:
 
 - **Cluster Address** — the address other nodes use to join (e.g., `10.0.0.1:4566`)
 - **Join Token** — the enrollment token new nodes need to join
-- **Join Command** — a ready-to-copy CLI command for starting a new node
+- **Join Command** — a ready-to-copy CLI command for starting a new node. It names the cluster address and the token and nothing else: the new node's own cluster listen address stays at the server default (`:4566`); add `--cluster-addr` yourself if that node must listen elsewhere.
 
 The join token is masked by default. Click the eye icon to reveal it, or use the copy buttons to copy it to your clipboard.
+
+The **this node** badge marks the node answering your requests. It is shown only while every response in this session has come from the same node; behind a load balancer that spreads requests across nodes, no node is marked, because none is "this" one.
 
 ## Joining a Cluster
 

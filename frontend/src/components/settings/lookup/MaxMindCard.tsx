@@ -88,7 +88,8 @@ export function MaxMindCard({
       onDelete={handleDelete}
       deleteLabel="Disable"
       status={
-        autoDownload ? (
+        // Saved state, not the draft: the checkbox is a proposal until Save.
+        savedMaxmind?.autoDownload ? (
           <span className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>enabled</span>
         ) : undefined
       }

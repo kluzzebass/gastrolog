@@ -42,3 +42,5 @@ A configurable **minimum password length** is enforced for all password changes 
 ## No-Auth Mode
 
 Starting the server with `--no-auth` disables all authentication. Every request is treated as an implicit admin user. The login page is skipped, and user management is hidden from settings. This is intended for trusted networks or local development where authentication is unnecessary overhead.
+
+The Authentication and Password Policy cards are read-only in this mode: their settings are not consulted while `--no-auth` is in effect, so there is nothing to edit into. They show the saved values; the JWT secret cannot be regenerated.

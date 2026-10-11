@@ -15,6 +15,7 @@ import { JobCard, ScheduledJobsTable } from "./JobCard";
 import { HelpButton } from "../HelpButton";
 import { SystemStatsView } from "./SystemStatsView";
 import { PeerBytesSection } from "./PeerBytesSection";
+import { StatsFreshnessCue } from "./StatsFreshness";
 import { Badge } from "../Badge";
 
 interface NodeDetailPaneProps {
@@ -64,6 +65,8 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       <Section title="System" dark={dark} helpRef="inspector-system">
         <SystemStatsView
           nodeStats={nodeInfo?.stats ?? null}
+          receivedAt={node?.statsReceivedAt}
+          ttlMs={registry.statsTtlMs}
           dark={dark}
         />
       </Section>
@@ -136,7 +139,12 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       </Section>
 
       {/* Network — per-link traffic (both peers' lanes merged). */}
-      <Section title="Network" dark={dark} helpRef="inspector-system#network">
+      <Section
+        title="Network"
+        dark={dark}
+        helpRef="inspector-system#network"
+        trailing={<StatsFreshnessCue receivedAt={node?.statsReceivedAt} ttlMs={registry.statsTtlMs} dark={dark} />}
+      >
         <PeerBytesSection
           viewNodeId={nodeIdTyped}
           nodeStats={nodeInfo?.stats ?? null}
@@ -184,12 +192,14 @@ function Section({
   dark,
   count,
   helpRef,
+  trailing,
   children,
 }: Readonly<{
   title: string;
   dark: boolean;
   count?: number;
   helpRef?: string;
+  trailing?: React.ReactNode;
   children: React.ReactNode;
 }>) {
   const c = useThemeClass(dark);
@@ -205,6 +215,7 @@ function Section({
         {count !== undefined && count > 0 && (
           <Badge variant="muted" dark={dark}>{count}</Badge>
         )}
+        {trailing && <span className="ml-auto">{trailing}</span>}
       </div>
       {children}
     </section>
