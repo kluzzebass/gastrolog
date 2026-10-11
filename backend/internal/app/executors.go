@@ -243,27 +243,18 @@ func forwardSearchAfterParse(
 	q query.Query,
 	pipeline *querylang.Pipeline,
 	resumeTokenData []byte,
-	includeHistogram bool,
-) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
-	// Filtered forward searches already pay a full lazy-prime record scan in
-	// Search below. Skip the histogram pre-pass (timechartScanPath → Search)
-	// which would duplicate that work and spike RSS on scatterbox nodes.
-	// Unfiltered legacy full-vault forwards keep the fast binary-search path.
-	// One ledger for this node's share of the query: histogram, pipeline,
-	// and scan all charge it.
+) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, error) {
+	// One ledger for this node's share of the query: pipeline and scan both
+	// charge it.
 	q = q.WithBudget(eng.NewBudget())
-	var histogram []*gastrologv1.HistogramBucket
-	if includeHistogram {
-		histogram = server.HistogramToProto(eng.ComputeSearchPageHistogram(ctx, q, 50))
-	}
 
 	if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
 		result, err := eng.RunPipeline(ctx, q, pipeline)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, nil, err
 		}
 		if result.Table != nil {
-			return nil, nil, server.TableResultToBasicProto(result.Table), histogram, nil
+			return nil, nil, server.TableResultToBasicProto(result.Table), nil
 		}
 		records := result.Records
 		return func(yield func(chunk.Record, error) bool) {
@@ -272,7 +263,7 @@ func forwardSearchAfterParse(
 					return
 				}
 			}
-		}, nil, nil, histogram, nil
+		}, nil, nil, nil
 	}
 
 	var resume *query.ResumeToken
@@ -280,7 +271,7 @@ func forwardSearchAfterParse(
 		var err error
 		resume, err = server.ProtoToLocalResumeToken(resumeTokenData)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("invalid resume token: %w", err)
+			return nil, nil, nil, fmt.Errorf("invalid resume token: %w", err)
 		}
 	}
 	searchIter, getToken := eng.Search(ctx, q, resume)
@@ -291,7 +282,7 @@ func forwardSearchAfterParse(
 		}
 		return server.ResumeTokenToProto(token)
 	}
-	return searchIter, getTokenBytes, nil, histogram, nil
+	return searchIter, getTokenBytes, nil, nil
 }
 
 // newSearchExecutor creates a cluster.SearchExecutor that runs local vault
@@ -299,6 +290,7 @@ func forwardSearchAfterParse(
 // contains a pipeline (stats, timechart), runs RunPipeline and returns the
 // TableResult instead of individual records. For regular searches, returns
 // the iterator directly — the streaming handler sends records as it iterates.
+// A histogram_only request returns the vault's page histogram alone.
 func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 	return func(ctx context.Context, req *gastrologv1.ForwardSearchRequest) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
 		vaultID := glid.FromBytes(req.GetVaultId())
@@ -319,15 +311,17 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 			return nil, nil, nil, nil, nil
 		}
 
-		includeHist := server.ForwardSearchIncludesHistogram(q)
-		it, getToken, table, hist, err := forwardSearchAfterParse(ctx, eng, q, pipeline, req.GetResumeToken(), includeHist)
+		if req.GetHistogramOnly() {
+			return nil, nil, nil, server.ForwardSearchHistogram(ctx, eng, q), nil
+		}
+		it, getToken, table, err := forwardSearchAfterParse(ctx, eng, q, pipeline, req.GetResumeToken())
 		if err != nil {
 			server.NoteSearchOutcome(o.Alerts(), err, nil)
 			return nil, nil, nil, nil, err
 		}
 		// This node's copy of the vault is the one being read, so its alarm
 		// is raised or cleared here, where the read outcome is known.
-		return server.ObserveSearchIterator(o.Alerts(), vaultID, it), getToken, table, hist, nil
+		return server.ObserveSearchIterator(o.Alerts(), vaultID, it), getToken, table, nil, nil
 	}
 }
 

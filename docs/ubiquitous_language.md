@@ -364,8 +364,9 @@ Reading records back, filtering, aggregating, and rendering them.
   cross-chunk and cross-node paths. Terminates with `chunk.ErrNoMoreRecords`.
 
 - **collectRemote** — the orchestrator entry point that fans a search out to
-  peer nodes and merges results. Used by Search, Histogram, Explain,
-  GetContext, GetFields.
+  peer nodes and merges results. Used by Search, Explain, GetContext,
+  GetFields. Its histogram counterpart, `collectRemoteHistogram`, asks each
+  remote vault's leader for its page histogram beside the record stream.
 
 ---
 

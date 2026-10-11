@@ -138,7 +138,7 @@ func (s *QueryServer) searchContext(
 	// as the local scan and any other materializing work.
 	budget := eng.NewBudget()
 	localIter, _ := eng.Search(ctx, q.WithBudget(budget), nil)
-	remoteIter, _, _ := s.collectRemote(ctx, q)
+	remoteIter, _ := s.collectRemote(ctx, q)
 
 	reverse := q.Reverse()
 	isBefore := func(a, b time.Time) bool {
