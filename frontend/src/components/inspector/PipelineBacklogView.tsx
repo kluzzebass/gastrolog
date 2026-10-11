@@ -15,6 +15,12 @@ export const PIPELINE_BACKLOG_EMPTY_TEXT = "The connected node reported no pipel
 
 interface PipelineBacklogViewProps {
   vaultId: string;
+  /**
+   * The responding node's admission gate reports the backlog at its budget.
+   * The budget is the backend's (Settings › Pipeline › Backlog Budget); the
+   * browser holds no threshold of its own.
+   */
+  backlogAtBudget: boolean;
   dark: boolean;
 }
 
@@ -192,7 +198,7 @@ interface NodeRow {
   preHeadBytes: bigint;
 }
 
-export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogViewProps>) {
+export function PipelineBacklogView({ vaultId, backlogAtBudget, dark }: Readonly<PipelineBacklogViewProps>) {
   const c = useThemeClass(dark);
   const { data: backlog, isLoading } = usePipelineBacklog(vaultId);
   const contribution = usePipelineBacklogContribution(vaultId);
@@ -227,7 +233,7 @@ export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogV
 
   const eligible = backlog.eligibleSegments;
   const registry = backlog.registrySegments;
-  const backlogWarn = eligible > 100;
+  const backlogWarn = backlogAtBudget;
 
   const oldestEligible = backlog.oldestEligibleLastIngest
     ? formatDateTimeShort(instantToDate(protoToInstant(backlog.oldestEligibleLastIngest)))

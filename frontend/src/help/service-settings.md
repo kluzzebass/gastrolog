@@ -35,3 +35,5 @@ The TLS options are always on screen; each is disabled, with the reason beside i
 | **Enable TLS (HTTPS)** | Enable the HTTPS listener | A default certificate |
 | **HTTPS port** | Port for the HTTPS listener; empty means API port + 1, e.g. `:4565` | TLS enabled |
 | **Redirect HTTP to HTTPS** | Redirect plain HTTP requests to the HTTPS port | TLS enabled |
+
+The **enabled** badge on the TLS card reflects the saved configuration, not unsaved edits. If the saved default certificate has since been deleted, the card says so: HTTPS cannot be served from it, and the next save turns TLS off.

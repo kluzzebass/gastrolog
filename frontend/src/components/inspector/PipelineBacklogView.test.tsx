@@ -61,7 +61,7 @@ function backlogFixture(): VaultPipelineBacklog {
   });
 }
 
-function renderPanel(backlog: VaultPipelineBacklog | null) {
+function renderPanel(backlog: VaultPipelineBacklog | null, backlogAtBudget = false) {
   const qc = createTestQueryClient();
   qc.setQueryData(["settings"], { nodeId: NODE_A });
   qc.setQueryData(["system"], {
@@ -82,7 +82,7 @@ function renderPanel(backlog: VaultPipelineBacklog | null) {
   const result = render(
     <QueryClientProvider client={qc}>
       <HelpProvider onOpen={openHelp}>
-        <PipelineBacklogView vaultId={vaultId} dark />
+        <PipelineBacklogView vaultId={vaultId} backlogAtBudget={backlogAtBudget} dark />
       </HelpProvider>
     </QueryClientProvider>,
   );
@@ -162,5 +162,29 @@ describe("PipelineBacklogView empty state", () => {
   test("with a backlog the empty-state text is absent", () => {
     const { queryByText } = renderPanel(backlogFixture());
     expect(queryByText(PIPELINE_BACKLOG_EMPTY_TEXT)).toBeNull();
+  });
+});
+
+// The warn tone is the backend's verdict: the responding node's admission
+// gate reports the backlog at the configured budget. The browser holds no
+// segment-count threshold of its own, so a large registry with the budget
+// not reached is calm, and a refused vault warns at any count.
+describe("PipelineBacklogView warn tone", () => {
+  test("many eligible segments without the backend's verdict: no warn tone", () => {
+    const { container } = renderPanel(
+      new VaultPipelineBacklog({ vaultId: VAULT, eligibleSegments: 5000, registrySegments: 5000 }),
+      false,
+    );
+    expect(container.textContent).toContain("Pipeline backlog");
+    expect(container.querySelector(".text-severity-warn")).toBeNull();
+  });
+
+  test("the backend reports the backlog at budget: warn tone at any count", () => {
+    const { container, getByText } = renderPanel(
+      new VaultPipelineBacklog({ vaultId: VAULT, eligibleSegments: 3, registrySegments: 3 }),
+      true,
+    );
+    expect(getByText("3 / 3")).toBeTruthy();
+    expect(container.querySelector(".text-severity-warn")).not.toBeNull();
   });
 });

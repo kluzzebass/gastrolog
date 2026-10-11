@@ -71,7 +71,7 @@ near capacity while its durable-commit rate lags its append rate is
 experiencing write-path backpressure (usually fsync pressure on that node's
 disk).
 
-Peer node data is refreshed at the [broadcast interval](help:clustering-broadcasting) (default 5 seconds). The stats carry no freshness marker; a node the cluster has not heard from shows an **offline** badge in the node list, with how long it has been silent.
+Peer node data is refreshed at the [broadcast interval](help:clustering-broadcasting) (default 5 seconds). Every node's stats carry the moment the responding node received them — **sampled Ns ago** at the head of the System section and beside the Network heading — so a figure reads as "as of then", never as a live reading. The cue turns into a **stale** warning once the sample is older than the stats TTL (a multiple of the broadcast interval, three by default): the cluster itself stops serving a broadcast that old, so what remains on screen is a copy nothing refreshes. A node the cluster has not heard from shows an **offline** badge in the node list, with how long it has been silent.
 
 ## Network
 

@@ -30,6 +30,8 @@ function registry(ids: EntityID[]): NodeRegistry {
     multiNode: true,
     nameOf: (id) => byId.get(id)?.name ?? id,
     isLocal: (id) => id === NODE_A,
+    respondingNodeStable: true,
+    statsTtlMs: null,
   };
 }
 
