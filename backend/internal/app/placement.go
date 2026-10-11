@@ -178,12 +178,10 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 		}
 	}
 
-	// Build node-state map from FSM authority. placeVault uses this to
-	// gate leader rotation: soft-offline (Unreachable, Maintenance) and
-	// in-transition (Draining, Decommissioning) states refuse rotation.
-	// Only Live state permits the existing rotate-on-unreachable
-	// behavior. See docs/node-lifecycle-design.md "Behavior gates by
-	// state".
+	// Node lifecycle state from FSM authority. It gates rotation off a
+	// node, whether a member counts toward the replication factor, and
+	// which nodes may take a new placement. See
+	// docs/node-lifecycle-design.md "Behavior gates by state".
 	nodeConfigs, err := pm.cfgStore.ListNodes(ctx)
 	if err != nil {
 		pm.logger.Error("placement: list nodes", "error", err)
@@ -220,8 +218,9 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 		}
 	}
 
+	nodes := placementNodes{alive: alive, states: nodeStates}
 	for _, v := range vaults {
-		pm.placeVault(ctx, v, alive, nodeStates, nscs, vaultCount)
+		pm.placeVault(ctx, v, nodes, nscs, vaultCount)
 		pm.reportDegradedHomes(ctx, v, alive, nscs, nodeNames)
 	}
 
@@ -399,7 +398,8 @@ func (pm *placementManager) isSingletonIngester(ing system.IngesterConfig) bool 
 }
 
 // placeVault evaluates a single vault and assigns it to an eligible node if needed.
-func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig, alive map[string]bool, nodeStates map[string]system.NodeState, nscs []system.NodeStorageConfig, vaultCount map[string]int) {
+func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig, nodes placementNodes, nscs []system.NodeStorageConfig, vaultCount map[string]int) {
+	alive, nodeStates := nodes.alive, nodes.states
 	currentLeader := system.LeaderNodeID(func() []system.VaultPlacement {
 		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 		return p
@@ -427,25 +427,9 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 	// "node just went quiet" branch — a ghost placement pinned to a node that has
 	// left, with followers never extended to compensate because the placement
 	// target already looks met.
-	//
-	// BOTH signals are required, because neither is sufficient alone:
-	//
-	//   - Missing config alone does not mean gone. Nodes write their own
-	//     NodeConfig asynchronously after start (ensureNodeConfigAsync retries
-	//     until it lands), so a perfectly healthy node can be absent from
-	//     ListNodes for a window, and rotating its placements during that window
-	//     would be exactly the churn the soft-offline guard was built to stop.
-	//   - No heartbeat alone certainly does not mean gone — that is the
-	//     transient absence the two-clock guard protects, and treating it as
-	//     departure would orphan the returning node's chunks at RF=1.
-	//
-	// Together they mean the cluster has neither a record of the node nor any
-	// contact with it. A node that still has a config and is unreachable keeps
-	// its placement: that is the soft-offline guard doing its job, untouched
-	// here, and it is also the no-auto-remove stance — only an operator removes
-	// a node, and removal is what deletes the config.
-	_, leaderKnown := nodeStates[currentLeader]
-	leaderDeparted := currentLeader != "" && !leaderKnown && !alive[currentLeader]
+	// A leader that is merely silent still has its NodeConfig and keeps its
+	// placement (placementNodes.departed).
+	leaderDeparted := currentLeader != "" && nodes.departed(currentLeader)
 
 	if currentLeader != "" && !leaderDeparted {
 		switch nodeStates[currentLeader] {
@@ -472,7 +456,7 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 						fmt.Sprintf("Vault %q leader heartbeat lost on node %s (state still Live) — placement retained, rotation gated until the node lifecycle state changes",
 							v.Name, currentLeader))
 				}
-				pm.placeFollowers(ctx, &v, alive, nscs, vaultCount)
+				pm.placeFollowers(ctx, &v, nodes, nscs, vaultCount)
 				return
 			}
 		case system.NodeStateUnreachable, system.NodeStateMaintenance:
@@ -481,12 +465,12 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 					fmt.Sprintf("Vault %q leader on %s node %s — placement retained, rotation gated",
 						v.Name, nodeStates[currentLeader], currentLeader))
 			}
-			pm.placeFollowers(ctx, &v, alive, nscs, vaultCount)
+			pm.placeFollowers(ctx, &v, nodes, nscs, vaultCount)
 			return
 		case system.NodeStateDraining, system.NodeStateDecommissioning:
 			// Drain / decommission flow is the authority; reconcile is a
 			// no-op for this vault while the node is in transition.
-			pm.placeFollowers(ctx, &v, alive, nscs, vaultCount)
+			pm.placeFollowers(ctx, &v, nodes, nscs, vaultCount)
 			return
 		}
 	}
@@ -510,11 +494,11 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 	// type.
 	if currentLeader != "" && !leaderDeparted && pm.nodeEligible(v, currentLeader, nscs) {
 		pm.clearUnplacedAlarms(v)
-		pm.placeFollowers(ctx, &v, alive, nscs, vaultCount)
+		pm.placeFollowers(ctx, &v, nodes, nscs, vaultCount)
 		return
 	}
 
-	eligible := pm.eligibleNodes(v, alive, nscs)
+	eligible := pm.eligibleNodes(v, nodes, nscs)
 
 	if len(eligible) == 0 {
 		pm.handleUnplaceable(ctx, v, nscs, vaultCount)
@@ -563,7 +547,7 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 	}
 
 	// Place followers if replication is configured.
-	pm.placeFollowers(ctx, &v, alive, nscs, vaultCount)
+	pm.placeFollowers(ctx, &v, nodes, nscs, vaultCount)
 }
 
 // replaceLeaderPlacement returns a new Placements slice with the leader set to storageID.
@@ -580,7 +564,7 @@ func replaceLeaderPlacement(placements []system.VaultPlacement, storageID string
 // placeFollowers assigns follower file storages for a vault based on its ReplicationFactor.
 // Prefers storages on different nodes (availability), falls back to different storages on
 // the same node (redundancy). Never places two replicas on the same file storage.
-func (pm *placementManager) placeFollowers(ctx context.Context, v *system.VaultConfig, alive map[string]bool, nscs []system.NodeStorageConfig, vaultCount map[string]int) {
+func (pm *placementManager) placeFollowers(ctx context.Context, v *system.VaultConfig, nodes placementNodes, nscs []system.NodeStorageConfig, vaultCount map[string]int) {
 	leaderStorageID := system.LeaderStorageID(func() []system.VaultPlacement {
 		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 		return p
@@ -607,8 +591,8 @@ func (pm *placementManager) placeFollowers(ctx context.Context, v *system.VaultC
 		return
 	}
 
-	candidates := pm.followerCandidates(*v, leaderStorageID, leaderNodeID, alive, nscs, vaultCount)
-	kept, healthy := pm.selectFollowers(v, target, leaderStorageID, leaderNodeID, degraded, candidates, nscs, alive, vaultCount)
+	candidates := pm.followerCandidates(*v, leaderStorageID, leaderNodeID, nodes, nscs, vaultCount)
+	kept, healthy := pm.selectFollowers(v, target, leaderStorageID, leaderNodeID, degraded, candidates, nscs, nodes, vaultCount)
 
 	// Build new placements.
 	newPlacements := []system.VaultPlacement{{StorageID: leaderStorageID, Leader: true}}
@@ -652,8 +636,8 @@ func (pm *placementManager) clearStaleFollowers(ctx context.Context, v *system.V
 // followerCandidates returns eligible storages excluding the leader, sorted
 // by preference: cross-node first (availability), then same-node (redundancy),
 // then least-loaded.
-func (pm *placementManager) followerCandidates(v system.VaultConfig, leaderStorageID, leaderNodeID string, alive map[string]bool, nscs []system.NodeStorageConfig, vaultCount map[string]int) []eligibleStorage {
-	all := pm.eligibleStorages(v, alive, nscs)
+func (pm *placementManager) followerCandidates(v system.VaultConfig, leaderStorageID, leaderNodeID string, nodes placementNodes, nscs []system.NodeStorageConfig, vaultCount map[string]int) []eligibleStorage {
+	all := pm.eligibleStorages(v, nodes, nscs)
 	var candidates []eligibleStorage
 	for _, ea := range all {
 		if ea.storageID != leaderStorageID {
@@ -674,41 +658,43 @@ func (pm *placementManager) followerCandidates(v system.VaultConfig, leaderStora
 	return candidates
 }
 
-// selectFollowers picks follower placements: retains existing valid ones first,
-// then fills from sorted candidates.
 // selectFollowers picks the follower placements: existing healthy members
 // up to target (the cap trims surplus after recovery or an RF decrease),
 // degraded members unconditionally retained, and healthy eligible
 // candidates backfilled until target healthy followers exist. Returns the
 // placements and the healthy-follower count.
 //
-// Degraded-home backfill: a placement member whose local volume for this
-// vault is under disk protect cannot take collection writes or build GLCBs,
-// so it stops COUNTING toward the replication factor — but it is never
-// dropped here (its bytes may recover when space frees; removal is the
-// operator's call). Healthy eligible candidates backfill automatically so the
-// vault keeps RF storable members and the release gate keeps moving. When the
-// degraded member recovers it counts again, and the healthy cap trims the
-// placement back on a later pass.
-func (pm *placementManager) selectFollowers(v *system.VaultConfig, target int, leaderStorageID, leaderNodeID string, degraded map[string]bool, candidates []eligibleStorage, nscs []system.NodeStorageConfig, alive map[string]bool, vaultCount map[string]int) ([]system.VaultPlacement, int) {
+// A member is degraded when it cannot act as a working replica: its local
+// volume for this vault is under disk protect (no collection writes, no GLCB
+// builds), or its node is soft-offline or decommissioning
+// (countsTowardReplication). A degraded member stops COUNTING toward the
+// replication factor but is never dropped here — its bytes are still there,
+// and only an operator removes a node. Healthy eligible candidates backfill
+// automatically so the vault keeps RF working members. When the degraded
+// member recovers it counts again, and the healthy cap trims the placement
+// back on a later pass.
+//
+// Heartbeat liveness is not an input to retention or counting: a follower
+// whose node is still Live in the FSM keeps its placement and its count while
+// its heartbeat is absent. A pod restart is shorter than the unreachable
+// threshold, and only the lifecycle state machine may read absence as
+// anything more than that.
+func (pm *placementManager) selectFollowers(v *system.VaultConfig, target int, leaderStorageID, leaderNodeID string, degraded map[string]bool, candidates []eligibleStorage, nscs []system.NodeStorageConfig, nodes placementNodes, vaultCount map[string]int) ([]system.VaultPlacement, int) {
 	var kept []system.VaultPlacement
 	usedStorages := map[string]bool{leaderStorageID: true}
 	usedNodes := map[string]bool{leaderNodeID: true} // 1:1:1: one store per vault per node
 
 	healthy := 0
-	// Keep existing valid follower placements: healthy ones up to the
-	// target (the cap is what trims surplus after recovery or an RF
-	// decrease), degraded ones unconditionally.
 	current, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 	for _, p := range current {
 		if p.Leader {
 			continue
 		}
 		nid := system.NodeIDForStorage(p.StorageID, nscs)
-		if nid == "" || !alive[nid] || usedStorages[p.StorageID] || usedNodes[nid] || !pm.storageEligible(p.StorageID, *v, nscs) {
+		if nid == "" || nodes.departed(nid) || usedStorages[p.StorageID] || usedNodes[nid] || !pm.storageEligible(p.StorageID, *v, nscs) {
 			continue
 		}
-		if degraded[nid] {
+		if degraded[nid] || !countsTowardReplication(nodes.states[nid]) {
 			kept = append(kept, p)
 			usedStorages[p.StorageID] = true
 			usedNodes[nid] = true
@@ -766,10 +752,60 @@ func (pm *placementManager) alertReplication(v *system.VaultConfig, placed, desi
 	}
 	if placed < desired {
 		pm.alerts.Raise("vault-underreplicated", v.ID.String(),
-			fmt.Sprintf("Vault %q: only %d of %d desired replicas (insufficient eligible file storages)", v.Name, placed+1, int(v.ReplicationFactor)))
+			fmt.Sprintf("Vault %q: only %d of %d desired working replicas (no eligible node to place another)", v.Name, placed+1, int(v.ReplicationFactor)))
 	} else {
 		pm.alerts.Clear("vault-underreplicated", v.ID.String())
 	}
+}
+
+// acceptsNewPlacements reports whether a node in this lifecycle state may be
+// given a placement it does not already hold. Only Live may (Unknown is the
+// zero value of a record minted before the state field, and of a node whose
+// NodeConfig has not landed yet; both are Live). Soft-offline (Unreachable,
+// Maintenance) and in-transition (Draining, Decommissioning) nodes keep the
+// placements they hold and take no new ones. The placement manager and the
+// RF-preservation removal gate both decide eligibility with this predicate: a
+// gate that counts a spare the placer will not use approves removals that
+// leave a vault below its replication factor.
+func acceptsNewPlacements(state system.NodeState) bool {
+	return state == system.NodeStateUnknown || state == system.NodeStateLive
+}
+
+// countsTowardReplication reports whether a placement member on a node in
+// this lifecycle state is a working replica. Soft-offline nodes are expected
+// back but are not serving now, and a decommissioning node refuses reads and
+// writes; their members are retained but do not count. A draining node still
+// serves reads and writes until its chunks have moved, so it counts.
+func countsTowardReplication(state system.NodeState) bool {
+	switch state {
+	case system.NodeStateUnreachable, system.NodeStateMaintenance, system.NodeStateDecommissioning:
+		return false
+	case system.NodeStateUnknown, system.NodeStateLive, system.NodeStateDraining:
+		return true
+	}
+	return true
+}
+
+// placementNodes is one reconcile pass's view of the cluster's nodes: the
+// heartbeat-alive set and each node's FSM lifecycle state.
+type placementNodes struct {
+	alive  map[string]bool
+	states map[string]system.NodeState
+}
+
+// acceptsNew reports whether the node may be given a new placement: it is
+// heartbeat-alive and its lifecycle state accepts new placements.
+func (n placementNodes) acceptsNew(nodeID string) bool {
+	return n.alive[nodeID] && acceptsNewPlacements(n.states[nodeID])
+}
+
+// departed reports whether the node has left the cluster: it has no
+// NodeConfig and no heartbeat. Either signal alone is not departure — a
+// starting node writes its NodeConfig asynchronously, and a restarting node
+// is silent for a while.
+func (n placementNodes) departed(nodeID string) bool {
+	_, known := n.states[nodeID]
+	return !known && !n.alive[nodeID]
 }
 
 type eligibleStorage struct {
@@ -777,14 +813,18 @@ type eligibleStorage struct {
 	nodeID    string
 }
 
-// eligibleStorages returns all storages across all alive nodes that can host a replica.
-// For memory vaults: one synthetic storage per alive node (no file storage needed).
+// eligibleStorages returns every storage that can take a new replica of the
+// vault: storages on nodes that accept new placements (placementNodes.acceptsNew).
+// For memory vaults: one synthetic storage per such node (no file storage needed).
 // For file/cloud vaults: all file storages matching the required class.
-func (pm *placementManager) eligibleStorages(v system.VaultConfig, alive map[string]bool, nscs []system.NodeStorageConfig) []eligibleStorage {
+func (pm *placementManager) eligibleStorages(v system.VaultConfig, nodes placementNodes, nscs []system.NodeStorageConfig) []eligibleStorage {
 	var result []eligibleStorage
 
 	if v.Type == system.VaultTypeMemory {
-		for nodeID := range alive {
+		for nodeID := range nodes.alive {
+			if !nodes.acceptsNew(nodeID) {
+				continue
+			}
 			result = append(result, eligibleStorage{
 				storageID: system.SyntheticStorageID(nodeID),
 				nodeID:    nodeID,
@@ -795,7 +835,7 @@ func (pm *placementManager) eligibleStorages(v system.VaultConfig, alive map[str
 
 	sc := v.StorageClass
 	for _, nsc := range nscs {
-		if !alive[nsc.NodeID] {
+		if !nodes.acceptsNew(nsc.NodeID) {
 			continue
 		}
 		for _, fs := range nsc.FileStorages {
@@ -893,10 +933,10 @@ func (pm *placementManager) handleUnplaceable(_ context.Context, v system.VaultC
 // re-placement candidates. Do not fork a second copy — a gate that
 // disagrees with the placer is worse than no gate.
 //
-// Liveness and lifecycle state are the CALLER's filter (the placement
-// manager passes its alive set; the removal gate passes nodes in
-// NodeStateLive). This function answers only "can this node hold this
-// vault's data".
+// Liveness and lifecycle state are the CALLER's filter: both callers
+// apply acceptsNewPlacements to the node's lifecycle state, and the
+// placement manager also requires a current heartbeat. This function
+// answers only "can this node hold this vault's data".
 func nodeEligibleForVault(v system.VaultConfig, nodeID string, nscs []system.NodeStorageConfig, placements []system.VaultPlacement) bool {
 	switch v.Type {
 	case system.VaultTypeMemory:
@@ -918,12 +958,13 @@ func (pm *placementManager) nodeEligible(v system.VaultConfig, nodeID string, ns
 	return nodeEligibleForVault(v, nodeID, nscs, placements)
 }
 
-// eligibleNodes returns all alive nodes that can serve a vault.
-func (pm *placementManager) eligibleNodes(v system.VaultConfig, alive map[string]bool, nscs []system.NodeStorageConfig) []string {
+// eligibleNodes returns every node that can take a new leader placement for
+// the vault: it accepts new placements and can hold the vault's data.
+func (pm *placementManager) eligibleNodes(v system.VaultConfig, nodes placementNodes, nscs []system.NodeStorageConfig) []string {
 	placements, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 	var result []string
-	for nodeID := range alive {
-		if nodeEligibleForVault(v, nodeID, nscs, placements) {
+	for nodeID := range nodes.alive {
+		if nodes.acceptsNew(nodeID) && nodeEligibleForVault(v, nodeID, nscs, placements) {
 			result = append(result, nodeID)
 		}
 	}

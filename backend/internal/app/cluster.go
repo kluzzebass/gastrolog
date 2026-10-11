@@ -993,13 +993,12 @@ type degradedVault struct {
 // operator should hear about it before the node goes away, not from the
 // under-replication alarm afterwards.
 //
-// Eligibility is the placement manager's own rule
-// (nodeEligibleForVault) intersected with NodeStateLive and
-// "not already a placement member": the same three conditions
-// placeFollowers applies when it picks a backfill target. Soft-offline
-// and in-transition nodes (Unreachable, Maintenance, Draining,
-// Decommissioning) are deliberately not counted — placement won't put
-// new members there either.
+// Eligibility is the placement manager's own rule: nodeEligibleForVault,
+// acceptsNewPlacements on the node's lifecycle state, and "not already a
+// placement member" — the conditions placeFollowers applies when it picks
+// a backfill target. Heartbeat liveness, the placer's other filter, is
+// not consulted: it is momentary, and a removal decision must not hinge
+// on whether a spare happens to be mid-restart.
 func vaultsBelowRFAfterRemoval(ctx context.Context, cfgStore system.Store, targetNodeID string) []degradedVault {
 	if cfgStore == nil {
 		return nil
@@ -1037,15 +1036,13 @@ func vaultsBelowRFAfterRemoval(ctx context.Context, cfgStore system.Store, targe
 }
 
 // liveReplacementCandidates returns the node IDs that could take a new
-// placement after targetNodeID leaves: everything in NodeStateLive
-// except the departing node. Soft-offline and in-transition states
-// (Unreachable, Maintenance, Draining, Decommissioning) are excluded —
-// the placement manager won't put new members there either.
+// placement after targetNodeID leaves: every other node whose lifecycle
+// state accepts new placements.
 func liveReplacementCandidates(nodes []system.NodeConfig, targetNodeID string) []string {
 	var live []string
 	for _, n := range nodes {
 		id := n.ID.String()
-		if id == targetNodeID || n.EffectiveState() != system.NodeStateLive {
+		if id == targetNodeID || !acceptsNewPlacements(n.State) {
 			continue
 		}
 		live = append(live, id)
