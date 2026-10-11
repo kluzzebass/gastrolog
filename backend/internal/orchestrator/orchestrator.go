@@ -237,8 +237,9 @@ type Orchestrator struct {
 	// pipelineGate is the ingest-pipeline pressure signal injected into
 	// PressureAware ingesters by the supervisor's ingestion manager.
 	pipelineGate *chanwatch.PressureGate
-	// segmentsDir is the base directory for per-vault segment roots
-	// (OriginRoot = segmentsDir/<vaultID>).
+	// segmentsDir is the node home's segments directory, under which the
+	// pipeline root of a vault without a placement on this node's file
+	// storages lives (pipelineRootFor).
 	segmentsDir string
 	// homeDir is the gastrolog home directory (stores, segments, raft, …).
 	homeDir string
@@ -801,11 +802,12 @@ type Config struct {
 	// pipeline). Empty disables the guard (tests, memory-only setups).
 	DiskGuardPaths []string
 
-	// SegmentsDir is the base directory under which each origin vault's
-	// segmentation working/ and completed/ areas live: a vault's segment
-	// OriginRoot is SegmentsDir/<vaultID>. Set from home.Dir.SegmentsDir() at
-	// process startup; tests may point it at t.TempDir(). There is no default
-	// under $TMPDIR or the working directory.
+	// SegmentsDir is the node home's segments directory: the pipeline root
+	// of a vault this node only originates segments for is
+	// SegmentsDir/<vaultID>. A vault placed on one of the node's file
+	// storages has its root on that storage instead (pipelineRootFor). Set
+	// from home.Dir.SegmentsDir() at process startup; tests may point it at
+	// t.TempDir(). There is no default under $TMPDIR or the working directory.
 	SegmentsDir string
 
 	// Phase is the shared shutdown signal. When non-nil, the orchestrator

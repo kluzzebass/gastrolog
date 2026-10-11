@@ -1,9 +1,14 @@
 package orchestrator
 
 import (
+	"context"
+	"errors"
+	"slices"
+
 	"gastrolog/internal/glid"
 	"gastrolog/internal/orchestrator/pipeline"
 	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -16,7 +21,16 @@ import (
 // where the vault is registered with the pipeline; this sweep is what turns a
 // purge into a confirmation, and it reaches vaults the pipeline does not run
 // here.
+//
+// A pass whose config cannot be loaded does nothing: without the node's file
+// storages it cannot reach every root a staging copy may be under, and a
+// purge that skipped one must not be confirmed.
 func (o *Orchestrator) sweepReleasedSegments() {
+	sys, err := o.loadSystem(context.Background())
+	if err != nil && !errors.Is(err, ErrNoSystemLoader) {
+		o.logger.Warn("released-segment sweep: config unavailable; skipping", "error", err)
+		return
+	}
 	o.mu.RLock()
 	vaultIDs := make([]glid.GLID, 0, len(o.vaults))
 	for vaultID := range o.vaults {
@@ -24,17 +38,17 @@ func (o *Orchestrator) sweepReleasedSegments() {
 	}
 	o.mu.RUnlock()
 	for _, vaultID := range vaultIDs {
-		o.sweepReleasedSegmentsForVault(vaultID)
+		o.sweepReleasedSegmentsForVault(sys, vaultID)
 	}
 }
 
-func (o *Orchestrator) sweepReleasedSegmentsForVault(vaultID glid.GLID) {
+func (o *Orchestrator) sweepReleasedSegmentsForVault(sys *system.System, vaultID glid.GLID) {
 	fsm, applier, isLeader, ok := o.vaultCtlHandle(vaultID)
 	if !ok || !fsm.Ready() {
 		return
 	}
 	log := o.logger.With("vault", vaultID)
-	covered, purged, err := pipeline.PurgeReleasedStaging(fsm, o.releasedSegmentStagingRoots(vaultID))
+	covered, purged, err := pipeline.PurgeReleasedStaging(fsm, o.releasedSegmentStagingRoots(sys, vaultID))
 	if len(purged) > 0 {
 		log.Info("released-segment sweep: purged released segments' staging copies", "segments", len(purged))
 	}
@@ -59,13 +73,17 @@ func (o *Orchestrator) sweepReleasedSegmentsForVault(vaultID glid.GLID) {
 }
 
 // releasedSegmentStagingRoots is where this node may hold staging copies of a
-// vault's segments: <segmentsDir>/<vaultID>, whether or not the vault is
-// registered with the pipeline here. None without a segments directory.
-func (o *Orchestrator) releasedSegmentStagingRoots(vaultID glid.GLID) []string {
-	if o.segmentsDir == "" {
-		return nil
+// vault's segments, whether or not the vault is registered with the pipeline
+// here: every candidate pipeline root (the node home's and one per local file
+// storage), plus the root the vault is registered with. A placement change
+// leaves a former home's head/ copies under its previous root, and this sweep
+// is what reclaims them.
+func (o *Orchestrator) releasedSegmentStagingRoots(sys *system.System, vaultID glid.GLID) []string {
+	roots := o.pipelineRootCandidates(sys, vaultID)
+	if reg, ok := o.lookupPipelineVault(vaultID); ok && reg.root != "" && !slices.Contains(roots, reg.root) {
+		roots = append(roots, reg.root)
 	}
-	return []string{pipelineVaultRoot(o.segmentsDir, vaultID)}
+	return roots
 }
 
 // vaultCtlMembers returns the server IDs in this node's view of the vault-ctl

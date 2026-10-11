@@ -7,7 +7,6 @@ import (
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/orchestrator/pipeline"
-	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 
@@ -25,7 +24,7 @@ func TestNonHomeOriginSpecPurgesCompletedOnRelease(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node-D", SegmentsDir: t.TempDir()})
 	fsm := vaultctlfsm.New()
 
-	spec, err := orch.buildPipelineVaultSpec(vaultID, false, fsm, nil, nil, true, chunking.ManifestRotationPolicy{})
+	spec, err := orch.buildPipelineVaultSpec(vaultID, pipelineVaultReg{hasHandle: true}, fsm, nil, nil)
 	if err != nil {
 		t.Fatalf("buildPipelineVaultSpec: %v", err)
 	}
@@ -69,7 +68,7 @@ func TestNonHomeOriginSpecPurgesCompletedOnRelease(t *testing.T) {
 func TestNoHandleOriginSpecCarriesNoFSM(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-D", SegmentsDir: t.TempDir()})
-	spec, err := orch.buildPipelineVaultSpec(glid.New(), false, nil, nil, nil, false, chunking.ManifestRotationPolicy{})
+	spec, err := orch.buildPipelineVaultSpec(glid.New(), pipelineVaultReg{}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildPipelineVaultSpec: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -630,6 +631,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 	// Vault and instance share the same ID.
 	vaultID := glid.New()
 	storageID := glid.New()
+	storageDir := filepath.Join(t.TempDir(), "chunks")
 
 	sys := &system.System{
 		Config: system.Config{
@@ -641,7 +643,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 			NodeStorageConfigs: []system.NodeStorageConfig{{
 				NodeID: "node-1",
 				FileStorages: []system.FileStorage{{
-					ID: storageID, StorageClass: 1, Name: "fast", Path: "/data/chunks",
+					ID: storageID, StorageClass: 1, Name: "fast", Path: storageDir,
 				}},
 			}},
 			VaultPlacements: map[glid.GLID][]system.VaultPlacement{
@@ -656,7 +658,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 	}
 
 	// Verify dir param: <storage-path>/vaults/<vault-id>/<vault-id>
-	expectedDir := "/data/chunks/vaults/" + vaultID.String() + "/" + vaultID.String()
+	expectedDir := filepath.Join(storageDir, "vaults", vaultID.String(), vaultID.String())
 	if cmReceivedParams["dir"] != expectedDir {
 		t.Errorf("chunk manager: expected dir=%s, got %s", expectedDir, cmReceivedParams["dir"])
 	}

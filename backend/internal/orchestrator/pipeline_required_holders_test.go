@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"gastrolog/internal/glid"
-	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
@@ -23,7 +22,7 @@ func TestChunkRequiredHoldersReportsUnresolvedOnEmptyLookup(t *testing.T) {
 
 	buildSpec := func() func() ([]string, bool) {
 		t.Helper()
-		spec, err := orch.buildPipelineVaultSpec(vaultID, true, vaultctlfsm.New(), nil, func() bool { return true }, true, chunking.ManifestRotationPolicy{})
+		spec, err := orch.buildPipelineVaultSpec(vaultID, pipelineVaultReg{home: true, hasHandle: true}, vaultctlfsm.New(), nil, func() bool { return true })
 		if err != nil {
 			t.Fatalf("buildPipelineVaultSpec: %v", err)
 		}

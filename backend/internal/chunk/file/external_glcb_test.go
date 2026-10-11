@@ -211,6 +211,59 @@ func TestRegisterExternalGLCB_RefreshesPath(t *testing.T) {
 	}
 }
 
+// TestRegisterExternalGLCB_FollowsLocatorAfterRootMove: a registered pipeline
+// GLCB whose file moved — a placement change moved the vault's pipeline root
+// to another storage — is read from where the locator says it lives now.
+func TestRegisterExternalGLCB_FollowsLocatorAfterRootMove(t *testing.T) {
+	t.Parallel()
+
+	src, err := NewManager(Config{Dir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("new src manager: %v", err)
+	}
+	defer func() { _ = src.Close() }()
+	const recordCount = 7
+	chunkID, built := buildSealedGLCB(t, src, recordCount)
+	want := drainCursorRaw(t, src, chunkID)
+
+	oldPath := filepath.Join(t.TempDir(), "old-root", "chunks", chunkID.String(), dataGLCBFileName)
+	newPath := filepath.Join(t.TempDir(), "new-root", "chunks", chunkID.String(), dataGLCBFileName)
+	for _, p := range []string{oldPath, newPath} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, err := os.ReadFile(filepath.Clean(built))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oldPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cm, err := NewManager(Config{Dir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("new consumer manager: %v", err)
+	}
+	defer func() { _ = cm.Close() }()
+	cm.SetExternalGLCBLocator(func(id chunk.ChunkID) (string, bool) {
+		return newPath, id == chunkID
+	})
+	if err := cm.RegisterExternalGLCB(chunkID, oldPath, chunk.ExternalGLCBInfo{RecordCount: recordCount}); err != nil {
+		t.Fatalf("RegisterExternalGLCB: %v", err)
+	}
+
+	if err := os.Rename(oldPath, newPath); err != nil {
+		t.Fatal(err)
+	}
+	if got := cm.glcbPath(chunkID); got != newPath {
+		t.Fatalf("glcbPath after the move = %q, want the located %q", got, newPath)
+	}
+	if got := drainCursorRaw(t, cm, chunkID); len(got) != len(want) {
+		t.Fatalf("read %d records after the move, want %d", len(got), len(want))
+	}
+}
+
 // TestDeleteSilent_RemovesExternalGLCBDir: deleting a pipeline-registered external
 // chunk removes the GLCB directory at the registered path (the vault ChunkRoot
 // layout), not just the chunk-manager metadata entry.

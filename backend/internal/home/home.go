@@ -17,7 +17,9 @@
 //	  stores/
 //	    <vault-id>/                    (per-vault chunk + index data)
 //	  segments/
-//	    <vault-id>/                    (pipeline segment working + completed areas)
+//	    <vault-id>/                    (pipeline root of a vault this node only originates segments for;
+//	                                    a vault placed on one of the node's file storages has its
+//	                                    root at <storage>/segments/<vault-id>/ instead)
 //	  managed-files/
 //	    <file-id>/                     (managed file entity: lookups, etc.)
 package home
@@ -78,8 +80,9 @@ func (d Dir) VaultDir(vaultID string) string {
 	return filepath.Join(d.root, "stores", vaultID)
 }
 
-// SegmentsDir returns the base directory for pipeline segment storage.
-// Each vault's origin root is SegmentsDir/<vault-id>/ (working/, completed/, chunks/).
+// SegmentsDir returns the node home's segments directory: the pipeline root
+// (working/, completed/) of a vault this node originates segments for without
+// a placement on one of its file storages is SegmentsDir/<vault-id>/.
 func (d Dir) SegmentsDir() string {
 	return filepath.Join(d.root, "segments")
 }

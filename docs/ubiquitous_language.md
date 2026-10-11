@@ -135,7 +135,17 @@ for append-heavy write patterns and time-ordered reads.
 
 - **StorageClass** (`uint32`) — non-zero integer grouping storages by performance
   or role. A vault's `StorageClass` selects which FileStorage on each node hosts
-  its chunks.
+  its chunks and its pipeline root.
+
+- **Pipeline root** — the one directory holding every pipeline storage area a
+  node keeps for a vault (`working/`, `completed/`, `pre-head/`, `head/`,
+  `chunks/`). On a node with a placement for the vault it is
+  `<storage>/segments/<vault-id>` on the FileStorage that placement chose; on a
+  node that only originates segments for the vault it is the node home's
+  `segments/<vault-id>`. A placement change moves it, and the next registration
+  gathers the vault's files into it. Resolved in one place
+  (`orchestrator.pipelineRootFor`) and carried on the vault's pipeline
+  registration for every reader.
 
 - **CloudService** — a cluster-wide cloud endpoint (S3, Azure, GCS) with
   optional archival lifecycle. [`system.CloudService`](../backend/internal/system/storage.go).

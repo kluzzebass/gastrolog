@@ -118,9 +118,9 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 		o.chunkGLCBPuller = cluster.NewChunkGLCBPuller(factories.PeerConns)
 	}
 
-	// Root the per-vault segment areas under the node home unless already
-	// configured. Origin vaults are registered during applyVaults→route reload,
-	// so this must be set first. See originRoot.
+	// The node home's segments directory, unless already configured. Origin
+	// vaults are registered during applyVaults→route reload, so this must be
+	// set first. See pipelineRootFor.
 	if o.segmentsDir == "" && factories.HomeDir != "" {
 		o.homeDir = factories.HomeDir
 		o.segmentsDir = home.New(factories.HomeDir).SegmentsDir()

@@ -43,14 +43,18 @@ type externalGLCBResolverSetter interface {
 // manager (ABBA).
 func (o *Orchestrator) pipelineGLCBSource(vaultID glid.GLID) (*vaultctlfsm.FSM, string, bool) {
 	reg, ok := o.lookupPipelineVault(vaultID)
-	if !ok || !reg.home || !reg.hasHandle || o.segmentsDir == "" {
+	if !ok || !reg.home || !reg.hasHandle {
+		return nil, "", false
+	}
+	root, err := o.registeredRoot(vaultID, reg)
+	if err != nil {
 		return nil, "", false
 	}
 	f, _, _, ok := o.vaultCtlHandle(vaultID)
 	if !ok || f == nil {
 		return nil, "", false
 	}
-	return f, pipelineChunkRoot(pipelineVaultRoot(o.segmentsDir, vaultID)), true
+	return f, pipelineChunkRoot(root), true
 }
 
 // installPipelineGLCBResolver installs the on-miss external-GLCB resolver on
