@@ -146,6 +146,14 @@ func (f *FSM) AwaitingBuild(id chunk.ChunkID) bool {
 	return f.sealedManifestByIDLocked(id) != nil
 }
 
+// SealQueueManifest returns a copy of id's manifest in the seal queue, or nil
+// when id is not queued.
+func (f *FSM) SealQueueManifest(id chunk.ChunkID) *OpenChunkManifest {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return copyOpenChunkManifest(f.sealedManifestByIDLocked(id))
+}
+
 func (f *FSM) sealedManifestByIDLocked(id chunk.ChunkID) *OpenChunkManifest {
 	for _, m := range f.sealedManifests {
 		if m != nil && m.ChunkID == id {
