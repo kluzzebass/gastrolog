@@ -2,10 +2,10 @@
 
 ## Overview
 
-Nodes join a cluster using a one-time token exchange over a dedicated
-cluster port. After enrollment, all nodes share the same TLS certificate
-for mutual authentication. The certificate is replicated via the Raft
-config FSM.
+Nodes join a cluster using a join token exchange over a dedicated
+cluster port. After enrollment, each node holds its own certificate, signed
+by the cluster CA, for mutual authentication. The CA is replicated via the
+cluster-ctl FSM.
 
 Prior art: K3s bootstrap model.
 
@@ -33,10 +33,13 @@ flowchart LR
 | HTTPS | HTTP/2 + TLS | JWT / no-auth | Yes |
 | Cluster | gRPC + mTLS | Per-node cert + membership | No (end-to-end TLS required) |
 
-The cluster port runs a gRPC server with mTLS. Raft transport uses
-Jille/raft-grpc-transport (Raft RPCs as gRPC services). Additional
-gRPC services on the same port handle inter-node operations such as
-chunk transfer, federated query forwarding, and health checks.
+The cluster port runs a gRPC server with mTLS. Raft transport is
+GastroLog's own `multiraft.Transport` (`backend/internal/multiraft`), which
+carries every Raft group — cluster-ctl and each vault-ctl group — over the
+cluster port; with TLS, each group gets its own inbound gRPC lane
+(`cluster.Server.EnsureRaftGroupLane`). Additional gRPC services on the same
+port handle inter-node operations such as chunk transfer, federated query
+forwarding, and health checks.
 
 ## Cluster Bootstrap (First Node)
 
@@ -45,18 +48,19 @@ First node starts with `--bootstrap`. Generates:
 1. **Cluster CA** — self-signed X.509 CA key pair
 2. **Its own node cert** — signed by that CA, subject CN = its node ID,
    ExtKeyUsage: ServerAuth + ClientAuth
-3. **Join token** — random secret, format: `<secret>:<sha256 of CA cert>`
+3. **Join token key** — a random 32-byte secret that join tokens are minted
+   from (see Join Token Lifecycle)
 
 ```mermaid
 flowchart TD
     Start["gastrolog server --bootstrap"] --> GenCA["Generate self-signed CA"]
     GenCA --> GenCert["Issue own node cert (signed by CA)"]
-    GenCert --> GenToken["Generate join token"]
-    GenToken --> Store["Store CA + token in config FSM;<br>own cert + key on local disk only"]
+    GenCert --> GenToken["Generate join token key"]
+    GenToken --> Store["Store CA + token key in config FSM;<br>own cert + key on local disk only"]
     Store --> Listen["Listen on cluster port with mTLS"]
 ```
 
-The CA (cert and key) and the join token are stored in the config FSM and
+The CA (cert and key) and the join token key are stored in the config FSM and
 replicated to every node, so any member can enrol a joiner and no single node
 has to be up for one to join. Node certificates are not replicated: each node
 keeps its own key on its own disk.
@@ -78,8 +82,8 @@ sequenceDiagram
     N->>M: TLS connect to cluster port
     Note over N,M: Node verifies the member's leaf chains to<br>the CA hash in the token (anti-MITM)
     N->>N: Generate key pair + CSR (key never leaves)
-    N->>M: Enroll (token secret, CSR)
-    M->>M: Verify token against replicated state
+    N->>M: Enroll (token credential, CSR)
+    M->>M: Verify token HMAC + expiry against the replicated key
     M->>M: Refuse if node_id is already in the configuration
     M->>M: Sign a cert naming node_id (CA from replicated state)
     M-->>N: CA cert, node cert
@@ -117,8 +121,17 @@ re-issued.
 
 ## Join Token Lifecycle
 
-- One reusable cluster token generated at bootstrap
-- Optional short-lived tokens via API (single-use or TTL-limited)
+- No standing token. The cluster stores only the join token key; a token is
+  minted on demand from it — by `gastrolog cluster join-token`
+  (`CreateJoinToken`, answered by any node) or by the `/cluster/bootstrap-token`
+  endpoint a joiner fetches at its own startup — and is not stored
+- Format `<expiry-unix>.<hmac>:<hex sha256 of the CA cert DER>`. The credential
+  half is an expiry and an HMAC over it under the token key, so nothing is
+  stored per token and the expiry cannot be extended by editing it; the CA hash
+  lets the joiner verify the member before it sends the credential
+- TTL-limited: one hour by default (`tlsutil.DefaultJoinTokenTTL`), overridable
+  with `--ttl`. A token is not single-use — it admits any number of joins until
+  it expires
 - Token is only used during enrollment — the node's own certificate,
   together with its membership, is the ongoing credential
 - Enrollment runs only on a node's first boot. A restarting node resumes
