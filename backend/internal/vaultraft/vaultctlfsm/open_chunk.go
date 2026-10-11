@@ -106,15 +106,15 @@ func (f *FSM) OpenChunk() *OpenChunkManifest {
 	return copyOpenChunkManifest(f.openChunk)
 }
 
-// SealedManifest returns a copy of the oldest sealed manifest awaiting local
-// GLCB build, or nil when the queue is empty.
+// SealedManifest returns a copy of the seal-queue head — the oldest sealed
+// manifest awaiting the leader's CmdSealChunk — or nil when the queue is empty.
 func (f *FSM) SealedManifest() *OpenChunkManifest {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return copyOpenChunkManifest(f.sealedManifestHeadLocked())
 }
 
-// SealedManifestCount returns how many manifests are awaiting local GLCB build.
+// SealedManifestCount returns how many manifests are in the seal queue.
 func (f *FSM) SealedManifestCount() int {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -168,12 +168,56 @@ func (f *FSM) appendSealedManifestLocked(m *OpenChunkManifest) {
 	f.sealedManifests = append(f.sealedManifests, m)
 }
 
-func (f *FSM) popSealedManifestHeadIfIDLocked(id chunk.ChunkID) bool {
+// popSealedManifestHeadIfIDLocked removes and returns the seal-queue head when
+// it is id's manifest, or returns nil. Caller MUST hold f.mu.
+func (f *FSM) popSealedManifestHeadIfIDLocked(id chunk.ChunkID) *OpenChunkManifest {
 	if len(f.sealedManifests) == 0 || f.sealedManifests[0].ChunkID != id {
-		return false
+		return nil
 	}
+	head := f.sealedManifests[0]
 	f.sealedManifests = f.sealedManifests[1:]
-	return true
+	return head
+}
+
+// SealedChunkManifestIDs returns, in seal order, the chunk IDs of sealed
+// manifests whose CmdSealChunk has committed and whose refs are still
+// retained for homes that have not built the chunk.
+func (f *FSM) SealedChunkManifestIDs() []chunk.ChunkID {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if len(f.sealedChunkManifests) == 0 {
+		return nil
+	}
+	out := make([]chunk.ChunkID, len(f.sealedChunkManifests))
+	for i, m := range f.sealedChunkManifests {
+		out[i] = m.ChunkID
+	}
+	return out
+}
+
+// SealedChunkManifest returns a copy of the retained manifest of a chunk whose
+// CmdSealChunk has committed, or nil when none is retained.
+func (f *FSM) SealedChunkManifest(id chunk.ChunkID) *OpenChunkManifest {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	for _, m := range f.sealedChunkManifests {
+		if m.ChunkID == id {
+			return copyOpenChunkManifest(m)
+		}
+	}
+	return nil
+}
+
+// dropSealedChunkManifestsLocked forgets the retained manifests of the given
+// chunks. Caller MUST hold f.mu.
+func (f *FSM) dropSealedChunkManifestsLocked(ids map[chunk.ChunkID]struct{}) {
+	if len(ids) == 0 || len(f.sealedChunkManifests) == 0 {
+		return
+	}
+	f.sealedChunkManifests = slices.DeleteFunc(f.sealedChunkManifests, func(m *OpenChunkManifest) bool {
+		_, drop := ids[m.ChunkID]
+		return drop
+	})
 }
 
 func (f *FSM) removeSealedManifestByIDLocked(id chunk.ChunkID) {
@@ -545,6 +589,7 @@ func (f *FSM) ensureManifestChunkEntryLocked(m *OpenChunkManifest, state chunk.C
 // Caller MUST hold f.mu.
 func (f *FSM) clearOpenManifestStateIfChunkIDLocked(id chunk.ChunkID) {
 	f.removeSealedManifestByIDLocked(id)
+	f.dropSealedChunkManifestsLocked(map[chunk.ChunkID]struct{}{id: {}})
 	if f.openChunk != nil && f.openChunk.ChunkID == id {
 		f.openChunk = nil
 	}
@@ -614,7 +659,8 @@ func (f *FSM) applySealOpenChunkManifestLocked(c *gastrologv1.SealOpenChunkManif
 }
 
 // SegmentReferencedInManifest reports whether segmentID appears in the open
-// or sealed (awaiting build) chunk manifest.
+// manifest or a sealed manifest in the seal queue. Sealed-chunk manifests do
+// not count: they never hold a segment back from release.
 func (f *FSM) SegmentReferencedInManifest(segmentID glid.GLID) bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -672,6 +718,10 @@ func (f *FSM) segmentRangeReferencedLocked(segID glid.GLID, first, last uint32) 
 
 func (f *FSM) applyReleaseSegments(c *gastrologv1.ReleaseSegmentsCommand) []glid.GLID {
 	var released []glid.GLID
+	// A sealed chunk whose segment is released can no longer be built from
+	// segments on any home; a home still missing it pulls the GLCB from a
+	// peer instead.
+	unbuildable := make(map[chunk.ChunkID]struct{})
 	for _, raw := range c.GetSegmentIds() {
 		segID := glid.FromBytes(raw)
 		if segID == glid.Nil {
@@ -694,8 +744,12 @@ func (f *FSM) applyReleaseSegments(c *gastrologv1.ReleaseSegmentsCommand) []glid
 		delete(f.completedSegments, segID)
 		f.removeCompletedSegmentOrder(segID)
 		delete(f.segmentResume, segID)
+		for _, chunkID := range f.segmentChunks[segID] {
+			unbuildable[chunkID] = struct{}{}
+		}
 		delete(f.segmentChunks, segID)
 	}
+	f.dropSealedChunkManifestsLocked(unbuildable)
 	return released
 }
 
@@ -770,13 +824,23 @@ func (f *FSM) snapshotOpenChunkLocked() *gastrologv1.OpenChunkManifestState {
 	return openChunkManifestToProto(f.openChunk)
 }
 
-func (f *FSM) snapshotSealedManifestsLocked() []*gastrologv1.OpenChunkManifestState {
-	if len(f.sealedManifests) == 0 {
+func snapshotManifests(manifests []*OpenChunkManifest) []*gastrologv1.OpenChunkManifestState {
+	if len(manifests) == 0 {
 		return nil
 	}
-	out := make([]*gastrologv1.OpenChunkManifestState, 0, len(f.sealedManifests))
-	for _, m := range f.sealedManifests {
+	out := make([]*gastrologv1.OpenChunkManifestState, 0, len(manifests))
+	for _, m := range manifests {
 		out = append(out, openChunkManifestToProto(m))
+	}
+	return out
+}
+
+func manifestsFromProto(states []*gastrologv1.OpenChunkManifestState) []*OpenChunkManifest {
+	var out []*OpenChunkManifest
+	for _, st := range states {
+		if m := openChunkManifestFromProto(st); m != nil {
+			out = append(out, m)
+		}
 	}
 	return out
 }
@@ -821,12 +885,8 @@ func (f *FSM) snapshotSegmentChunksLocked() []*gastrologv1.SegmentChunkIDs {
 
 func (f *FSM) restoreOpenChunkLocked(snap *gastrologv1.VaultCtlSnapshot) {
 	f.openChunk = openChunkManifestFromProto(snap.GetOpenChunk())
-	f.sealedManifests = nil
-	for _, sm := range snap.GetSealedManifests() {
-		if m := openChunkManifestFromProto(sm); m != nil {
-			f.sealedManifests = append(f.sealedManifests, m)
-		}
-	}
+	f.sealedManifests = manifestsFromProto(snap.GetSealedManifests())
+	f.sealedChunkManifests = manifestsFromProto(snap.GetSealedChunkManifests())
 	f.segmentResume = make(map[glid.GLID]uint32, len(snap.GetSegmentResume()))
 	for _, entry := range snap.GetSegmentResume() {
 		f.segmentResume[glid.FromBytes(entry.GetSegmentId())] = entry.GetNextRecordNumber()

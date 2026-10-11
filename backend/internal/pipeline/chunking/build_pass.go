@@ -18,7 +18,10 @@ import (
 // cannot diverge.
 
 func (v *vaultChunking) buildDue() bool {
-	pending := v.sealedManifestForBuild()
+	if v.sealedChunkBuildDue() {
+		return true
+	}
+	pending := v.fsm().SealedManifest()
 	if pending == nil {
 		return false
 	}
@@ -38,14 +41,6 @@ func (v *vaultChunking) buildDue() bool {
 		return true
 	}
 	return false
-}
-
-func (v *vaultChunking) sealedManifestForBuild() *vaultctlfsm.OpenChunkManifest {
-	if pending := v.fsm().SealedManifest(); pending != nil {
-		v.progress.setPending(pending)
-		return pending
-	}
-	return v.progress.pendingManifest()
 }
 
 func (v *vaultChunking) afterSealBuild(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest) {
@@ -83,12 +78,19 @@ func (v *vaultChunking) afterSealBuild(ctx context.Context, pending *vaultctlfsm
 		}
 		v.releaseWake.Notify()
 	}
-	v.progress.clearPendingAfterBuilt(pending.ChunkID, key)
 }
 
+// buildOnce runs one build pass: first every sealed chunk this home has not
+// built, in seal order, then the seal-queue head. A sealed chunk that cannot
+// be built here does not hold back the seal-queue head.
 func (v *vaultChunking) buildOnce(ctx context.Context) error {
 	v.pruneCorruptGLCBs()
-	pending := v.sealedManifestForBuild()
+	sealedErr := v.buildSealedChunksMissingLocally(ctx)
+	return errors.Join(v.buildSealQueueHead(ctx), sealedErr)
+}
+
+func (v *vaultChunking) buildSealQueueHead(ctx context.Context) error {
+	pending := v.fsm().SealedManifest()
 	if pending == nil {
 		return nil
 	}
@@ -135,7 +137,6 @@ func (v *vaultChunking) buildOnceIfSealedElsewhere(ctx context.Context, pending 
 	if !v.progress.alreadyBuilt(key) {
 		return false, nil
 	}
-	v.progress.clearPendingAfterBuilt(pending.ChunkID, key)
 
 	// Another home proposed CmdSealChunk first; this home still needs local
 	// head purge and release-queue work.
@@ -294,11 +295,6 @@ func (v *vaultChunking) finishBuildOnce(ctx context.Context, pending *vaultctlfs
 	// Re-flushing here doubled the seal tail: a second full purge pass —
 	// including releasableSegmentIDs over the whole manifest — on every build
 	// wake after the post-seal work had already run.
-	// Retain the pending manifest until CmdSealChunk commits so
-	// OnSealedManifestCleared can run afterSealBuild on follower homes.
-	if entry := v.fsm().Get(pending.ChunkID); entry != nil && entry.State == chunk.ChunkStateSealed {
-		v.progress.clearPendingAfterBuilt(pending.ChunkID, key)
-	}
 }
 
 func (v *vaultChunking) discardEmptySealedManifest(pending *vaultctlfsm.OpenChunkManifest) error {
@@ -313,13 +309,16 @@ func (v *vaultChunking) build(ctx context.Context, pending *vaultctlfsm.OpenChun
 	if err := v.materializeManifestSegments(ctx, manifest); err != nil {
 		return BuildResult{}, err
 	}
-	input := BuildInput{
+	return BuildSealedChunk(v.buildInput(manifest))
+}
+
+func (v *vaultChunking) buildInput(manifest SealedManifest) BuildInput {
+	return BuildInput{
 		Manifest:  manifest,
 		VaultID:   v.cfg.VaultID,
 		ChunkRoot: v.cfg.ChunkRoot,
 		Locate:    v.cfg.Locate,
 	}
-	return BuildSealedChunk(input)
 }
 
 // materializeManifestSegments ensures every segment referenced by a sealed

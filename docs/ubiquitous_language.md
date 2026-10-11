@@ -1514,8 +1514,17 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
   backlog of old records does not seal into slivers.
 
 - **Sealed manifest** — after `SealOpenChunkManifest`, the frozen segment-ref list
-  on vault-ctl awaiting per-home GLCB build (`sealed_manifest` in FSM snapshot).
-  Not the same word as V2 sequenced-write **materialization** (spool → chunk).
+  on vault-ctl awaiting per-home GLCB build. Sealed manifests whose chunk the
+  leader has not yet sealed form the FIFO **seal queue** (`sealed_manifests` in
+  the FSM snapshot); the queue head is the one chunk the leader builds and seals
+  next. Not the same word as V2 sequenced-write **materialization** (spool → chunk).
+
+- **Sealed-chunk manifest** — a sealed manifest whose `CmdSealChunk` has
+  committed. Vault-ctl keeps it (`sealed_chunk_manifests` in the FSM snapshot)
+  until a segment it references is released or the chunk is deleted, so every
+  home that has not built the chunk yet can still build it from its refs. A
+  home's build list is the sealed-chunk manifests whose GLCB is missing from its
+  chunk root, then the seal-queue head.
 
 - **Eligible segment** — a registry segment the chunking planner can still
   take: it has an index and prior chunks have not consumed all its records

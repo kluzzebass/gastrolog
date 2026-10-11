@@ -297,21 +297,39 @@ Open chunk (manifest on vault-ctl FSM):
   Rotation when committed totals satisfy policy (records / bytes / cron)
 
 Build at seal:
-  Leader: SealOpenChunkManifest(chunkID)
-  Each replica: if all manifest segments local → merge → GLCB → SealChunk
+  Leader: SealOpenChunkManifest(chunkID) — the manifest joins the FIFO seal queue
+  Leader: builds the seal-queue head → GLCB → SealChunk; the manifest moves from
+          the seal queue to the sealed-chunk manifests
+  Each home: builds every sealed chunk whose GLCB is not in its chunk root
   Verify: blob digest equality across builders
 
 Release:
   When chunk replicated per holder-set / RF rules
-  Leader: ReleaseSegments(segmentIDs…) — origin and holders purge work-area copies
+  Leader: ReleaseSegments(segmentIDs…) — origin and holders purge work-area copies;
+          drops every sealed-chunk manifest that references a released segment
 ```
+
+**What a home builds.** Each build pass derives its work from vault-ctl FSM state
+and the home's own chunk root — never from a local queue of manifests it happened
+to observe. First, in seal order, every sealed-chunk manifest (a sealed manifest
+whose `CmdSealChunk` has committed) whose chunk is Sealed, not cloud-backed, and
+has no `data.glcb` in this home's chunk root: the home collects the missing
+segments and builds the chunk, or skips it until a later pass when collection
+cannot deliver them yet, so one unbuildable chunk never holds back another. Then
+the seal-queue head, which the leader seals and followers build without proposing.
+A home therefore builds every chunk it did not have when the leader sealed it,
+however many seals the leader ran ahead, and a restart rebuilds the same work from
+the restored FSM. Sealed-chunk manifests are part of the vault-ctl snapshot.
 
 **Failure:**
 
 - Leader dies: new leader continues manifest from FSM.
 - Builder dies mid-build: replay or re-run idempotent build.
-- Replica missing segment: cannot build locally; does not block manifest apply;
-  seal/purge predicates must define behavior for stragglers.
+- Replica missing segment: cannot build locally; does not block manifest apply or
+  the leader's seal. The home keeps the chunk on its build list until the segment
+  arrives or a segment the chunk references is released; after a release the chunk
+  can no longer be built from segments anywhere, and the GLCB catch-up pull
+  supplies the home's copy.
 
 ---
 
@@ -324,7 +342,7 @@ wires, does not own phase logic”).
 |---------|---------|----------------|
 | **Decisions (planner)** | `backend/internal/pipeline/chunking` | Pure functions: open manifest + resume record numbers + eligible segments + rotation policy → next `AddSegmentRef` (segmentID, first/last record number, byte total) or rotate. No Raft, no segment I/O — unit-testable. Lives beside existing `merge.go` / `glcb.go` (same span/budget semantics, different phase of the pipeline). |
 | **Leader loop** | `backend/internal/pipeline/chunking` (`ChunkingManager`) | Vault-leader-only goroutine: read FSM + segment registry, call planner, **propose** commands through a vault-ctl `Applier`. Gated on vault leadership (same class of check as other leader-only work, not on every home). |
-| **Execution (followers + leader)** | `backend/internal/pipeline/chunking` (`ChunkingManager`) | Every home: watch sealed manifest, build at seal (`BuildSealedChunk` / `MergeSpanRefs` + `BuildGLCB`), nudge Collection for missing segments, report chunk identity/digest back to vault-ctl. Does **not** invent membership. |
+| **Execution (followers + leader)** | `backend/internal/pipeline/chunking` (`ChunkingManager`) | Every home: build every sealed chunk missing from its chunk root (see *What a home builds* above), build at seal (`BuildSealedChunk` / `MergeSpanRefs` + `BuildGLCB`), nudge Collection for missing segments, report chunk identity/digest back to vault-ctl. Does **not** invent membership. |
 | **Durable state** | `backend/internal/vaultraft/vaultctlfsm` | Command types and `Apply` handlers only — open manifest refs, running totals, `manifest_opened_at`, resume map, seal/release. **No** segment scans, merge simulation, or pick-order policy. |
 | **Harness integration** | `backend/internal/pipeline/flow_test.go` | Wire `ChunkingManager` into the in-process pipeline harness with test doubles (`gastrolog-5x29i`). Proves leader loop + build-at-seal + collection nudge **before** production wiring. |
 | **Wiring (Rubicon)** | `backend/internal/orchestrator` | Start/stop `ChunkingManager` per vault home; inject real vault-ctl `Applier`, FSM callbacks, Collection nudge (`gastrolog-214bz` **only** — not before). |

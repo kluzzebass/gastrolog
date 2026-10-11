@@ -266,8 +266,18 @@ R3. **The release predicate must use all three signals in 28, not just the first
     tolerates a long absence, not the segment's seconds-to-minutes transport window.
     The chunk's *desired* holder set is still all homes; only the segment-purge
     *trigger* is the lower RF threshold. Mechanically this needs a small persistent
-    segment→containing-chunk-IDs map on the vault-ctl FSM (the open/sealed manifest
-    linkage is dropped once a home builds and pops the manifest), cleared on release.
+    segment→containing-chunk-IDs map on the vault-ctl FSM (the segment refs of a
+    sealed chunk are kept only until one of its segments is released), cleared on
+    release.
+    **Every home builds every sealed chunk.** CmdSealChunk moves the sealed manifest
+    out of the seal queue but the FSM keeps it, as a sealed-chunk manifest, until a
+    segment it references is released or the chunk is deleted. A home's build pass
+    builds each sealed-chunk manifest whose GLCB is missing from its chunk root, then
+    the seal-queue head — FSM state plus local disk, so a home that lagged the
+    leader by any number of seals, or restarted, still builds each chunk while its
+    segments exist. Release does not wait for those builds (that is the dead-home
+    pin this note removes); a chunk whose segment was released before a home built
+    it reaches that home through the GLCB catch-up pull.
 
 R4. **Catch-up is state-dependent and differential, never event-replay (reaffirms
     29/30; settles chunking-design open Qs #1/#2).** A missing node must never block

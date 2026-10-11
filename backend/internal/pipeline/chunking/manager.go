@@ -479,12 +479,11 @@ func (m *Manager) RewireVaultFSM(vaultID glid.GLID, fsm *vaultctlfsm.FSM, applie
 	cfg := v.cfg
 	cfg.FSM = fsm
 	m.wireVaultFSMCallbacks(v, cfg)
-	if pending := fsm.SealedManifest(); pending != nil {
-		v.progress.setPending(pending)
+	if headID, ok := fsm.SealedManifestHeadChunkID(); ok {
 		// Hot FSM restore can leave the seal-proposed guard set from when this
 		// home was a follower; clear so the vault-ctl leader can commit
 		// CmdSealChunk.
-		if entry := fsm.Get(pending.ChunkID); entry == nil || !entry.IsSealed() {
+		if entry := fsm.Get(headID); entry == nil || !entry.IsSealed() {
 			v.progress.resetSealProposal()
 		}
 	}
@@ -527,8 +526,7 @@ func (m *Manager) wireVaultFSMCallbacks(v *vaultChunking, cfg VaultConfig) {
 	// All four FSM callbacks coalesce into the same wake signal; the worker
 	// runs a plan step followed by a build step on every wake, and both
 	// no-op quickly when there is nothing to do.
-	cfg.FSM.SetOnSealedManifest(func(m *vaultctlfsm.OpenChunkManifest) {
-		v.progress.setPending(m)
+	cfg.FSM.SetOnSealedManifest(func(*vaultctlfsm.OpenChunkManifest) {
 		v.wake.Notify()
 	})
 	v.unsubPublish = cfg.FSM.AddOnPublishCompletedSegment(func(vaultctlfsm.CompletedSegmentEntry) {
@@ -563,9 +561,10 @@ func (m *Manager) wireVaultFSMCallbacks(v *vaultChunking, cfg VaultConfig) {
 	//
 	// Must NOT call afterSealBuild inline: holder-receipt Apply on the Raft
 	// FSM apply goroutine deadlocks the vault-ctl leader.
-	cfg.FSM.SetOnSealedManifestCleared(func(_ chunk.ChunkID) {
-		if pending := v.progress.noteSealCleared(); pending != nil {
-			v.goAfterSealBuild(pending)
+	cfg.FSM.SetOnSealedManifestCleared(func(id chunk.ChunkID) {
+		v.progress.noteSealCleared()
+		if sealed := cfg.FSM.SealedChunkManifest(id); sealed != nil {
+			v.goAfterSealBuild(sealed)
 		}
 		v.wake.Notify()
 	})
