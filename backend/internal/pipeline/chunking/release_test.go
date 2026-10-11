@@ -112,7 +112,7 @@ func TestPartitionPendingReleaseWaitsForHolders(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(chunkID, sealedAt, 1, 1, now, now, now, true, sealedAt)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(chunkID, sealedAt, 1, 1, now, now, now, true, sealedAt, [32]byte{})}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -196,7 +196,7 @@ func TestReleaseUnpinsDeadHolderViaSupersession(t *testing.T) {
 	}))
 	sealedAt := now.Add(time.Minute)
 	apply(vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
-	apply(vaultctlfsm.MarshalSealChunk(chunkID, sealedAt, 1, 1, now, now, now, true, sealedAt))
+	apply(vaultctlfsm.MarshalSealChunk(chunkID, sealedAt, 1, 1, now, now, now, true, sealedAt, [32]byte{}))
 
 	// dead-home is required but will never ack the segment or the chunk.
 	required := []string{"live-a", "live-b", "dead-home"}

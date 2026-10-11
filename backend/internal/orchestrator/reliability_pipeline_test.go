@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/ingester/chatterbox"
 	"gastrolog/internal/orchestrator"
@@ -244,13 +245,22 @@ func (h *orchRelHarness) waitGLCBsOnHomes(v vaultSpec, homeIdxs []int, entries [
 	}, func() { h.dumpPipelineState(v) })
 
 	// All files exist (GLCBs are renamed into place atomically); assert
-	// byte-identity across homes.
+	// byte-identity across homes, and that every copy's bytes hash to the
+	// digest the seal recorded.
 	for _, e := range entries {
+		if e.Hash == ([32]byte{}) {
+			h.t.Fatalf("vault %s chunk %s: the seal recorded no digest", v.label, e.ID)
+		}
 		var refHash [sha256.Size]byte
 		var refNode string
 		for _, idx := range homeIdxs {
 			nodeID := h.nodeIDs[idx]
-			data, err := os.ReadFile(h.pipelineGLCBPath(nodeID, v, e.ID))
+			path := h.pipelineGLCBPath(nodeID, v, e.ID)
+			if digest, err := glcb.VerifyBlobDigest(path); err != nil || digest != e.Hash {
+				h.t.Fatalf("vault %s chunk %s: copy on home %s does not verify against the sealed digest %x (digest=%x err=%v)",
+					v.label, e.ID, h.nodes[nodeID].label, e.Hash[:8], digest[:8], err)
+			}
+			data, err := os.ReadFile(path)
 			if err != nil {
 				h.t.Fatalf("vault %s chunk %s: GLCB unreadable on home %s after convergence: %v",
 					v.label, e.ID, h.nodes[nodeID].label, err)

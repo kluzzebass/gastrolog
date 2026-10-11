@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
@@ -71,7 +72,9 @@ type orchRelNode struct {
 	// kept so tests can drive dispatcher-equivalent calls (AddVaultInstance)
 	// after config changes.
 	factories orchestrator.Factories
-	cancel    context.CancelFunc
+	// alerts is the node's alarm collector, wired as the orchestrator's sink.
+	alerts *alert.Collector
+	cancel context.CancelFunc
 }
 
 // orchRelHarness boots N in-process nodes, each running a real orchestrator
@@ -774,9 +777,11 @@ func (h *orchRelHarness) startNode(id string) {
 	if os.Getenv("ORCH_REL_LOG") != "" {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})).With("node", n.label)
 	}
+	n.alerts = alert.New()
 	orchCfg := orchestrator.Config{
 		LocalNodeID: id,
 		Logger:      logger,
+		Alerts:      n.alerts,
 		// Per-node segments base, mirroring production's <home>/segments.
 		SegmentsDir: filepath.Join(n.home, "segments"),
 	}

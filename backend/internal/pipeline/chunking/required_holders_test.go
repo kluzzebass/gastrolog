@@ -64,7 +64,7 @@ func sealedReleasableFSM(t *testing.T, segID glid.GLID) *vaultctlfsm.FSM {
 		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 0, SliceBytes: 1, RefAddedAt: now,
 	}))
 	apply(vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, chunkAt))
-	apply(vaultctlfsm.MarshalSealChunk(chunkID, chunkAt, 1, 1, now, now, now, true, chunkAt))
+	apply(vaultctlfsm.MarshalSealChunk(chunkID, chunkAt, 1, 1, now, now, now, true, chunkAt, [32]byte{}))
 	for _, node := range []string{"home-a", "home-b"} {
 		data, err := vaultctlfsm.MarshalAckChunkHolders([]chunk.ChunkID{chunkID}, node)
 		if err != nil {

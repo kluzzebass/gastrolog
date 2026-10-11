@@ -793,6 +793,9 @@ type SealChunkCommand struct {
 	// Wall-clock sealing completion (leader-chosen, replicated). Retention
 	// MaxAge measures age from this timestamp, not WriteEnd.
 	SealedAtNanos int64 `protobuf:"varint,9,opt,name=sealed_at_nanos,json=sealedAtNanos,proto3" json:"sealed_at_nanos,omitempty"`
+	// Whole-blob digest (the GLCB TOC footer's blobDigest) of the copy the
+	// sealing leader built. Every home's copy of the chunk must carry it.
+	BlobDigest    []byte `protobuf:"bytes,10,opt,name=blob_digest,json=blobDigest,proto3" json:"blob_digest,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -888,6 +891,13 @@ func (x *SealChunkCommand) GetSealedAtNanos() int64 {
 		return x.SealedAtNanos
 	}
 	return 0
+}
+
+func (x *SealChunkCommand) GetBlobDigest() []byte {
+	if x != nil {
+		return x.BlobDigest
+	}
+	return nil
 }
 
 type UploadChunkCommand struct {
@@ -3963,7 +3973,7 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12*\n" +
 	"\x11write_start_nanos\x18\x02 \x01(\x03R\x0fwriteStartNanos\x12,\n" +
 	"\x12ingest_start_nanos\x18\x03 \x01(\x03R\x10ingestStartNanos\x12,\n" +
-	"\x12source_start_nanos\x18\x04 \x01(\x03R\x10sourceStartNanos\"\xdd\x02\n" +
+	"\x12source_start_nanos\x18\x04 \x01(\x03R\x10sourceStartNanos\"\xfe\x02\n" +
 	"\x10SealChunkCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12&\n" +
 	"\x0fwrite_end_nanos\x18\x02 \x01(\x03R\rwriteEndNanos\x12!\n" +
@@ -3973,7 +3983,10 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\x10source_end_nanos\x18\x06 \x01(\x03R\x0esourceEndNanos\x12,\n" +
 	"\x12ingest_start_nanos\x18\a \x01(\x03R\x10ingestStartNanos\x12.\n" +
 	"\x13ingest_ts_monotonic\x18\b \x01(\bR\x11ingestTsMonotonic\x12&\n" +
-	"\x0fsealed_at_nanos\x18\t \x01(\x03R\rsealedAtNanos\"\xca\x02\n" +
+	"\x0fsealed_at_nanos\x18\t \x01(\x03R\rsealedAtNanos\x12\x1f\n" +
+	"\vblob_digest\x18\n" +
+	" \x01(\fR\n" +
+	"blobDigest\"\xca\x02\n" +
 	"\x12UploadChunkCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x1f\n" +
 	"\vcloud_bytes\x18\x02 \x01(\x03R\n" +

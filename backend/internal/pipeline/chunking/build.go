@@ -162,20 +162,20 @@ func (e *MissingSegmentsError) Is(target error) bool {
 	return target == ErrMissingSegments
 }
 
-// readGLCBSealMeta reads seal metadata from the blob header. Header-only —
-// IngestTSMonotonic is persisted in the layout meta at build time, never
-// derived by touching record frames: scanning frames for it cost minutes per
-// large chunk on slow volumes.
-func readGLCBSealMeta(path string) (glcb.BlobMeta, int64, error) {
+// readGLCBSealMeta reads seal metadata and the whole-blob digest from the
+// blob header and TOC footer. Never touches record frames —
+// IngestTSMonotonic is persisted in the layout meta at build time: scanning
+// frames for it cost minutes per large chunk on slow volumes.
+func readGLCBSealMeta(path string) (glcb.BlobMeta, [32]byte, int64, error) {
 	blob, err := glcb.OpenMappedBlob(filepath.Clean(path))
 	if err != nil {
-		return glcb.BlobMeta{}, 0, err
+		return glcb.BlobMeta{}, [32]byte{}, 0, err
 	}
 	defer func() { _ = blob.Close() }()
 
 	info, err := os.Stat(filepath.Clean(path))
 	if err != nil {
-		return glcb.BlobMeta{}, 0, err
+		return glcb.BlobMeta{}, [32]byte{}, 0, err
 	}
-	return blob.Meta(), info.Size(), nil
+	return blob.Meta(), blob.BlobDigest(), info.Size(), nil
 }

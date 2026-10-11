@@ -582,7 +582,7 @@ func TestPipelineSegmentLogReaderSkipsSupersededSegment(t *testing.T) {
 		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 0, SliceBytes: 1, RefAddedAt: now,
 	}))
 	mustApply(vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, now.Add(time.Minute)))
-	mustApply(vaultctlfsm.MarshalSealChunk(chunkID, now.Add(time.Minute), 1, 1, now, now, now, true, now.Add(time.Minute)))
+	mustApply(vaultctlfsm.MarshalSealChunk(chunkID, now.Add(time.Minute), 1, 1, now, now, now, true, now.Add(time.Minute), [32]byte{}))
 	for _, node := range []string{"chunk-holder-a", "chunk-holder-b"} {
 		data, err := vaultctlfsm.MarshalAckChunkHolders([]chunk.ChunkID{chunkID}, node)
 		if err != nil {

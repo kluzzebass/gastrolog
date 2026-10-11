@@ -86,7 +86,7 @@ func applySeal(t *testing.T, fsm *vaultctlfsm.FSM, e vaultctlfsm.ManifestEntry) 
 func sealCommands(e vaultctlfsm.ManifestEntry) [][]byte {
 	return [][]byte{
 		vaultctlfsm.MarshalCreateChunk(e.ID, e.WriteStart, e.IngestStart, e.SourceStart),
-		vaultctlfsm.MarshalSealChunk(e.ID, e.WriteEnd, e.RecordCount, e.Bytes, e.IngestStart, e.IngestEnd, e.SourceEnd, e.IngestTSMonotonic, e.SealedAt),
+		vaultctlfsm.MarshalSealChunk(e.ID, e.WriteEnd, e.RecordCount, e.Bytes, e.IngestStart, e.IngestEnd, e.SourceEnd, e.IngestTSMonotonic, e.SealedAt, e.Hash),
 	}
 }
 

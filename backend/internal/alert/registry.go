@@ -122,6 +122,17 @@ var catalog = []AlarmType{
 		Cause:         "A Raft WAL segment's live-bytes counter and the index disagree — either the counter nominated a segment as drained that the index still references, or it reads above zero for a segment the index does not reference at all. An accounting defect, not an operating condition. The segment is retained and the WAL stops returning space on this node.",
 		Response:      "This should never fire. Capture the alarm detail and this node's WAL log lines and file it. Restarting the node rebuilds the counters from replay and resumes reclamation, but that is a workaround, not the response.",
 	},
+	{
+		// Latching: the node recovers the agreed copy on its own, but two
+		// homes building different bytes from one manifest stays a defect
+		// after the copy is replaced.
+		IDPrefix:      "chunking-build-diverged",
+		SoftwareFault: true,
+		Latching:      true,
+		Source:        "chunking",
+		Cause:         "A sealed chunk's file on this node differs from the copy the cluster agreed on when the chunk sealed. Every home builds a chunk from the same records and must produce the same bytes; this node did not. The copy was renamed aside so it is neither served nor counted, and the node pulls the agreed copy from another home.",
+		Response:      "This should never fire. Capture the alarm detail and this node's chunking log lines — they name the chunk and both digests — and file it. The agreed copy replaces the renamed one on its own; restarting the node clears the alarm but is not the response.",
+	},
 
 	// ------------------------------------------------------------------
 	// High — durability or availability degraded, will compound.

@@ -856,6 +856,16 @@ func (s *Supervisor) NoteGLCBRestored(vaultID glid.GLID, chunkID chunk.ChunkID) 
 	}
 }
 
+// CheckLandedGLCB reports whether this home's GLCB for the sealed chunk e is
+// the copy agreed at seal (chunking.Manager.CheckLandedGLCB). ok is false when
+// chunking does not run the vault on this node.
+func (s *Supervisor) CheckLandedGLCB(vaultID glid.GLID, e vaultctlfsm.ManifestEntry) (agrees, ok bool) {
+	if s.chunk == nil || !s.chunk.HasVault(vaultID) {
+		return false, false
+	}
+	return s.chunk.CheckLandedGLCB(vaultID, e), true
+}
+
 // RewireVaultAfterCtlRestore rebinds release consumption, chunking, and
 // collection — whichever of those the vault runs on this node — to the live
 // vault-ctl sub-FSM after a group-level snapshot Restore. Returns

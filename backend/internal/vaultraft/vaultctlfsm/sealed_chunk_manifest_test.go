@@ -26,7 +26,7 @@ func sealManifestForTest(t *testing.T, fsm *FSM, chunkID chunk.ChunkID, segID gl
 
 func commitSealForTest(t *testing.T, fsm *FSM, chunkID chunk.ChunkID, at time.Time) {
 	t.Helper()
-	applyCmd(t, fsm, MarshalSealChunk(chunkID, at, 1, 100, at, at, at, true, at))
+	applyCmd(t, fsm, MarshalSealChunk(chunkID, at, 1, 100, at, at, at, true, at, [32]byte{}))
 }
 
 func publishForTest(t *testing.T, fsm *FSM, segID glid.GLID, records uint32) {

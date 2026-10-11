@@ -623,9 +623,11 @@ Each TOC entry describes one section in the blob (e.g. IngestTS index, SourceTS 
 **Read protocol.** Read the last 44 bytes as the footer, validate the
 magic, then read `entryCount × 42` bytes immediately preceding the footer
 to recover all section pointers + hashes. The blob digest covers
-everything from the start of the file through the last entry — readers
-verifying integrity hash that range and compare against the FSM-stamped
-digest. See gastrolog-grnc3.
+everything from the start of the file through the last entry. It is the
+chunk's identity across homes: `CmdSealChunk` records the sealing leader's
+digest in the vault-ctl FSM, a home compares its own copy's footer digest
+against it, and a copy pulled from a peer is accepted only when that range
+hashes to it.
 
 ### Blob Object Metadata
 

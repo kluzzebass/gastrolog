@@ -81,7 +81,7 @@ func TestStagingSweepRemovesOnlyTombstonedChunkDirs(t *testing.T) {
 	// Tombstoned: full delete cycle finalized while "offline". Dir must go.
 	tombstoned := chunk.NewChunkID()
 	f.apply(t, vaultctlfsm.MarshalCreateChunk(tombstoned, now, now, now))
-	f.apply(t, vaultctlfsm.MarshalSealChunk(tombstoned, now, 1, 1, now, now, now, false, now))
+	f.apply(t, vaultctlfsm.MarshalSealChunk(tombstoned, now, 1, 1, now, now, now, false, now, [32]byte{}))
 	f.apply(t, vaultctlfsm.MarshalRequestDelete(tombstoned, now, "test", []string{"node-B"}))
 	f.apply(t, vaultctlfsm.MarshalAckDelete(tombstoned, "node-B"))
 	f.apply(t, vaultctlfsm.MarshalFinalizeDelete(tombstoned))
@@ -90,13 +90,13 @@ func TestStagingSweepRemovesOnlyTombstonedChunkDirs(t *testing.T) {
 	// Live sealed chunk: FSM manifest entry exists. Must survive.
 	live := chunk.NewChunkID()
 	f.apply(t, vaultctlfsm.MarshalCreateChunk(live, now, now, now))
-	f.apply(t, vaultctlfsm.MarshalSealChunk(live, now, 1, 1, now, now, now, false, now))
+	f.apply(t, vaultctlfsm.MarshalSealChunk(live, now, 1, 1, now, now, now, false, now, [32]byte{}))
 	liveDir := f.writeChunkDir(t, live)
 
 	// Pending delete: receipt protocol owns cleanup. Must survive here.
 	pending := chunk.NewChunkID()
 	f.apply(t, vaultctlfsm.MarshalCreateChunk(pending, now, now, now))
-	f.apply(t, vaultctlfsm.MarshalSealChunk(pending, now, 1, 1, now, now, now, false, now))
+	f.apply(t, vaultctlfsm.MarshalSealChunk(pending, now, 1, 1, now, now, now, false, now, [32]byte{}))
 	f.apply(t, vaultctlfsm.MarshalRequestDelete(pending, now, "test", []string{"node-B"}))
 	pendingDir := f.writeChunkDir(t, pending)
 
@@ -157,7 +157,7 @@ func TestReconcileFromSnapshotRunsStagingOrphanCleanup(t *testing.T) {
 	// Tombstoned chunk staging dir: full delete cycle finalized "offline".
 	tombstoned := chunk.NewChunkID()
 	f.apply(t, vaultctlfsm.MarshalCreateChunk(tombstoned, now, now, now))
-	f.apply(t, vaultctlfsm.MarshalSealChunk(tombstoned, now, 1, 1, now, now, now, false, now))
+	f.apply(t, vaultctlfsm.MarshalSealChunk(tombstoned, now, 1, 1, now, now, now, false, now, [32]byte{}))
 	f.apply(t, vaultctlfsm.MarshalRequestDelete(tombstoned, now, "test", []string{"node-B"}))
 	f.apply(t, vaultctlfsm.MarshalAckDelete(tombstoned, "node-B"))
 	f.apply(t, vaultctlfsm.MarshalFinalizeDelete(tombstoned))
@@ -166,7 +166,7 @@ func TestReconcileFromSnapshotRunsStagingOrphanCleanup(t *testing.T) {
 	// Live sealed chunk dir: FSM manifest entry exists; must survive.
 	live := chunk.NewChunkID()
 	f.apply(t, vaultctlfsm.MarshalCreateChunk(live, now, now, now))
-	f.apply(t, vaultctlfsm.MarshalSealChunk(live, now, 1, 1, now, now, now, false, now))
+	f.apply(t, vaultctlfsm.MarshalSealChunk(live, now, 1, 1, now, now, now, false, now, [32]byte{}))
 	liveDir := f.writeChunkDir(t, live)
 
 	// Fire ONLY the snapshot-restore event.

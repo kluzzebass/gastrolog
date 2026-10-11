@@ -53,7 +53,7 @@ func agedSealedManifest(t *testing.T, n int) (*vaultctlfsm.FSM, []chunk.ChunkID)
 		if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, old, old, old)}); err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, old, 1, 1, old, old, old, false, old)}); err != nil {
+		if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, old, 1, 1, old, old, old, false, old, [32]byte{})}); err != nil {
 			t.Fatalf("seal: %v", err)
 		}
 		ids = append(ids, id)

@@ -84,6 +84,7 @@ type reconcilerHost interface {
 	noteRegisterSkip(vaultID glid.GLID, id chunk.ChunkID, reason string)
 	pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.ManifestEntry)
 	homeHoldsGLCB(vaultID glid.GLID, id chunk.ChunkID) bool
+	landedGLCBAgrees(vaultID glid.GLID, e vaultctlfsm.ManifestEntry) bool
 	onGLCBLanded(vaultID glid.GLID, ti *VaultInstance, e vaultctlfsm.ManifestEntry)
 
 	// Watch-subscriber and event-journal notifications.
@@ -1526,10 +1527,13 @@ func (r *VaultLifecycleReconciler) SyncHolderReceipts() {
 
 // reconcileHolderReceipts reconciles this node's residency claims against the
 // bytes actually in its chunk root. Earn on presence (local build or a
-// completed pull), revoke on absence — ChunkResidency then reports bytes truth
-// instead of the placement assumption: a home that lost its copy stops being
-// counted the same sweep that schedules its recovery pull, and a home whose
-// warm-cache eviction removed a cloud-backed chunk's GLCB stops claiming it.
+// completed pull) of the copy agreed at seal, revoke on absence —
+// ChunkResidency then reports bytes truth instead of the placement
+// assumption: a home that lost its copy stops being counted the same sweep
+// that schedules its recovery pull, and a home whose warm-cache eviction
+// removed a cloud-backed chunk's GLCB stops claiming it. A copy not yet
+// claimed is checked against the sealed digest first; the check quarantines a
+// divergent one, and for a chunk the cloud does not hold the pull replaces it.
 func (r *VaultLifecycleReconciler) reconcileHolderReceipts(v *reconcileView) {
 	if r.orch == nil {
 		return
@@ -1547,7 +1551,11 @@ func (r *VaultLifecycleReconciler) reconcileHolderReceipts(v *reconcileView) {
 		holds := slices.Contains(e.Holders, r.localNodeID)
 		switch {
 		case statErr == nil && !holds:
-			ack = append(ack, e.ID)
+			if r.orch.landedGLCBAgrees(r.vaultID, e) {
+				ack = append(ack, e.ID)
+			} else if !e.CloudBacked {
+				r.orch.pullMissingGLCB(r.vaultID, e)
+			}
 		case os.IsNotExist(statErr) && holds:
 			revoke = append(revoke, e.ID)
 		}

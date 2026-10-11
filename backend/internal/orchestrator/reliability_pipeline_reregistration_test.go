@@ -68,7 +68,7 @@ func TestOrchPipeline_FailedLeaderReregistrationRetiresNoChunks(t *testing.T) {
 	for i := range ids {
 		ids[i] = chunk.NewChunkID()
 		h.applyOnVaultCtlLeader(v, vaultctlfsm.MarshalCreateChunk(ids[i], old, old, old))
-		h.applyOnVaultCtlLeader(v, vaultctlfsm.MarshalSealChunk(ids[i], old, 1, 1, old, old, old, false, old))
+		h.applyOnVaultCtlLeader(v, vaultctlfsm.MarshalSealChunk(ids[i], old, 1, 1, old, old, old, false, old, [32]byte{}))
 	}
 	h.waitProgress("aged sealed entries replicated to every node", 30*time.Millisecond, func() (string, bool) {
 		var views []string

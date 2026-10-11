@@ -1,6 +1,7 @@
 package vaultctlfsm
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -215,14 +216,11 @@ type ManifestEntry struct {
 	SourceIdxOffset int64
 	SourceIdxSize   int64
 
-	// Integrity fields populated at upload time, verified on every cache
-	// re-fetch.
-	//
-	// Hash is the GLCB whole-blob digest from the TOC footer:
-	// sha256(header ‖ section_hashes_in_TOC_order ‖ TOC_bytes). Re-fetch
-	// verification re-derives this from the on-disk file's footer + TOC
-	// section hashes — O(1) work regardless of blob size — and rejects on
-	// mismatch.
+	// Hash is the whole-blob digest of the chunk's agreed GLCB: the TOC
+	// footer's blobDigest, the SHA-256 of every byte before the footer. The
+	// sealing leader's CmdSealChunk records it; every home's copy (built,
+	// pulled from a peer, or transfer-copied) and every cloud re-fetch must
+	// match it. CmdUploadChunk sets it only for a chunk sealed without one.
 	Hash [32]byte
 	// CloudServiceID pins the chunk to the cloud store it was actually
 	// uploaded to, surviving any future vault reconfiguration that points
@@ -1424,6 +1422,17 @@ func (f *FSM) applySeal(c *gastrologv1.SealChunkCommand) error {
 	if e == nil {
 		return fmt.Errorf("seal chunk: %s not found", id)
 	}
+	digest := c.GetBlobDigest()
+	if len(digest) != 0 && len(digest) != len(e.Hash) {
+		return fmt.Errorf("seal chunk %s: blob digest is %d bytes, want %d", id, len(digest), len(e.Hash))
+	}
+	// The first digest recorded is the agreed one and homes verify their
+	// copies against it, so a later seal of other bytes — a new leader
+	// proposing its own, different build — is refused whole rather than
+	// left to rewrite the entry's metadata under a digest it does not match.
+	if len(digest) != 0 && e.Hash != ([32]byte{}) && !bytes.Equal(digest, e.Hash[:]) {
+		return fmt.Errorf("seal chunk %s: blob digest %x differs from the sealed digest %x", id, digest, e.Hash[:])
+	}
 	e.WriteEnd = time.Unix(0, c.GetWriteEndNanos())
 	e.RecordCount = c.GetRecordCount()
 	e.Bytes = c.GetBytes()
@@ -1437,6 +1446,9 @@ func (f *FSM) applySeal(c *gastrologv1.SealChunkCommand) error {
 		sealedAt = e.WriteEnd
 	}
 	e.SealedAt = sealedAt
+	if len(digest) != 0 {
+		copy(e.Hash[:], digest)
+	}
 	if m := f.popSealedManifestHeadIfIDLocked(id); m != nil && len(m.Refs) > 0 {
 		f.sealedChunkManifests = append(f.sealedChunkManifests, m)
 	}
@@ -1564,13 +1576,22 @@ func (f *FSM) applyAttachOffsets(c *gastrologv1.AttachOffsetsCommand) error {
 	return nil
 }
 
-// UploadChunk records cloud-upload metadata and integrity fields.
+// UploadChunk records cloud-upload metadata and integrity fields. Hash has
+// one meaning, the digest of the agreed GLCB: an upload whose digest differs
+// from the sealed one is refused rather than allowed to redefine it, and an
+// upload that does not know its digest (all zero) leaves the sealed one in
+// place.
 func (f *FSM) applyUpload(c *gastrologv1.UploadChunkCommand) error {
 	id := chunkIDFromProto(c.GetId())
 
 	e := f.chunks[id]
 	if e == nil {
 		return fmt.Errorf("upload chunk: %s not found", id)
+	}
+	h := c.GetHash()
+	known := len(h) == len(e.Hash) && !bytes.Equal(h, make([]byte, len(e.Hash)))
+	if known && e.Hash != ([32]byte{}) && !bytes.Equal(h, e.Hash[:]) {
+		return fmt.Errorf("upload chunk %s: uploaded blob digest %x differs from the sealed digest %x", id, h, e.Hash[:])
 	}
 	e.CloudBytes = c.GetCloudBytes()
 	e.IngestIdxOffset = c.GetIngestIdxOffset()
@@ -1580,8 +1601,10 @@ func (f *FSM) applyUpload(c *gastrologv1.UploadChunkCommand) error {
 	e.CloudBacked = true
 
 	// Integrity fields — present only on the extended form.
-	if h := c.GetHash(); len(h) > 0 {
-		copy(e.Hash[:], h)
+	if len(h) > 0 {
+		if known && e.Hash == ([32]byte{}) {
+			copy(e.Hash[:], h)
+		}
 		e.CloudServiceID = glid.FromBytes(c.GetCloudServiceId())
 		e.KeyScheme = uint8(c.GetKeyScheme()) //nolint:gosec // G115: key scheme is a small enum; round-trips a uint8
 	}
@@ -1629,8 +1652,14 @@ func MarshalCreateChunk(id chunk.ChunkID, writeStart, ingestStart, sourceStart t
 	return mustMarshalCommand(NewCreateChunk(id, writeStart, ingestStart, sourceStart))
 }
 
-// NewSealChunk builds a SealChunk command message.
-func NewSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool, sealedAt time.Time) *gastrologv1.VaultCtlCommand {
+// NewSealChunk builds a SealChunk command message. blobDigest is the
+// whole-blob digest of the GLCB the sealing leader built; the zero digest
+// means the sealer has none, and the command then carries no digest.
+func NewSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool, sealedAt time.Time, blobDigest [32]byte) *gastrologv1.VaultCtlCommand {
+	var digest []byte
+	if blobDigest != ([32]byte{}) {
+		digest = blobDigest[:]
+	}
 	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_SealChunk{SealChunk: &gastrologv1.SealChunkCommand{
 		Id:                id[:],
 		WriteEndNanos:     writeEnd.UnixNano(),
@@ -1641,12 +1670,13 @@ func NewSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64
 		IngestStartNanos:  ingestStart.UnixNano(),
 		IngestTsMonotonic: ingestTSMonotonic,
 		SealedAtNanos:     sealedAt.UnixNano(),
+		BlobDigest:        digest,
 	}}}
 }
 
 // MarshalSealChunk builds the Raft log data for a SealChunk command.
-func MarshalSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool, sealedAt time.Time) []byte {
-	return mustMarshalCommand(NewSealChunk(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic, sealedAt))
+func MarshalSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool, sealedAt time.Time, blobDigest [32]byte) []byte {
+	return mustMarshalCommand(NewSealChunk(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic, sealedAt, blobDigest))
 }
 
 // NewBeginSeal builds a BeginSeal command message.

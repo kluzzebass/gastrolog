@@ -38,7 +38,7 @@ func TestSweepMissingReplicas_PipelineVault_SyncsGLCBNotCatchup(t *testing.T) {
 
 	fsm := vaultctlfsm.New()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(chunkID, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(chunkID, now, 100, 4096, now, now, now, false, now)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(chunkID, now, 100, 4096, now, now, now, false, now, [32]byte{})})
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
 	markPipelineIngestVault(t, orch, vaultID, true)

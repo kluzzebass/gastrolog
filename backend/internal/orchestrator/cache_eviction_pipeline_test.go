@@ -121,8 +121,7 @@ func (h *pipelineCloudHome) buildSealedChunk(t *testing.T, records int) (chunk.C
 	path, info := glcbtest.WriteSealedBlob(t, h.chunkRoot, id, h.vaultID,
 		glcbtest.Records(records, base, glid.New(), "pipeline-cloud-evict"))
 	h.apply(t, vaultctlfsm.MarshalCreateChunk(id, info.WriteStart, info.IngestStart, info.SourceStart))
-	h.apply(t, vaultctlfsm.MarshalSealChunk(id, info.WriteEnd, info.RecordCount, info.Bytes,
-		info.IngestStart, info.IngestEnd, info.SourceEnd, info.IngestTSMonotonic, time.Now()))
+	h.apply(t, vaultctlfsm.MarshalSealChunk(id, info.WriteEnd, info.RecordCount, info.Bytes, info.IngestStart, info.IngestEnd, info.SourceEnd, info.IngestTSMonotonic, time.Now(), [32]byte{}))
 	ack, err := vaultctlfsm.MarshalAckChunkHolders([]chunk.ChunkID{id}, h.nodeID)
 	if err != nil {
 		t.Fatal(err)

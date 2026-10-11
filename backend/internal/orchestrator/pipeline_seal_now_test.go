@@ -166,7 +166,7 @@ func TestReconcilerOnSealSkipsLegacyProjectionForPipelineVaults(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, now, now, now)}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 100, 1234, now, now, now, false, now)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 100, 1234, now, now, now, false, now, [32]byte{})}); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
 	if len(cm.ensured) != 0 {

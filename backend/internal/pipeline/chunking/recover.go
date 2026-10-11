@@ -13,12 +13,14 @@ import (
 )
 
 // BuildResultFromExistingGLCB reads seal metadata from a pipeline GLCB that
-// already exists on disk. Header-only: IngestTSMonotonic is persisted in the
-// blob layout meta at build time, so no record frame is ever touched. Used
-// on the hot build path and after restart when local materialization
-// finished but CmdSealChunk did not apply before shutdown.
+// already exists on disk: header and TOC footer only — IngestTSMonotonic is
+// persisted in the blob layout meta at build time, so no record frame is ever
+// touched. Used on the hot build path and after restart when local
+// materialization finished but CmdSealChunk did not apply before shutdown;
+// BlobDigest is the footer's, so a seal proposed from it records the digest
+// the blob was written with.
 func BuildResultFromExistingGLCB(glcbPath string, sealedAt time.Time) (BuildResult, error) {
-	meta, fileBytes, err := readGLCBSealMeta(glcbPath)
+	meta, digest, fileBytes, err := readGLCBSealMeta(glcbPath)
 	if err != nil {
 		return BuildResult{}, err
 	}
@@ -28,6 +30,7 @@ func BuildResultFromExistingGLCB(glcbPath string, sealedAt time.Time) (BuildResu
 	}
 	return BuildResult{
 		GLCBPath:          glcbPath,
+		BlobDigest:        digest,
 		RecordCount:       meta.RecordCount,
 		Bytes:             fileBytes,
 		WriteEnd:          writeEnd,

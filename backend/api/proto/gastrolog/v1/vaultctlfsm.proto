@@ -96,6 +96,9 @@ message SealChunkCommand {
   // Wall-clock sealing completion (leader-chosen, replicated). Retention
   // MaxAge measures age from this timestamp, not WriteEnd.
   int64 sealed_at_nanos = 9;
+  // Whole-blob digest (the GLCB TOC footer's blobDigest) of the copy the
+  // sealing leader built. Every home's copy of the chunk must carry it.
+  bytes blob_digest = 10;
 }
 
 message UploadChunkCommand {

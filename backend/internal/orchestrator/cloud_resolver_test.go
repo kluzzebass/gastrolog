@@ -85,8 +85,7 @@ func applyCloudChunkLifecycle(t *testing.T, fsm *vaultctlfsm.FSM, id chunk.Chunk
 	}
 	apply("create", vaultctlfsm.MarshalCreateChunk(id, meta.WriteStart, meta.IngestStart, meta.SourceStart))
 	apply("begin-seal", vaultctlfsm.MarshalBeginSeal(id))
-	apply("seal", vaultctlfsm.MarshalSealChunk(id, meta.WriteEnd, meta.RecordCount, meta.Bytes,
-		meta.IngestStart, meta.IngestEnd, meta.SourceEnd, meta.IngestTSMonotonic, time.Now()))
+	apply("seal", vaultctlfsm.MarshalSealChunk(id, meta.WriteEnd, meta.RecordCount, meta.Bytes, meta.IngestStart, meta.IngestEnd, meta.SourceEnd, meta.IngestTSMonotonic, time.Now(), [32]byte{}))
 	apply("upload", vaultctlfsm.MarshalUploadChunk(id, meta.CloudBytes, 0, 0, 0, 0, [32]byte{}, glid.GLID{}, 0))
 }
 

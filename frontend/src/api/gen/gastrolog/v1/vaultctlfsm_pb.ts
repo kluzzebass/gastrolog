@@ -488,6 +488,14 @@ export class SealChunkCommand extends Message<SealChunkCommand> {
    */
   sealedAtNanos = protoInt64.zero;
 
+  /**
+   * Whole-blob digest (the GLCB TOC footer's blobDigest) of the copy the
+   * sealing leader built. Every home's copy of the chunk must carry it.
+   *
+   * @generated from field: bytes blob_digest = 10;
+   */
+  blobDigest = new Uint8Array(0);
+
   constructor(data?: PartialMessage<SealChunkCommand>) {
     super();
     proto3.util.initPartial(data, this);
@@ -505,6 +513,7 @@ export class SealChunkCommand extends Message<SealChunkCommand> {
     { no: 7, name: "ingest_start_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 8, name: "ingest_ts_monotonic", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 9, name: "sealed_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 10, name: "blob_digest", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SealChunkCommand {

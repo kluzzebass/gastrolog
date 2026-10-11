@@ -48,7 +48,7 @@ func sealResumeFixture(t *testing.T, logger *slog.Logger) (*VaultLifecycleReconc
 			t.Fatalf("begin-seal %s: %v", id, err)
 		}
 	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed, now, 1, 1, now, now, now, false, now)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed, now, 1, 1, now, now, now, false, now, [32]byte{})}); err != nil {
 		t.Fatalf("seal-chunk: %v", err)
 	}
 
