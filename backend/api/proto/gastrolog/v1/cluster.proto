@@ -55,10 +55,13 @@ message EnrollResponse {
 // Unlike Enroll, this call is mTLS-authenticated: the caller presents the
 // certificate enrolment just issued it, which is what proves it holds the
 // key rather than merely a copy of the join token.
+//
+// The request carries no suffrage. A node outside the configuration enters
+// as a nonvoter, and a member is re-added at the suffrage it already has:
+// the vote is granted by the cluster, never claimed by the caller.
 message RequestMembershipRequest {
   bytes node_id = 1;
   string node_addr = 2;
-  bool voter = 3;
 }
 
 message RequestMembershipResponse {}
@@ -662,7 +665,9 @@ message ForwardRemoveNodeRequest {
 message ForwardRemoveNodeResponse {}
 
 // ForwardSetNodeSuffrageRequest is sent by a follower to the leader to
-// promote or demote a node's voting status.
+// promote or demote a node's voting status, or, when node_addr is set, to
+// carry a membership request on behalf of the node at that address. A
+// membership request takes no suffrage, so voter is not read for one.
 message ForwardSetNodeSuffrageRequest {
   bytes node_id = 1;
   string node_addr = 2;

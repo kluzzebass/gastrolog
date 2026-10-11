@@ -646,8 +646,9 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	advertisedAddr := cfg.advertisedClusterAddr()
 	if cfg.ConfigType == "raft" && clusterSrv != nil {
 		joinClusterFn = makeJoinClusterFunc(proxy, clusterSrv, clusterTLS, hd, nodeID, advertisedAddr, orch, disp, logger)
-		removeNodeFn = makeRemoveNodeFunc(clusterSrv, cfgStore, nodeID, logger)
-		setNodeSuffrageFn = makeSetNodeSuffrageFunc(clusterSrv, nodeID, orch.Scheduler(), logger)
+		var gate membershipGate
+		removeNodeFn = makeRemoveNodeFunc(clusterSrv, cfgStore, &gate, nodeID, logger)
+		setNodeSuffrageFn = makeSetNodeSuffrageFunc(clusterSrv, cfgStore, &gate, nodeID, orch.Scheduler(), logger)
 
 		// Register eviction handler: reinitialize as a fresh single-node cluster.
 		clusterSrv.SetEvictionHandler(makeEvictionHandler(proxy, clusterSrv, clusterTLS, hd, nodeID, orch, disp, logger))
@@ -1027,7 +1028,7 @@ func resolveIdentity(logger *slog.Logger, cfg RunConfig, hd home.Dir) (string, e
 
 // loadLocalConfig attempts to load config from the local FSM or bootstrap.
 func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cfgStore system.Store, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, nodeID string) (*system.System, bool, error) {
-	if err := requestClusterMembership(ctx, logger, cfg, cfgStore, clusterSrv, clusterTLS, nodeID); err != nil {
+	if err := requestClusterMembership(ctx, logger, cfg, clusterSrv, clusterTLS, nodeID); err != nil {
 		return nil, false, err
 	}
 
@@ -1108,15 +1109,14 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 
 // requestClusterMembership asks a cluster member to put this node in the
 // Raft configuration. The member serves the request wherever it sits in the
-// configuration, so cfg.JoinAddr names any node, not the leader. Fresh
-// joiners enter as nonvoters (learners) and get promoted by the cluster-ctl
-// learner promoter once caught up; a node rejoining at a new address asks as
-// a voter, which re-adds it there. The fresh-vs-restart decision probes the
-// local FSM (presence of vault configs or a JWT secret).
+// configuration, so cfg.JoinAddr names any node, not the leader. The cluster
+// decides the suffrage: a fresh joiner enters as a nonvoter (learner) and is
+// promoted by the cluster-ctl learner promoter once caught up, and a member
+// coming back at a new address is re-added there at the suffrage it has.
 //
 // No-op if join parameters are not set, or if this node is already in the
 // configuration at this address — see alreadyInConfiguration.
-func requestClusterMembership(ctx context.Context, logger *slog.Logger, cfg RunConfig, cfgStore system.Store, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, nodeID string) error {
+func requestClusterMembership(ctx context.Context, logger *slog.Logger, cfg RunConfig, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, nodeID string) error {
 	advertise := cfg.advertisedClusterAddr()
 	if cfg.JoinAddr == "" || clusterTLS == nil || advertise == "" {
 		return nil
@@ -1125,18 +1125,13 @@ func requestClusterMembership(ctx context.Context, logger *slog.Logger, cfg RunC
 		logger.Info("already in the cluster configuration at this address, not asking to be added", "advertise", advertise)
 		return nil
 	}
-	asVoter := isRestartOfVoter(ctx, cfg, cfgStore)
-	kind := "nonvoter (learner)"
-	if asVoter {
-		kind = "voter (restart of existing voter)"
-	}
-	logger.Info("requesting cluster membership", "member_addr", cfg.JoinAddr, "advertise", advertise, "as", kind)
+	logger.Info("requesting cluster membership", "member_addr", cfg.JoinAddr, "advertise", advertise)
 	joinCtx, joinCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer joinCancel()
-	if err := cluster.JoinCluster(joinCtx, logger, cfg.JoinAddr, nodeID, advertise, clusterTLS, asVoter); err != nil {
+	if err := cluster.JoinCluster(joinCtx, logger, cfg.JoinAddr, nodeID, advertise, clusterTLS); err != nil {
 		return fmt.Errorf("join cluster: %w", err)
 	}
-	logger.Info("cluster membership granted", "as", kind)
+	logger.Info("cluster membership granted")
 	return nil
 }
 
@@ -1176,10 +1171,9 @@ func configurationLists(servers []cluster.RaftServer, nodeID, advertise string) 
 }
 
 // isRestartOfVoter probes the local FSM to determine whether this
-// join request is a restart of an existing voter (preserved local
-// state) versus a fresh joiner (empty local state). Used by both
-// requestClusterMembership and loadLocalConfig — extracted so the two
-// agree on the boundary without duplicating the predicate.
+// start is a restart of an existing voter (preserved local state) versus a
+// fresh joiner (empty local state). loadLocalConfig uses it to decide
+// whether to resume from the local FSM or wait for replication.
 //
 // True (restart): local FSM has at least one vault or a JWT secret —
 // the snapshot replay from the previous incarnation populated state

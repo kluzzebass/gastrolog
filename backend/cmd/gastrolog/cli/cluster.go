@@ -426,11 +426,12 @@ func newClusterRemoveNodeCmd() *cobra.Command {
 	return cmd
 }
 
-// newClusterDemoteSelfCmd is the preStop-hook command for K8s
-// rolling-restart / scale-down: the pod tells the cluster to remove this
-// node from Raft membership before SIGTERM arrives. Returns success once the
-// RemoveServer commit has propagated, so the pod terminates without leaving
-// a stranded voter behind.
+// newClusterDemoteSelfCmd is the preStop-hook command for a K8s
+// scale-down: the pod tells the cluster to remove this node from Raft
+// membership before SIGTERM arrives. Removal retires the node ID for good, so
+// a pod that comes back on the same volume is refused; restarts use
+// yield-leadership instead. Returns success once the RemoveServer commit has
+// propagated, so the pod terminates without leaving a stranded voter behind.
 //
 // Distinct from `cluster remove-node`: that requires an operator to
 // specify the target node by name. demote-self looks up its own name
@@ -455,9 +456,10 @@ func newClusterDemoteSelfCmd() *cobra.Command {
 		Long: "Looks up this node's own name via os.Hostname() and calls " +
 			"cluster.RemoveNode against it, returning when the membership " +
 			"change has committed. Intended as a Kubernetes preStop lifecycle " +
-			"hook so pods leaving via `kubectl scale` / rolling restart / " +
-			"voluntary eviction take themselves out of the Raft voter set " +
-			"before SIGTERM.",
+			"hook so pods leaving for good via `kubectl scale` take themselves " +
+			"out of the Raft voter set before SIGTERM. Removal retires the " +
+			"node ID: the cluster does not re-admit it, so a pod restarting on " +
+			"the same volume must use yield-leadership instead.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			hostname, err := os.Hostname()
 			if err != nil {

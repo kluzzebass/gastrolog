@@ -148,6 +148,7 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.SystemCommand_DeleteCertificate,
 		*gastrologv1.SystemCommand_PutNodeConfig,
 		*gastrologv1.SystemCommand_DeleteNodeConfig,
+		*gastrologv1.SystemCommand_MarkNodeRemoved,
 		*gastrologv1.SystemCommand_SetNodeState,
 		*gastrologv1.SystemCommand_PutClusterTls,
 		*gastrologv1.SystemCommand_PutRoute,
@@ -274,6 +275,9 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 			return nil, err
 		}
 		return &Notification{Kind: NotifyNodeConfigDeleted, ID: id}, nil
+	case *gastrologv1.SystemCommand_MarkNodeRemoved:
+		// Read on demand by enrolment and admission; nothing reacts to it.
+		return nil, f.store.MarkNodeRemoved(ctx, c.MarkNodeRemoved.GetNodeId())
 	case *gastrologv1.SystemCommand_SetNodeState:
 		id, newState, since, err := command.ExtractSetNodeState(c.SetNodeState)
 		if err != nil {
@@ -877,6 +881,11 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 	for _, n := range rt.Nodes {
 		if err := newStore.PutNode(ctx, n); err != nil {
 			return fmt.Errorf("restore node %s: %w", n.ID, err)
+		}
+	}
+	for _, nodeID := range rt.RemovedNodes {
+		if err := newStore.MarkNodeRemoved(ctx, nodeID); err != nil {
+			return fmt.Errorf("restore removed node %s: %w", nodeID, err)
 		}
 	}
 	// Build the set of valid node IDs once so the per-node maps below can

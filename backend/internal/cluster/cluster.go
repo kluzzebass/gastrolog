@@ -416,6 +416,10 @@ var (
 	// ErrNodeNotInCluster is returned when the node named is not in the
 	// Raft configuration.
 	ErrNodeNotInCluster = errors.New("node not in cluster configuration")
+	// ErrNodeRemoved is returned when a node the cluster removed asks to be
+	// put back in the configuration. A removed node ID never re-enters: the
+	// machine comes back as a new node, under a new ID.
+	ErrNodeRemoved = errors.New("node was removed from the cluster and cannot rejoin under its node ID")
 )
 
 // removalRefusal is a removal-gate refusal: its own message, and a match for
@@ -827,7 +831,10 @@ func (s *Server) mTLSStreamInterceptor(srv any, ss grpc.ServerStream, info *grpc
 // takes no certificate at all, because it exists to hand one out.
 // RequestMembership takes the certificate but cannot require membership —
 // the caller is asking for exactly that — so it is the one call a node holds
-// a certificate for while still being outside the configuration.
+// a certificate for while still being outside the configuration. What that
+// call can buy is decided by the leader, not here: a node the cluster removed
+// is refused, and any other node outside the configuration enters as a
+// nonvoter.
 func (s *Server) requirePeerAuthority(ctx context.Context, method string) error {
 	if strings.HasSuffix(method, "/Enroll") {
 		return nil

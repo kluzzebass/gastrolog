@@ -86,10 +86,10 @@ sequenceDiagram
     N->>N: Load its cert, start cluster port gRPC with mTLS
     N->>M: RequestMembership (mTLS, with the new cert)
     alt member leads
-        M->>M: AddVoter / AddNonvoter
+        M->>M: Refuse a removed node_id; AddNonvoter
     else member does not lead
         M->>L: ForwardSetNodeSuffrage
-        L->>L: AddVoter / AddNonvoter
+        L->>L: Refuse a removed node_id; AddNonvoter
     end
     M-->>N: Membership granted
 ```
@@ -111,9 +111,38 @@ configuration takes more than a copy of the token.
 
 The node ID on the request is a request. The member decides what the
 certificate says, and refuses to name a node the configuration already has —
-otherwise a token holder could be issued the identity of a current member. A
-node that genuinely lost its disk is removed and re-added rather than silently
-re-issued.
+otherwise a token holder could be issued the identity of a current member —
+or a node the cluster removed (see [Node Revocation](#node-revocation)). A
+node that genuinely lost its disk is removed and comes back as a new node,
+under a new node ID, rather than having its old identity re-issued.
+
+## Admission
+
+`RequestMembership` carries the node's ID and address and nothing else: the
+node has no say in its suffrage. The leader decides, against the
+configuration and the removal record:
+
+| Requesting node | Outcome |
+|-----------------|---------|
+| Named in the removal record | Refused, `PermissionDenied`; the configuration does not change |
+| Not in the configuration | Added as a nonvoter (learner) |
+| A nonvoter in the configuration | Re-added at the requested address, still a nonvoter |
+| A voter in the configuration | Re-added at the requested address, still a voter |
+
+A vote is granted by the cluster-ctl learner promoter once the learner has
+caught up, or by an operator's promotion — never by asking. A learner asking
+again stays a learner.
+
+The leader reads the removal record after a barrier, so its view includes
+every removal committed before the request, including one committed under a
+previous leader. Admission and removal are serialized on the leader, so a
+request cannot read the record just before a removal writes it and then add
+the node back just after the removal takes it out.
+
+The member that serves `Enroll` checks the same record against its own,
+possibly lagging, replicated state, so a removed node is normally refused a
+certificate before it ever asks for membership; the leader's check is the one
+that decides.
 
 ## Join Token Lifecycle
 
@@ -145,7 +174,9 @@ and `RequestMembership` additionally requires that the node the certificate
 names is in the Raft configuration this node holds.
 
 `RequestMembership` is the single call made with a certificate from outside
-the configuration, because it is the call that asks to be put in it.
+the configuration, because it is the call that asks to be put in it. Passing
+the certificate check buys it no more than [Admission](#admission) allows: a
+learner's seat for a new node, and nothing for a removed one.
 
 A node whose local configuration is empty admits any valid certificate. An
 empty configuration means the membership is unknown rather than empty — a
@@ -182,15 +213,33 @@ Remove the node from the cluster. Its certificate stays cryptographically
 valid and stops being accepted: peers check the node it names against their
 own configuration, which no longer lists it.
 
+Removal also writes the node's ID to the **removal record** in the config FSM,
+before the configuration change, so there is no instant at which the node is
+out of the configuration and free to ask back in. The record is replicated
+like any other cluster-ctl state and survives restarts and snapshots. It is
+what closes the one call a removed certificate can still make:
+`RequestMembership` from a recorded ID is refused, as is `Enroll` naming it.
+
 ```mermaid
 flowchart LR
-    Remove["Remove node from Raft configuration"] --> Replicate["Raft replicates to members"]
+    Remove["Remove node"] --> Record["Write removal record"]
+    Record --> Config["Remove from Raft configuration"]
+    Config --> Replicate["Raft replicates to members"]
     Replicate --> Members["Members' membership check updates"]
     Members -.-x Evicted["Evicted node's calls"]
     Evicted --> Rejected["PermissionDenied: not a member"]
+    Record -.-x Rejoin["Evicted node's RequestMembership / Enroll"]
+    Rejoin --> Refused["PermissionDenied: removed"]
 ```
 
 No certificate rotation, no CRL, no reissue of the rest of the cluster.
+
+The record is permanent: a removed node ID never re-enters the cluster. To
+bring the same machine back, start it from an empty home directory. It then
+has a new node ID, enrolls with a join token like any new node, and is
+admitted as a learner. A removal whose configuration change fails after the
+record was written leaves the node in the configuration but unable to
+re-address itself; retrying the removal completes it.
 
 ## Constraints and Trade-offs
 
@@ -199,8 +248,12 @@ No certificate rotation, no CRL, no reissue of the rest of the cluster.
   The consequence is explicit — this PKI cannot contain a compromised node,
   because a compromised node can mint any identity. What it does give is
   attribution (a certificate names one node), revocation (removal takes
-  effect immediately, cluster-wide, with nothing to reissue), and a join
-  token that buys one identity rather than the cluster's private key.
+  effect immediately, cluster-wide, with nothing to reissue, and the removed
+  identity stays out), and a join token that buys one identity rather than
+  the cluster's private key. A removed node keeps the copy of the CA key it
+  replicated while it was a member, so it can still mint a certificate for a
+  new node ID and enter under it as a learner; containing that takes
+  rotating the CA (and the join-token key) after the removal.
 
 - **No cluster → node enrollment.** No member can initiate a connection to a
   node that has no cert yet, so enrolment is always joiner-initiated.

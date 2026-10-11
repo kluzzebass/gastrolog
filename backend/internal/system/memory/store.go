@@ -5,6 +5,7 @@ package memory
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
 	"maps"
@@ -49,6 +50,7 @@ type Store struct {
 	users                map[glid.GLID]system.User         // keyed by ID (UUID)
 	refreshTokens        map[glid.GLID]system.RefreshToken // keyed by token ID
 	nodes                map[glid.GLID]system.NodeConfig   // keyed by node ID
+	removedNodes         map[string]struct{}               // runtime: Raft server IDs the cluster removed
 	managedFiles         map[glid.GLID]system.ManagedFileConfig
 	cloudServices        map[glid.GLID]system.CloudService
 	vaultPlacements      map[glid.GLID][]system.VaultPlacement // runtime: system-managed
@@ -75,6 +77,7 @@ func NewStore() *Store {
 		users:               make(map[glid.GLID]system.User),
 		refreshTokens:       make(map[glid.GLID]system.RefreshToken),
 		nodes:               make(map[glid.GLID]system.NodeConfig),
+		removedNodes:        make(map[string]struct{}),
 		managedFiles:        make(map[glid.GLID]system.ManagedFileConfig),
 		cloudServices:       make(map[glid.GLID]system.CloudService),
 		vaultPlacements:     make(map[glid.GLID][]system.VaultPlacement),
@@ -92,7 +95,7 @@ func (s *Store) isEmpty() bool {
 		len(s.ingesters) == 0 && len(s.routes) == 0 &&
 		len(s.managedFiles) == 0 && len(s.cloudServices) == 0 &&
 		len(s.nodeStorageConfigs) == 0 &&
-		len(s.nodes) == 0 &&
+		len(s.nodes) == 0 && len(s.removedNodes) == 0 &&
 		!s.ss.hasServerSettings && s.clusterTLS == nil &&
 		s.logLevels == nil
 }
@@ -143,6 +146,9 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 	// Runtime: cluster-managed state.
 	rt.Nodes = collectAndSort(s.nodes, func(v system.NodeConfig) system.NodeConfig { return v }, func(a, b system.NodeConfig) int { return glid.Compare(a.ID, b.ID) })
 	rt.NodeStorageConfigs = collectAndSort(s.nodeStorageConfigs, copyNodeStorageConfig, func(a, b system.NodeStorageConfig) int { return cmp.Compare(a.NodeID, b.NodeID) })
+	if len(s.removedNodes) > 0 {
+		rt.RemovedNodes = slices.Sorted(maps.Keys(s.removedNodes))
+	}
 	if s.clusterTLS != nil {
 		c := *s.clusterTLS
 		rt.ClusterTLS = &c
@@ -524,6 +530,27 @@ func (s *Store) SetNodeState(_ context.Context, id glid.GLID, state system.NodeS
 	node.StateSince = since
 	s.nodes[id] = node
 	return nil
+}
+
+// MarkNodeRemoved records that the cluster removed the node with this Raft
+// server ID. Idempotent.
+func (s *Store) MarkNodeRemoved(_ context.Context, nodeID string) error {
+	if nodeID == "" {
+		return errors.New("mark node removed: empty node ID")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.removedNodes[nodeID] = struct{}{}
+	return nil
+}
+
+// IsNodeRemoved reports whether the cluster removed the node with this Raft
+// server ID.
+func (s *Store) IsNodeRemoved(_ context.Context, nodeID string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, removed := s.removedNodes[nodeID]
+	return removed, nil
 }
 
 // DeleteNode removes a node from the cluster and atomically sweeps

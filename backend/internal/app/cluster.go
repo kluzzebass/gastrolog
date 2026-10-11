@@ -236,8 +236,9 @@ const (
 // for, signed by the cluster CA that every member holds. What it will not do
 // is name a node the configuration already has: the ID the joiner sends is
 // unverified at this point, so honouring it for a current member would hand
-// a token holder that member's identity. A node that genuinely lost its disk
-// is removed and re-added rather than silently re-issued.
+// a token holder that member's identity. Nor will it name a node the cluster
+// removed: a node that genuinely lost its disk is removed and comes back as a
+// new node, under a new ID, rather than having its old identity re-issued.
 // memberLister is the slice of *cluster.Server enrollment needs: the current
 // Raft configuration, so a joiner cannot be issued a current member's
 // identity. An interface so the refusal is testable without a live raft.
@@ -285,6 +286,18 @@ func makeEnrollHandler(cfgStore system.Store, clusterSrv memberLister, logger *s
 			logger.Warn("enroll: refused, a node with this ID is already in the cluster",
 				"node_id", nodeID, "node_addr", req.GetNodeAddr())
 			return nil, errors.New("a node with this ID is already in the cluster; remove it before enrolling a replacement")
+		}
+		// Read from this member's FSM, which may lag a removal committed
+		// elsewhere; the leader checks the same record, current, before it
+		// admits anyone. Refusing here as well spares a removed node a
+		// certificate it could never use.
+		if removed, err := cfgStore.IsNodeRemoved(ctx, nodeID); err != nil {
+			return nil, fmt.Errorf("read removal record: %w", err)
+		} else if removed {
+			logger.Warn("enroll: refused, the cluster removed a node with this ID",
+				"node_id", nodeID, "node_addr", req.GetNodeAddr())
+			return nil, errors.New("the cluster removed a node with this ID and does not re-admit it; " +
+				"start the node from an empty home directory to join as a new node")
 		}
 
 		certPEM, err := tlsutil.SignCSR([]byte(tls.CACertPEM), []byte(tls.CAKeyPEM), req.GetCsrPem(), nodeID, cluster.LaneSANs)
@@ -533,15 +546,12 @@ func makeJoinClusterFunc(
 			return err
 		}
 
-		// 12. Request membership as a nonvoter (learner). This is a
-		// runtime single-node-to-cluster join — the joining node is
-		// new to the target cluster's Raft membership regardless of
-		// its own local state, so the safe shape is to enter as a
-		// learner and let the cluster-ctl promoter upgrade to voter once
-		// caught up.
-		logger.Info("requesting cluster membership (as learner)", "member_addr", memberAddr)
+		// 12. Request membership. The node is new to the target
+		// cluster's configuration, so the cluster admits it as a learner
+		// and the cluster-ctl promoter upgrades it to voter once caught up.
+		logger.Info("requesting cluster membership", "member_addr", memberAddr)
 		joinCtx, joinCancel := context.WithTimeout(ctx, 30*time.Second)
-		err = cluster.JoinCluster(joinCtx, logger, memberAddr, nodeID, clusterAddr, clusterTLS, false)
+		err = cluster.JoinCluster(joinCtx, logger, memberAddr, nodeID, clusterAddr, clusterTLS)
 		joinCancel()
 		if err != nil {
 			return fmt.Errorf("join cluster: %w", err)
@@ -682,9 +692,10 @@ func (r *nodeRemover) remove(ctx context.Context, targetNodeID string, opts clus
 	return r.execute(ctx, targetNodeID, opts)
 }
 
-// executeNodeRemoval performs the leader-side removal: the Raft membership
-// change, the system-FSM NodeConfig deletion, and the best-effort eviction
-// notification to the removed node. Runs after the removal gates have passed.
+// executeNodeRemoval performs the leader-side removal: the removal record,
+// the Raft membership change, the system-FSM NodeConfig deletion, and the
+// best-effort eviction notification to the removed node. Runs after the
+// removal gates have passed.
 func executeNodeRemoval(
 	ctx context.Context,
 	clusterSrv *cluster.Server,
@@ -693,6 +704,16 @@ func executeNodeRemoval(
 	targetNodeID string,
 	opts cluster.RemoveNodeOptions,
 ) error {
+	// Recorded before the configuration changes, so there is no instant at
+	// which the node is out of the configuration and free to ask back in.
+	// A record whose removal then fails errs towards keeping the node out,
+	// and the operator's retry completes the removal it stands for.
+	if cfgStore != nil {
+		if err := cfgStore.MarkNodeRemoved(ctx, targetNodeID); err != nil {
+			return fmt.Errorf("record removal of %s: %w", targetNodeID, err)
+		}
+	}
+
 	peerConns := clusterSrv.PeerConns()
 	var evictHandle cluster.PeerConnHandle
 	if peerConns != nil {
@@ -769,10 +790,13 @@ func executeNodeRemoval(
 func makeRemoveNodeFunc(
 	clusterSrv *cluster.Server,
 	cfgStore system.Store,
+	gate *membershipGate,
 	nodeID string,
 	logger *slog.Logger,
 ) cluster.RemoveNodeFunc {
 	execute := func(ctx context.Context, targetNodeID string, opts cluster.RemoveNodeOptions) error {
+		gate.mu.Lock()
+		defer gate.mu.Unlock()
 		return executeNodeRemoval(ctx, clusterSrv, cfgStore, logger, targetNodeID, opts)
 	}
 
@@ -1113,23 +1137,94 @@ const (
 	opDemoteVoter suffrageOp = "demote-voter"
 )
 
-// resolveSuffrageOp decides which configuration change a request means.
-// admitting says the target is not in the configuration yet.
-//
-// The two inputs are not independent: "no vote" means an addition for a node
-// being admitted and a demotion for one already in the configuration, and
-// demoting a node the configuration has never heard of would leave a joiner
-// outside it. Adding a voter covers both promoting a member and re-adding a
-// restarting one at its current address.
-func resolveSuffrageOp(admitting, voter bool) suffrageOp {
-	switch {
-	case voter:
+// resolveSuffrageOp decides which configuration change an operator's
+// suffrage request on a member means.
+func resolveSuffrageOp(voter bool) suffrageOp {
+	if voter {
 		return opAddVoter
-	case admitting:
-		return opAddNonvoter
-	default:
-		return opDemoteVoter
 	}
+	return opDemoteVoter
+}
+
+// resolveAdmissionOp decides which configuration change a membership request
+// means. suffrage is the requester's suffrage in the configuration, empty
+// when the configuration does not list it.
+//
+// Nothing about the request can raise a suffrage: a node outside the
+// configuration enters as a nonvoter, and a member coming back at a new
+// address is re-added there as what it already is. Votes are granted by the
+// learner promoter or an operator's promotion, never claimed by the node.
+func resolveAdmissionOp(suffrage string) suffrageOp {
+	if suffrage == suffrageVoter {
+		return opAddVoter
+	}
+	return opAddNonvoter
+}
+
+// suffrageVoter is how cluster.RaftServer spells a voter.
+const suffrageVoter = "Voter"
+
+// membershipGate serializes, on the leader, the two configuration changes
+// that consult the removal record: admitting a node and removing one. An
+// admission that read the record just before a removal wrote it would
+// otherwise put the node back just after the removal took it out.
+type membershipGate struct{ mu sync.Mutex }
+
+// suffrageChangeTimeout bounds one Raft configuration change.
+const suffrageChangeTimeout = 10 * time.Second
+
+// applySuffrageOp performs a resolved configuration change. Leader only.
+func applySuffrageOp(clusterSrv *cluster.Server, logger *slog.Logger, op suffrageOp, targetNodeID, nodeAddr string) error {
+	logger.Info("applying suffrage change", "node_id", targetNodeID, "node_addr", nodeAddr, "op", op)
+	var err error
+	switch op {
+	case opAddVoter:
+		err = clusterSrv.AddVoter(targetNodeID, nodeAddr, suffrageChangeTimeout)
+	case opAddNonvoter:
+		err = clusterSrv.AddNonvoter(targetNodeID, nodeAddr, suffrageChangeTimeout)
+	case opDemoteVoter:
+		err = clusterSrv.DemoteVoter(targetNodeID, suffrageChangeTimeout)
+	}
+	if err != nil {
+		logger.Error("suffrage change failed", "node_id", targetNodeID, "op", op, "error", err)
+		return err
+	}
+	logger.Info("suffrage change applied", "node_id", targetNodeID, "op", op)
+	return nil
+}
+
+// admitOnLeader puts a node that asked for membership in the configuration
+// at nodeAddr, unless the cluster removed it. Leader only.
+func admitOnLeader(
+	ctx context.Context,
+	clusterSrv *cluster.Server,
+	cfgStore system.Store,
+	gate *membershipGate,
+	logger *slog.Logger,
+	targetNodeID, nodeAddr string,
+) error {
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+
+	// The barrier makes this node's FSM reflect every removal committed
+	// before the request, including one committed under a previous leader.
+	if err := cfgStore.Barrier(ctx); err != nil {
+		return fmt.Errorf("read removal record: %w", err)
+	}
+	removed, err := cfgStore.IsNodeRemoved(ctx, targetNodeID)
+	if err != nil {
+		return fmt.Errorf("read removal record: %w", err)
+	}
+	if removed {
+		logger.Warn("membership refused: the cluster removed this node",
+			"node_id", targetNodeID, "node_addr", nodeAddr)
+		return fmt.Errorf("%s: %w", targetNodeID, cluster.ErrNodeRemoved)
+	}
+	suffrage, err := configuredSuffrage(clusterSrv, targetNodeID)
+	if err != nil {
+		return err
+	}
+	return applySuffrageOp(clusterSrv, logger, resolveAdmissionOp(suffrage), targetNodeID, nodeAddr)
 }
 
 // makeSetNodeSuffrageFunc creates the callback for the SetNodeSuffrage RPC,
@@ -1138,41 +1233,25 @@ func resolveSuffrageOp(admitting, voter bool) suffrageOp {
 // node leads, and a node asking to be admitted.
 func makeSetNodeSuffrageFunc(
 	clusterSrv *cluster.Server,
+	cfgStore system.Store,
+	gate *membershipGate,
 	nodeID string,
 	scheduler *orchestrator.Scheduler,
 	logger *slog.Logger,
 ) func(ctx context.Context, targetNodeID string, voter bool) error {
-	// A supplied nodeAddr means the target is not in the configuration yet
-	// and the caller is the only one that knows where it is; without one the
-	// target is a current member, and the configuration is the authority on
-	// its address.
-	suffrageOnLeader := func(_ context.Context, targetNodeID, nodeAddr string, voter bool) error {
-		admitting := nodeAddr != ""
-		if !admitting {
-			var err error
-			nodeAddr, err = lookupNodeAddr(clusterSrv, targetNodeID)
-			if err != nil {
-				return err
-			}
+	// A supplied nodeAddr makes the change a membership request from the
+	// node at that address, which takes no suffrage; without one it is an
+	// operator's suffrage change on a current member, and the configuration
+	// is the authority on its address.
+	suffrageOnLeader := func(ctx context.Context, targetNodeID, nodeAddr string, voter bool) error {
+		if nodeAddr != "" {
+			return admitOnLeader(ctx, clusterSrv, cfgStore, gate, logger, targetNodeID, nodeAddr)
 		}
-		op := resolveSuffrageOp(admitting, voter)
-		logger.Info("applying suffrage change", "node_id", targetNodeID, "node_addr", nodeAddr, "op", op)
-		const timeout = 10 * time.Second
-		var err error
-		switch op {
-		case opAddVoter:
-			err = clusterSrv.AddVoter(targetNodeID, nodeAddr, timeout)
-		case opAddNonvoter:
-			err = clusterSrv.AddNonvoter(targetNodeID, nodeAddr, timeout)
-		case opDemoteVoter:
-			err = clusterSrv.DemoteVoter(targetNodeID, timeout)
-		}
+		addr, err := lookupNodeAddr(clusterSrv, targetNodeID)
 		if err != nil {
-			logger.Error("suffrage change failed", "node_id", targetNodeID, "op", op, "error", err)
 			return err
 		}
-		logger.Info("suffrage change applied", "node_id", targetNodeID, "op", op)
-		return nil
+		return applySuffrageOp(clusterSrv, logger, resolveSuffrageOp(voter), targetNodeID, addr)
 	}
 
 	clusterSrv.SetNodeSuffrageFn(suffrageOnLeader)
@@ -1189,10 +1268,12 @@ func makeSetNodeSuffrageFunc(
 			return cluster.ErrNoLeader
 		}
 		logger.Info("forwarding suffrage change to leader", "leader_id", leaderID, "target_node_id", targetNodeID, "voter", voter)
-		return forwardSuffrage(clusterSrv, leaderID, targetNodeID, nodeAddr, voter)
+		return forwardSuffrage(ctx, clusterSrv, leaderID, targetNodeID, nodeAddr, voter)
 	}
 
-	clusterSrv.SetMembershipHandler(changeSuffrage)
+	clusterSrv.SetMembershipHandler(func(ctx context.Context, targetNodeID, nodeAddr string) error {
+		return changeSuffrage(ctx, targetNodeID, nodeAddr, false)
+	})
 
 	var demotingSelf atomic.Bool
 
@@ -1213,6 +1294,21 @@ func makeSetNodeSuffrageFunc(
 	}
 }
 
+// configuredSuffrage returns a node's suffrage in the current Raft
+// configuration, or "" when the configuration does not list it.
+func configuredSuffrage(clusterSrv *cluster.Server, targetNodeID string) (string, error) {
+	servers, err := clusterSrv.Servers()
+	if err != nil {
+		return "", fmt.Errorf("list servers: %w", err)
+	}
+	for _, srv := range servers {
+		if srv.ID == targetNodeID {
+			return srv.Suffrage, nil
+		}
+	}
+	return "", nil
+}
+
 // lookupNodeAddr finds a node's cluster address in the current Raft configuration.
 func lookupNodeAddr(clusterSrv *cluster.Server, targetNodeID string) (string, error) {
 	servers, err := clusterSrv.Servers()
@@ -1228,7 +1324,7 @@ func lookupNodeAddr(clusterSrv *cluster.Server, targetNodeID string) (string, er
 }
 
 // forwardSuffrage forwards a suffrage change to the current leader via cluster gRPC.
-func forwardSuffrage(clusterSrv *cluster.Server, leaderID, targetNodeID, nodeAddr string, voter bool) error {
+func forwardSuffrage(ctx context.Context, clusterSrv *cluster.Server, leaderID, targetNodeID, nodeAddr string, voter bool) error {
 	peerConns := clusterSrv.PeerConns()
 	if peerConns == nil {
 		return errors.New("peer connections not available")
@@ -1240,17 +1336,7 @@ func forwardSuffrage(clusterSrv *cluster.Server, leaderID, targetNodeID, nodeAdd
 			return err
 		}
 	}
-	req := &gastrologv1.ForwardSetNodeSuffrageRequest{
-		NodeId:   []byte(targetNodeID),
-		NodeAddr: nodeAddr,
-		Voter:    voter,
-	}
-	resp := &gastrologv1.ForwardSetNodeSuffrageResponse{}
-	if err := peerConns.InvokeService(context.Background(), leaderID, cluster.PurposeSuffrage,
-		"/gastrolog.v1.ClusterService/ForwardSetNodeSuffrage", req, resp); err != nil {
-		return fmt.Errorf("forward suffrage to leader %s: %w", leaderID, err)
-	}
-	return nil
+	return cluster.ForwardSetNodeSuffrage(ctx, peerConns, leaderID, targetNodeID, nodeAddr, voter)
 }
 
 // submitSelfDemotion runs leader self-demotion as a background job.
@@ -1296,7 +1382,7 @@ func submitSelfDemotion(
 					newLeaderID = id
 				}
 			}
-			if err := forwardSuffrage(clusterSrv, newLeaderID, nodeID, "", false); err != nil {
+			if err := forwardSuffrage(ctx, clusterSrv, newLeaderID, nodeID, "", false); err != nil {
 				lastErr = err
 				logger.Warn("forward demotion attempt failed", "attempt", attempt+1, "error", err)
 				continue
