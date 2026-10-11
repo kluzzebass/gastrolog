@@ -1,6 +1,15 @@
 import { FormField, TextInput } from "./FormField";
 import { Checkbox } from "./Checkbox";
-import { NodeMultiSelect } from "./NodeMultiSelect";
+import { NodeMultiSelect, NODE_ASSIGNMENT_HELP_REF } from "./NodeMultiSelect";
+
+const SINGLETON_LABEL = "Singleton (run on one node with automatic failover)";
+
+/** The singleton checkbox's label, carrying the reason when the type cannot use it. */
+export function singletonLabel(singletonSupported: boolean): string {
+  return singletonSupported
+    ? SINGLETON_LABEL
+    : `${SINGLETON_LABEL} — not available for this type: it reads a node-local source or binds a port on every assigned node`;
+}
 
 /**
  * Shared header controls for every ingester form (both create and edit):
@@ -60,15 +69,14 @@ export function IngesterCommonFields({
         onAllNodesChange={onAllNodesChange}
         dark={dark}
       />
-      {singletonSupported && (
-        <Checkbox
-          checked={singleton}
-          onChange={onSingletonChange}
-          label="Singleton (run on one node with automatic failover)"
-          helpRef="ingestion"
-          dark={dark}
-        />
-      )}
+      <Checkbox
+        checked={singletonSupported && singleton}
+        onChange={onSingletonChange}
+        label={singletonLabel(singletonSupported)}
+        helpRef={NODE_ASSIGNMENT_HELP_REF}
+        disabled={!singletonSupported}
+        dark={dark}
+      />
     </>
   );
 }

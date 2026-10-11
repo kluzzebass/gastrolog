@@ -18,7 +18,7 @@ The join token is masked by default. Click the eye icon to reveal it, or use the
 
 ## Joining a Cluster
 
-A single-node server can join an existing cluster from this tab. Enter the leader's cluster address and join token, then confirm. This operation:
+A single-node server can join an existing cluster from this tab. Enter the leader's cluster address and join token, then confirm. The **Join Cluster** card is always shown; on a node that is already one of several members it is disabled with that reason, since only a single-node cluster can join another. This operation:
 
 - Replaces the node's local configuration with the cluster's replicated state
 - Backs up the previous Raft state to `<home>/raft.bak.<timestamp>`

@@ -1,9 +1,10 @@
 import { encode } from "../../../api/glid";
-import { FormField, TextInput, SelectInput } from "../FormField";
+import { FormField, TextInput } from "../FormField";
+import { EligibilitySelect } from "../EligibilitySelect";
 import { useThemeClass } from "../../../hooks/useThemeClass";
-import { useCertificates } from "../../../api/hooks/useCertificates";
 import { Checkbox } from "../Checkbox";
 import { TestConnectionButton } from "./TestConnectionButton";
+import { CERTIFICATES_HELP_REF, NO_CERTIFICATES_MESSAGE, useCertOptions } from "./TlsFields";
 import type { SubFormProps } from "./types";
 
 export function DockerForm({
@@ -13,14 +14,7 @@ export function DockerForm({
   defaults: d,
 }: Readonly<SubFormProps>) {
   const c = useThemeClass(dark);
-  const { data: certData } = useCertificates();
-  const certs = certData?.certificates ?? [];
-  const certOptions = [
-    { value: "", label: "(none)" },
-    ...certs
-      .map((c) => ({ value: encode(c.id), label: c.name || encode(c.id) }))
-      .sort((a, b) => a.label.localeCompare(b.label)),
-  ];
+  const certOptions = useCertOptions((cert) => encode(cert.id));
   const set = (key: string, value: string) =>
     onChange({ ...params, [key]: value });
 
@@ -111,10 +105,13 @@ export function DockerForm({
                 description="Verify the Docker daemon's server certificate"
                 dark={dark}
               >
-                <SelectInput
+                <EligibilitySelect
                   value={params["tls_ca"] ?? ""}
                   onChange={(v) => set("tls_ca", v)}
                   options={certOptions}
+                  placeholder="(none)"
+                  emptyMessage={NO_CERTIFICATES_MESSAGE}
+                  helpRef={CERTIFICATES_HELP_REF}
                   dark={dark}
                 />
               </FormField>
@@ -123,10 +120,13 @@ export function DockerForm({
                 description="Authenticate to the Docker daemon"
                 dark={dark}
               >
-                <SelectInput
+                <EligibilitySelect
                   value={params["tls_cert"] ?? ""}
                   onChange={(v) => set("tls_cert", v)}
                   options={certOptions}
+                  placeholder="(none)"
+                  emptyMessage={NO_CERTIFICATES_MESSAGE}
+                  helpRef={CERTIFICATES_HELP_REF}
                   dark={dark}
                 />
               </FormField>

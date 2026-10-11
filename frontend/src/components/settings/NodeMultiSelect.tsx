@@ -1,8 +1,11 @@
 import { encode } from "../../api/glid";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { HelpLink } from "../HelpLink";
 import { FormField } from "./FormField";
 import { Checkbox } from "./Checkbox";
+
+export const NODE_ASSIGNMENT_HELP_REF = "ingestion#node-assignment";
 
 /**
  * Multi-select node picker for ingesters. Renders a list of checkboxes,
@@ -54,8 +57,12 @@ export function NodeMultiSelect({
     }
   };
 
+  // The dispatcher reads an empty list as "every node"; the picker must
+  // not let that read as "no node".
+  const nothingSelected = !allNodes && value.length === 0;
+
   return (
-    <FormField label="Nodes" dark={dark}>
+    <FormField label="Nodes" helpRef={NODE_ASSIGNMENT_HELP_REF} dark={dark}>
       <div className={`flex flex-col gap-1.5 px-2 py-1.5 rounded border ${c(
         "border-ink-border bg-ink-surface",
         "border-light-border bg-light-surface",
@@ -63,7 +70,7 @@ export function NodeMultiSelect({
         <Checkbox
           checked={allNodes}
           onChange={onAllNodesChange}
-          label="All nodes"
+          label="All nodes — including nodes that join later"
           dark={dark}
         />
         <div className={`border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`} />
@@ -78,6 +85,12 @@ export function NodeMultiSelect({
           />
         ))}
       </div>
+      {nothingSelected && (
+        <div role="note" className={`text-[0.85em] leading-relaxed ${c("text-text-normal", "text-light-text-normal")}`}>
+          No node selected — the ingester runs on every node, the same as All nodes.{" "}
+          <HelpLink helpRef={NODE_ASSIGNMENT_HELP_REF} className="text-copper">Node assignment</HelpLink>
+        </div>
+      )}
     </FormField>
   );
 }

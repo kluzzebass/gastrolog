@@ -546,26 +546,13 @@ describe("transfer target picker", () => {
     cloudServices: [{ id: testId(60), name: "s3" }],
   };
 
-  function renderWithHelp(config: unknown) {
-    const qc = createTestQueryClient();
-    qc.setQueryData(["system"], config);
-    const openHelp = mock((_helpRef?: string) => {});
-    const result = renderWritable(
-      <HelpProvider onOpen={openHelp}>
-        <VaultsSettings dark />
-      </HelpProvider>,
-      { wrapper: settingsWrapper(qc) },
-    );
-    return { ...result, openHelp };
-  }
-
   test("an empty picker names the rule that emptied it and links to it", async () => {
-    const { getByText, getByLabelText, getByRole, openHelp } = renderWithHelp(noEligibleConfig);
+    const { getByText, getByLabelText, openHelp } = renderWithHelp(noEligibleConfig);
     expandVault(getByText);
     fireEvent.change(getByLabelText("Retention Disposition"), { target: { value: "transfer" } });
 
     await waitFor(() => expect(getByLabelText("Transfer Target")).toBeTruthy());
-    expect(getByRole("note").textContent).toContain(
+    expect(fieldNote(getByLabelText("Transfer Target"))?.textContent).toContain(
       "No eligible targets — transfer requires a different, non-cloud file vault.",
     );
 
@@ -600,12 +587,12 @@ describe("transfer target picker", () => {
 
   test("no empty-state note while an eligible target exists", async () => {
     const config = { ...noEligibleConfig, vaults: [...noEligibleConfig.vaults, fileVault(3, "vault-archive")] };
-    const { getByText, getByLabelText, queryByRole } = renderWithHelp(config);
+    const { getByText, getByLabelText } = renderWithHelp(config);
     expandVault(getByText);
     fireEvent.change(getByLabelText("Retention Disposition"), { target: { value: "transfer" } });
 
     await waitFor(() => expect(getByLabelText("Transfer Target")).toBeTruthy());
-    expect(queryByRole("note")).toBeNull();
+    expect(fieldNote(getByLabelText("Transfer Target"))).toBeNull();
     expect(optionStates(getByLabelText("Transfer Target"))[1]).toEqual({ label: "vault-archive", disabled: false });
   });
 
@@ -625,7 +612,7 @@ describe("transfer target picker", () => {
   test("binding a cloud service after choosing transfer blocks Create and names the cause", async () => {
     m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
     const config = { ...noEligibleConfig, vaults: [...noEligibleConfig.vaults, fileVault(3, "vault-archive")] };
-    const { getByText, getByLabelText, getByRole } = renderWithHelp(config);
+    const { getByText, getByLabelText } = renderWithHelp(config);
     fireEvent.click(getByText("Add Vault"));
     await waitFor(() => expect(getByText("Create")).toBeTruthy());
 
@@ -639,8 +626,118 @@ describe("transfer target picker", () => {
 
     fireEvent.change(getByLabelText("Cloud Storage"), { target: { value: encode(testId(60)) } });
     await waitFor(() => expect(createBtn.disabled).toBe(true));
-    expect(getByRole("note").textContent).toContain(
+    expect(fieldNote(getByLabelText("Retention Disposition"))?.textContent).toContain(
       "Transfer records to another vault unchanged is not eligible — this vault is cloud-backed.",
     );
+  });
+});
+
+/** The note rendered inside the FormField that owns this input, if any. */
+function fieldNote(input: HTMLElement): Element | null {
+  return input.closest(".flex-col")!.querySelector('[role="note"]');
+}
+
+/** Render the vaults tab under a help provider whose calls are recorded. */
+function renderWithHelp(config: unknown) {
+  const qc = createTestQueryClient();
+  qc.setQueryData(["system"], config);
+  const openHelp = mock((_helpRef?: string) => {});
+  const result = renderWritable(
+    <HelpProvider onOpen={openHelp}>
+      <VaultsSettings dark />
+    </HelpProvider>,
+    { wrapper: settingsWrapper(qc) },
+  );
+  return { ...result, openHelp };
+}
+
+// ── Pickers that used to go empty silently, and fields that used to vanish ──
+
+describe("vault form eligibility and gating", () => {
+  const bare = {
+    ...oneVaultConfig,
+    rotationPolicies: [],
+    retentionPolicies: [],
+    cloudServices: [],
+    nodeStorageConfigs: [],
+  };
+
+  test("with no file storage the Storage Class picker says so and links to the rule — no spinner fallback", () => {
+    const { getByText, getByLabelText, openHelp } = renderWithHelp(bare);
+    expandVault(getByText);
+    expect(fieldNote(getByLabelText("Storage Class"))?.textContent).toContain("No file storage configured");
+    expect(getByLabelText("Storage Class").tagName).toBe("SELECT");
+    const link = fieldNote(getByLabelText("Storage Class"))!.querySelector("button")!;
+    fireEvent.click(link);
+    expect(openHelp).toHaveBeenCalledWith("storage-config#file-storage");
+  });
+
+  test("with no cloud storage the new-vault Cloud Storage picker says so and stays local-only", async () => {
+    m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
+    const { getByText, getByLabelText, openHelp } = renderWithHelp(bare);
+    fireEvent.click(getByText("Add Vault"));
+    await waitFor(() => expect(getByText("Create")).toBeTruthy());
+    fireEvent.change(getByLabelText("Storage Type"), { target: { value: "file" } });
+    expect((getByLabelText("Cloud Storage") as HTMLSelectElement).disabled).toBe(false);
+    const note = fieldNote(getByLabelText("Cloud Storage"))!;
+    expect(note.textContent).toContain("No cloud storage configured");
+    fireEvent.click(note.querySelector("button")!);
+    expect(openHelp).toHaveBeenCalledWith("storage-config#cloud-storage");
+  });
+
+  test("the policy pickers stay on screen with no policy configured, each naming the cause", () => {
+    const { getByText, getByLabelText, openHelp } = renderWithHelp(bare);
+    expandVault(getByText);
+    expect(fieldNote(getByLabelText("Rotation Policy"))?.textContent).toContain("No rotation policies configured");
+    expect(fieldNote(getByLabelText("Retention Policy"))?.textContent).toContain("No retention policies configured");
+    fireEvent.click(fieldNote(getByLabelText("Retention Policy"))!.querySelector("button")!);
+    expect(openHelp).toHaveBeenCalledWith("vaults-config#rotation-and-retention-policies");
+  });
+
+  test("with a policy configured the pickers carry no note", () => {
+    const { getByText, getByLabelText } = renderWithHelp(oneVaultConfig);
+    expandVault(getByText);
+    expect(fieldNote(getByLabelText("Rotation Policy"))).toBeNull();
+    expect(fieldNote(getByLabelText("Retention Policy"))).toBeNull();
+    expect([...getByLabelText("Rotation Policy").querySelectorAll("option")].map((o) => o.textContent)).toEqual(["None", "daily"]);
+  });
+
+  test("the cache fields are on screen for a local-only vault, disabled with the reason", () => {
+    const { getByText, getByLabelText } = renderWithHelp(oneVaultConfig);
+    expandVault(getByText);
+    for (const label of ["Cache Eviction", "Cache Budget", "Cache TTL"]) {
+      const input = getByLabelText(label) as HTMLInputElement;
+      expect(input.disabled).toBe(true);
+      expect(fieldNote(input)?.textContent).toBe("Only a cloud-backed vault has a warm cache.");
+    }
+  });
+
+  test("on a cloud-backed vault the cache fields open, and Cache TTL stays gated on TTL eviction", async () => {
+    m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
+    const config = { ...oneVaultConfig, cloudServices: [{ id: testId(60), name: "s3" }] };
+    const { getByText, getByLabelText } = renderWithHelp(config);
+    fireEvent.click(getByText("Add Vault"));
+    await waitFor(() => expect(getByText("Create")).toBeTruthy());
+    fireEvent.change(getByLabelText("Storage Type"), { target: { value: "file" } });
+    fireEvent.change(getByLabelText("Cloud Storage"), { target: { value: encode(testId(60)) } });
+
+    expect((getByLabelText("Cache Budget") as HTMLInputElement).disabled).toBe(false);
+    expect(fieldNote(getByLabelText("Cache Budget"))).toBeNull();
+    expect((getByLabelText("Cache TTL") as HTMLInputElement).disabled).toBe(true);
+    expect(fieldNote(getByLabelText("Cache TTL"))?.textContent).toBe("Applies to TTL eviction only.");
+
+    fireEvent.change(getByLabelText("Cache Eviction"), { target: { value: "ttl" } });
+    expect((getByLabelText("Cache TTL") as HTMLInputElement).disabled).toBe(false);
+    expect(fieldNote(getByLabelText("Cache TTL"))).toBeNull();
+  });
+
+  test("an existing vault's cloud binding is disabled with the reason it is fixed, and only that", () => {
+    const { getByText, getByLabelText } = renderWithHelp(bare);
+    expandVault(getByText);
+    expect((getByLabelText("Cloud Storage") as HTMLSelectElement).disabled).toBe(true);
+    const notes = [...getByLabelText("Cloud Storage").closest(".flex-col")!.querySelectorAll('[role="note"]')];
+    expect(notes.map((n) => n.textContent)).toEqual([
+      "Fixed at vault creation — to change it, create a new vault and migrate data via retention routing.",
+    ]);
   });
 });

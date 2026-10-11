@@ -31,7 +31,7 @@ GastroLog can automatically download and update the free MaxMind GeoLite2 databa
 3. Enter your **Account ID** and **License Key**
 4. Check **Enable Automatic Database Downloads**
 
-When enabled, databases are fetched twice weekly (Tuesday and Friday at 03:00). The last update timestamp is shown in the card.
+When enabled, databases are fetched twice weekly (Tuesday and Friday at 03:00). The last update timestamp is shown in the card. The card is always on the Files tab, with its status reading **enabled** or **disabled**; **Disable** is offered only while downloads are enabled.
 
 MMDB lookups with no uploaded file will automatically use the auto-downloaded database matching their type.
 

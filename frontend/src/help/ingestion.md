@@ -22,3 +22,14 @@ You can run multiple ingesters simultaneously, each feeding into the same pipeli
 | [**Scatterbox**](help:ingester-scatterbox) | Generates deterministic, traceable test records with sequence numbers |
 
 Select an ingester from the sidebar for protocol and configuration details.
+
+## Node Assignment
+
+In a cluster, every ingester form carries a **Nodes** picker and a **Singleton** checkbox that together say where the ingester runs.
+
+| Control | Meaning |
+|---------|---------|
+| **All nodes** | The ingester runs on every member, including nodes that join later. It is a setting of its own, not a shortcut for ticking every current node — a ticked list is a fixed set that a new joiner is not part of. |
+| **Ticked nodes** | The ingester runs on exactly those nodes. |
+| **No node selected** | With **All nodes** off and nothing ticked, the ingester runs on every node, the same as **All nodes**; the picker says so. |
+| **Singleton** | Of the assigned nodes, exactly one runs the ingester at a time, with automatic failover. Available for Kafka, MQTT, Chatterbox and Scatterbox. Listeners bind their port on every assigned node, and Docker, Tail, Metrics and Self read a node-local source, so for those types the checkbox is disabled with the reason. |

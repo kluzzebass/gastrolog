@@ -15,7 +15,7 @@ import { Checkbox } from "./Checkbox";
 import { HelpLink } from "../HelpLink";
 import type { SettingsTab } from "./SettingsDialog";
 import { sortByName } from "../../lib/sort";
-import type { RouteConfig } from "../../api/gen/gastrolog/v1/system_pb";
+import { VaultType, type RouteConfig } from "../../api/gen/gastrolog/v1/system_pb";
 
 // The route's gating predicate is the inline expression on the first
 // MatchStage. Planned stage kinds (enrich, redact, sample, fork,
@@ -223,7 +223,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
           <DestinationsEditor
             destinations={newDestinations}
             onChange={setNewDestinations}
-            vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name }))}
+            vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name, type: v.type, enabled: v.enabled }))}
             dark={dark}
           />
           <FormField
@@ -324,7 +324,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
               <DestinationsEditor
                 destinations={edit.destinations}
                 onChange={(dests) => setEdit(id, { destinations: dests })}
-                vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name }))}
+                vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name, type: v.type, enabled: v.enabled }))}
                 dark={dark}
               />
               <FormField
@@ -353,6 +353,20 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
   );
 }
 
+type DestinationVault = { id: string; name: string; type: VaultType; enabled: boolean };
+
+/**
+ * What a destination candidate is besides a name: a JSONL sink cannot be
+ * searched, and a disabled vault has no instance to append to. Both remain
+ * selectable — a route may be configured ahead of enabling its vault.
+ */
+export function destinationState(v: Pick<DestinationVault, "type" | "enabled">): string | undefined {
+  const notes: string[] = [];
+  if (v.type === VaultType.JSONL) notes.push("JSONL sink, write-only");
+  if (!v.enabled) notes.push("disabled, not accepting records");
+  return notes.length > 0 ? notes.join("; ") : undefined;
+}
+
 // DestinationsEditor renders a flat checkbox list — every destination is
 // explicit. The wire shape is a list of {vaultId}; this component keeps
 // that contract by reconstructing it from the checked vault IDs.
@@ -364,7 +378,7 @@ function DestinationsEditor({
 }: Readonly<{
   destinations: DestinationEdit[];
   onChange: (dests: DestinationEdit[]) => void;
-  vaults: { id: string; name: string }[];
+  vaults: DestinationVault[];
   dark: boolean;
 }>) {
   const c = useThemeClass(dark);
@@ -383,19 +397,23 @@ function DestinationsEditor({
     <FormField label="Destinations" helpRef={ROUTE_COMPONENTS_HELP_REF} dark={dark}>
       <div className="flex flex-col gap-1.5">
         {sortedVaults.length === 0 && (
-          <p className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
-            No vaults available
+          <p role="note" className={`text-[0.85em] ${c("text-text-normal", "text-light-text-normal")}`}>
+            No vaults configured — create one under Vaults; a route with no destination drops what it matches.{" "}
+            <HelpLink helpRef={ROUTE_COMPONENTS_HELP_REF} className="text-copper">Route components</HelpLink>
           </p>
         )}
-        {sortedVaults.map((v) => (
-          <Checkbox
-            key={v.id}
-            checked={selected.has(v.id)}
-            onChange={() => toggle(v.id)}
-            label={v.name || v.id}
-            dark={dark}
-          />
-        ))}
+        {sortedVaults.map((v) => {
+          const state = destinationState(v);
+          return (
+            <Checkbox
+              key={v.id}
+              checked={selected.has(v.id)}
+              onChange={() => toggle(v.id)}
+              label={state ? `${v.name || v.id} — ${state}` : v.name || v.id}
+              dark={dark}
+            />
+          );
+        })}
       </div>
     </FormField>
   );

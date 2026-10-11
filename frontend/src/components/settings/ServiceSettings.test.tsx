@@ -3,6 +3,7 @@ import { render, fireEvent } from "@testing-library/react";
 import { installMockClients, m } from "../../../test/api-mock";
 import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 import { HelpProvider } from "../../hooks/useHelp";
+import { encode } from "../../api/glid";
 
 const mocks = installMockClients();
 
@@ -190,10 +191,10 @@ describe("ServiceSettings", () => {
   });
 });
 
-function renderWithHelp(noAuth?: boolean) {
+function renderWithHelp(noAuth?: boolean, certificates: { id: Uint8Array; name: string }[] = [{ id: testId(1), name: "my-cert" }]) {
   const qc = createTestQueryClient();
   qc.setQueryData(["settings"], sampleSettings);
-  qc.setQueryData(["certificates"], { certificates: [{ id: testId(1), name: "my-cert" }] });
+  qc.setQueryData(["certificates"], { certificates });
   const openHelp = mock((_helpRef?: string) => {});
   const result = renderWritable(
     <HelpProvider onOpen={openHelp}>
@@ -202,6 +203,11 @@ function renderWithHelp(noAuth?: boolean) {
     { wrapper: settingsWrapper(qc) },
   );
   return { ...result, openHelp };
+}
+
+/** The note rendered inside the FormField that owns this label or input, if any. */
+function fieldNote(el: HTMLElement): Element | null {
+  return el.closest(".flex-col")!.querySelector('[role="note"]');
 }
 
 /** The help button beside a form field's label. */
@@ -219,6 +225,43 @@ describe("ServiceSettings help", () => {
     fireEvent.click(fieldHelpButton(getByText("Default certificate")));
 
     expect(openHelp).toHaveBeenCalledWith("certificates#default-certificate");
+  });
+
+  test("with no certificate stored the picker says so and links to the default-certificate section", () => {
+    const { getByText, getByLabelText, openHelp } = renderWithHelp(false, []);
+    fireEvent.click(getByText("TLS"));
+    expect(fieldNote(getByLabelText("Default certificate"))?.textContent).toContain(
+      "No certificates stored — add one in the Certificates tab.",
+    );
+    fireEvent.click(getByText("Eligibility rules"));
+    expect(openHelp).toHaveBeenCalledWith("certificates#default-certificate");
+  });
+
+  test("the TLS fields stay on screen without a certificate, disabled with the reason", () => {
+    const { getByText, container } = renderWithHelp(false, []);
+    fireEvent.click(getByText("TLS"));
+    for (const label of ["Enable TLS (HTTPS)", "HTTPS port", "Redirect HTTP to HTTPS"]) {
+      expect(fieldNote(getByText(label))?.textContent).toBe("Requires a default certificate.");
+    }
+    expect(getByText("Enable TLS (HTTPS)").closest(".flex-col")!.querySelector('[role="checkbox"]')?.getAttribute("aria-disabled")).toBe("true");
+    const port = container.querySelector(`#${CSS.escape((getByText("HTTPS port") as HTMLLabelElement).htmlFor)}`) as HTMLInputElement;
+    expect(port.disabled).toBe(true);
+  });
+
+  test("choosing a certificate frees Enable TLS; enabling TLS frees the port and redirect", () => {
+    const { getByText, getByLabelText, container } = renderWithHelp(false);
+    fireEvent.click(getByText("TLS"));
+    fireEvent.change(getByLabelText("Default certificate"), { target: { value: encode(testId(1)) } });
+
+    expect(fieldNote(getByText("Enable TLS (HTTPS)"))).toBeNull();
+    expect(fieldNote(getByText("HTTPS port"))?.textContent).toBe("Requires TLS enabled.");
+    expect(fieldNote(getByText("Redirect HTTP to HTTPS"))?.textContent).toBe("Requires TLS enabled.");
+
+    fireEvent.click(getByText("Enable TLS (HTTPS)").closest(".flex-col")!.querySelector('[role="checkbox"]')!);
+    expect(fieldNote(getByText("HTTPS port"))).toBeNull();
+    expect(fieldNote(getByText("Redirect HTTP to HTTPS"))).toBeNull();
+    const port = container.querySelector(`#${CSS.escape((getByText("HTTPS port") as HTMLLabelElement).htmlFor)}`) as HTMLInputElement;
+    expect(port.disabled).toBe(false);
   });
 
   test("the --no-auth badge names its cause and opens the no-auth section", () => {
