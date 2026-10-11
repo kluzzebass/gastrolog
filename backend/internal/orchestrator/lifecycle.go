@@ -292,6 +292,14 @@ func (o *Orchestrator) rebuildVaultIndexes(ctx context.Context, vaultID glid.GLI
 	return nil
 }
 
+func indexRebuildJobName(vaultID glid.GLID, chunkID chunk.ChunkID) string {
+	return indexRebuildJobPrefix(vaultID) + chunkID.String()
+}
+
+func indexRebuildJobPrefix(vaultID glid.GLID) string {
+	return "index-rebuild:" + vaultID.String() + ":"
+}
+
 func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID glid.GLID, vaultInst *VaultInstance, meta chunk.ChunkMeta) {
 	// Every home indexes its own copy: any of them can become the vault leader
 	// that serves searches. Completeness is read from the index files on disk,
@@ -305,7 +313,7 @@ func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID
 	// Describe BEFORE scheduling — see scheduleReplication for why (missing
 	// label on the Scheduled event, leaked descriptions entry when the job
 	// finishes first).
-	name := fmt.Sprintf("index-rebuild:%s:%s:%s", vaultID, vaultInst.VaultID, meta.ID)
+	name := indexRebuildJobName(vaultID, meta.ID)
 	o.scheduler.Describe(name, fmt.Sprintf("Rebuild missing indexes for chunk %s", meta.ID))
 	runBuild := func(runCtx context.Context, chunkID chunk.ChunkID) error {
 		return vaultInst.Indexes.BuildIndexes(runCtx, chunkID)

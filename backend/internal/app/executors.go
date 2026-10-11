@@ -290,7 +290,8 @@ func forwardSearchAfterParse(
 // contains a pipeline (stats, timechart), runs RunPipeline and returns the
 // TableResult instead of individual records. For regular searches, returns
 // the iterator directly — the streaming handler sends records as it iterates.
-// A histogram_only request returns the vault's page histogram alone.
+// A request carrying a histogram grid returns the vault's page histogram on
+// that grid alone.
 func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 	return func(ctx context.Context, req *gastrologv1.ForwardSearchRequest) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
 		vaultID := glid.FromBytes(req.GetVaultId())
@@ -311,8 +312,9 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 			return nil, nil, nil, nil, nil
 		}
 
-		if req.GetHistogramOnly() {
-			return nil, nil, nil, server.ForwardSearchHistogram(ctx, eng, q), nil
+		if grid := req.GetHistogramGrid(); grid != nil {
+			hist, err := server.ForwardSearchHistogram(ctx, eng, q, grid)
+			return nil, nil, nil, hist, err
 		}
 		it, getToken, table, err := forwardSearchAfterParse(ctx, eng, q, pipeline, req.GetResumeToken())
 		if err != nil {

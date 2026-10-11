@@ -226,7 +226,7 @@ func TestSweepTTLAnchorsOnOverlaySealedAt(t *testing.T) {
 	}
 	vaultID := glid.New()
 	inst := &VaultInstance{VaultID: vaultID}
-	inst.applyRaftCallbacks(buildVaultRaftCallbacks(nil, func() *vaultctlfsm.FSM { return fsm }, nil))
+	inst.applyRaftCallbacks(buildVaultRaftCallbacks(nil, nil, func() *vaultctlfsm.FSM { return fsm }, nil))
 	orch := &Orchestrator{vaults: map[glid.GLID]*Vault{vaultID: {ID: vaultID, Instance: inst}}}
 
 	r := &retentionRunner{

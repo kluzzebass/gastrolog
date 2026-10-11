@@ -516,7 +516,7 @@ func (o *Orchestrator) purgeBackfillFailuresForInactiveVaults(active map[glid.GL
 }
 
 // purgeBackfillFailuresForVault immediately drops every backoff/alarm entry
-// for one vault — called from teardownVault/removeVaultJobs so a vault
+// for one vault — called from cancelPendingChunkJobs so a vault
 // leaving this node (deleted, unregistered, drained) doesn't leave its
 // alarms standing until the next evaluateCloudHealth sweep notices.
 func (o *Orchestrator) purgeBackfillFailuresForVault(vaultID glid.GLID) {

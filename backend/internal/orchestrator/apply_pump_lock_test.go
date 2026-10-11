@@ -48,11 +48,6 @@ func TestPipelineReadersDoNotBlockOnOrchestratorWriteLock(t *testing.T) {
 			t.Errorf("pipelineVaultChunkRoot: registered home vault reported absent")
 		}
 	})
-	mustAnswerWhileLocked(t, "pipelineVaultStagingRoot", func() {
-		if _, ok := o.pipelineVaultStagingRoot(vaultID); !ok {
-			t.Errorf("pipelineVaultStagingRoot: registered vault reported absent")
-		}
-	})
 	mustAnswerWhileLocked(t, "isPipelineIngestVault", func() {
 		if !o.isPipelineIngestVault(vaultID) {
 			t.Errorf("isPipelineIngestVault: registered vault reported absent")

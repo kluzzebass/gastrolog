@@ -1883,8 +1883,8 @@ export class RequestReplicaCatchupResponse extends Message<RequestReplicaCatchup
 
 /**
  * ForwardSearchRequest is sent to the node leading vault_id to run the query
- * against that vault: a record stream, a pipeline's table, or — with
- * histogram_only — the vault's page histogram.
+ * against that vault: a record stream, a pipeline's table, or — with a
+ * histogram_grid — the vault's page histogram.
  *
  * @generated from message gastrolog.v1.ForwardSearchRequest
  */
@@ -1916,13 +1916,13 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
   partialAggregates = false;
 
   /**
-   * Answer with the vault's page histogram over the query's window and no
+   * When set, answer with the vault's page histogram on this grid and no
    * records. The coordinator asks for it beside the record stream, so a record
    * stream never waits on the histogram's scan of the window.
    *
-   * @generated from field: bool histogram_only = 5;
+   * @generated from field: gastrolog.v1.HistogramGrid histogram_grid = 5;
    */
-  histogramOnly = false;
+  histogramGrid?: HistogramGrid;
 
   constructor(data?: PartialMessage<ForwardSearchRequest>) {
     super();
@@ -1936,7 +1936,7 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
     { no: 2, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 4, name: "partial_aggregates", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 5, name: "histogram_only", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 5, name: "histogram_grid", kind: "message", T: HistogramGrid },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSearchRequest {
@@ -1953,6 +1953,65 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
 
   static equals(a: ForwardSearchRequest | PlainMessage<ForwardSearchRequest> | undefined, b: ForwardSearchRequest | PlainMessage<ForwardSearchRequest> | undefined): boolean {
     return proto3.util.equals(ForwardSearchRequest, a, b);
+  }
+}
+
+/**
+ * HistogramGrid is the one bucket grid a search's page histogram is counted
+ * on. The coordinator chooses it and every node counts its vaults' share on
+ * it, so the shares sum bucket by bucket.
+ *
+ * @generated from message gastrolog.v1.HistogramGrid
+ */
+export class HistogramGrid extends Message<HistogramGrid> {
+  /**
+   * first bucket's start, inclusive
+   *
+   * @generated from field: int64 start_nanos = 1;
+   */
+  startNanos = protoInt64.zero;
+
+  /**
+   * last bucket's end, exclusive
+   *
+   * @generated from field: int64 end_nanos = 2;
+   */
+  endNanos = protoInt64.zero;
+
+  /**
+   * equal-width buckets between start and end
+   *
+   * @generated from field: int32 buckets = 3;
+   */
+  buckets = 0;
+
+  constructor(data?: PartialMessage<HistogramGrid>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.HistogramGrid";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "start_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 2, name: "end_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "buckets", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): HistogramGrid {
+    return new HistogramGrid().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): HistogramGrid {
+    return new HistogramGrid().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): HistogramGrid {
+    return new HistogramGrid().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: HistogramGrid | PlainMessage<HistogramGrid> | undefined, b: HistogramGrid | PlainMessage<HistogramGrid> | undefined): boolean {
+    return proto3.util.equals(HistogramGrid, a, b);
   }
 }
 
@@ -1983,7 +2042,7 @@ export class ForwardSearchResponse extends Message<ForwardSearchResponse> {
   tableResult?: TableResult;
 
   /**
-   * The vault's page histogram, answering histogram_only
+   * The vault's page histogram, answering histogram_grid
    *
    * @generated from field: repeated gastrolog.v1.HistogramBucket histogram = 5;
    */

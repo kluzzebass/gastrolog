@@ -232,8 +232,9 @@ func IngestSource(rec *record.Record) SourceContext {
 }
 
 // RetentionSource builds SourceContext for records fed back through routing by a
-// retention event (disposition=route). The source vault ID and optional reason
-// (`age`, `size`, `count`) overlay as `_vault` and `_reason` during matching.
+// retention event (disposition=route). The source vault ID and the retention
+// reason (`age`, `size`, `count`, `memory-budget`) overlay as `_vault` and
+// `_reason` during matching.
 func RetentionSource(vaultID glid.GLID, reason string) SourceContext {
 	return SourceContext{
 		Kind:    SourceRetention,

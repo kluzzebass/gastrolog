@@ -837,15 +837,20 @@ type directRemoteSearcher struct {
 	// full channel, so a count short of the total says it never had to drain
 	// the whole match set.
 	batchesSent atomic.Int64
-	// histogramHold, when set, holds every histogram_only request until it
+	// histogramHold, when set, holds every histogram request until it
 	// closes, so a test can tell whether records reach the client while a
 	// remote histogram is still being computed.
 	histogramHold chan struct{}
-	// histogramFails names nodes whose histogram_only requests fail while
-	// their record streams keep answering.
+	// histogramFails names nodes whose histogram requests fail while their
+	// record streams keep answering.
 	histogramFails map[string]bool
-	// histogramRequests counts histogram_only requests.
+	// histogramRequests counts histogram requests.
 	histogramRequests atomic.Int64
+	// boundsFails names nodes that cannot list their vaults' chunks, so the
+	// coordinator cannot learn where those vaults' data lies.
+	boundsFails map[string]bool
+	// boundsRequests counts ListChunks requests.
+	boundsRequests atomic.Int64
 }
 
 func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *gastrologv1.ForwardSearchRequest) (*gastrologv1.ForwardSearchResponse, error) {
@@ -874,7 +879,7 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 	}
 	q.PartialAggregates = req.GetPartialAggregates()
 
-	if req.GetHistogramOnly() {
+	if grid := req.GetHistogramGrid(); grid != nil {
 		d.histogramRequests.Add(1)
 		if d.histogramFails[nodeID] {
 			return nil, fmt.Errorf("histogram from %s: connection refused", nodeID)
@@ -886,7 +891,11 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 				return nil, ctx.Err()
 			}
 		}
-		return &gastrologv1.ForwardSearchResponse{Histogram: server.ForwardSearchHistogram(ctx, eng, q)}, nil
+		hist, err := server.ForwardSearchHistogram(ctx, eng, q, grid)
+		if err != nil {
+			return nil, err
+		}
+		return &gastrologv1.ForwardSearchResponse{Histogram: hist}, nil
 	}
 
 	// Pipeline query: run locally and return table.
@@ -1039,6 +1048,36 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 	}()
 
 	return recCh, nil, errCh, getTokenBytes
+}
+
+func (d *directRemoteSearcher) ListChunks(_ context.Context, nodeID string, req *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error) {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return nil, fmt.Errorf("unknown node: %s", nodeID)
+	}
+	d.boundsRequests.Add(1)
+	if d.boundsFails[nodeID] {
+		return nil, fmt.Errorf("list chunks on %s: connection refused", nodeID)
+	}
+	chunks, err := mnListChunks(orch, glid.FromBytes(req.GetVaultId()))
+	if err != nil {
+		return nil, err
+	}
+	return &gastrologv1.ForwardListChunksResponse{Chunks: chunks}, nil
+}
+
+// mnListChunks answers ForwardListChunks on a harness node as the production
+// executor does: every chunk of the vault the node holds.
+func mnListChunks(orch *orchestrator.Orchestrator, vaultID glid.GLID) ([]*gastrologv1.ChunkMeta, error) {
+	metas, err := orch.ListAllChunkMetas(vaultID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*gastrologv1.ChunkMeta, 0, len(metas))
+	for _, m := range metas {
+		out = append(out, server.VaultChunkMetaToProto(m))
+	}
+	return out, nil
 }
 
 func (d *directRemoteSearcher) GetContext(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error) {
@@ -1300,6 +1339,9 @@ func startClusterPeers(t *testing.T, nodes map[string]multinodeTestNode, selfID,
 		cs.Transport()
 		cs.SetInternalHandler(remoteSrv.BuildInternalHandler())
 		cs.SetSearchExecutor(mnForwardSearchExecutor(node.orch, memLimit))
+		cs.SetListChunksExecutor(func(_ context.Context, vaultID glid.GLID) ([]*gastrologv1.ChunkMeta, error) {
+			return mnListChunks(node.orch, vaultID)
+		})
 		if err := cs.Start(); err != nil {
 			t.Fatalf("start cluster server for %s: %v", id, err)
 		}
@@ -1334,8 +1376,9 @@ func mnForwardSearchExecutor(orch *orchestrator.Orchestrator, memLimit int64) cl
 		}
 		q.PartialAggregates = req.GetPartialAggregates()
 		q = q.WithBudget(eng.NewBudget())
-		if req.GetHistogramOnly() {
-			return nil, nil, nil, server.ForwardSearchHistogram(ctx, eng, q), nil
+		if grid := req.GetHistogramGrid(); grid != nil {
+			hist, err := server.ForwardSearchHistogram(ctx, eng, q, grid)
+			return nil, nil, nil, hist, err
 		}
 		if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
 			result, err := eng.RunPipeline(ctx, q, pipeline)

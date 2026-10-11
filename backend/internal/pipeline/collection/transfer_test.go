@@ -232,7 +232,7 @@ func TestPromoteVerifiedRejectsSameLengthSubstitution(t *testing.T) {
 // TestPromoteVerifiedPurgedPreHeadIsNotCorrupt reproduces the release-purge
 // race observed on the soak cluster: a segment lands in
 // pre-head via a clean pull, then a concurrent release purge
-// (paths.PurgeHeadStaging — the supervisor's OnReleaseSegments hook and
+// (the pipeline's release purge or
 // chunking's release/stale purges) deletes the file before PromoteVerified
 // opens it. No byte was verified and found wrong, so the result must NOT be
 // ErrCorruptSegment — that label routed 46 benign races per soak run to the

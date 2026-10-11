@@ -229,7 +229,7 @@ func (f *FSM) applyAckDelete(c *gastrologv1.AckDeleteCommand) (*chunk.ChunkID, s
 	// Natural finalize: every node has acked. Atomically tombstone the
 	// chunk, remove the pendingDeletes entry, and remove the manifest
 	// entry. Matches applyFinalizeDelete's mutation exactly.
-	f.tombstones[id] = time.Now()
+	f.tombstoneChunksLocked(id)
 	f.clearOpenManifestStateIfChunkIDLocked(id)
 	delete(f.pendingDeletes, id)
 	delete(f.chunks, id)
@@ -243,14 +243,14 @@ func (f *FSM) applyAckDelete(c *gastrologv1.AckDeleteCommand) (*chunk.ChunkID, s
 // chunks/tombstone updates the manifest carries dead entries forever
 // and stale ImportSealed RPCs could re-create the chunk after the
 // cluster believed it deleted. Idempotent: re-applying for an entry
-// already finalized is a no-op (tombstone update aside).
+// already finalized is a no-op (re-tombstoning a pruned tombstone aside).
 func (f *FSM) applyFinalizeDelete(c *gastrologv1.FinalizeDeleteCommand) (*chunk.ChunkID, error) {
 	id := chunkIDFromProto(c.GetId())
 
 	// Tombstone unconditionally so a stale ImportSealed/Append/Seal
 	// command racing the receipt protocol can be rejected even if the
 	// chunk metadata never lived in this FSM.
-	f.tombstones[id] = time.Now()
+	f.tombstoneChunksLocked(id)
 
 	_, hadPending := f.pendingDeletes[id]
 	if hadPending {
@@ -313,9 +313,8 @@ func (f *FSM) applyPruneNode(c *gastrologv1.PruneNodeCommand) (pruneResult, erro
 			out.finalizable = append(out.finalizable, chunkID)
 		}
 	}
-	now := time.Now()
+	f.tombstoneChunksLocked(out.finalizable...)
 	for _, chunkID := range out.finalizable {
-		f.tombstones[chunkID] = now
 		f.clearOpenManifestStateIfChunkIDLocked(chunkID)
 		delete(f.pendingDeletes, chunkID)
 		delete(f.chunks, chunkID)

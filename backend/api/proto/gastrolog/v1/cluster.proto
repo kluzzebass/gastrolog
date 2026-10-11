@@ -429,8 +429,8 @@ message RequestReplicaCatchupResponse {
 }
 
 // ForwardSearchRequest is sent to the node leading vault_id to run the query
-// against that vault: a record stream, a pipeline's table, or — with
-// histogram_only — the vault's page histogram.
+// against that vault: a record stream, a pipeline's table, or — with a
+// histogram_grid — the vault's page histogram.
 message ForwardSearchRequest {
   bytes vault_id = 1;
   string query = 2;
@@ -439,10 +439,19 @@ message ForwardSearchRequest {
   // count) so the coordinator can merge per-node tables instead of gathering
   // records.
   bool partial_aggregates = 4;
-  // Answer with the vault's page histogram over the query's window and no
+  // When set, answer with the vault's page histogram on this grid and no
   // records. The coordinator asks for it beside the record stream, so a record
   // stream never waits on the histogram's scan of the window.
-  bool histogram_only = 5;
+  HistogramGrid histogram_grid = 5;
+}
+
+// HistogramGrid is the one bucket grid a search's page histogram is counted
+// on. The coordinator chooses it and every node counts its vaults' share on
+// it, so the shares sum bucket by bucket.
+message HistogramGrid {
+  int64 start_nanos = 1; // first bucket's start, inclusive
+  int64 end_nanos = 2;   // last bucket's end, exclusive
+  int32 buckets = 3;     // equal-width buckets between start and end
 }
 
 message ForwardSearchResponse {
@@ -450,7 +459,7 @@ message ForwardSearchResponse {
   bytes resume_token = 2;
   bool has_more = 3;
   TableResult table_result = 4;          // Pipeline results (timechart, stats)
-  repeated HistogramBucket histogram = 5; // The vault's page histogram, answering histogram_only
+  repeated HistogramBucket histogram = 5; // The vault's page histogram, answering histogram_grid
 }
 
 // ForwardGetContextRequest asks a remote node to return records surrounding

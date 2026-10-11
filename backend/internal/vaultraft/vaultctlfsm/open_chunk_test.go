@@ -443,7 +443,7 @@ func TestSealChunkClearsStaleTombstoneForPendingManifest(t *testing.T) {
 	applyCmd(t, fsm, MarshalSealOpenChunkManifest(chunkID, now.Add(time.Minute)))
 
 	fsm.mu.Lock()
-	fsm.tombstones[chunkID] = time.Now()
+	fsm.tombstoneChunksLocked(chunkID)
 	delete(fsm.chunks, chunkID)
 	fsm.mu.Unlock()
 	if !fsm.IsTombstoned(chunkID) {

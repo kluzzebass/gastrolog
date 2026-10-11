@@ -607,8 +607,8 @@ func (m *PeerConnManager) dial(spec ConnSpec, poolIndex int) (*managedConn, erro
 				MaxDelay:   3 * time.Second,
 			},
 		}),
-		grpc.WithUnaryInterceptor(m.attachNodeIDUnaryInterceptor),
-		grpc.WithStreamInterceptor(m.attachNodeIDStreamInterceptor),
+		grpc.WithChainUnaryInterceptor(m.attachNodeIDUnaryInterceptor, peerStatusUnaryClientInterceptor),
+		grpc.WithChainStreamInterceptor(m.attachNodeIDStreamInterceptor, peerStatusStreamClientInterceptor),
 		grpc.WithStatsHandler(newManagedConnStatsHandler(mc, m.byteMetrics)),
 	}
 	if spec.Lane == LaneService {

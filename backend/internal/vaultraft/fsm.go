@@ -23,13 +23,11 @@ import (
 // FSM implements the vault control-plane replicated state machine: no-ops,
 // vault-scoped vaultctlfsm commands, and snapshot/restore across vaults.
 //
-// Readiness for reads/writes is NOT tracked on this FSM — it is tracked at
-// the Raft level via r.AppliedIndex(), which advances for every log entry
-// type (LogCommand, LogConfiguration, LogNoop) whereas FSM.Apply is only
-// called for LogCommand. On a fresh cluster the only log entries are the
-// bootstrap configuration and the leader's post-election no-op, which
-// never reach FSM.Apply. See buildVaultRaftCallbacks in
-// orchestrator/reconfig_vaults.go for the readiness wiring.
+// The FSM is ready once it has applied its first entry or restored a
+// snapshot. It stores configuration entries (hraft.ConfigurationStore) as
+// well as commands, so a fresh group — whose log holds only the bootstrap
+// configuration and the leader's post-election no-op, neither of them a
+// command — becomes ready when the bootstrap configuration applies.
 type FSM struct {
 	mu     sync.Mutex
 	vaults map[glid.GLID]*vaultctlfsm.FSM
@@ -42,12 +40,18 @@ type FSM struct {
 	// the receipt protocol's catchup mechanism is dead code.
 	onAfterRestore func()
 
-	// applyWait is advanced after each log entry is applied (and after a
-	// snapshot restore, up to the index the snapshot embeds). The vault-ctl
-	// forward paths block on it after forwarding a command to the group
-	// leader so their next local read sees post-mutation state — the
-	// read-after-write barrier, event-driven rather than polled.
+	// applyWait is advanced after each command or configuration entry is
+	// applied (and after a snapshot restore, up to the index the snapshot
+	// embeds). It is the FSM's readiness, and the vault-ctl forward paths
+	// block on it after forwarding a command to the group leader so their
+	// next local read sees post-mutation state — the read-after-write
+	// barrier, event-driven rather than polled.
 	applyWait *applywait.Tracker
+
+	// onReady fires once, outside mu, at the first moment the FSM is ready
+	// and a callback is registered.
+	onReady    func()
+	readyFired bool
 }
 
 // NewFSM returns a new vault control-plane FSM instance.
@@ -87,6 +91,50 @@ func (f *FSM) Vaults() map[glid.GLID]*vaultctlfsm.FSM {
 	return out
 }
 
+// Ready reports whether the FSM has applied an entry or restored a snapshot.
+// Before then its state may be incomplete and must not be acted on.
+func (f *FSM) Ready() bool {
+	return f.applyWait.Applied() > 0
+}
+
+// SetOnReady registers fn to run once when the FSM becomes ready — at
+// registration, if it already is. Replaces any prior callback; a callback
+// registered after the one-shot has fired never runs.
+func (f *FSM) SetOnReady(fn func()) {
+	f.mu.Lock()
+	f.onReady = fn
+	f.mu.Unlock()
+	f.fireReady()
+}
+
+// advance records that the entry at index has applied and fires the ready
+// callback on the first one. Call after the entry's mutation is visible.
+func (f *FSM) advance(index uint64) {
+	f.applyWait.Advance(index)
+	f.fireReady()
+}
+
+func (f *FSM) fireReady() {
+	if !f.Ready() {
+		return
+	}
+	f.mu.Lock()
+	fn := f.onReady
+	if fn == nil || f.readyFired {
+		f.mu.Unlock()
+		return
+	}
+	f.readyFired = true
+	f.mu.Unlock()
+	fn()
+}
+
+// StoreConfiguration records that a configuration entry has applied. The
+// configuration itself lives in Raft; the FSM only counts the entry.
+func (f *FSM) StoreConfiguration(index uint64, _ hraft.Configuration) {
+	f.advance(index)
+}
+
 // Apply executes vault control-plane commands. Empty payloads are ignored.
 // The log data is a marshaled gastrologv1.VaultRaftCommand; see cmd.go.
 func (f *FSM) Apply(l *hraft.Log) any {
@@ -97,7 +145,7 @@ func (f *FSM) Apply(l *hraft.Log) any {
 	// apply tracker on every return path, after the sub-FSM mutation (if
 	// any) is visible. Mirrors raft's own applied-index semantics, which
 	// count entries whose FSM application returned an error.
-	defer f.applyWait.Advance(l.Index)
+	defer f.advance(l.Index)
 	if len(l.Data) == 0 {
 		return nil
 	}
@@ -219,7 +267,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	// state includes every command up to the embedded index. Advance after
 	// the sub-FSM map swap (waiters must read post-restore state) and
 	// before the potentially slow after-restore hook.
-	f.applyWait.Advance(group.GetLastAppliedIndex())
+	f.advance(group.GetLastAppliedIndex())
 	// Fire outside the mutex — the handler walks per-vault reconcilers
 	// which can call back into the FSM (Instances, PendingDeletes, etc.).
 	if hook != nil {
@@ -227,6 +275,8 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	}
 	return nil
 }
+
+var _ hraft.ConfigurationStore = (*FSM)(nil)
 
 type vaultCtlSnapshot struct {
 	group *gastrologv1.VaultGroupSnapshot

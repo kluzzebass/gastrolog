@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"runtime/pprof"
 	"strconv"
 	"testing"
@@ -166,16 +167,28 @@ func (h *orchRelHarness) waitSealedRecordsAtLeast(v vaultSpec, nodeID string, wa
 }
 
 // pipelineGLCBPath is the on-disk location of a pipeline-built sealed GLCB on
-// a node: <home>/segments/<vaultID>/chunks/<chunkID>/data.glcb. Mirrors
-// originRoot + VaultSpec.ChunkRoot in the orchestrator.
+// a node: <pipeline root>/chunks/<chunkID>/data.glcb.
 func (h *orchRelHarness) pipelineGLCBPath(nodeID string, v vaultSpec, chunkID chunk.ChunkID) string {
-	chunkRoot := h.nodes[nodeID].home + "/segments/" + v.id.String() + "/chunks"
-	return chunking.ChunkGLCBPath(chunkRoot, chunkID)
+	return chunking.ChunkGLCBPath(filepath.Join(h.pipelineVaultRoot(nodeID, v), "chunks"), chunkID)
 }
 
-// pipelineVaultRoot is the segment staging root for a vault on a node.
+// pipelineVaultRoot is the vault's pipeline root on a node, derived from the
+// config store independently of the orchestrator: under the node's file
+// storage when the vault is placed on it, under the node home otherwise.
 func (h *orchRelHarness) pipelineVaultRoot(nodeID string, v vaultSpec) string {
-	return h.nodes[nodeID].home + "/segments/" + v.id.String()
+	h.t.Helper()
+	n := h.nodes[nodeID]
+	sys, err := h.cfgStore.Load(context.Background())
+	if err != nil {
+		h.t.Fatalf("load config: %v", err)
+	}
+	storageID, storageDir := h.storageFor(n, v)
+	for _, p := range sys.PlacementsFor(v.id) {
+		if p.StorageID == storageID.String() {
+			return filepath.Join(storageDir, "segments", v.id.String())
+		}
+	}
+	return filepath.Join(n.home, "segments", v.id.String())
 }
 
 func countHeadSegmentFiles(root string) (int, error) {

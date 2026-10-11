@@ -777,13 +777,13 @@ func (s *Server) baseServerOpts(maxRecv int) []grpc.ServerOption {
 		tlsCfg := s.cfg.TLS.ServerTLSConfig()
 		opts = append(opts,
 			grpc.Creds(credentials.NewTLS(tlsCfg)),
-			grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor, s.mTLSUnaryInterceptor),
-			grpc.ChainStreamInterceptor(s.pauseStreamInterceptor, s.mTLSStreamInterceptor),
+			grpc.ChainUnaryInterceptor(peerStatusUnaryServerInterceptor, s.pauseUnaryInterceptor, s.mTLSUnaryInterceptor),
+			grpc.ChainStreamInterceptor(peerStatusStreamServerInterceptor, s.pauseStreamInterceptor, s.mTLSStreamInterceptor),
 		)
 	} else {
 		opts = append(opts,
-			grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor),
-			grpc.ChainStreamInterceptor(s.pauseStreamInterceptor),
+			grpc.ChainUnaryInterceptor(peerStatusUnaryServerInterceptor, s.pauseUnaryInterceptor),
+			grpc.ChainStreamInterceptor(peerStatusStreamServerInterceptor, s.pauseStreamInterceptor),
 		)
 	}
 

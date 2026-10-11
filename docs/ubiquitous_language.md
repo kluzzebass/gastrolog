@@ -135,7 +135,17 @@ for append-heavy write patterns and time-ordered reads.
 
 - **StorageClass** (`uint32`) — non-zero integer grouping storages by performance
   or role. A vault's `StorageClass` selects which FileStorage on each node hosts
-  its chunks.
+  its chunks and its pipeline root.
+
+- **Pipeline root** — the one directory holding every pipeline storage area a
+  node keeps for a vault (`working/`, `completed/`, `pre-head/`, `head/`,
+  `chunks/`). On a node with a placement for the vault it is
+  `<storage>/segments/<vault-id>` on the FileStorage that placement chose; on a
+  node that only originates segments for the vault it is the node home's
+  `segments/<vault-id>`. A placement change moves it, and the next registration
+  gathers the vault's files into it. Resolved in one place
+  (`orchestrator.pipelineRootFor`) and carried on the vault's pipeline
+  registration for every reader.
 
 - **CloudService** — a cluster-wide cloud endpoint (S3, Azure, GCS) with
   optional archival lifecycle. [`system.CloudService`](../backend/internal/system/storage.go).
@@ -241,7 +251,8 @@ a vault's active chunk".
   per call and never mutates the record's persisted attrs. They
   unify source-predicate and content-filter into a single expression
   language. Routes match on `_source = "ingest"`,
-  `_source = "retention" AND _vault = "<id>"`, etc. User records
+  `_source = "retention" AND _vault = "<id>"`,
+  `_source = "retention" AND _reason = "age"`, etc. User records
   carrying `_`-prefixed attrs collide with this namespace and aren't
   supported.
 
@@ -320,6 +331,11 @@ Reading records back, filtering, aggregating, and rendering them.
 - **HistogramBucket** — counts for one time window: `timestamp_ms`, `count`,
   optional `group_counts` (for per-severity breakdowns), flags indicating
   whether any records came from cloud storage.
+
+- **HistogramGrid** — the one bucket grid a search's page histogram is counted
+  on: start, end and bucket count. The coordinator chooses it from the
+  search's window and every node counts its vaults' share on it, so the shares
+  sum bucket by bucket.
 
 - **ChunkPlan** — per-chunk execution metadata inside `Explain`: time bounds,
   which indexes were usable, whether the chunk was skipped and why.
@@ -425,6 +441,24 @@ gRPC transport:
   The chunk has already left the retained set: retention sweeps and the
   age/count bound re-check skip it, while the manifest and residency keep
   reporting it until the acks land.
+
+- **Chunk tombstone** (vault-ctl) — the FSM's record that a chunk was
+  deleted, kept after its manifest entry is gone and tagged with the
+  **delete sequence** it was deleted at (`deleteSeq`, counting the applies
+  that tombstoned a chunk — never a wall-clock time). A `CreateChunk`,
+  `OpenChunkManifest` or `RepatriateChunk` naming one is refused, a
+  retention-transfer announce naming one is deferred, and it is the only
+  evidence that lets a node delete local bytes the manifest no longer lists
+  (`FSM.IsTombstoned`).
+
+- **Chunk purge confirmation** (vault-ctl) — a node's
+  `ConfirmChunkPurgeCommand`: it holds no copy, in its chunk store or chunk
+  staging, of any chunk tombstoned at or before the named delete sequence.
+  Every node sends one after its chunk tombstone sweep
+  (`Orchestrator.sweepChunkTombstones`); the vault-ctl leader's
+  `PruneChunkTombstonesCommand` drops the tombstones every member of its Raft
+  configuration has confirmed, and the confirmations of nodes no longer in
+  it. Same rule as the released-segment **purge confirmation**.
 
 ### Raft primitives (hashicorp/raft vocabulary)
 
@@ -682,8 +716,9 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 
 - **Vault readiness** — a vault on this node is "ready" iff it has a local
   instance AND that instance's `IsFSMReady()` callback returns `true` (i.e.
-  the vault-ctl Raft has applied at least one log entry on this node, or
-  restored from a snapshot). An instance whose vault-ctl group creation is
+  the vault-ctl group's FSM has applied at least one entry — a command or a
+  configuration — on this node, or restored from a snapshot; that first apply
+  wakes `WaitVaultReady` callers). An instance whose vault-ctl group creation is
   still deferred on this node is not ready; on a node without vault-ctl
   Raft the callback is nil and the instance is ready. Canonical definition in
   [`vault_readiness.go`](../backend/internal/orchestrator/vault_readiness.go).
@@ -822,6 +857,16 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   routing engine, transferred to another vault, or dropped before the
   chunk's local copy is destroyed.
 
+- **Retention reason** (`chunk.RetentionReason`) — the trigger that
+  selected a chunk for its retention event, overlaid as the `_reason`
+  synthetic attribute on every record a `route` disposition streams through
+  the routing engine. Values: `age` (TTL / `MaxAge`), `size` (`MaxSize`
+  drain), `count` (`MaxChunks`), `memory-budget` (a memory vault over its
+  memory budget). A chunk several triggers select — within one policy or
+  across the vault's attached policies — carries one reason, the first in
+  that order (`chunk.PrecedingRetentionReason`), so a route on
+  `_reason = "age"` receives every chunk that aged out.
+
 - **Retention disposition** (`VaultConfig.RetentionDisposition`,
   gastrolog-18du3, extended by gastrolog-2l918) — per-vault flag
   controlling what happens to records when a retention event fires.
@@ -832,7 +877,8 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
     requires a target vault, and a default must be a value the operator
     could type into the field.
   - **`route`**: records flow through the routing engine with synthetic
-    `_source = "retention"` and `_vault = "<id>"`, so operator-configured
+    `_source = "retention"`, `_vault = "<id>"` and `_reason` (the retention
+    reason), so operator-configured
     routes can forward them to archive vaults, cold storage, etc.
   - **`transfer`** (`VaultConfig.RetentionTransferTargetVaultID`,
     gastrolog-2l918): the sealed chunk is re-homed to the target vault
@@ -1407,6 +1453,10 @@ describes what the code does today.
   **node prune** (`CmdPruneNode`) removes the node's claims — proposed by the
   placement leader's outside-placement prune when the node leaves the
   placement, and by the vault-ctl leader when it leaves the cluster.
+  For a cloud-backed chunk a holder's GLCB is a **warm-cache** copy: every
+  home's cache eviction may remove it, and the home's holder receipt is
+  withdrawn with it. The uploaded object, not the placed-holder count, is
+  what makes a cloud-backed chunk supersede its segments.
 
 - **Holder receipt** — the vault-ctl commit a node makes after it has pulled
   and verified bytes (`AckSegmentHolderCommand` for segments,
@@ -1477,16 +1527,33 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
   chunks (holder-gated). The FSM-level end of a segment's registry life;
   bytes may still exist on disk.
 
+- **Released-segment tombstone** (vault-ctl) — the FSM's record that a
+  segment was released, kept after its registry entry is gone and tagged
+  with the **release sequence** it was released at (`releaseSeq`, counting
+  the `ReleaseSegments` applies that tombstoned a segment). A
+  `PublishCompletedSegment` naming one is ignored — the restart republish of
+  a node that missed the release — and the release consumer's catch-up and
+  the released-segment sweep purge its bytes on sight
+  (`FSM.SegmentReleased`).
+
+- **Purge confirmation** (vault-ctl) — a node's `ConfirmSegmentPurgeCommand`:
+  it holds no staging copy of any segment released at or before the named
+  release sequence. Every node sends one after its released-segment sweep
+  (`Orchestrator.sweepReleasedSegments`); the vault-ctl leader's
+  `PruneReleasedSegmentsCommand` drops the tombstones every member of its
+  Raft configuration has confirmed, and the confirmations of nodes no longer
+  in it.
+
 - **Retire** (distribution) — drop a node's in-memory tracking of a segment
   and mark it so the stranded rescan does not republish still-on-disk
   `completed/` bytes (`Manager.RetireSegments`, `vaultDist.retireSegment`).
   Node-local bookkeeping, downstream of release.
 
 - **Purge** (paths / disk) — delete the segment's bytes from staging areas
-  (`paths.PurgeCompleted` on the origin after release, whether or not the
-  origin is a home; `paths.PurgeHeadStaging`
-  after a home materializes the sealed GLCB; `paths.PurgeSegmentStaging` for
-  all three areas). The physical end of a segment's life, ordered strictly
+  (`paths.PurgeSegmentStaging` for all three areas once the segment is
+  released, on every node whether or not it is a home;
+  `paths.PurgeHeadStaging` after a home materializes the sealed GLCB). The
+  physical end of a segment's life, ordered strictly
   after its records survive in a replicated chunk — a returning node gets
   those records via chunk replication, never a segment re-pull.
 

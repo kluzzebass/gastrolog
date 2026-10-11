@@ -208,7 +208,15 @@ contrast with any earlier design. It states only what V3 *is*, never what it
     growing without limit. Ordering is the safety invariant: purge only after the data
     survives in a replicated chunk, so a returning or long-offline node never needs a
     purged segment — it gets those records via chunk replication, not a segment
-    re-pull.
+    re-pull. Release leaves a **released-segment tombstone** behind the registry entry:
+    a node that missed the release still has the segment in `completed/` and
+    republishes it on restart, and only the tombstone stops that publish from
+    re-registering records already in a chunk. Each node's staging sweep purges every
+    tombstoned segment it holds and then confirms the release sequence it covered;
+    the vault-ctl leader prunes the tombstones every member of the group has
+    confirmed. The tombstones are therefore bounded by the releases some member has
+    not swept yet — a member that stays down holds them until it returns or leaves
+    the cluster — not by total ingest.
 
 ### Revised by lived experience (implementation + soak, 2026-07)
 
@@ -270,7 +278,11 @@ R3. **The release predicate must use all three signals in 28, not just the first
     node prune removes it. The dead home then catches up at the **chunk** level, whose reconcile (30)
     tolerates a long absence, not the segment's seconds-to-minutes transport window.
     The chunk's *desired* holder set is still all homes; only the segment-purge
-    *trigger* is the lower RF threshold. Mechanically this needs a small persistent
+    *trigger* is the lower RF threshold. A **cloud-backed** chunk meets the
+    trigger by its upload alone: the uploaded object is the durable copy, and
+    each home's GLCB is a warm cache whose eviction withdraws that home's
+    holder receipt — counting those receipts would re-pin the segment every
+    time a home evicts. Mechanically this needs a small persistent
     segment→containing-chunk-IDs map on the vault-ctl FSM (the segment refs of a
     sealed chunk are kept only until one of its segments is released), cleared on
     release.
@@ -383,9 +395,25 @@ a periodic “read FSM and maybe propose” tick. See [`chunking-design.md`](./c
 
 **Storage areas are roles bound to storage.** The phases own on-disk areas —
 Segmentation's `working/` and `completed/`, Collection's **pre-head**, and the
-**head** and chunk store. Each area's location resolves either explicitly
-(operator-pinned) or automatically from the vault's storage class matched against
-the node's available storages (default). Two constraints:
+**head** and chunk store (`chunks/`). All of a vault's areas on a node live under
+one **pipeline root**, resolved from the vault's placement: placement matches the
+vault's storage class against the node's FileStorages, and on a node with a
+placement for the vault the root is `<storage>/segments/<vault-id>` on the
+FileStorage that placement chose — so the class decides which volume the vault's
+segments and GLCBs fill, and that storage's disk guard watches them. A node
+without such a placement only originates segments for the vault; its root is the
+node home's `segments/<vault-id>`, guarded by the node's home-volume guard. A
+placement change moves the root (another storage on the same node, or the node
+becoming or ceasing to be a home), and the next registration gathers the vault's
+files from every other root the node could hold them under into the new one
+before the managers start: a home takes every area, an origin-only node takes
+`working/` and `completed/` (a former home's `head/` and `chunks/` stay where
+they are; the released-segment sweep purges staging copies under every such
+root). Within one filesystem a file moves by rename; across filesystems it is
+copied, synced and renamed into place before the old copy is removed, so an
+interrupted gather leaves every file whole somewhere and the next registration
+finishes it. A gather that cannot finish still registers the vault on its new
+root and retries on the next reload. Two constraints:
 - *Head invariant.* A segment enters the head only when complete and
   checksum-verified; in-flight transfers sit in pre-head, invisible to queries and
   Chunking. A failed or corrupt transfer is discarded and re-fetched from another
@@ -396,7 +424,8 @@ the node's available storages (default). Two constraints:
 - *Rename-paired areas co-locate.* Promotion is an atomic `rename(2)`, so paired
   areas must share storage: `working`↔`completed` on the origin, pre-head↔head on
   the collector. A locally written segment needs no transfer — Segmentation's
-  `completed/` promotes straight into the head.
+  `completed/` promotes straight into the head. One root per vault per node
+  satisfies this by construction.
 
 ## Pipeline at a glance
 
@@ -527,8 +556,8 @@ A record that matches multiple vaults is sent to each vault's in channel
 
 Each routing-queue item carries a `Source` tag used only at match time: digest
 hands off `Source = ingest` (ingester ID from EventID); retention eject hands off
-`Source = retention` with the source vault ID and optional reason (`age`, `size`,
-`count`). Both producers block on the same bounded channel, so eject backpressure
+`Source = retention` with the source vault ID and the retention reason (`age`,
+`size`, `count`, `memory-budget`). Both producers block on the same bounded channel, so eject backpressure
 is unified with live ingest — neither path drops when the queue or downstream
 writers are slow.
 

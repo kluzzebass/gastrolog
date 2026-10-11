@@ -483,12 +483,12 @@ func TestSupervisorReleasePurgesOriginAndHomeHead(t *testing.T) {
 	assertCompleted(t, originRoot, segID, false)
 }
 
-func TestStagingHeadPurgeRootsDedupesSharedRoot(t *testing.T) {
+func TestStagingRootsDedupesSharedRoot(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	got := stagingHeadPurgeRoots(root, root, true, true)
+	got := stagingRoots(root, root, true, true)
 	if len(got) != 1 || got[0] != root {
-		t.Fatalf("stagingHeadPurgeRoots = %v, want [%s]", got, root)
+		t.Fatalf("stagingRoots = %v, want [%s]", got, root)
 	}
 }
 

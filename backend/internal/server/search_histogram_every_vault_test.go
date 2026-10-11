@@ -105,16 +105,12 @@ func TestMultiNode_SearchHistogramCountsEveryVault(t *testing.T) {
 				name string
 				expr string
 				want int
-				// unbounded leaves the window to each node when the
-				// coordinator cannot see a remote vault's open chunk, so the
-				// grids may differ; the counts still must not.
-				unbounded bool
 			}{
-				{"unfiltered", histWindow, vaults * (histErrPerVault + histInfoPerVault), false},
-				{"filtered", "level=error " + histWindow, vaults * histErrPerVault, false},
-				{"filtered, negated", "not level=error " + histWindow, vaults * histInfoPerVault, false},
-				{"filtered, unbounded", "level=error", vaults * histErrPerVault, true},
-				{"filter matching nothing", "level=fatal " + histWindow, 0, false},
+				{"unfiltered", histWindow, vaults * (histErrPerVault + histInfoPerVault)},
+				{"filtered", "level=error " + histWindow, vaults * histErrPerVault},
+				{"filtered, negated", "not level=error " + histWindow, vaults * histInfoPerVault},
+				{"filtered, unbounded", "level=error", vaults * histErrPerVault},
+				{"filter matching nothing", "level=fatal " + histWindow, 0},
 			}
 			for _, qc := range queries {
 				got, err := searchWithHistogram(t, h, qc.expr)
@@ -127,7 +123,7 @@ func TestMultiNode_SearchHistogramCountsEveryVault(t *testing.T) {
 				if got.histTotal != int64(got.records) {
 					t.Errorf("%s: histogram total %d != %d records returned", qc.name, got.histTotal, got.records)
 				}
-				if !qc.unbounded && got.sawHist && got.buckets != 50 {
+				if got.sawHist && got.buckets != 50 {
 					t.Errorf("%s: histogram has %d buckets, want 50 on one grid", qc.name, got.buckets)
 				}
 			}

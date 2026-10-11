@@ -12,18 +12,18 @@ func ApplyResumeCursor(q *Query, resume *ResumeToken) {
 	if resume == nil || resume.HighwaterTS.IsZero() || !q.ResumeAfterTS.IsZero() {
 		return
 	}
-	hasIdentity := !resume.HighwaterEvent.IngesterID.IsZero()
-	narrowQueryByHighwater(q, resume.HighwaterTS, hasIdentity)
+	narrowQueryByHighwater(q, resume.HighwaterTS)
 	q.ResumeAfterTS = resume.HighwaterTS
 	q.ResumeAfterEvent = resume.HighwaterEvent
 }
 
 // narrowQueryByHighwater bounds q at a resume-token highwater on the query's
-// ordering axis: forward it becomes the inclusive lower bound; with reverse
-// the exclusive upper bound, placed one tick past the highwater when the
-// cursor carries an identity so the boundary group stays reachable. No-op
-// when highwater is zero or already inside the existing bounds.
-func narrowQueryByHighwater(q *Query, highwater time.Time, includeBoundary bool) {
+// ordering axis, keeping the records that share the highwater timestamp in
+// reach: forward it becomes the inclusive lower bound; with reverse the
+// exclusive upper bound, one tick past the highwater. The cursor, not the
+// bound, decides which of those records the previous page already emitted.
+// No-op when highwater is zero or already inside the existing bounds.
+func narrowQueryByHighwater(q *Query, highwater time.Time) {
 	if highwater.IsZero() {
 		return
 	}
@@ -34,14 +34,7 @@ func narrowQueryByHighwater(q *Query, highwater time.Time, includeBoundary bool)
 		lower, upper = &q.Start, &q.End
 	}
 	if q.Reverse() {
-		// The upper bound is exclusive: to keep records sharing the
-		// boundary timestamp in reach of the cursor it must sit one tick
-		// past the highwater. Without an identity to order ties there is
-		// nothing to resume within the group, so the bound excludes it.
-		bound := highwater
-		if includeBoundary {
-			bound = highwater.Add(time.Nanosecond)
-		}
+		bound := highwater.Add(time.Nanosecond)
 		if upper.IsZero() || bound.Before(*upper) {
 			*upper = bound
 		}

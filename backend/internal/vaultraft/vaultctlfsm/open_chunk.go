@@ -325,11 +325,12 @@ func (f *FSM) SnapshotReleaseScan(placement []string) *ReleaseScan {
 // signal that supersedes the raw segment (design-notes 39, refined R3: RF, not
 // home-set, so a dead home never pins the segment; the dead home catches up at
 // the chunk level). True only when the segment has been chunked (≥1 containing
-// chunk) and every containing chunk is sealed and held by enough members of
-// placement, or has already aged out (tombstoned/expired — the records are gone
-// by retention, so the segment is equally free to drop). An empty placement
-// means placement wiring is absent or unresolved (single-node/test); return
-// false so release falls back to the holders⊇homes fast path.
+// chunk) and every containing chunk is sealed and either held by enough members
+// of placement or cloud-backed, or has already aged out (tombstoned/expired —
+// the records are gone by retention, so the segment is equally free to drop).
+// An empty placement means placement wiring is absent or unresolved
+// (single-node/test); return false so release falls back to the holders⊇homes
+// fast path.
 func (f *FSM) SegmentSuperseded(segID glid.GLID, placement []string) bool {
 	if len(placement) == 0 {
 		return false
@@ -354,8 +355,10 @@ func (f *FSM) segmentSupersededLocked(segID glid.GLID, placement []string) bool 
 
 // chunkReplicatedLocked reports whether chunk id is durable enough to supersede
 // a segment: sealed and held by HolderQuorum(placement) members of placement,
-// or already gone (its records aged out under retention, which only deletes
-// sealed chunks).
+// sealed and cloud-backed, or already gone (its records aged out under
+// retention, which only deletes sealed chunks). A cloud-backed chunk's durable
+// copy is the uploaded object; its holders are warm caches that eviction
+// withdraws, and counting them would re-pin a segment every time a home evicts.
 func (f *FSM) chunkReplicatedLocked(id chunk.ChunkID, placement []string) bool {
 	entry := f.chunks[id]
 	if entry == nil {
@@ -363,6 +366,9 @@ func (f *FSM) chunkReplicatedLocked(id chunk.ChunkID, placement []string) bool {
 	}
 	if entry.State != chunk.ChunkStateSealed {
 		return false
+	}
+	if entry.CloudBacked {
+		return true
 	}
 	return PlacedHolderCount(entry.Holders, placement) >= HolderQuorum(placement)
 }
@@ -671,11 +677,12 @@ func (f *FSM) SegmentReferencedInManifest(segmentID glid.GLID) bool {
 
 // SegmentReleased reports whether segmentID was dropped from the registry
 // by a ReleaseSegments apply. This is positive, replicated, snapshot-
-// persisted evidence of release — the staging-orphan sweep uses it to
-// delete local segment files whose release effect this node missed while
-// offline. Registry absence alone is NOT evidence: a completed segment
+// persisted evidence of release — the released-segment catch-up uses it to
+// delete local segment files whose release event this node did not consume. Registry absence alone is NOT evidence: a completed segment
 // awaiting its distribution publish is also registry-absent, and deleting
-// it would lose ingested records.
+// it would lose ingested records. The tombstone is pruned only after every
+// vault-ctl member has confirmed purging it, so no node is left holding bytes
+// it can no longer recognise as released.
 func (f *FSM) SegmentReleased(segmentID glid.GLID) bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -720,6 +727,7 @@ func (f *FSM) segmentRangeReferencedLocked(segID glid.GLID, first, last uint32) 
 
 func (f *FSM) applyReleaseSegments(c *gastrologv1.ReleaseSegmentsCommand) []glid.GLID {
 	var released []glid.GLID
+	seq := f.releases.seq + 1
 	// A sealed chunk whose segment is released can no longer be built from
 	// segments on any home; a home still missing it pulls the GLCB from a
 	// peer instead.
@@ -740,9 +748,12 @@ func (f *FSM) applyReleaseSegments(c *gastrologv1.ReleaseSegmentsCommand) []glid
 			released = append(released, segID)
 		}
 		if f.releasedSegments == nil {
-			f.releasedSegments = make(map[glid.GLID]struct{})
+			f.releasedSegments = make(map[glid.GLID]uint64)
 		}
-		f.releasedSegments[segID] = struct{}{}
+		if _, tombstoned := f.releasedSegments[segID]; !tombstoned {
+			f.releasedSegments[segID] = seq
+			f.releases.seq = seq
+		}
 		delete(f.completedSegments, segID)
 		f.removeCompletedSegmentOrder(segID)
 		delete(f.segmentResume, segID)

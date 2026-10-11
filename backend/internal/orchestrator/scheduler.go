@@ -400,8 +400,8 @@ func (s *Scheduler) UpdateJob(name, cronExpr string, taskFn any, args ...any) er
 }
 
 // RemoveJobsByPrefix stops and removes all jobs whose name starts with prefix.
-// Used to cancel pending one-time jobs (compress, index-build) for a vault
-// that is about to be closed, preventing use-after-close on the chunk manager.
+// Used to cancel a vault's pending one-time jobs before the vault closes, so
+// none of them runs against a closed chunk or index manager.
 func (s *Scheduler) RemoveJobsByPrefix(prefix string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -144,7 +144,7 @@ func TestFireRetentionEventStreamsThroughPipeline(t *testing.T) {
 		orch:    fx.orch,
 		logger:  slog.Default(),
 	}
-	r.fireRetentionEvent(fx.sealedID)
+	r.fireRetentionEvent(fx.sealedID, "")
 
 	waitForRouteStats(t, fx.orch, "3 matched retention records", func(s *RouteStats) bool {
 		return s.Matched == 3
@@ -206,7 +206,7 @@ func TestFireRetentionEventDropsWhenNoRouteMatches(t *testing.T) {
 		orch:    orch,
 		logger:  slog.Default(),
 	}
-	r.fireRetentionEvent(sealedID)
+	r.fireRetentionEvent(sealedID, "")
 
 	// All submitted records ingested but unmatched; none routed.
 	waitForRouteStats(t, orch, "2 unmatched retention records", func(s *RouteStats) bool {
@@ -234,7 +234,7 @@ func TestRetentionDispositionRouteFiresFanOut(t *testing.T) {
 		logger:      slog.Default(),
 		disposition: system.RetentionDispositionRoute,
 	}
-	r.applyRetentionDispositionToChunk(fx.sealedID)
+	r.applyRetentionDispositionToChunk(fx.sealedID, "")
 
 	waitForRouteStats(t, fx.orch, "3 matched records (route disposition fires fan-out)", func(s *RouteStats) bool {
 		return s.Matched == 3
@@ -256,7 +256,7 @@ func TestRetentionDispositionDeleteSkipsFanOut(t *testing.T) {
 		logger:      slog.Default(),
 		disposition: system.RetentionDispositionDelete,
 	}
-	r.applyRetentionDispositionToChunk(fx.sealedID)
+	r.applyRetentionDispositionToChunk(fx.sealedID, "")
 
 	assertNoRetentionFanOut(t, fx.orch, "delete disposition")
 }
@@ -276,7 +276,7 @@ func TestRetentionDispositionEmptyTreatedAsDelete(t *testing.T) {
 		logger:      slog.Default(),
 		disposition: "", // explicitly empty — what the runner sees pre-resolution
 	}
-	r.applyRetentionDispositionToChunk(fx.sealedID)
+	r.applyRetentionDispositionToChunk(fx.sealedID, "")
 
 	assertNoRetentionFanOut(t, fx.orch, "empty disposition")
 }
@@ -322,7 +322,7 @@ func TestTryRetainChunkSkipsDispositionWhenAlreadyPending(t *testing.T) {
 	// into the pipeline). expireChunk panics from nil cm — caught.
 	func() {
 		defer func() { _ = recover() }()
-		r.tryRetainChunk(fx.sealedID, retentionRule{}, false)
+		r.tryRetainChunk(fx.sealedID, "", false)
 	}()
 
 	waitForRouteStats(t, fx.orch, "first sweep routes 3 records", func(s *RouteStats) bool {
@@ -337,7 +337,7 @@ func TestTryRetainChunkSkipsDispositionWhenAlreadyPending(t *testing.T) {
 	// Second call: alreadyPending=true → must NOT fire routing.
 	func() {
 		defer func() { _ = recover() }()
-		r.tryRetainChunk(fx.sealedID, retentionRule{}, true)
+		r.tryRetainChunk(fx.sealedID, "", true)
 	}()
 
 	// A retention submit returns only after routing has counted the record,

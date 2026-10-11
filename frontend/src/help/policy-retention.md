@@ -55,6 +55,7 @@ To keep records (in another vault) instead of dropping them on retention:
 1. Create a route with **Source = Retention trigger** in [Settings → Routes](settings:routes).
 2. Configure its filter and destinations as needed — the destinations receive the routed records.
 3. Routes with `Source = Retention trigger` are excluded from live ingestion automatically, so re-routed records can't loop back through the ingestion pipeline.
+4. To treat chunks differently by why they fired, match on the `_reason` [synthetic attribute](help:routing): `age` (TTL), `size` (max size), or `count` (chunk count). A chunk several conditions select carries the first of `age`, `size`, `count` — for example, a route on `_reason = "age"` receives the chunks that aged out, including ones that were also over the size bound.
 
 The vault's retention rule itself just specifies the trigger policy. The "what happens to the records" decision lives entirely on the routing table.
 

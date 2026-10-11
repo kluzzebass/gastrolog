@@ -107,7 +107,7 @@ flowchart TD
     AllChunks["Matching chunks in planner order"] --> Lazy["lazyOpenCompeting()"]
     Lazy --> HeapEmpty{"Heap empty?"}
     HeapEmpty -->|Yes| Open["openAndPrimeScanner(next chunk)"]
-    HeapEmpty -->|No| Overlap{"Next chunk's upper bound reaches heap top?"}
+    HeapEmpty -->|No| Overlap{"Next chunk can hold a record at or ahead of the heap top?"}
     Overlap -->|Yes| Open
     Overlap -->|No| MergeLoop["runMergeLoop()"]
     Open --> Heap["Push first record onto heap"]
@@ -115,9 +115,16 @@ flowchart TD
     MergeLoop -->|"after each pop"| Lazy
 ```
 
-For chunks whose time ranges do not overlap, only one scanner is open at a
-time; for overlapping ranges, every chunk whose upper bound can still beat the
-current heap top is opened. `runMergeLoop()` calls `lazyOpenCompeting()` again
+A pending chunk competes when its range on the ordering axis can hold a record
+at or ahead of the heap top: forward, its range starts at or before the top;
+reverse, its range ends at or after it. A timestamp equal to the top competes,
+because records sharing a timestamp across chunks are ordered by EventID. The
+chunk's own range is what counts, never the query bounds clipped to it — a
+resumed page bounds every chunk at the cursor, and a chunk whose range ends
+before a neighbour's first surviving record can still hold records past the
+cursor. Planner order makes the first chunk that cannot compete the last one
+considered, so for chunks whose ranges do not overlap only one scanner is open
+at a time. `runMergeLoop()` calls `lazyOpenCompeting()` again
 as the heap advances, so a chunk is opened only when the merge reaches it. A
 `last=5m limit=10` query that fills its limit from the newest chunks never opens
 older ones — local or cloud-backed alike. There is no separate local/cloud
@@ -271,8 +278,19 @@ sequenceDiagram
 ```
 
 The local cache is byte-for-byte equivalent to a freshly-sealed local
-chunk. Subsequent queries reuse the cache; eviction policy reclaims
-disk space under pressure (`gastrolog-2idw8`).
+chunk. Subsequent queries reuse the cache; the vault's cache policy
+(`CacheEviction` LRU on `CacheBudget`, or TTL on `CacheTTL`) reclaims it.
+
+Every home holds a second kind of local copy: the GLCB the pipeline built in
+its chunk root before the chunk was uploaded. Once the vault-ctl manifest
+records the upload, that GLCB is warm cache too — reads use it without any
+cloud I/O (also after a restart, when nothing has registered it), and the
+eviction sweep, which runs on every home rather than only the placement
+leader, counts it against the budget and removes it like the chunk-dir copy.
+Eviction considers only chunks the manifest marks cloud-backed; a local GLCB
+whose upload has not committed is never removed. An evicted pipeline GLCB
+withdraws the home's holder receipt, and the next read re-fetches into the
+chunk dir through the cold path above.
 
 ## Cloud Index Infrastructure
 
@@ -339,8 +357,8 @@ node honours a source-time window or a `pos=` address the same way a local one
 does. A legacy token/key-value query is folded into its filter first, so it
 never reaches a peer as an unfiltered scan. What the text does not carry
 travels in the request beside it: the resume cursor in `ResumeToken`, the
-partial-aggregate request in `PartialAggregates`, the histogram request in
-`HistogramOnly`. A test fails when a
+partial-aggregate request in `PartialAggregates`, the histogram request and
+its grid in `HistogramGrid`. A test fails when a
 `query.Query` field is neither round-tripped through the wire form nor named
 with the channel that carries it instead. `Query.String()` is a display form
 for Explain, not the wire.
@@ -372,16 +390,39 @@ limit, so no record scan can produce it: a filtered histogram is its own scan
 of the window (`timechartScanPath`), an unfiltered one counts from the
 timestamp index. On the first page the coordinator computes its own leader
 vaults' share and, concurrently, `collectRemoteHistogram` sends every remote
-vault's leader a `ForwardSearch` with `histogram_only` set; the peer answers
-with `ComputeSearchPageHistogram` over the forwarded query — the function the
-coordinator runs for its own vaults — and no records. The shares sum bucket by
-bucket on the grid every node derives from the same absolute window. Record
-streams carry no histogram, and later pages ask for none, so no record waits on
-a histogram's scan and the response's closing message is the only one that
-does. Pipeline searches merge the remote shares the same way. If any remote
-vault fails to answer, the response carries no histogram: a sum missing one
-vault's share would understate volume while looking authoritative. A remote
-vault whose record stream fails fails the search itself.
+vault's leader a `ForwardSearch` carrying a `HistogramGrid`; the peer answers
+with `ComputeSearchPageHistogram` over the forwarded filter — the function the
+coordinator runs for its own vaults — and no records. Record streams carry no
+histogram, and later pages ask for none, so no record waits on a histogram's
+scan and the response's closing message is the only one that does. Pipeline
+searches merge the remote shares the same way. If any remote vault fails to
+answer, the response carries no histogram: a sum missing one vault's share
+would understate volume while looking authoritative. A remote vault whose
+record stream fails fails the search itself.
+
+**One grid, chosen by the coordinator.** The shares sum bucket by bucket only
+when every node counts on the same grid, so the coordinator chooses it — the
+search's window cut into the page histogram's 50 buckets (`pageHistogramGrid`)
+— and sends its start, end and bucket count in the `HistogramGrid`. A peer
+counts on exactly that grid and refuses one it cannot count on bucket for
+bucket (no buckets, more than `query.MaxHistogramBuckets`, an empty window or
+one narrower than a nanosecond per bucket); it never derives a window of its
+own, because its view of the chunks differs from every other node's.
+
+A search with no time window gets one before it fans out:
+`resolveUnboundedQuery` takes the oldest record across every vault in scope as
+the window's start, and the newest record or the coordinator's now, whichever
+is later, as its end. Each vault's bounds come from this node's view of its
+chunks — the vault-ctl FSM manifest every node holds, open chunks included,
+and any chunks held locally. A vault with no records in that view is asked of
+its leader with `ForwardListChunks`. The resolved window bounds the record
+search as well as the histogram, and later pages keep it through the resume
+token's frozen bounds rather than resolving again. When a leader cannot report
+its vault's chunks, the query stays unbounded — a window derived without that
+vault could cut its records out of the search — and with no window there is no
+grid, so the response carries no histogram. A search over vaults all led by
+the coordinator has no shares to align and counts on the window its own engine
+derives.
 
 **Resume tokens** carry the coordinator's local chunk positions plus one
 canonical cursor for the merged stream: the last emitted record's timestamp on
@@ -389,7 +430,12 @@ the ordering axis and its EventID. Remote vaults are not resumed by their own
 tokens; the next page bounds every source at the cursor's timestamp
 (inclusively) and the merge skips whatever sits at or before the cursor in
 canonical order, so a page boundary inside a group of records sharing a
-timestamp neither repeats nor drops any of them, from any node. Local positions
+timestamp neither repeats nor drops any of them, from any node, in either
+direction. A record without an ingester identity has no rank within its tie
+group — every identity-less record at one timestamp compares equal — so the
+cursor skips all of them along with the one it names; ingest mints an identity
+for every record, and only records appended straight to a chunk manager, as
+test fixtures are, lack one. Local positions
 advance only past records the page displayed: the merge reads one local record
 ahead to compare against the remote stream, so a page filled entirely by remote
 records hands on the local positions it received, and a page that displayed a
@@ -397,7 +443,9 @@ local record pins them to the last one shown. Positions are
 kept only for chunks scanned in physical order. A chunk scanned through its
 timestamp index (every sealed chunk, and any ordering other than the default)
 yields in index order, so no physical position can resume it; it carries none,
-and the next page restarts it under the cursor, which the narrowed time bound
+the engine ignores any position a token names for it (the coordinator pins the
+last displayed local record's position whatever chunk it came from), and the
+next page restarts it under the cursor, which the narrowed time bound
 lets the rank scan seek to directly. An open pipeline chunk has no source
 index yet; under `order=source_ts` it is put in canonical order in memory —
 one pass collects each surviving record's ordering key and position, charged

@@ -33,7 +33,12 @@ const maxConcurrentGLCBPulls = 4
 const glcbCatchupJobPrefix = "glcb-catchup:"
 
 func glcbCatchupJobName(vaultID glid.GLID, chunkID chunk.ChunkID) string {
-	return glcbCatchupJobPrefix + vaultID.String() + ":" + chunkID.String()
+	return glcbCatchupVaultJobPrefix(vaultID) + chunkID.String()
+}
+
+// glcbCatchupVaultJobPrefix names one vault's replica catch-up pull jobs.
+func glcbCatchupVaultJobPrefix(vaultID glid.GLID) string {
+	return glcbCatchupJobPrefix + vaultID.String() + ":"
 }
 
 // pullMissingGLCB schedules recovery of this home's copy of a sealed chunk
@@ -65,9 +70,9 @@ func glcbCatchupJobName(vaultID glid.GLID, chunkID chunk.ChunkID) string {
 // own job map, via RunOnceIfAbsentUnderLimit keyed on glcbCatchupJobName /
 // glcbCatchupJobPrefix. There is deliberately no second bookkeeping map: the
 // claim is a lease held for exactly as long as the job is registered, so
-// cancelling a pending pull (RemoveJobsByPrefix on vault teardown) releases
-// the right to retry it instead of stranding a claim that would stop the
-// chunk from ever being pulled again.
+// cancelling a pending pull (cancelPendingChunkJobs on vault teardown)
+// releases the right to retry it instead of stranding a claim that would stop
+// the chunk from ever being pulled again.
 func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.ManifestEntry) {
 	if o.chunkGLCBPuller == nil || o.scheduler == nil {
 		return // single-node: every chunk this node should hold, it built

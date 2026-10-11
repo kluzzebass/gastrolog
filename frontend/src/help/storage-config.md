@@ -20,6 +20,8 @@ The thresholds are evaluated once per storage, not once per vault — a below-fl
 
 When you create a file vault, you assign it a **Storage Class**. The placement manager finds file storages with that class across the cluster and assigns one per replica. For example, a file vault with RF=3 and storage class 1 needs three file storages with class 1 — they can be on different nodes (availability) or the same node (redundancy).
 
+Everything a vault keeps on a node it is placed on lives on the file storage chosen there: the segments records are written to, the segments collected from other nodes, and the built chunks. The storage class therefore decides which disk the vault fills, and that storage's **Disk Free** thresholds guard it. A node that receives records for a vault it is not placed on keeps those segments under its home directory (`segments/<vault>`) until the vault's nodes have collected them. When a placement moves a vault to another file storage, or onto or off a node, the node moves the vault's files to their new location before writing there.
+
 The number of file storages with a matching class is the vault's replication factor cap. The Storage Class picker lists that count per class, the Replication Factor field states the cap and its cause (`Cap 2: 2 file storages with class 1`), and the vault card's [Placement](help:vaults-config#placement) block shows which nodes hold the leader and follower placements, or why the vault is unplaced. To raise the cap, add a file storage with the class on any node.
 
 ## Cloud Storage

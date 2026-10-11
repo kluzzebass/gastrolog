@@ -68,8 +68,8 @@ func (s *QueryServer) searchPipeline(
 // scope: this node's vaults grouped by level, merged with each remote vault's
 // page histogram.
 func (s *QueryServer) pipelineHistogram(ctx context.Context, eng *query.Engine, q query.Query) []*apiv1.HistogramBucket {
-	return s.mergeRemoteHistogram(ctx, q, func() []*apiv1.HistogramBucket {
-		return HistogramToProto(eng.ComputeHistogram(ctx, q, pageHistogramBuckets))
+	return s.mergeRemoteHistogram(ctx, q, func(q query.Query, buckets int) []*apiv1.HistogramBucket {
+		return HistogramToProto(eng.ComputeHistogram(ctx, q, buckets))
 	})
 }
 

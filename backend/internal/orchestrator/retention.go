@@ -317,11 +317,14 @@ func (o *Orchestrator) retentionSweepAll() {
 // offset from the retention sweep) on every node. For each (vault,
 // instance) on this node it runs the lifecycle reconciler's
 // consolidated ReconcileTick: one shared FSM/disk gather per tick, then
-// every reconcile category diffs against it (pending obligations, local
-// orphans, staging orphans, missing replicas, stale leader FSM entries,
-// nodes outside the placement, idle actives). See
+// every reconcile category diffs against it (pending obligations, missing
+// replicas, stale leader FSM entries, nodes outside the placement, idle
+// actives). See
 // VaultLifecycleReconciler.ReconcileTick for the category catalogue and
-// per-category ownership docs.
+// per-category ownership docs. It then runs the released-segment sweep and
+// the chunk tombstone sweep for every vault, instance or not
+// (sweepReleasedSegments, sweepChunkTombstones); the chunk tombstone sweep is
+// the periodic local- and staging-orphan pass.
 //
 // BACKSTOP, not the primary driver. Every category has an upstream event
 // that drives its primary convergence — delete obligations on
@@ -353,6 +356,8 @@ func (o *Orchestrator) vaultCatchupSweepAll() {
 	for _, t := range vaultInsts {
 		t.Reconciler.ReconcileTick()
 	}
+	o.sweepReleasedSegments()
+	o.sweepChunkTombstones()
 }
 
 // enforceMemoryBudgets checks memory vaults for budget overruns and transitions
@@ -436,7 +441,7 @@ func (o *Orchestrator) drainExcessChunks(runner *retentionRunner, cm chunk.Chunk
 		// by shutdown or disk protect, ejecting every record unrouted. Skip
 		// rather than break: the abort is per-chunk, and a later chunk may
 		// still route.
-		if !runner.applyRetentionDispositionToChunk(m.ID) {
+		if !runner.applyRetentionDispositionToChunk(m.ID, chunk.RetentionReasonMemoryBudget) {
 			continue
 		}
 		runner.expireChunk(m.ID, "memory-budget-enforcement")
@@ -813,38 +818,29 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 		Claims: r.claimsIfNeeded(rules, sealed),
 	}
 
-	processed := make(map[chunk.ChunkID]bool)
+	matched, totalMatched := matchRetentionRules(rules, state)
 
-	totalMatched := 0
-	for _, b := range rules {
-		matched := b.policy.Apply(state)
-		totalMatched += len(matched)
-		// Bounded worker pool: retentionChunkWorkers goroutines pull chunk
-		// IDs off a channel, so the goroutine count is bounded and not just
-		// the concurrency. Spawning one goroutine per matched chunk and
-		// bounding with a semaphore instead parked 668 goroutines on a live
-		// profile, all waiting out the serialized disk-bound drain.
-		// pendingFlag is read-only after construction, so workers may read it
-		// without locking.
-		jobs := make(chan chunk.ChunkID)
-		var chunkWG sync.WaitGroup
-		for range min(retentionChunkWorkers, len(matched)) {
-			chunkWG.Go(func() {
-				for id := range jobs {
-					r.tryRetainChunk(id, b, pendingFlag[id])
-				}
-			})
-		}
-		for _, id := range matched {
-			if processed[id] {
-				continue
+	// Bounded worker pool: retentionChunkWorkers goroutines pull chunks off
+	// a channel, so the goroutine count is bounded and not just the
+	// concurrency. Spawning one goroutine per matched chunk and bounding
+	// with a semaphore instead parked 668 goroutines on a live profile, all
+	// waiting out the serialized disk-bound drain. pendingFlag is read-only
+	// after construction, so workers may read it without locking.
+	jobs := make(chan chunk.RetentionMatch)
+	var chunkWG sync.WaitGroup
+	for range min(retentionChunkWorkers, len(matched)) {
+		chunkWG.Go(func() {
+			for m := range jobs {
+				r.tryRetainChunk(m.ID, m.Reason, pendingFlag[m.ID])
 			}
-			processed[id] = true
-			jobs <- id
-		}
-		close(jobs)
-		chunkWG.Wait()
+		})
 	}
+	for _, m := range matched {
+		jobs <- m
+	}
+	close(jobs)
+	chunkWG.Wait()
+
 	if totalMatched == 0 {
 		r.noteIdle("rules matched no chunks", len(metas), filtered)
 	}
@@ -853,6 +849,28 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	r.mu.Unlock()
 	r.finishSweepDeferralState()
 	r.checkBoundViolations(rules)
+}
+
+// matchRetentionRules evaluates every rule against one snapshot and returns
+// each selected chunk once, in first-selected order, with the preceding
+// reason over every rule that selected it — so a chunk's `_reason` does not
+// depend on the order the vault lists its policies. total counts selections
+// across rules before deduplication.
+func matchRetentionRules(rules []retentionRule, state chunk.VaultState) (matched []chunk.RetentionMatch, total int) {
+	at := make(map[chunk.ChunkID]int)
+	for _, b := range rules {
+		ruleMatches := chunk.MatchRetention(b.policy, state)
+		total += len(ruleMatches)
+		for _, m := range ruleMatches {
+			if i, seen := at[m.ID]; seen {
+				matched[i].Reason = chunk.PrecedingRetentionReason(matched[i].Reason, m.Reason)
+				continue
+			}
+			at[m.ID] = len(matched)
+			matched = append(matched, m)
+		}
+	}
+	return matched, total
 }
 
 // claimsIfNeeded computes disk claims for sealed only when some rule in
@@ -1260,7 +1278,7 @@ func selectRetentionCandidates(
 // capacity and were a major contributor to leader-queue saturation
 // when retention actions stalled with hundreds of pending chunks), and
 // dispatches to the action handler.
-func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alreadyPending bool) {
+func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, reason chunk.RetentionReason, alreadyPending bool) {
 	// During drain nothing downstream can succeed: the pipeline rejects
 	// fan-out submits and Raft applies race teardown. Leave the chunk
 	// untouched — the sweep after restart processes it from scratch.
@@ -1304,7 +1322,7 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alre
 	// flag and are never re-routed.
 	defer r.clearInflight(id)
 	if !alreadyPending {
-		if !r.applyRetentionDispositionToChunk(id) {
+		if !r.applyRetentionDispositionToChunk(id, reason) {
 			// Fan-out aborted (shutdown / pipeline stopped). Nothing was
 			// marked, nothing is destroyed; a later sweep retries fully.
 			return
@@ -1397,11 +1415,11 @@ func (r *retentionRunner) currentDisposition() (string, *glid.GLID) {
 // pure local-copy delete, since the data now lives on at the destination.
 // Extracted so tests can verify the disposition gate without standing up
 // the full expire-chunk machinery (which needs a reconciler, Raft, etc.).
-func (r *retentionRunner) applyRetentionDispositionToChunk(id chunk.ChunkID) bool {
+func (r *retentionRunner) applyRetentionDispositionToChunk(id chunk.ChunkID, reason chunk.RetentionReason) bool {
 	disposition, target := r.currentDisposition()
 	switch disposition {
 	case system.RetentionDispositionRoute:
-		return r.fireRetentionEvent(id)
+		return r.fireRetentionEvent(id, reason)
 	case system.RetentionDispositionTransfer:
 		return r.fireTransferEvent(id, target)
 	default:
@@ -1421,15 +1439,11 @@ func dispositionActionName(disposition string) string {
 }
 
 // fireRetentionEvent streams the chunk's records through the routing
-// engine with synthetic `_source = "retention"` and `_vault = vaultID`.
-// Each matched route writes the records to its destinations. The
-// original chunk is destroyed in the caller regardless of routing
-// outcome — records with no matching route drop silently.
-//
-// The `_reason` synthetic attribute is left empty: distinguishing age vs.
-// size vs. count would require splitting composite retention policies into
-// per-trigger rules, which is not built. Routes targeting retention match on
-// `_source = "retention"` and `_vault = "<id>"`.
+// engine with synthetic `_source = "retention"`, `_vault = vaultID` and
+// `_reason = reason` (the trigger that selected the chunk). Each matched
+// route writes the records to its destinations. The original chunk is
+// destroyed in the caller regardless of routing outcome — records with no
+// matching route drop silently.
 //
 // SubmitRetentionRecord routes each record through the pipeline: route
 // evaluation against the published table, then durable segment write on
@@ -1457,7 +1471,7 @@ func dispositionActionName(disposition string) string {
 // for a non-terminal reason are dropped and the chunk is destroyed, because
 // one bad record must not strand a chunk forever. Those are counted and
 // reported.
-func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
+func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID, reason chunk.RetentionReason) bool {
 	if r.orch == nil {
 		return true
 	}
@@ -1574,7 +1588,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 				if fanCtx.Err() != nil {
 					continue // drain so the producer never blocks after abort
 				}
-				subErr := r.orch.SubmitRetentionRecord(fanCtx, r.vaultID, rec, "")
+				subErr := r.orch.SubmitRetentionRecord(fanCtx, r.vaultID, rec, reason)
 				switch {
 				case subErr == nil:
 				case errors.Is(subErr, pipeline.ErrNotRunning),
