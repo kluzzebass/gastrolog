@@ -116,7 +116,7 @@ which records to read and in what order.
 
 ```mermaid
 flowchart TD
-    Build["buildScannerWithManagers()"] --> MinPos["setMinPositionsFromBounds()"]
+    Build["buildScannerWithManagers()"] --> MinPos["setMinPositionFromIngestBound()"]
     MinPos --> BoolExpr{"BoolExpr set?"}
 
     BoolExpr -->|Yes| DNF["Convert to DNF"]
@@ -145,8 +145,19 @@ flowchart TD
 
 For **sealed chunks** with indexes, the engine narrows which records to read:
 
-1. **Time-based**: B+ tree (active) or flat index (sealed) finds the first
-   position with IngestTS ≥ lower bound → `setMinPosition()`
+1. **Time-based**: on a sealed chunk whose IngestTS never decreases in
+   physical order (`IngestTSMonotonic`), the records an ingest lower bound
+   excludes are exactly the leading positions, as many as the bound's rank in
+   the ITSI, so that rank becomes the minimum position → `setMinPosition()`.
+   Posting lists are pruned below it and the rank walk skips reading records
+   below it, which saves reads under `order=source_ts` (under the default
+   order the ingest rank range already starts past them). No other time bound
+   narrows by position: on a chunk whose records arrived out of IngestTS
+   order, and on every chunk for SourceTS (late, replayed and multi-source
+   logs arrive out of source order), an admitted record can sit at any
+   position, so those bounds act only as the rank range on the ordering axis
+   and a per-record check. Active chunks are not narrowed either; their
+   monotonicity can change while a scan runs.
 2. **Token index**: posting lists intersected for all required tokens
 3. **KV index**: positions of records matching key/value predicates
 4. **Glob index**: prefix-based positions, verified at runtime
