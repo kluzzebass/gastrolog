@@ -23,9 +23,17 @@ import { sortByName } from "../../lib/sort";
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
 import { validateCron, describeCron } from "../../utils/cron";
 
+const noConditionReason = "Set at least one condition";
+
+/** What deleting a rotation policy does to the vaults that use it. */
+function rotationPolicyDeleteConsequences(refs: string[]): string[] {
+  if (refs.length === 0) return [];
+  return [`${refs.join(", ")}: rotation policy cleared — active chunks no longer seal on schedule`];
+}
+
 interface PolicyEdit {
   name: string;
-  maxBytes: string;
+  maxSize: string;
   maxRecords: string;
   maxAge: string;
   cron: string;
@@ -36,7 +44,7 @@ interface PolicyEdit {
 interface AddRotationFormState {
   adding: boolean;
   newName: string;
-  newMaxBytes: string;
+  newMaxSize: string;
   newMaxRecords: string;
   newMaxAge: string;
   newCron: string;
@@ -45,7 +53,7 @@ interface AddRotationFormState {
 const addRotationFormInitial: AddRotationFormState = {
   adding: false,
   newName: "",
-  newMaxBytes: "",
+  newMaxSize: "",
   newMaxRecords: "",
   newMaxAge: "",
   newCron: "",
@@ -54,7 +62,7 @@ const addRotationFormInitial: AddRotationFormState = {
 type AddRotationFormAction =
   | { type: "setAdding"; value: boolean }
   | { type: "setNewName"; value: string }
-  | { type: "setNewMaxBytes"; value: string }
+  | { type: "setNewMaxSize"; value: string }
   | { type: "setNewMaxRecords"; value: string }
   | { type: "setNewMaxAge"; value: string }
   | { type: "setNewCron"; value: string }
@@ -66,8 +74,8 @@ function addRotationFormReducer(state: AddRotationFormState, action: AddRotation
       return { ...state, adding: action.value };
     case "setNewName":
       return { ...state, newName: action.value };
-    case "setNewMaxBytes":
-      return { ...state, newMaxBytes: action.value };
+    case "setNewMaxSize":
+      return { ...state, newMaxSize: action.value };
     case "setNewMaxRecords":
       return { ...state, newMaxRecords: action.value };
     case "setNewMaxAge":
@@ -126,7 +134,7 @@ function CronField({
   );
 }
 
-export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{ dark: boolean; onNavigateTo?: NavigateTo }>) {
+export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean; onNavigateTo?: NavigateTo }>) {
   const _c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putPolicy = usePutRotationPolicy();
@@ -137,7 +145,7 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
   const { isExpanded, toggle: toggleCard } = useExpandedCards();
 
   const [addForm, dispatchAdd] = useReducer(addRotationFormReducer, addRotationFormInitial);
-  const { adding, newName, newMaxBytes, newMaxRecords, newMaxAge, newCron } = addForm;
+  const { adding, newName, newMaxSize, newMaxRecords, newMaxAge, newCron } = addForm;
   const [namePlaceholder, setNamePlaceholder] = useState("");
 
   const policies = config?.rotationPolicies ?? [];
@@ -150,14 +158,17 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
   // empty policies with InvalidArgument; mirror the rule in the form so
   // the operator sees disabled state before submitting.
   const newPolicyEmpty =
-    !newMaxAge.trim() && !newMaxBytes.trim() && !newMaxRecords.trim() && !newCron.trim();
+    !newMaxAge.trim() && !newMaxSize.trim() && !newMaxRecords.trim() && !newCron.trim();
+  let createDisabledReason: string | undefined;
+  if (nameConflict) createDisabledReason = `A rotation policy named "${effectiveName}" already exists`;
+  else if (newPolicyEmpty) createDisabledReason = noConditionReason;
 
   const defaults = (id: string): PolicyEdit => {
     const pol = policies.find((p) => encode(p.id) === id);
-    if (!pol) return { name: "", maxBytes: "", maxRecords: "", maxAge: "", cron: "" };
+    if (!pol) return { name: "", maxSize: "", maxRecords: "", maxAge: "", cron: "" };
     return {
       name: pol.name,
-      maxBytes: pol.maxSize,
+      maxSize: pol.maxSize,
       maxRecords: pol.maxRecords > BigInt(0) ? pol.maxRecords.toString() : "",
       maxAge: pol.maxAge,
       cron: pol.cron,
@@ -179,7 +190,7 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
       return {
         id,
         name: edit.name,
-        maxSize: edit.maxBytes,
+        maxSize: edit.maxSize,
         maxRecords: maxRecordsValue,
         maxAge: edit.maxAge,
         cron: edit.cron,
@@ -216,7 +227,7 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
       await putPolicy.mutateAsync({
         id: encode(crypto.getRandomValues(new Uint8Array(16))),
         name,
-        maxSize: newMaxBytes,
+        maxSize: newMaxSize,
         maxRecords: maxRecordsValue,
         maxAge: newMaxAge,
         cron: newCron,
@@ -253,6 +264,7 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
           onCreate={handleCreate}
           isPending={putPolicy.isPending}
           createDisabled={nameConflict || newPolicyEmpty}
+          createDisabledReason={createDisabledReason}
         >
           <FormField label="Name" dark={dark}>
             <TextInput
@@ -277,12 +289,12 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
               />
             </FormField>
             <FormField
-              label="Max Bytes"
+              label="Max Size"
               dark={dark}
             >
               <TextInput
-                value={newMaxBytes}
-                onChange={(v) => dispatchAdd({ type: "setNewMaxBytes", value: v })}
+                value={newMaxSize}
+                onChange={(v) => dispatchAdd({ type: "setNewMaxSize", value: v })}
                 placeholder=""
                 dark={dark}
                 mono
@@ -310,7 +322,7 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
         // empty policies, so disable Save preemptively
         // when the operator has cleared every condition.
         const editEmpty =
-          !edit.maxAge.trim() && !edit.maxBytes.trim() && !edit.maxRecords.trim() && !edit.cron.trim();
+          !edit.maxAge.trim() && !edit.maxSize.trim() && !edit.maxRecords.trim() && !edit.cron.trim();
         return (
           <SettingsCard
             key={id}
@@ -319,15 +331,17 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
             expanded={isExpanded(id)}
             onToggle={() => toggleCard(id)}
             onDelete={() => handleDelete(id)}
+            deleteConsequences={rotationPolicyDeleteConsequences(refs)}
             footer={
               <Button
                 onClick={() => handleSave(id)}
                 disabled={putPolicy.isPending || !isDirty(id) || editEmpty}
+                disabledReason={editEmpty ? noConditionReason : undefined}
               >
                 {putPolicy.isPending ? "Saving..." : "Save"}
               </Button>
             }
-            status={<UsedByStatus dark={dark} refs={refs} />}
+            status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo && ((ref) => onNavigateTo("vaults", ref))} />}
           >
             <div className="flex flex-col gap-3">
               <FormField label="Name" dark={dark}>
@@ -348,10 +362,10 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
                     examples={["1h", "24h", "7d"]}
                   />
                 </FormField>
-                <FormField label="Max Bytes" dark={dark}>
+                <FormField label="Max Size" dark={dark}>
                   <TextInput
-                    value={edit.maxBytes}
-                    onChange={(v) => setEdit(id, { maxBytes: v })}
+                    value={edit.maxSize}
+                    onChange={(v) => setEdit(id, { maxSize: v })}
                     placeholder=""
                     dark={dark}
                     mono

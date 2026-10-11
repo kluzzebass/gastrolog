@@ -1,6 +1,7 @@
 import { FormField, TextInput } from "./FormField";
 import { Checkbox } from "./Checkbox";
-import { NodeMultiSelect } from "./NodeMultiSelect";
+import { NodeMultiSelect, NODE_ASSIGNMENT_HELP_REF } from "./NodeMultiSelect";
+import { singletonLabel } from "./ingesterLabels";
 
 /**
  * Shared header controls for every ingester form (both create and edit):
@@ -60,15 +61,14 @@ export function IngesterCommonFields({
         onAllNodesChange={onAllNodesChange}
         dark={dark}
       />
-      {singletonSupported && (
-        <Checkbox
-          checked={singleton}
-          onChange={onSingletonChange}
-          label="Singleton (run on one node with automatic failover)"
-          helpRef="ingestion"
-          dark={dark}
-        />
-      )}
+      <Checkbox
+        checked={singletonSupported && singleton}
+        onChange={onSingletonChange}
+        label={singletonLabel(singletonSupported)}
+        helpRef={NODE_ASSIGNMENT_HELP_REF}
+        disabled={!singletonSupported}
+        dark={dark}
+      />
     </>
   );
 }

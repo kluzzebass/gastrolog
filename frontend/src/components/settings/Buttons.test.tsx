@@ -132,3 +132,27 @@ describe("IconButton", () => {
     expect(onPointerDown).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("Button disabledReason", () => {
+  test("the reason is visible text beside a disabled button", () => {
+    const { getByText } = renderWritable(
+      <Button onClick={() => {}} disabled disabledReason="Pick a storage class">Save</Button>,
+    );
+    expect(getByText("Pick a storage class")).toBeTruthy();
+    expect(getByText("Save").closest("button")!.disabled).toBe(true);
+  });
+
+  test("the reason is not shown while the button is enabled", () => {
+    const { queryByText } = renderWritable(
+      <Button onClick={() => {}} disabledReason="Pick a storage class">Save</Button>,
+    );
+    expect(queryByText("Pick a storage class")).toBeNull();
+  });
+
+  test("a disabled button without a reason adds nothing", () => {
+    const { container } = renderWritable(
+      <Button onClick={() => {}} disabled>Save</Button>,
+    );
+    expect(container.querySelectorAll("span")).toHaveLength(0);
+  });
+});

@@ -1,5 +1,17 @@
 import { describe, test, expect } from "bun:test";
-import { storageVerdictLabel, thresholdLabel } from "./StorageCard";
+import { freeOfTotalLabel, storageVerdictLabel, thresholdLabel } from "./storageLabels";
+
+// The header's space figure names both numbers — free against the
+// volume's total — instead of an unlabeled "a / b".
+describe("freeOfTotalLabel", () => {
+  test("reads free of total", () => {
+    expect(freeOfTotalLabel(784_000_000_000n, 888_000_000_000n)).toBe("730.2 GiB free of 827.0 GiB");
+  });
+
+  test("a volume with no sample yet reads 0 B free of 0 B, never blank", () => {
+    expect(freeOfTotalLabel(0n, 0n)).toBe("0 B free of 0 B");
+  });
+});
 
 // storageVerdictLabel drives the header badge grammar: nothing when
 // healthy, "warn" below the warn threshold, "protected" below the floor

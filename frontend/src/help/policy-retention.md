@@ -21,7 +21,7 @@ Every set condition (age, size, or chunk count) is a **soft bound** by default: 
 - **Drain:** oldest sealed chunks fire retention events once the **sealed-chunk store's** disk claim exceeds the bound. Scope: only what retention can act on — sealed chunks and their indexes. Unconditional — set `maxSize` always drains, regardless of **Refuse**.
 - **Refuse:** while the vault's **whole local footprint** — the sealed-chunk store plus the pipeline segment backlog — is at or over the bound, the cluster **refuses** new records for the vault (everything already accepted is kept, the newest is nacked) — the backstop while drain catches up or is deferred. A warning alarm raises at 90% of the bound. Only when the policy's **Refuse** flag is on — off by default, so a plain `maxSize` only drains.
 
-**Min-wins across attached policies:** the vault model holds a list of retention rules, though the vault card edits and saves a single retention policy. When several are attached, drain mins over **every** attached policy that carries a max size; refuse mins over only the ones with **Refuse** on — the tightest such policy's bound wins for refusal, even if a looser soft policy is what actually triggers the drain.
+**Min-wins across attached policies:** a vault attaches any number of retention policies (the vault card's **Retention Policies** list, or `--retention-policy` repeated on the CLI). When several are attached, drain mins over **every** attached policy that carries a max size; refuse mins over only the ones with **Refuse** on — the tightest such policy's bound wins for refusal, even if a looser soft policy is what actually triggers the drain.
 
 **Default floor:** a vault with no retention rules, or whose attached policies carry no max size at all, still gets a bound — the system default applies, refuse-only (a default never destroys data). An unbounded file vault is not representable.
 
@@ -31,6 +31,10 @@ What happens depends on the vault's [Retention Disposition](help:vaults-config):
 
 - **Delete** (default) and **Route** both destroy the original chunk — indexes first, then the chunk data — and decide the records' fate via the routing engine: with `route`, the chunk's records are streamed through the routing engine with `source = retention-trigger(vault)`, and if any [retention-trigger route](help:routing) matches, they're re-appended to that route's destination vaults (per-record filtering applies); with `delete`, or with `route` and no matching route, the records are simply dropped.
 - **Transfer** skips the routing engine entirely: the sealed chunk itself is re-homed unchanged to the vault's **Transfer Target**. No decode, no re-ingest, no per-record filtering — the chunk's records and identity are untouched, only its retention clock resets at the destination. The original chunk is only removed from the source once the target confirms it holds the chunk.
+
+## Deleting a Policy
+
+A policy in use can be deleted; the vaults it is used by are listed on the policy card, and the confirm step names them. Those vaults have their retention policy cleared: nothing expires until another policy is assigned, and only the default floor remains, which refuses but never destroys.
 
 ## How Retention Runs
 

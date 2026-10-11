@@ -5594,9 +5594,12 @@ func (x *ListCertificatesResponse) GetCertificates() []*CertificateInfo {
 }
 
 type CertificateInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name  string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// True when the key material is loaded from files on disk (and reloaded
+	// on change); false when PEM content is stored in the configuration.
+	FromFiles     bool `protobuf:"varint,3,opt,name=from_files,json=fromFiles,proto3" json:"from_files,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5643,6 +5646,13 @@ func (x *CertificateInfo) GetName() string {
 		return x.Name
 	}
 	return ""
+}
+
+func (x *CertificateInfo) GetFromFiles() bool {
+	if x != nil {
+		return x.FromFiles
+	}
+	return false
 }
 
 type GetCertificateRequest struct {
@@ -9543,10 +9553,12 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\rsaved_queries\x18\x01 \x01(\v2%.gastrolog.v1.GetSavedQueriesResponseR\fsavedQueries\"\x19\n" +
 	"\x17ListCertificatesRequest\"]\n" +
 	"\x18ListCertificatesResponse\x12A\n" +
-	"\fcertificates\x18\x01 \x03(\v2\x1d.gastrolog.v1.CertificateInfoR\fcertificates\"5\n" +
+	"\fcertificates\x18\x01 \x03(\v2\x1d.gastrolog.v1.CertificateInfoR\fcertificates\"T\n" +
 	"\x0fCertificateInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"'\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"from_files\x18\x03 \x01(\bR\tfromFiles\"'\n" +
 	"\x15GetCertificateRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\"\xa8\x01\n" +
 	"\x16GetCertificateResponse\x12\x0e\n" +

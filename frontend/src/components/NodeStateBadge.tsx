@@ -1,45 +1,15 @@
-import { NodeState, type Timestamp } from "../api/model/node";
-import { Badge, type BadgeVariant } from "./Badge";
+import type { NodeState, Timestamp } from "../api/model/node";
+import { Badge } from "./Badge";
+import { nodeStateView } from "./nodeStateView";
 import { formatDuration } from "../utils/units";
+
+export const NODE_STATES_HELP_REF = "clustering-nodes#node-states";
 
 interface NodeStateBadgeProps {
   state: NodeState;
   stateSince?: Timestamp;
   dark: boolean;
 }
-
-interface StateView {
-  label: string;
-  variant: BadgeVariant;
-  description: string;
-}
-
-// Live and Unspecified intentionally return null below — the steady
-// state should not add visual noise (AGENTS.md "Quiet until needed").
-// Maintenance gets `info` rather than `muted` so operator intent is
-// visible without competing with the warn tone reserved for problems.
-const viewByState: Partial<Record<NodeState, StateView>> = {
-  [NodeState.UNREACHABLE]: {
-    label: "unreachable",
-    variant: "warn",
-    description: "cluster has not heard from this node",
-  },
-  [NodeState.MAINTENANCE]: {
-    label: "maintenance",
-    variant: "info",
-    description: "operator-declared absence",
-  },
-  [NodeState.DRAINING]: {
-    label: "draining",
-    variant: "info",
-    description: "transferring chunks off this node",
-  },
-  [NodeState.DECOMMISSIONING]: {
-    label: "decommissioning",
-    variant: "warn",
-    description: "node is being removed from the cluster",
-  },
-};
 
 function durationSince(ts: Timestamp | undefined): string {
   if (!ts) return "";
@@ -52,12 +22,12 @@ function durationSince(ts: Timestamp | undefined): string {
 }
 
 export function NodeStateBadge({ state, stateSince, dark }: Readonly<NodeStateBadgeProps>) {
-  const view = viewByState[state];
+  const view = nodeStateView(state);
   if (!view) return null;
   const duration = durationSince(stateSince);
   const text = duration ? `${view.label} ${duration}` : view.label;
   return (
-    <Badge variant={view.variant} dark={dark} title={view.description}>
+    <Badge variant={view.variant} dark={dark} title={view.description} helpRef={NODE_STATES_HELP_REF}>
       {text}
     </Badge>
   );

@@ -8,11 +8,13 @@ import {
 import { useTestCloudService } from "../../api/hooks/useVaults";
 import { useEditState } from "../../hooks/useEditState";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { endpointBlocked } from "../../utils/endpointScheme";
+import { endpointBlocked, endpointSchemeReason } from "../../utils/endpointScheme";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
 import { CloudServiceFields } from "./CloudServiceFields";
+import { providerOptions } from "./cloudProviders";
+import { cloudServiceSaveRequest, type CloudServiceEdit } from "./cloudServiceEdit";
 import { Button } from "./Buttons";
 
 interface CloudServiceCardProps {
@@ -22,13 +24,6 @@ interface CloudServiceCardProps {
   onToggle: () => void;
 }
 
-const providerOptions = [
-  { value: "s3", label: "S3" },
-  { value: "gcs", label: "GCS" },
-  { value: "azure", label: "Azure" },
-  { value: "memory", label: "Memory" },
-];
-
 function providerLabel(provider: string): string {
   switch (provider) {
     case "s3": return "S3";
@@ -37,32 +32,6 @@ function providerLabel(provider: string): string {
     case "memory": return "Memory";
     default: return provider || "unknown";
   }
-}
-
-interface TransitionEdit {
-  after: string;
-  cloudStorageClass: string;
-}
-
-interface CloudServiceEdit {
-  name: string;
-  provider: string;
-  bucket: string;
-  region: string;
-  endpoint: string;
-  accessKey: string;
-  secretKey: string;
-  credentialsConfigured: boolean;
-  clearCredentials: boolean;
-  container: string;
-  connectionString: string;
-  credentialsJson: string;
-  archivalMode: string;
-  transitions: TransitionEdit[];
-  restoreSpeed: string;
-  restoreDays: number;
-  suspectGraceDays: number;
-  reconcileSchedule: string;
 }
 
 /**
@@ -89,32 +58,6 @@ function destinationEdited(service: CloudService, e: CloudServiceEdit): boolean 
     e.endpoint !== service.endpoint ||
     e.container !== service.container
   );
-}
-
-export function cloudServiceSaveRequest(id: string, e: CloudServiceEdit) {
-  return {
-    id,
-    clearCredentials: e.clearCredentials,
-    name: e.name,
-    provider: e.provider,
-    bucket: e.bucket,
-    region: e.region,
-    endpoint: e.endpoint,
-    accessKey: e.accessKey,
-    secretKey: e.secretKey,
-    container: e.container,
-    connectionString: e.connectionString,
-    credentialsJson: e.credentialsJson,
-    archivalMode: e.archivalMode,
-    transitions: e.transitions.map((t) => ({
-      after: t.after,
-      cloudStorageClass: t.cloudStorageClass,
-    })),
-    restoreSpeed: e.restoreSpeed,
-    restoreDays: e.restoreDays,
-    suspectGraceDays: e.suspectGraceDays,
-    reconcileSchedule: e.reconcileSchedule,
-  };
 }
 
 export function CloudServiceCard({
@@ -214,6 +157,7 @@ export function CloudServiceCard({
               );
             }}
             disabled={testCloud.isPending || !edit.provider || endpointInvalid}
+            disabledReason={endpointInvalid ? endpointSchemeReason : undefined}
           >
             {testCloud.isPending ? "Testing..." : "Test Connection"}
           </Button>
@@ -230,6 +174,7 @@ export function CloudServiceCard({
           <Button
             onClick={() => handleSave(encode(service.id), edit)}
             disabled={putCloudService.isPending || !isDirty(encode(service.id)) || endpointInvalid}
+            disabledReason={endpointInvalid ? endpointSchemeReason : undefined}
           >
             {putCloudService.isPending ? "Saving..." : "Save"}
           </Button>

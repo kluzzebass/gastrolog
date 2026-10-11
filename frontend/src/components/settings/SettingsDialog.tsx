@@ -32,6 +32,9 @@ import { StorageSettings } from "./StorageSettings";
 import { ServiceSettings } from "./ServiceSettings";
 import { LogLevelsSettings } from "./LogLevelsSettings";
 import { HelpButton } from "../HelpButton";
+import { HelpLink } from "../HelpLink";
+
+const ROLES_HELP_REF = "user-management#roles";
 
 export type SettingsTab =
   | "service"
@@ -170,6 +173,12 @@ export function SettingsDialog({
               </div>
             );
           })()}
+          {!isAdmin && (
+            <p role="note" className={`text-[0.85em] mb-5 ${c("text-text-normal", "text-light-text-normal")}`}>
+              Read-only — the user role can view settings but not change them; nothing here offers a save.{" "}
+              <HelpLink helpRef={ROLES_HELP_REF} className="text-copper">Roles</HelpLink>
+            </p>
+          )}
           {tab === "service" && <ServiceSettings dark={dark} noAuth={noAuth} />}
           {tab === "nodes" && <NodesSettings dark={dark} />}
           {tab === "certificates" && <CertificatesSettings dark={dark} />}

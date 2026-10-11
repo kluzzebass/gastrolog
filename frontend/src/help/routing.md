@@ -23,7 +23,7 @@ loss, add a catch-all route (`*`) at the lowest priority (highest number).
 |-----------|-------------|
 | **Priority** | Evaluation order. Lower fires first; routes with the same priority break ties by name. |
 | **Match expression** | A boolean expression evaluated against each record's attributes (see [Query Language](help:query-language) for syntax). Determines whether this route fires. |
-| **Destinations** | One or more vaults that receive records when the route fires. |
+| **Destinations** | One or more vaults that receive records when the route fires. Every vault is listed; a JSONL sink is marked write-only and a disabled vault as not accepting records, both still selectable. With no vault configured the list says so — a route whose destinations are missing drops what it matches. |
 | **Distribution** | How records fan across destinations: **fanout** (all destinations, default), **round-robin** (rotate), or **failover** (first healthy). |
 | **Enabled** | Disabled routes are skipped during evaluation. |
 
@@ -34,7 +34,8 @@ Two special forms exist alongside ordinary expressions:
 - **`*`** (catch-all): Matches every record. Place one at the lowest
   priority to guarantee nothing goes unmatched.
 - **empty**: Matches nothing. The route stays configured but never fires —
-  useful for temporarily muting a route without deleting it.
+  useful for temporarily muting a route without deleting it. Its card reads
+  **matches nothing — no match expression**.
 - **Expression**: A boolean expression like `level=error AND env=prod`.
 
 Expressions are evaluated after [digestion](help:digesters), so attributes

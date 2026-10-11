@@ -256,3 +256,46 @@ export function staticLookupEqual(draft: StaticLookupDraft, saved: StaticLookupE
   }
   return true;
 }
+
+/**
+ * Why a file-backed lookup (CSV, JSON, YAML) cannot be created yet: an entry
+ * with no file is dropped on save, so Create waits for one.
+ */
+export function fileLookupIncompleteReason(name: string, namePlaceholder: string | undefined, fileId: string): string | undefined {
+  if (!name.trim() && !namePlaceholder) return "Name is required";
+  if (!fileId) return "Select a file first";
+  return undefined;
+}
+
+/** Why the column pickers have nothing to offer yet, or undefined once the query yields a table. */
+export function tableColumnsUnavailable(fileId: string, tableColumns: string[]): string | undefined {
+  if (!fileId) return "Select a file first — the columns come from the query result.";
+  if (tableColumns.length === 0) return "The query must produce an array of objects to pick columns from.";
+  return undefined;
+}
+
+/** Why the column pickers have nothing to offer yet, or undefined once the preview has columns. */
+export function csvColumnsUnavailable(
+  fileId: string,
+  previewPending: boolean,
+  data?: { error?: string; columns: string[] },
+): string | undefined {
+  if (!fileId) return "Select a file first — the columns come from its preview.";
+  if (data?.error) return "The preview failed — fix the file to pick columns.";
+  if (previewPending || !data) return "Waiting for the preview.";
+  if (data.columns.length === 0) return "The preview found no columns.";
+  return undefined;
+}
+
+/**
+ * Why an uploaded .mmdb file does not fit the lookup's database type, or
+ * undefined when it may. Only the file name is known here, so a file is
+ * ruled out only when its name says it is the other kind.
+ */
+export function mmdbFileIneligibility(dbType: string, fileName: string): string | undefined {
+  const namedAsn = fileName.includes("ASN") || fileName.includes("ISP");
+  const namedCity = fileName.includes("City");
+  if (dbType === "city" && namedAsn && !namedCity) return "named as an ASN database";
+  if (dbType === "asn" && namedCity && !namedAsn) return "named as a GeoIP City database";
+  return undefined;
+}

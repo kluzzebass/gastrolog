@@ -7,8 +7,8 @@ import { HelpProvider } from "../../../hooks/useHelp";
 
 const mocks = installMockClients();
 
-import { CsvCards } from "./CsvSection";
-import type { LookupSectionProps } from "./types";
+import { CsvAddForm, CsvCards } from "./CsvSection";
+import { fileLookupIncompleteReason, type LookupSectionProps } from "./types";
 import { renderWritable } from "../../../testing/renderWritable";
 
 function testId(n: number): Uint8Array<ArrayBuffer> {
@@ -57,6 +57,14 @@ function fieldHelpButton(label: HTMLElement): HTMLButtonElement {
   return button as HTMLButtonElement;
 }
 
+describe("CsvCards labels", () => {
+  test("the name field says it is the table name used in queries", async () => {
+    const { getByText } = renderCards();
+    fireEvent.click(getByText("assets"));
+    await waitFor(() => expect(getByText("Table name used in queries, e.g. | lookup assets ip")).toBeTruthy());
+  });
+});
+
 describe("CsvCards help", () => {
   test("the column pickers open the CSV lookups section", async () => {
     const { getByText, openHelp } = renderCards();
@@ -69,5 +77,41 @@ describe("CsvCards help", () => {
 
     fireEvent.click(fieldHelpButton(getByText("Value Columns")));
     expect(openHelp).toHaveBeenLastCalledWith("lookups-settings#csv-file-lookups");
+  });
+});
+
+// A file-backed lookup without a file is dropped on save, so Create waits for
+// one and says so; picking an existing file clears the reason.
+describe("CsvAddForm create gate", () => {
+  test("Create is disabled with 'Select a file first' until a file is picked", async () => {
+    m(mocks.systemClient, "previewCSVLookup").mockResolvedValue({ columns: ["ip"], rows: [], totalRows: 0, error: "" });
+    const qc = createTestQueryClient();
+    const sectionProps = {
+      dark: true,
+      managedFiles: [assetsFile],
+      uploadFile: { isPending: false, mutate: () => {} },
+      addToast: () => {},
+    } as unknown as LookupSectionProps;
+    const { getByText, queryByText } = renderWritable(
+      <HelpProvider onOpen={() => {}}>
+        <CsvAddForm {...sectionProps} onCreated={() => {}} onCancel={() => {}} existingLookups={[]} namePlaceholder="calm-otter" />
+      </HelpProvider>,
+      { wrapper: settingsWrapper(qc) },
+    );
+    const create = getByText("Create").closest("button")!;
+    expect(create.disabled).toBe(true);
+    expect(getByText("Select a file first")).toBeTruthy();
+
+    fireEvent.click(getByText("assets.csv").closest("button")!);
+    await waitFor(() => expect(getByText("Create").closest("button")!.disabled).toBe(false));
+    expect(queryByText("Select a file first")).toBeNull();
+  });
+});
+
+describe("fileLookupIncompleteReason", () => {
+  test("names the missing step: a name, then a file", () => {
+    expect(fileLookupIncompleteReason("", undefined, "")).toBe("Name is required");
+    expect(fileLookupIncompleteReason("", "calm-otter", "")).toBe("Select a file first");
+    expect(fileLookupIncompleteReason("assets", undefined, "f1")).toBeUndefined();
   });
 });

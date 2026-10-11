@@ -32,14 +32,27 @@ import { Badge } from "../Badge";
 import { HelpButton } from "../HelpButton";
 import { HelpLink } from "../HelpLink";
 import { BlobMark, SealPips } from "./SealPips";
-import { chunkLifecycleState, computeCloudPips, computePips } from "./sealPipState";
+import { chunkLifecycleState, computeCloudPips, computePips, rowIsCalm } from "./sealPipState";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { CrossLinkBadge } from "./CrossLinkBadge";
 import { PipelineBacklogView } from "./PipelineBacklogView";
+import { appendIdleNote, collectIdleNote, sealIdleNote, type IdleNote } from "./throughputNotes";
 import { VaultStageCountersSection } from "./VaultStageCounters";
 import { useReadOnly } from "../../hooks/useReadOnly";
+import { chunkDiskClaimBytes, chunkSizeCell } from "./chunkSize";
+import {
+  CLOUD_BACKED_VAULT_BADGE,
+  INDEX_MISSING_TITLE,
+  INDEX_OK_TITLE,
+  archivedBadgeTitle,
+  chunksEmptyText,
+  indexesEmptyText,
+  refusingBadgeText,
+  vaultRefusalDetails,
+  vaultRefusingCauseLabels,
+} from "./vaultCardText";
 
 // chunkEndInstant returns the ingest/write end for display, omitting unset or
 // sentinel epoch timestamps that proto encodes for zero-value Go times.
@@ -66,21 +79,6 @@ function chunkStartInstant(chunk: ChunkMeta): Date | undefined {
 /** Node names longer than this truncate in the throughput table; the full name is in the tooltip. */
 const NODE_NAME_MAX_CHARS = 24;
 
-// chunkDiskClaimBytes is this chunk's LOCAL on-disk claim — what deleting
-// it would actually free on the responding node. Mirrors the backend's
-// chunk.DiskClaim formula (backend/internal/chunk/claim.go): a cloud-backed
-// chunk with no local cache (diskBytes == 0) claims nothing — the object
-// still lives in the cloud store, at cloudBytes, a currency this never
-// substitutes in. Otherwise diskBytes wins when recorded, falling back to
-// logical bytes only for chunks with no disk-bytes tracking at all
-// (pipeline GLCB chunks).
-export function chunkDiskClaimBytes(chunk: ChunkMeta): number {
-  const diskBytes = Number(chunk.diskBytes);
-  if (chunk.cloudBacked && diskBytes === 0) return 0;
-  if (diskBytes > 0) return diskBytes;
-  return Number(chunk.bytes);
-}
-
 // chunkSizeCellTitle explains the size column's number — terse, and honest
 // about which of the two cloud currencies (local cache vs. cloud object) is
 // showing. undefined = no tooltip needed (the number is self-explanatory).
@@ -97,53 +95,49 @@ function chunkSizeCellTitle(chunk: ChunkMeta): string | undefined {
   if (diskBytes > 0) {
     return `${formatBytes(Number(chunk.bytes))} → ${formatBytes(diskBytes)} on disk`;
   }
-  return undefined;
+  return "record bytes — this chunk reports no file size, so its disk claim is the record bytes";
 }
 
-// vaultAdmissionCauseLabels maps the backend's admission-refusal cause enum
-// (VaultInfo.admissionRefused, populated from the responding node's own
-// admission-causes collector — backend/internal/orchestrator/disk_guard.go's
-// VaultAdmissionCauses) to a terse tooltip phrase. A first-class backend
-// signal, not a UI-side derivation from alarm state. The disk-free
-// thresholds belong to the storage a vault is placed on, not the vault,
-// hence STORAGE_DISK_PROTECT.
-const vaultAdmissionCauseLabels: Partial<Record<VaultAdmissionCause, string>> = {
-  [VaultAdmissionCause.MAX_SIZE_BOUND]: "at max-size bound",
-  [VaultAdmissionCause.STORAGE_DISK_PROTECT]: "storage below floor",
-  [VaultAdmissionCause.BACKLOG_BUDGET]: "backlog at budget",
-  [VaultAdmissionCause.AGE_BOUND]: "past age bound",
-  [VaultAdmissionCause.CHUNK_COUNT_BOUND]: "over chunk-count bound",
-};
-
-// vaultRefusingCauseLabels maps the vault's admission-refused causes to their
-// terse tooltip phrases, dropping UNSPECIFIED (never emitted by the backend
-// today, but the label map has no entry for it — defense in depth).
-export function vaultRefusingCauseLabels(refusals: readonly VaultAdmissionRefusal[]): string[] {
-  const labels: string[] = [];
-  for (const r of refusals) {
-    const label = vaultAdmissionCauseLabels[r.cause];
-    if (label) labels.push(label);
+// VaultHoldingsBadges is the card header's chunk / record / size summary.
+// The chunk list is a fan-out to every node hosting the vault; until it
+// returns there is no count to show, and a zero would be a false one.
+export function VaultHoldingsBadges({
+  chunks,
+  dark,
+}: Readonly<{ chunks: readonly ChunkMeta[] | undefined; dark: boolean }>) {
+  if (chunks === undefined) {
+    return (
+      <Badge variant="muted" dark={dark} title="chunk list not yet collected from the hosting nodes">
+        loading chunks…
+      </Badge>
+    );
   }
-  return labels;
-}
-
-// vaultRefusalDetails pairs each active cause's label with the backend's own
-// detail string, verbatim — the expanded card's refusal section renders
-// exactly this, never reconstructing the specifics client-side
-// (VaultAdmissionRefusal carries {cause, detail} on the wire). Same
-// UNSPECIFIED-drop discipline as vaultRefusingCauseLabels.
-export interface VaultRefusalDetail {
-  label: string;
-  detail: string;
-}
-
-export function vaultRefusalDetails(refusals: readonly VaultAdmissionRefusal[]): VaultRefusalDetail[] {
-  const details: VaultRefusalDetail[] = [];
-  for (const r of refusals) {
-    const label = vaultAdmissionCauseLabels[r.cause];
-    if (label) details.push({ label, detail: r.detail });
-  }
-  return details;
+  const chunkCount = chunks.length;
+  const recordCount = chunks.reduce((sum, c) => sum + Number(c.recordCount), 0);
+  // Summed per-chunk LOCAL disk claim — the quantity the max-size bound
+  // measures. A cloud-backed chunk with no local copy contributes 0: the
+  // object is in the cloud store, not on disk here.
+  const sizeBytes = chunks.reduce((sum, c) => sum + chunkDiskClaimBytes(c), 0);
+  return (
+    <>
+      <Badge variant="muted" dark={dark} title="chunks in this vault, collected from every hosting node">
+        {chunkCount.toLocaleString()} chunks
+      </Badge>
+      <Badge variant="muted" dark={dark} title="records across every chunk">
+        {recordCount.toLocaleString()} records
+      </Badge>
+      <Badge
+        variant="muted"
+        dark={dark}
+        title="sum of each chunk's local on-disk claim as reported by the hosting nodes; cloud-backed chunks with no local copy count 0"
+      >
+        <LiveValue dark={dark} tone="inherit" reserve={BYTES_MAX_CHARS}>
+          {formatBytes(sizeBytes)}
+        </LiveValue>
+        {" on disk"}
+      </Badge>
+    </>
+  );
 }
 
 interface VaultCardProps {
@@ -165,49 +159,42 @@ export function VaultCard({
   // ListVaults stats rely on periodic peer broadcasts and flicker.
   const { data: chunks } = useChunks(vault.id);
   const chunksContribution = useChunksContribution(vault.id);
-  const chunkCount = chunks?.length ?? 0;
-  const recordCount = (chunks ?? []).reduce((sum, c) => sum + Number(c.recordCount), 0);
-  // Vault size = summed per-chunk local disk claim — the same quantity the
-  // max-size bound measures. An evicted cloud-backed chunk contributes 0,
-  // not its logical bytes (the object is still in the cloud store, not on
-  // this node).
-  const sizeBytes = (chunks ?? []).reduce(
-    (sum, c) => sum + chunkDiskClaimBytes(c),
-    0,
-  );
   const refusingCauses = vaultRefusingCauseLabels(vault.admissionRefused);
+  const backlogAtBudget = vault.admissionRefused.some((r) => r.cause === VaultAdmissionCause.BACKLOG_BUDGET);
 
   return (
     <ExpandableCard
       key={vault.id}
       id={vault.displayLabel}
       typeBadge={vault.typeLabel}
-      secondaryBadge={vault.isCloudBacked ? { text: "cloud", title: "cloud-backed vault", helpRef: "storage-cloud" } : undefined}
+      secondaryBadge={vault.isCloudBacked ? CLOUD_BACKED_VAULT_BADGE : undefined}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}
       headerRight={
         <span className="flex items-center gap-1.5">
           {!vault.enabled && (
-            <Badge variant="warn" dark={dark}>disabled</Badge>
+            <Badge
+              variant="warn"
+              dark={dark}
+              title="disabled — the vault accepts no records; enable it in Settings"
+              helpRef="vaults-config#common-settings"
+            >
+              disabled
+            </Badge>
           )}
           {refusingCauses.length > 0 && (
-            <Badge variant="warn" dark={dark} title={refusingCauses.join("; ")} helpRef="inspector-vaults#refusal">
-              refusing
+            <Badge
+              variant="warn"
+              dark={dark}
+              title="refusing new records until the cause clears — expand the card for the backend's detail"
+              helpRef="inspector-vaults#refusal"
+            >
+              {refusingBadgeText(refusingCauses)}
             </Badge>
           )}
           <DegradedPeersBadge report={chunksContribution} dark={dark} />
-          <Badge variant="muted" dark={dark}>
-            {chunkCount.toLocaleString()} chunks
-          </Badge>
-          <Badge variant="muted" dark={dark}>
-            {recordCount.toLocaleString()} records
-          </Badge>
-          <Badge variant="muted" dark={dark}>
-            <LiveValue dark={dark} tone="inherit" reserve={BYTES_MAX_CHARS}>
-              {formatBytes(sizeBytes)}
-            </LiveValue>
-          </Badge>
+          <VaultHoldingsBadges chunks={chunks} dark={dark} />
           {onOpenSettings && (
             <CrossLinkBadge dark={dark} title="Open in Settings" onClick={onOpenSettings}>
               <CogIcon className="w-3 h-3" />
@@ -221,7 +208,7 @@ export function VaultCard({
         <VaultLeaderSummary vaultId={vault.id} vaultTypeLabel={vault.typeLabel} dark={dark} />
         <VaultThroughputSection vaultId={vault.id} dark={dark} />
         <VaultStageCountersSection vaultId={vault.id} dark={dark} />
-        <PipelineBacklogView vaultId={vault.id} dark={dark} />
+        <PipelineBacklogView vaultId={vault.id} backlogAtBudget={backlogAtBudget} dark={dark} />
         <ChunkList vaultId={vault.id} dark={dark} />
       </div>
     </ExpandableCard>
@@ -275,20 +262,12 @@ interface StageRow {
   extra?: { depth: number; cap: number; durablePerSec: number };
 }
 
-// idleNote explains WHY an idle node is idle — "caught up" is fine,
-// "behind" while idle is a stall and warns. Absence of an explanation is
-// how support cases are born.
-interface IdleNote {
-  text: string;
-  warn: boolean;
-}
-
 // VaultThroughputSection is the three-stage pipeline readout for one vault,
-// aggregated across every node's gossip-broadcast NodeStats: append (origin
-// ingress), collected (segments arriving in head/ at the home), and sealed
-// (records materialized into GLCBs). A downstream stage's rate falling away
-// from its upstream is a pipeline stall in progress; the backlog panel below
-// shows where the inventory stacks.
+// aggregated across every node's gossip-broadcast NodeStats: append (on the
+// origins), collected (into head on the homes), and sealed (into chunks on
+// the homes). A downstream stage's rate falling away from its upstream is a
+// pipeline stall in progress; the backlog panel below shows where the
+// inventory stacks.
 function VaultThroughputSection({
   vaultId,
   dark,
@@ -348,28 +327,9 @@ function VaultThroughputSection({
   for (const ns of backlog?.nodeSegments ?? []) {
     headByNode.set(encode(ns.nodeId), ns.headSegments);
   }
-  const collectIdleNote = (r: StageRow): IdleNote => {
-    const head = headByNode.get(r.nodeId);
-    if (head === undefined || published === 0) return { text: "idle", warn: false };
-    if (head >= published) return { text: "caught up", warn: false };
-    return { text: `behind ${(published - head).toLocaleString()} segments`, warn: true };
-  };
-  const appendIdleNote = (): IdleNote => ({ text: "no ingest", warn: false });
-  const eligible = backlog?.eligibleSegments ?? 0;
-  const sealIdleNote = (): IdleNote => {
-    if (eligible > 0) {
-      return {
-        text: `backlog: ${eligible.toLocaleString()} segments eligible`,
-        warn: true,
-      };
-    }
-    // A sealed manifest pending build with nothing else eligible reads as
-    // "backlog: 0" — say what is actually happening instead.
-    if (backlog?.sealedManifestPending) {
-      return { text: "manifest awaiting build", warn: true };
-    }
-    return { text: "up to date", warn: false };
-  };
+  const collectNote = (r: StageRow): IdleNote => collectIdleNote(headByNode.get(r.nodeId), published);
+  const sealNote = (): IdleNote =>
+    sealIdleNote(backlog?.eligibleSegments ?? 0, backlog?.sealedManifestPending ?? false);
 
   // Answers "why is COLLECTED 4x APPEND?" inline instead of via tooltip:
   // replicated stages count each record once PER HOME, so their Σ runs at
@@ -421,7 +381,7 @@ function VaultThroughputSection({
         </div>
         <StageRows
           label="Append"
-          title="Origin ingress: records/s appended to this vault's working segments, per writing node"
+          title="Records/s written into the working segment on each origin node"
           rows={append}
           gridCols={gridCols}
           dark={dark}
@@ -429,22 +389,22 @@ function VaultThroughputSection({
         />
         <StageRows
           label="Collected"
-          title="Home ingress: records/s arriving in head/ per home node. Every placement member collects its own copy, so the sum counts each record once PER HOME — with RF=4, one appended record is collected up to four times. This measures replication work, not record throughput."
+          title="Records/s collected into head on each home; every home collects its own copy, so the sum counts each record once per home"
           rows={collected}
           gridCols={gridCols}
           dark={dark}
           replicated
-          idleNote={collectIdleNote}
+          idleNote={collectNote}
           totalsNote={replicationNote(collected)}
         />
         <StageRows
           label="Sealed"
-          title="Records/s materialized into sealed GLCB chunks per home node. Every home builds its own GLCB, so the sum counts each record once PER HOME — replication work, not record throughput."
+          title="Records/s sealed into chunks on each home; every home builds its own copy, so the sum counts each record once per home"
           rows={sealed}
           gridCols={gridCols}
           dark={dark}
           replicated
-          idleNote={sealIdleNote}
+          idleNote={sealNote}
           totalsNote={replicationNote(sealed)}
         />
       </div>
@@ -495,7 +455,14 @@ function StageRows({
       {sorted.length > 1 && (
         <div className={rowClass} title={title}>
           <span className={stageClass}>{label}</span>
-          <span className={`font-mono whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}>
+          <span
+            className={`font-mono whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+            title={
+              replicated
+                ? `Sum over the ${sorted.length} homes — the placement nodes that each collect and seal their own copy`
+                : "Sum over every node reporting this stage"
+            }
+          >
             {replicated ? `Σ ${sorted.length} homes` : "all nodes"}
           </span>
           <span />
@@ -536,7 +503,7 @@ function StageRows({
               {note && (
                 <span
                   className={`font-mono ${note.warn ? "text-severity-warn" : c("text-text-muted", "text-light-text-muted")}`}
-                  title="Why this node is quiet on this stage. 'Caught up' / 'up to date' is healthy; 'behind' while idle means this node's stage has stalled."
+                  title="Why this node is quiet on this stage; a warning-toned note is a stall"
                 >
                   {note.text}
                 </span>
@@ -747,6 +714,7 @@ function VaultPlacementSummary({
 function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data: chunks, isLoading } = useChunks(vaultId);
+  const chunksContribution = useChunksContribution(vaultId);
   const { data: config } = useConfig();
   const registry = useNodeRegistry();
   const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
@@ -887,7 +855,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
         </div>
       ) : (
         <div className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}>
-          No chunks on this node yet.
+          {chunksEmptyText(chunksContribution)}
         </div>
       )}
     </div>
@@ -924,11 +892,12 @@ function ChunkReplicaPips({
   });
   const all = [...pips, ...ghosts.map((g) => ({ ...g, isGhost: true }))];
   if (all.length === 0) return null;
+  const calm = rowIsCalm(pips, ghosts);
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
       {all.map((p) => (
         <span key={p.node} className="inline-flex items-center gap-1.5" title={p.title}>
-          <SealPips pips={[p]} ghosts={[]} size={14} />
+          <SealPips pips={[p]} ghosts={[]} size={14} calm={calm} />
           <span className={`font-mono text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
             {p.node}
           </span>
@@ -1035,16 +1004,23 @@ function ChunkRow({
               })()
             )}
             {chunk.archived && (
-              <Badge variant="warn" dark={dark}>{chunk.cloudStorageClass || "archived"}</Badge>
+              <Badge
+                variant="warn"
+                dark={dark}
+                title={archivedBadgeTitle(chunk.cloudStorageClass)}
+                helpRef="inspector-vaults#chunks"
+              >
+                archived
+              </Badge>
             )}
             {chunk.retentionPending && (
               <Badge
                 variant="warn"
                 dark={dark}
-                title="Retention pending — chunk is queued for retention firing"
+                title="queued for retention — the chunk is deleted, or its records routed, when the retention event fires"
                 helpRef="policy-retention#hard-vs-soft-bounds"
               >
-                ret
+                retention pending
               </Badge>
             )}
           </span>
@@ -1054,19 +1030,22 @@ function ChunkRow({
             {formatExactCount(chunk.recordCount)}
           </LiveValue>
         </td>
-        <td className="px-4 py-2 text-right" title={chunkSizeCellTitle(chunk)}>
-          {chunk.cloudBacked && Number(chunk.diskBytes) === 0 && Number(chunk.cloudBytes) > 0 ? (
-            // Cloud-only: show the GLCB's cloud object size, italic to mark
-            // that no local copy backs the number. Display only — the local
-            // disk claim (and the vault size badge) still counts it as zero.
-            <LiveValue dark={dark} tone="muted" reserve={BYTES_MAX_CHARS} className="italic">
-              {formatBytes(Number(chunk.cloudBytes))}
-            </LiveValue>
-          ) : (
-            <LiveValue dark={dark} tone="muted" reserve={BYTES_MAX_CHARS}>
-              {formatBytes(chunkDiskClaimBytes(chunk))}
-            </LiveValue>
-          )}
+        <td className="px-4 py-2 text-right whitespace-nowrap" title={chunkSizeCellTitle(chunk)}>
+          {(() => {
+            const size = chunkSizeCell(chunk);
+            return (
+              <>
+                {size.kind !== "disk" && (
+                  <span className={`mr-1.5 text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>
+                    {size.kind}
+                  </span>
+                )}
+                <LiveValue dark={dark} tone="muted" reserve={BYTES_MAX_CHARS}>
+                  {formatBytes(size.bytes)}
+                </LiveValue>
+              </>
+            );
+          })()}
         </td>
       </tr>
       {isExpanded && (
@@ -1176,7 +1155,7 @@ function ChunkDetail({
                 {formatBytes(Number(chunk.cloudBytes))}
               </span>
               <span className={c("text-text-muted", "text-light-text-muted")}>
-                GLCB (zstd-wrapped on transport)
+                sealed chunk object in the cloud store
               </span>
             </div>
             <div className={`flex items-center gap-3 text-[0.85em]`}>
@@ -1187,14 +1166,24 @@ function ChunkDetail({
             </div>
             <div className={`flex items-center gap-3 text-[0.85em]`}>
               <span className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}>ts-index</span>
-              <Badge variant="info" dark={dark}>embedded</Badge>
+              <Badge
+                variant="info"
+                dark={dark}
+                title="timestamp indexes travel inside the chunk object — no separate file to build or lose"
+                helpRef="inspector-vaults#chunks"
+              >
+                embedded
+              </Badge>
               <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
                 {Number(chunk.recordCount).toLocaleString()} entries
               </span>
             </div>
             <div className={`flex items-center gap-3 text-[0.85em]`}>
               <span className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}>class</span>
-              <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
+              <span
+                className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+                title="cloud storage class of the object; standard means readable without a restore"
+              >
                 {chunk.cloudStorageClass || "standard"}
               </span>
               {!chunk.archived && (
@@ -1228,7 +1217,7 @@ function ChunkDetail({
             <div
               className={`flex items-center gap-2 text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
             >
-              <span>{data?.contributionReport ? "Indexes unavailable." : "No indexes."}</span>
+              <span>{indexesEmptyText(data)}</span>
               <DegradedPeersBadge report={data?.contributionReport} dark={dark} />
             </div>
           )}
@@ -1246,7 +1235,7 @@ function ChunkDetail({
                   </span>
                   {idx.exists ? (
                     <>
-                      <Badge variant="info" dark={dark}>ok</Badge>
+                      <Badge variant="info" dark={dark} title={INDEX_OK_TITLE} helpRef="inspector-vaults#indexes">ok</Badge>
                       <span
                         className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
                       >
@@ -1259,7 +1248,7 @@ function ChunkDetail({
                       </span>
                     </>
                   ) : (
-                    <Badge variant="muted" dark={dark}>missing</Badge>
+                    <Badge variant="muted" dark={dark} title={INDEX_MISSING_TITLE} helpRef="inspector-vaults#indexes">missing</Badge>
                   )}
                 </div>
               ))}

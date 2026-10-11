@@ -1,9 +1,10 @@
 import { describe, test, expect } from "bun:test";
 import { render } from "@testing-library/react";
-import { createTestQueryClient, wrapper } from "../../test/render";
+import { createTestQueryClient, settingsWrapper } from "../../test/render";
 import { encode } from "../api/glid";
 import { ContributionReport, DegradedPeer } from "../api/gen/gastrolog/v1/vault_pb";
-import { DegradedPeersBadge } from "./DegradedPeersBadge";
+import { DegradedPeersBadge, PARTIAL_HELP_REF } from "./DegradedPeersBadge";
+import { partialBadgeText } from "./partialBadgeText";
 
 function testId(n: number): Uint8Array {
   const bytes = new Uint8Array(16);
@@ -35,12 +36,23 @@ function seedCluster(qc: ReturnType<typeof createTestQueryClient>) {
   });
 }
 
+describe("partialBadgeText", () => {
+  test("names the nodes the merge missed instead of a bare count", () => {
+    expect(partialBadgeText(1)).toBe("partial — 1 node unreached");
+    expect(partialBadgeText(3)).toBe("partial — 3 nodes unreached");
+  });
+
+  test("links to the partial-results explanation", () => {
+    expect(PARTIAL_HELP_REF).toBe("inspector#partial-results");
+  });
+});
+
 describe("DegradedPeersBadge", () => {
   test("renders nothing when report is null (quiet-until-needed)", () => {
     const qc = createTestQueryClient();
     seedCluster(qc);
     const { container } = render(<DegradedPeersBadge report={null} dark />, {
-      wrapper: wrapper(qc),
+      wrapper: settingsWrapper(qc),
     });
     expect(container.firstChild).toBeNull();
   });
@@ -50,7 +62,7 @@ describe("DegradedPeersBadge", () => {
     seedCluster(qc);
     const report = new ContributionReport({ degraded: [] });
     const { container } = render(<DegradedPeersBadge report={report} dark />, {
-      wrapper: wrapper(qc),
+      wrapper: settingsWrapper(qc),
     });
     expect(container.firstChild).toBeNull();
   });
@@ -62,9 +74,9 @@ describe("DegradedPeersBadge", () => {
       degraded: [new DegradedPeer({ nodeId: encode(NODE_B), reason: "timeout" })],
     });
     const { getByText } = render(<DegradedPeersBadge report={report} dark />, {
-      wrapper: wrapper(qc),
+      wrapper: settingsWrapper(qc),
     });
-    expect(getByText("partial (1)")).toBeTruthy();
+    expect(getByText("partial — 1 node unreached")).toBeTruthy();
   });
 
   test("resolves node IDs to names and includes the reason in the tooltip", () => {
@@ -74,9 +86,9 @@ describe("DegradedPeersBadge", () => {
       degraded: [new DegradedPeer({ nodeId: encode(NODE_B), reason: "timeout" })],
     });
     const { getByText } = render(<DegradedPeersBadge report={report} dark />, {
-      wrapper: wrapper(qc),
+      wrapper: settingsWrapper(qc),
     });
-    const badge = getByText("partial (1)");
+    const badge = getByText("partial — 1 node unreached");
     const title = badge.getAttribute("title") ?? "";
     expect(title).toContain("node-2");
     expect(title).toContain("timeout");
@@ -90,9 +102,9 @@ describe("DegradedPeersBadge", () => {
       degraded: [new DegradedPeer({ nodeId: unknown, reason: "connection refused" })],
     });
     const { getByText } = render(<DegradedPeersBadge report={report} dark />, {
-      wrapper: wrapper(qc),
+      wrapper: settingsWrapper(qc),
     });
-    const title = getByText("partial (1)").getAttribute("title") ?? "";
+    const title = getByText("partial — 1 node unreached").getAttribute("title") ?? "";
     expect(title).toContain(unknown);
     expect(title).toContain("connection refused");
   });

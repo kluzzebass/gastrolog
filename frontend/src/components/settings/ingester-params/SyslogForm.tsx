@@ -13,7 +13,7 @@ export function SyslogForm({
       <div className="grid grid-cols-2 gap-3">
         <FormField
           label="UDP Address"
-          description="UDP listen address"
+          description="UDP listen address (leave empty to disable)"
           dark={dark}
         >
           <TextInput

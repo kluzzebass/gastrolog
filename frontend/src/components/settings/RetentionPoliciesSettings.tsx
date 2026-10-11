@@ -27,10 +27,18 @@ type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
 // checkbox IS the field, no FormField wrapper.
 const refuseDescription = "Refuse new records while a bound is violated.";
 
+const noConditionReason = "Set at least one condition";
+
+/** What deleting a retention policy does to the vaults that use it. */
+function retentionPolicyDeleteConsequences(refs: string[]): string[] {
+  if (refs.length === 0) return [];
+  return [`${refs.join(", ")}: retention policy cleared — nothing expires; only the default floor remains, which refuses but never destroys`];
+}
+
 interface PolicyEdit {
   name: string;
   maxAge: string;
-  maxBytes: string;
+  maxSize: string;
   maxChunks: string;
   refuse: boolean;
 }
@@ -41,7 +49,7 @@ interface AddRetentionFormState {
   adding: boolean;
   newName: string;
   newMaxAge: string;
-  newMaxBytes: string;
+  newMaxSize: string;
   newMaxChunks: string;
   newRefuse: boolean;
 }
@@ -50,7 +58,7 @@ const addRetentionFormInitial: AddRetentionFormState = {
   adding: false,
   newName: "",
   newMaxAge: "",
-  newMaxBytes: "",
+  newMaxSize: "",
   newMaxChunks: "",
   // RetentionPolicyConfig.Refuse defaults off (nil reads as false — bounds
   // are drain-first, refusal is the explicit hard mode) — match that here
@@ -63,7 +71,7 @@ type AddRetentionFormAction =
   | { type: "setAdding"; value: boolean }
   | { type: "setNewName"; value: string }
   | { type: "setNewMaxAge"; value: string }
-  | { type: "setNewMaxBytes"; value: string }
+  | { type: "setNewMaxSize"; value: string }
   | { type: "setNewMaxChunks"; value: string }
   | { type: "setNewRefuse"; value: boolean }
   | { type: "resetForm" };
@@ -76,8 +84,8 @@ function addRetentionFormReducer(state: AddRetentionFormState, action: AddRetent
       return { ...state, newName: action.value };
     case "setNewMaxAge":
       return { ...state, newMaxAge: action.value };
-    case "setNewMaxBytes":
-      return { ...state, newMaxBytes: action.value };
+    case "setNewMaxSize":
+      return { ...state, newMaxSize: action.value };
     case "setNewMaxChunks":
       return { ...state, newMaxChunks: action.value };
     case "setNewRefuse":
@@ -89,7 +97,7 @@ function addRetentionFormReducer(state: AddRetentionFormState, action: AddRetent
   }
 }
 
-export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{ dark: boolean; onNavigateTo?: NavigateTo }>) {
+export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean; onNavigateTo?: NavigateTo }>) {
   const _c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putPolicy = usePutRetentionPolicy();
@@ -100,7 +108,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
   const { isExpanded, toggle: toggleCard } = useExpandedCards();
 
   const [addForm, dispatchAdd] = useReducer(addRetentionFormReducer, addRetentionFormInitial);
-  const { adding, newName, newMaxAge, newMaxBytes, newMaxChunks, newRefuse } = addForm;
+  const { adding, newName, newMaxAge, newMaxSize, newMaxChunks, newRefuse } = addForm;
   const [namePlaceholder, setNamePlaceholder] = useState("");
 
   const policies = config?.retentionPolicies ?? [];
@@ -111,15 +119,18 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
   // At least one condition must be set, otherwise the retention policy is
   // a silent no-op. Backend rejects empty policies with InvalidArgument;
   // mirror the rule client-side.
-  const newPolicyEmpty = !newMaxAge.trim() && !newMaxBytes.trim() && !newMaxChunks.trim();
+  const newPolicyEmpty = !newMaxAge.trim() && !newMaxSize.trim() && !newMaxChunks.trim();
+  let createDisabledReason: string | undefined;
+  if (nameConflict) createDisabledReason = `A retention policy named "${effectiveName}" already exists`;
+  else if (newPolicyEmpty) createDisabledReason = noConditionReason;
 
   const defaults = (id: string): PolicyEdit => {
     const pol = policies.find((p) => encode(p.id) === id);
-    if (!pol) return { name: "", maxAge: "", maxBytes: "", maxChunks: "", refuse: false };
+    if (!pol) return { name: "", maxAge: "", maxSize: "", maxChunks: "", refuse: false };
     return {
       name: pol.name,
       maxAge: pol.maxAge,
-      maxBytes: pol.maxSize,
+      maxSize: pol.maxSize,
       maxChunks: pol.maxChunks > BigInt(0) ? pol.maxChunks.toString() : "",
       // proto refuse is optional bool — unset reads as false, matching
       // RetentionPolicyConfig.RefuseEnabled() on the backend.
@@ -139,7 +150,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
         id,
         name: edit.name,
         maxAge: edit.maxAge,
-        maxSize: edit.maxBytes,
+        maxSize: edit.maxSize,
         maxChunks: maxChunksValue,
         refuse: edit.refuse,
       };
@@ -169,7 +180,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
         id: encode(crypto.getRandomValues(new Uint8Array(16))),
         name,
         maxAge: newMaxAge,
-        maxSize: newMaxBytes,
+        maxSize: newMaxSize,
         maxChunks: maxChunksValue,
         refuse: newRefuse,
       });
@@ -205,6 +216,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
           onCreate={handleCreate}
           isPending={putPolicy.isPending}
           createDisabled={nameConflict || newPolicyEmpty}
+          createDisabledReason={createDisabledReason}
         >
           <FormField label="Name" dark={dark}>
             <TextInput
@@ -235,8 +247,8 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
               helpRef="policy-retention#max-size"
             >
               <TextInput
-                value={newMaxBytes}
-                onChange={(v) => dispatchAdd({ type: "setNewMaxBytes", value: v })}
+                value={newMaxSize}
+                onChange={(v) => dispatchAdd({ type: "setNewMaxSize", value: v })}
                 placeholder=""
                 dark={dark}
                 mono
@@ -268,7 +280,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
         const refs = vaultRefsForRetentionPolicy(id, vaults);
         // Backend rejects empty policies; disable Save preemptively if the
         // operator has cleared every condition.
-        const editEmpty = !edit.maxAge.trim() && !edit.maxBytes.trim() && !edit.maxChunks.trim();
+        const editEmpty = !edit.maxAge.trim() && !edit.maxSize.trim() && !edit.maxChunks.trim();
         return (
           <SettingsCard
             key={id}
@@ -277,15 +289,17 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
             expanded={isExpanded(id)}
             onToggle={() => toggleCard(id)}
             onDelete={() => handleDelete(id)}
+            deleteConsequences={retentionPolicyDeleteConsequences(refs)}
             footer={
               <Button
                 onClick={() => handleSave(id)}
                 disabled={putPolicy.isPending || !isDirty(id) || editEmpty}
+                disabledReason={editEmpty ? noConditionReason : undefined}
               >
                 {putPolicy.isPending ? "Saving..." : "Save"}
               </Button>
             }
-            status={<UsedByStatus dark={dark} refs={refs} />}
+            status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo && ((ref) => onNavigateTo("vaults", ref))} />}
           >
             <div className="flex flex-col gap-3">
               <FormField label="Name" dark={dark}>
@@ -316,8 +330,8 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
                   helpRef="policy-retention#max-size"
                 >
                   <TextInput
-                    value={edit.maxBytes}
-                    onChange={(v) => setEdit(id, { maxBytes: v })}
+                    value={edit.maxSize}
+                    onChange={(v) => setEdit(id, { maxSize: v })}
                     placeholder=""
                     dark={dark}
                     mono

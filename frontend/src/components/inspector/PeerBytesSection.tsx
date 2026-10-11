@@ -13,19 +13,13 @@ import { type EntityID } from "../../api/model/id";
 import type { NodeRegistry } from "../../api/hooks";
 import {
   mergeAllPeerTraffic,
-  laneDetailText,
+  laneLabel,
+  raftLaneDetail,
   mergedPurposesWindow,
   type MergedPeerLane,
 } from "./peerTrafficMerge";
-import { PurposeWindowStrip } from "./PurposeWindowStrip";
+import { PurposeWindowText } from "./PurposeWindowText";
 import type { ReactNode } from "react";
-
-function laneLabel(lane: string, poolIndex: number): string {
-  if (lane === "service") {
-    return `service #${poolIndex}`;
-  }
-  return lane || "service";
-}
 
 function rowKey(peerId: EntityID, lane: MergedPeerLane): string {
   return `${peerId}\0${lane.lane}\0${lane.groupId}\0${lane.poolIndex}`;
@@ -36,26 +30,17 @@ function laneDetailCell(
   opts: {
     isTotal?: boolean;
     vaultNameOf?: (vaultId: EntityID) => string | undefined;
-    muted?: boolean;
   },
 ): { content: ReactNode; title?: string } {
   if (opts.isTotal || lane.lane === "total") {
     return { content: "—" };
   }
   if (lane.lane === "raft") {
-    const text = laneDetailText(lane, opts);
-    return {
-      content: text.label,
-      title: text.title || undefined,
-    };
+    const detail = raftLaneDetail(lane, opts.vaultNameOf);
+    return { content: detail.label, title: detail.title };
   }
   return {
-    content: (
-      <PurposeWindowStrip
-        active={mergedPurposesWindow(lane)}
-        muted={opts.muted}
-      />
-    ),
+    content: <PurposeWindowText carried={lane.purposes} active={mergedPurposesWindow(lane)} />,
   };
 }
 
@@ -113,7 +98,7 @@ export function PeerBytesSection({
       <table className="w-full text-[0.8em] font-mono">
         <thead>
           <tr className={c("bg-ink-surface/80", "bg-light-surface/80")}>
-            <th className={`${th} w-0 whitespace-nowrap`}>Peer</th>
+            <th className={`${th} w-0 whitespace-nowrap`}>Peer / lane</th>
             <th className={`${th} w-full`}>Detail</th>
             <th className={thMetric}>Tx/s</th>
             <th className={thMetric}>Rx/s</th>
@@ -188,7 +173,7 @@ function PeerTrafficGroup({
             key={rowKey(peerId, lane)}
             label={laneLabel(lane.lane, lane.poolIndex)}
             child
-            detail={laneDetailCell(lane, { ...detailOpts, muted: true })}
+            detail={laneDetailCell(lane, detailOpts)}
             txBytesPerSec={lane.txBytesPerSec}
             rxBytesPerSec={lane.rxBytesPerSec}
             txSpark={lane.txSpark}

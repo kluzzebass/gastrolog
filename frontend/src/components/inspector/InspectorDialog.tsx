@@ -10,11 +10,13 @@ import { VaultsIcon, IngestersIcon, JobsIcon, MetricsIcon, ClusterIcon, RouteIco
 import { Badge } from "../Badge";
 import { HelpButton } from "../HelpButton";
 import { OfflineBadge } from "../OfflineBadge";
+import { NodeStateBadge } from "../NodeStateBadge";
 import { NodeState } from "../../api/model/node";
 import { ModeToggle } from "./ModeToggle";
 import type { InspectorMode } from "./ModeToggle";
 import { NodeDetailPane } from "./NodeDetailPane";
 import { EntityListPane } from "./EntityListPane";
+import { entityCountTitle } from "./entityCounts";
 
 export type EntityType = "vaults" | "storages" | "ingesters" | "routes" | "jobs" | "system";
 
@@ -210,6 +212,7 @@ export function InspectorDialog({
                     {node.name}
                   </span>
                   <span className="ml-auto flex items-center gap-1">
+                    <NodeStateBadge state={node.state} stateSince={node.stateSince} dark={dark} />
                     {!isLocal && node.state === NodeState.LIVE && (
                       <OfflineBadge lastSeen={node.lastSeen} isOffline={!node.isOnline} dark={dark} />
                     )}
@@ -253,6 +256,7 @@ export function InspectorDialog({
                           ? "text-copper/70"
                           : c("text-text-muted", "text-light-text-muted")
                       }`}
+                      title={entityCountTitle(id, count)}
                     >
                       {count}
                     </span>
