@@ -62,29 +62,43 @@ for append-heavy write patterns and time-ordered reads.
 ### Value objects
 
 - **Record** — a single log entry: `SourceTS`, `IngestTS`, `WriteTS`, `EventID`,
-  `Attrs`, `Raw`, optional `Ref` and `VaultID`, and an ack-gate flag
-  `WaitForReplica`. Records are mostly immutable once ingested; `VaultID` gets
-  stamped during routing.
+  `Attrs`, `Raw`. The pipeline carries `record.Record`; query results carry
+  `chunk.Record`, which adds `Ref` and `VaultID`, populated by the query engine.
+  Both types also carry `WaitForReplica`, set when the ingester supplied an
+  ack channel; nothing reads it — the ack travels on the ingest message (see
+  [Ack semantics](#ack-semantics)).
 
 - **EventID** — compound identity for a record: `IngesterID + NodeID + IngestTS +
   IngestSeq`. Makes the same record distinguishable from near-duplicates across
   parallel ingesters.
 
 - **Attributes** (a.k.a. `Attrs`) — key-value pairs on a record. Persisted in
-  each chunk's `attr.log`. Queryable as first-class fields (plus a handful of
+  the record's frame, in segments and in the GLCB records section. Queryable as first-class fields (plus a handful of
   synthetic built-ins like `severity`, `source`).
 
 - **RecordRef** — pointer to a record inside a chunk: `ChunkID + Pos`. Used
   wherever one record needs to refer to another (GetContext anchors, indexes).
 
-- **ChunkMeta** — the stats bag for a chunk: sealed/cloud-backed
-  flags, record count, byte counts, timestamps (`WriteStart/End`, `IngestStart/End`,
-  `SourceStart/End`), retention-pending flag, frame count for cloud-backed chunks.
+- **ChunkMeta** — the stats bag for a chunk: lifecycle `State` (and the
+  `Sealed` flag), cloud-backed/archived flags, record count, byte counts
+  (`Bytes`, local `DiskBytes`, `CloudBytes`), timestamps (`WriteStart/End`,
+  `IngestStart/End`, `SourceStart/End`). The API `ChunkMeta` adds a
+  retention-pending flag read from the vault-ctl FSM, and the replica count.
 
 ### States a chunk passes through
 
-- **Active** — open for writes; lives only on the vault leader.
-- **Sealed** — immutable; eligible for indexing/replication/cloud upload.
+- **Active** — the vault's open chunk manifest: a list of segment slices on
+  the vault-ctl FSM that the vault-ctl leader's chunking planner extends. No
+  GLCB exists yet; each home reads the records from the manifest's segments in
+  its own `head/` (or `completed/` on the origin).
+- **Sealing** — the leader has sealed the manifest
+  (`SealOpenChunkManifest`): its segment list is frozen on the FSM's
+  sealed-manifest queue, and every home builds the chunk's GLCB from its
+  local segments.
+- **Sealed** — the vault-ctl leader committed `CmdSealChunk` after its own
+  GLCB build. Immutable; eligible for retention and, on a cloud-backed vault,
+  cloud upload. Homes that have not finished their build keep building, and
+  a home missing the GLCB pulls it from a peer home.
 - **Chunk seal** — the cluster-wide fact: `CmdSealChunk` applied, record
   membership frozen. Happens exactly once per chunk.
 - **Copy seal** — one home's completed local copy (GLCB build or replica
@@ -126,9 +140,17 @@ for append-heavy write patterns and time-ordered reads.
 - **CloudService** — a cluster-wide cloud endpoint (S3, Azure, GCS) with
   optional archival lifecycle. [`system.CloudService`](../backend/internal/system/storage.go).
 
-- **Frame** — a seekable zstd block within a cloud-backed chunk. `NumFrames` records
-  how many frames a cloud-backed chunk was uploaded in; range queries seek to a
-  specific frame to avoid pulling the whole blob.
+- **Frame** — one separately zstd-compressed piece of a cloud-backed chunk's
+  uploaded object (the transport format, `chunk/glcb/transport.go`): a body
+  frame (records and everything before the index sections), one frame per
+  index section, and a tail frame (the GLCB's TOC and footer), located by a
+  directory and footer at the object's end. A reader that needs one index
+  section range-fetches the footer, the directory and that one frame
+  (`FetchRemoteSection`); a full download decompresses the frames in order
+  back into the byte-identical local `data.glcb`, which is itself
+  uncompressed. Not to be confused with a **record frame**, the
+  length-prefixed encoding of one record in a segment or in the GLCB records
+  section.
 
 ### Placement
 
@@ -235,13 +257,16 @@ a vault's active chunk".
   - `round-robin` — rotate through destinations (load-balance).
   - `failover` — try first; on failure, try next.
 
-- **RouteSet** — the compiled, priority-sorted routing table on a
-  node. Reloaded when routes, vaults, or placements change.
+- **Routing table** (`routing.Table`) — the compiled, priority-sorted
+  routes on a node, published to the pipeline supervisor
+  (`SetRoutingTable`) by `reloadPipelineFromConfig` whenever routes, vaults
+  or placements change.
 
-- **MatchResult** — the output of route evaluation: `VaultID`,
-  optional `NodeID` (for cross-node forwarding), `RouteID`,
-  `Distribution`. A single matched route returns one MatchResult
-  per destination.
+- **Route match** — `routing.Table.MatchRoute` returns the first matching
+  route and its destination vault IDs. Routing knows vaults only, never
+  node placement: the routing manager hands the record to each matched
+  vault's segmentation queue on the receiving node, which every node
+  registers for every route destination.
 
 - **ValidateExpression RPC** — read-only, node-local check that an
   expression parses and uses only supported predicates. Drives the
@@ -250,16 +275,23 @@ a vault's active chunk".
 
 ### Ack semantics
 
-- **Ack-gated** — an ingester that waits for replica confirmation before
-  acknowledging the upstream sender. Records from ack-gated sources carry
-  `WaitForReplica = true`; the orchestrator does synchronous cross-node
-  forwarding for them, skipping the async "fire and forget" fast-path.
-  Examples: RELP syslog (with working acks), HTTP endpoints that accept an
-  `X-Wait-Ack` header.
+- **Ack-gated** — an ingester that puts an ack channel on the ingest message
+  and acknowledges its upstream sender only when that ack resolves: RELP, and
+  HTTP requests carrying `X-Wait-Ack: true`. Routing fans the record out to
+  every matched vault's segmentation queue on the receiving node and joins
+  the per-vault results; each segmentation writer releases its parked acks
+  after the group commit that fsyncs the record into the origin segment
+  (`SegmentDisableFsync`, a dev/load-testing setting, drops the fsync).
+  The ack is nil only once every matched vault has the record durable in an
+  origin segment — not once it reaches other homes or a chunk. A failed write,
+  an unencodable record, a degraded writer, or a gated destination nacks
+  it, and the sender retries. A record that matches no route is acked nil (a
+  counted, intentional drop).
 
-- **Fire-and-forget** — the default path: the orchestrator writes locally and
-  dispatches remote replication in background goroutines; the ingester gets
-  its ack immediately.
+- **Fire-and-forget** — every other ingester: no ack channel. The writer
+  batches the record and commits on a lazy sync window or at the batch size
+  cap; nothing waits for that commit. A degraded writer drops these records
+  and counts them.
 
 ---
 
@@ -366,17 +398,19 @@ gRPC transport:
   GetSystem/WatchSystem/SettingsMutationEcho.
 
 - **Vault Control-Plane Raft** (a.k.a. "vault-ctl Raft", "vault-ctl group") —
-  one group *per vault*. Replicates that vault's chunk metadata across all
-  nodes participating in the vault. Uses the `vaultraft.FSM` whose state is
-  a map of **instance FSMs** — one sub-FSM per vault instance, namespaced by
-  `OpVaultChunkFSM` commands. See
+  one group *per vault*, spanning every cluster node whether or not it homes
+  the vault, so every node holds every vault's chunk metadata locally. Uses
+  the `vaultraft.FSM`, whose state is a map of vault chunk FSMs keyed by
+  vault ID, addressed by `OpVaultChunkFSM` commands. See
   [`vault-control-plane-architecture.md`](./vault-control-plane-architecture.md)
   for the design rationale.
 
 - **Vault chunk FSM** (`vaultctlfsm.FSM`) — the per-vault sub-state-machine
   inside a vault-ctl FSM. Holds the **manifest** of chunks for one vault: each
-  chunk's metadata (sealed? retention-pending?), tombstones, and
-  pending-delete receipt state.
+  chunk's metadata (state, retention-pending, holders), tombstones, and
+  pending-delete receipt state — plus the pipeline's open chunk manifest,
+  the sealed-manifest queue, and the completed-segment registry with its
+  segment holders.
 
 - **Manifest** — the vault FSM's set of chunk entries. The authoritative
   answer to "which chunks should exist in this vault?" Compared against
@@ -559,7 +593,7 @@ How an operator-issued RPC finds the node that should execute it. See
   many logical Raft groups. [`backend/internal/multiraft/transport.go`](../backend/internal/multiraft/transport.go).
 
 - **PeerConns** — the gRPC connection pool for cross-node RPCs (not Raft
-  transport; for forward-apply, record-forward, chunk-transfer, etc.).
+  transport; for forward-apply, search fan-out, segment and GLCB pulls, etc.).
 
 - **Lane** — one connection between two nodes as the inspector's Network
   panel lists it, both directions merged (`ConnLane`). A **raft** lane
@@ -572,13 +606,15 @@ How an operator-issued RPC finds the node that should execute it. See
   order and meaning (`cluster.AllPurposes`): **search** (search fan-out),
   **chunk apply** and **vault apply** (a follower forwarding a vault-ctl
   chunk or vault command to that group's leader), **broadcast** (stats
-  push), **forward** (record forwarding to the vault leader), **forward
-  RPC** (a cluster-ctl config mutation forwarded to its leader),
+  push), **forward** (a cluster-ctl config command forwarded to its leader,
+  `cluster.Forwarder`), **forward RPC** (a client RPC the routing
+  interceptor forwards to another node, `cluster.ForwardRPC`),
   **eviction** (asking a node to drop a chunk copy), **remove node**,
   **suffrage** (voter/nonvoter changes), **chunk transfer** (streaming a
   chunk to a new home), **chunk wait** (waiting for a vault to be ready on
-  a peer), **replicate** (chunk replication stream), **replicate catchup**
-  (GLCB catch-up pulls), **segment pull** (pipeline segment bytes),
+  a peer), **replicate** (the `ChunkReplicator` sealed-chunk push stream),
+  **replicate catchup** (the `ChunkReplicator` catch-up request), **segment
+  pull** (pipeline segment bytes and GLCB catch-up pulls),
   **file transfer** (managed files), **raft**.
 
 ---
@@ -593,12 +629,12 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 
 - **Orchestrator** — `*orchestrator.Orchestrator`. Owns:
   - `o.vaults map[glid.GLID]*Vault` — local vault registry (protected by
-    `o.mu`, a `sync.RWMutex`).
+    `o.mu`, a `locktrack.RWMutex`).
   - `o.scheduler` — the job queue + cron runner.
   - `o.groupMgr` — handle to the multiraft `GroupManager`.
-  - `o.forwarder`, `o.chunkReplicator`, `o.peerConns` — cross-node I/O.
-  - `o.routeSet` — compiled routing table (priority-ordered, first-match-wins).
-  - `o.replicaCircuit` — per-node circuit breaker for failed replication.
+  - `o.pipeline` — the ingest pipeline supervisor; holds the routing table.
+  - `o.segmentPuller`, `o.chunkGLCBPuller`, `o.transferrer`,
+    `o.chunkReplicator`, `o.peerConns` — cross-node I/O.
 
 - **Factories** — the bundle passed to `Orchestrator.ApplyConfig` that
   contains component constructors (chunk manager factory, index manager
@@ -607,16 +643,18 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 
 ### Lifecycle
 
-- **`orch.Start(ctx)`** — start the scheduler, ingesters, and background
-  loops (writeLoop, digestLoop, retention sweep, rotation sweep). Returns
-  when startup completes.
+- **`orch.Start(ctx)`** — start the scheduler, prime the disk guard, hand
+  the ingesters to the pipeline supervisor and start the pipeline (whose
+  ingestion manager launches them), then the auxiliary loops (pressure gate,
+  progress emitters, readiness refresher). Returns when startup completes.
 
 - **`orch.Stop()`** — cancel all background goroutines, wait for in-flight
   writes, close chunk managers. Called via `t.Cleanup` in tests.
 
-- **Shutting down (`o.phase`)** — a `vaultctlfsm.Phase` atomic flag. When set,
-  `fireAndForgetRemote` skips remote dispatches; drain and replication
-  short-circuit. Used to suppress benign errors during shutdown.
+- **Shutting down (`o.phase`)** — a `lifecycle.Phase` atomic flag. When set,
+  retention leaves chunks untouched (sweep, route fan-out, transfer) and the
+  vault-ctl `Announcer` skips its applies. Used to suppress benign errors
+  during shutdown.
 
 - **Vault readiness** — a vault on this node is "ready" iff it has a local
   instance AND that instance's `IsFSMReady()` callback returns `true` (i.e.
@@ -629,7 +667,7 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 
 - **Scheduler** — the cron/queue subsystem. Runs scheduled jobs
   (retention sweep, rotation sweep, archival sweep) and one-shot tasks
-  (post-seal indexing, cloud upload, catchup replication).
+  (post-seal indexing, cloud upload, GLCB catch-up pulls).
 
 - **Job** — a scheduled or one-shot unit of work. Proto
   [`Job`](../backend/api/proto/gastrolog/v1/job.proto) tracks
@@ -803,10 +841,16 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 
 ### Core state transitions (verbs)
 
-- **Seal** — finalize an active chunk; it becomes immutable and enters the
-  post-seal pipeline (indexing → replication catchup).
+- **Seal** — finalize an active chunk. The vault-ctl leader's planner seals
+  the open manifest when the rotation policy fires; every home builds the
+  chunk's GLCB (timestamp indexes embedded) from its local segments, then
+  schedules its own secondary-index build and commits a holder receipt; the
+  leader commits `CmdSealChunk` after its own build. See
+  [States a chunk passes through](#states-a-chunk-passes-through).
 
-- **Rotate** — open a new active chunk after sealing the old one.
+- **Rotate** — seal the open manifest and let the planner open the next one.
+  Sealed manifests queue FIFO on the vault-ctl FSM, so rotation does not wait
+  for earlier chunks to finish building.
 
 - **Expire** — destroy a chunk that has aged out according to retention.
   With `disposition = delete` (default), records drop and the chunk is
@@ -856,7 +900,9 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 
 - **Reconcile** — compare the vault FSM manifest against local disk;
   delete sealed chunks on disk that aren't in the manifest (orphan
-  cleanup) and replicate manifest chunks that are missing locally.
+  cleanup), pull the GLCB of any sealed manifest chunk missing locally
+  (**GLCB catch-up**), and earn or revoke this node's chunk holder receipts
+  to match what is on disk.
 
 - **Cloud-index audit** — compare a cloud-backed vault's **objects in the
   blob store** against the FSM manifest (which chunks the cluster expects)
@@ -880,43 +926,69 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 - **Drain** — move all of a vault's chunks off this node, then remove the
   local instance. Used for decommission.
 
-- **Catchup** — replicate sealed chunks from a leader to a follower that
-  just joined or restarted. Distinct from live replication (which happens
-  per-record).
+- **GLCB catch-up** — a home missing a sealed chunk's GLCB (it missed the
+  build and the source segments are released) pulls the blob from a peer
+  home, verifies its seal metadata against the manifest entry, renames it
+  into place and commits a holder receipt (`glcb_catchup.go`,
+  `ChunkGLCBPuller`). Each pull is a one-shot scheduler job, scheduled by
+  the reconciler's missing-replica sweep. The same pull, addressed at the
+  source vault, is the destination half of a retention transfer.
 
 ---
 
 ## 6. Replication & Forwarding
 
-Cross-node data movement. Three distinct mechanisms; do not confuse them.
+Cross-node data movement. Keep these apart:
 
 - **Vault-ctl Raft replication** — chunk metadata (create/seal/delete/upload
-  events). Flows through hraft via the multiraft transport. Committed only
-  when a majority acks. This is the **authoritative** metadata replication.
+  events), the open and sealed chunk manifests, the segment registry, and
+  segment and chunk holder receipts. Flows through hraft via the multiraft
+  transport. Committed only when a majority acks. This is the
+  **authoritative** metadata replication.
 
-- **Vault replication** — actual chunk content (records) from a vault leader
-  to its followers. Uses ordered streams per `(vaultID, followerNodeID)`
-  via the **ChunkReplicator**. Does NOT use Raft; uses gRPC streams with
-  application-level acks.
+- **Segment distribution** — record bytes between homes. The origin
+  publishes a completed segment's metadata to vault-ctl; each home's
+  Collection pulls the bytes from a holder into `pre-head/`, verifies and
+  promotes them to `head/`, and commits a segment holder receipt. Bytes move
+  only by pull. See [Pipeline](#9-pipeline).
 
-- **Cross-vault record forwarding** — at ingestion time, a record that
-  matches a vault owned by another node is forwarded via the
-  **RecordForwarder** (batched, fire-and-forget) or **Forwarder**
-  (synchronous, ack-gated).
+- **Chunk replication** — every home builds its own GLCB for a sealed
+  manifest from its local segments, so no chunk is pushed. A home that
+  missed the build pulls the GLCB from a peer home (**GLCB catch-up**).
+  Chunk holder receipts, not pushes, are what count toward the replication
+  factor.
+
+- **Replica count** — how many nodes hold a chunk: the size of its holder
+  set on the vault-ctl FSM (`ChunkResidency`; while a delete is in flight,
+  the nodes that still owe a delete ack). Surfaced on
+  `ChunkMeta.ReplicaCount`; falls back to the number of nodes that reported
+  the chunk only when no vault-ctl FSM knows it.
+
+There is no record forwarding: a record that matches a vault becomes a
+segment on the node that received it (its origin), whether or not that node
+is one of the vault's homes.
 
 ### The actors
 
-- **ChunkReplicator** — per-node manager of replication streams to follower
-  vaults. Methods: `AppendRecords`, `SealVault`, `ImportSealedChunk`,
-  `DeleteChunk`. Always invoked on the **vault leader**.
+- **SegmentPuller** — streams a completed segment's bytes from a peer for
+  Collection. [`cluster/segment_puller.go`](../backend/internal/cluster/segment_puller.go).
+
+- **ChunkGLCBPuller** — streams a sealed chunk's GLCB from a peer home for
+  GLCB catch-up. [`cluster/chunk_glcb_puller.go`](../backend/internal/cluster/chunk_glcb_puller.go).
+
+- **ChunkReplicator** — record-stream push of one sealed chunk to a peer
+  (`ImportSealedChunk`: Begin → Records → Commit on an ordered stream per
+  `(vaultID, nodeID)`), plus the follower→leader `RequestReplicaCatchup`
+  request. Every production caller — post-seal replication, catch-up of new
+  followers, the missing-replica sweep and the catch-up request handler —
+  returns early for a vault registered with the ingest pipeline, and the
+  pipeline registers every vault its node homes; the one unconditional
+  caller, the rebalance mode of `DrainInstance`, has no production caller.
   [`cluster/chunk_replicator.go`](../backend/internal/cluster/chunk_replicator.go).
 
-- **RecordForwarder** — per-node ingestion forwarder. Batches records by
-  destination node; uses long-lived client-streaming RPCs with backpressure.
-  [`cluster/record_forwarder.go`](../backend/internal/cluster/record_forwarder.go).
-
-- **Forwarder** — simpler, synchronous per-command forwarder used by
-  raftstore (config-Raft apply forwarding) and ack-gated paths.
+- **Forwarder** — synchronous forwarder of pre-marshaled cluster-ctl config
+  commands to the cluster-ctl leader (`ForwardApply`), used by raftstore on
+  follower nodes.
   [`cluster/forwarder.go`](../backend/internal/cluster/forwarder.go).
 
 - **VaultApplyForwarder** — forwards vault-ctl Raft applies from a
@@ -943,28 +1015,13 @@ Cross-node data movement. Three distinct mechanisms; do not confuse them.
   it — otherwise a credential merge stores an empty secret and a
   duplicate-name check hands out a name the cluster already gave away.
 
-### The verbs
-
-- **`fireAndForgetRemote`** — called from the ingest and append paths:
-  dispatches per-follower replication goroutines. MUST be called
-  *outside* `o.mu`; holding the lock across this call cascades into
-  cluster-wide deadlock on a paused peer
-  ([`gastrolog-5oofa`](../backend/internal/orchestrator/reliability_orch_test.go)).
-
-- **Replica backoff circuit breaker** — `o.replicaCircuit`: per-node
-  `failures`/`skipUntil` state. After consecutive failures to a node,
-  subsequent replication attempts skip that node for an exponentially
-  growing window (2s → 4s → 16s → ...).
-
-- **Replica count** — how many nodes are known to have this chunk
-  (leader + caught-up followers). Surfaced on `ChunkMeta.ReplicaCount`.
-
 ### Connection management
 
-- **PeerConns** — shared gRPC connection pool. One connection per peer
-  node; reused by all callers (Broadcaster, RecordForwarder, SearchForwarder,
-  ChunkReplicator). `Invalidate(nodeID)` drops a stuck connection so the
-  next call re-dials.
+- **PeerConns** — shared gRPC connection pool: up to
+  `DefaultServicePoolMaxPerPeer` service connections per peer node, reused by
+  all callers (Broadcaster, SearchForwarder, SegmentPuller, ChunkGLCBPuller,
+  the apply forwarders, ChunkReplicator). `Invalidate(nodeID, err)` drops a
+  stuck connection so the next call re-dials.
 
 - **MultiRaftTransport** — per-node multiplexing transport for Raft RPCs.
   Distinct from PeerConns: PeerConns is for application RPCs,
@@ -1347,8 +1404,8 @@ the collector.
   queries and Chunking. A failed or corrupt transfer is discarded here and
   re-pulled from another holder.
 - **head/** — whole, checksum-verified, immutable segments awaiting chunking.
-  Where the recent, queryable records live (the role active chunks fill in
-  the pre-pipeline architecture).
+  Where the recent, queryable records live: an Active chunk's records are
+  read from its manifest's segments here.
 
 - **Pipeline backlog** — a vault's published, unreleased completed segments:
   the bytes in the vault-ctl registry that chunking has not yet consumed. It
@@ -1438,9 +1495,10 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
 - **Chunk byte budget** — stop when accumulated bytes (pinned unit) reach the
   limit (`MaxBytes` shape). Same category as record count over the merge walk.
 
-- **Chunk time cut** — schedule-based (`Cron`) can work for chunking when
-  committed on vault-ctl; age-since-chunk-open (`MaxAge` on active chunks) does
-  not map to the segment→chunk build model.
+- **Chunk time cut** — the planner's time-based rotation triggers on the open
+  manifest: `Cron` (a scheduled cut) and `MaxAge`, measured from the
+  manifest's `OpenedAt` wall clock rather than from record timestamps, so a
+  backlog of old records does not seal into slivers.
 
 - **Sealed manifest** — after `SealOpenChunkManifest`, the frozen segment-ref list
   on vault-ctl awaiting per-home GLCB build (`sealed_manifest` in FSM snapshot).
@@ -1512,7 +1570,7 @@ Canonical milestone verbs (reuse these names; do not coin synonyms):
 | cluster-ctl Raft | system Raft, config Raft, cluster Raft | One Raft group per cluster, authoritative for cluster-wide configuration. Pairs with `vault-ctl Raft` to form the `{scope}-ctl` pattern. The on-disk Raft group ID and type names were renamed from `system` → `cluster-ctl` in gastrolog-5eu6v. |
 | instance FSM     |                   | Per-vault chunk-metadata sub-FSM in `vaultctlfsm`. |
 | Raft contact     | peer heartbeat, liveness ping | Peer liveness comes from Raft's own per-group traffic. The dedicated `Heartbeat` broadcast that "peer heartbeat" named was deleted in gastrolog-1lbifx; "heartbeat" now only ever means hashicorp/raft's replication heartbeat. |
-| vault replication |                  | Record streams from leader to follower, per vault. |
+| chunk replication |                  | Every home builds its own GLCB from its segments; a home that missed the build pulls it from a peer home. |
 | reclamation / scavenge | WAL compaction | The shared Raft WAL's dead space returns via oldest-first segment reclamation: a drained segment (zero live payload bytes) unlinks outright; a nearly-drained one scavenges — its live records re-append through the write path onto the active segment before the original unlinks. The monolithic whole-log rewrite the term "WAL compaction" named is retired; no work unit in reclamation exceeds one segment's live remainder. |
 | ingester         | source, collector | "Ingester" is the proto name; "source" leaks from UI copy.          |
 | route            | pipeline (at ingest) | Ingestion "route" ≠ query "pipeline"; use "route pipeline" or "ingestion pipeline" to bridge. |
@@ -1522,7 +1580,7 @@ Canonical milestone verbs (reuse these names; do not coin synonyms):
 | peer             | remote node       | "Peer" is relative; there is no absolute "remote".                 |
 | retention event  | retention action, expire/eject/transition | A fired retention event destroys the chunk and (per the vault's retention disposition, gastrolog-18du3) optionally streams the records through the routing engine first. The "what" lives on routes; the "whether to invoke routes at all" lives on the disposition. |
 | match expression | filter, FilterConfig | Match expressions are inlined on `RouteConfig.Stages`; the named-`Filter` entity is gone (gastrolog-4kkoo Phase 5). UI label: "Match expression" on the route editor. |
-| route table      | filter set        | The runtime structure is a priority-ordered `RouteSet`, not a per-vault `FilterSet`. First-match-wins, no catch-the-rest. Renamed through the whole stack in gastrolog-5sdzfv: proto `route_table_active` / NodeStats `route_stats_route_table_active`, `Orchestrator.IsRouteTableActive`, UI banner "Route table is inactive". |
+| route table      | filter set        | The runtime structure is a priority-ordered `routing.Table`, not a per-vault `FilterSet`. First-match-wins, no catch-the-rest. Renamed through the whole stack in gastrolog-5sdzfv: proto `route_table_active` / NodeStats `route_stats_route_table_active`, `Orchestrator.IsRouteTableActive`, UI banner "Route table is inactive". |
 | synthetic attribute | source predicate, RouteSource | Source/content predicates unify via `_source`/`_ingester`/`_vault`/`_reason` overlays at routing-eval time. |
 | retire (segment, distribution) | forget | Distribution's node-local drop of segment tracking was called `forgetSegment` while the exported entry point was `RetireSegments`; one verb per meaning (gastrolog-34zx9y). See [Pipeline](#9-pipeline) for the release / retire / purge distinction. |
 | glcb (container-format package) | chunk/cloud | The GLCB container package lived at `chunk/cloud`, but GLCB is universal — local-only vaults seal into it too. The package is `chunk/glcb`; "cloud" names only genuine object-storage interaction (blobstore, cloud-backed cache, cloud upload) (gastrolog-34zx9y). |
@@ -1548,7 +1606,8 @@ Every record carries three timestamps, and they mean different things:
   monotonic per ingester (thanks to `IngestSeq`); used for disambiguation
   in `EventID`.
 
-- **WriteTS** — when the record was appended to its chunk. Unique per record
+- **WriteTS** — when the origin's segmentation writer appended the record to
+  a segment; the chunk build copies it unchanged. Unique per record
   across the cluster (see `ChunkID + Pos`).
 
 For user-facing features, **default to SourceTS**; fall back to IngestTS
@@ -1582,9 +1641,12 @@ Error values that cross bounded contexts:
 
 ### What "replication" means in which context
 
-- **Record replication** (vault layer) — copying record bytes from the
-  vault leader to vault followers. Done by `ChunkReplicator`. Acked by
-  a per-vault application-level ack; bounded by `ForwardingTimeout`.
+- **Segment distribution** (pipeline) — record bytes reaching every home:
+  the origin publishes segment metadata to vault-ctl and each home pulls the
+  bytes. Acked by a segment holder receipt committed to vault-ctl.
+- **Chunk replication** (pipeline) — every home building its own GLCB for a
+  sealed manifest, or pulling a missing one from a peer home (GLCB
+  catch-up). Acked by a chunk holder receipt committed to vault-ctl.
 - **Metadata replication** (vault-ctl Raft) — propagating chunk-create /
   seal / delete / upload events. Done by hraft via multiraft transport.
   Acked by Raft majority; bounded by `ReplicationTimeout`.
