@@ -348,6 +348,18 @@ A home therefore builds every chunk it did not have when the leader sealed it,
 however many seals the leader ran ahead, and a restart rebuilds the same work from
 the restored FSM. Sealed-chunk manifests are part of the vault-ctl snapshot.
 
+**Adopting a GLCB already on disk.** When the build pass reaches the seal-queue
+head, or restart recovery finds a GLCB for a chunk not yet sealed, a GLCB already
+on the chunk's canonical path is adopted instead of rebuilt only when it is a build
+of the chunk's manifest: its header names the chunk, it holds the manifest's record
+count, its record timestamps span the manifest's recorded bounds, and, for a chunk
+already sealed, it carries the sealed digest. Recovery checks each chunk against
+its own manifest — the seal-queue entry, or the open manifest for the open chunk.
+Any other GLCB there is mismatched: it is renamed to `data.glcb.mismatched` (kept
+for investigation until the chunk directory goes) and the chunk is built from its
+segments. Without the check the leader would seal the other blob's digest and every
+home's correct build would then be divergent.
+
 **Verifying a home's copy.** Builds are byte-identical, so the sealing leader's
 `CmdSealChunk` carries its build's whole-blob digest (the GLCB TOC footer's
 `blobDigest`, the SHA-256 of every byte before the footer) and the FSM records it

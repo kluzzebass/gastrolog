@@ -1645,6 +1645,13 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
   copy through GLCB catch-up. Raises the latched `chunking-build-diverged`
   software-fault alarm, one per vault (`chunking/glcb_divergent.go`).
 
+- **Mismatched GLCB** — a GLCB on a chunk's canonical path that is not a build
+  of the chunk's manifest: it names another chunk, holds another record count,
+  spans other record timestamps, or, for a sealed chunk, carries another digest
+  than the sealed digest. The build pass and restart recovery never adopt it:
+  it is renamed aside to a `data.glcb.mismatched` sibling and the chunk is built
+  from its segments (`chunking/glcb_mismatched.go`).
+
 ### Stage counters
 
 Per-vault, per-node **monotonic** counters for the discrete pipeline-stage

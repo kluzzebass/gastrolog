@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
@@ -172,34 +171,20 @@ func (v *vaultChunking) runBuildOncePass(ctx context.Context, pending *vaultctlf
 	return result, true, nil
 }
 
-// adoptExistingGLCBIfPresent loads BuildResult when data.glcb is already on
-// disk (BuildGLCBFile only renames into place after a complete build).
+// adoptExistingGLCBIfPresent adopts the GLCB already on the chunk's
+// canonical path when it is a build of pending (glcb_mismatched.go); a GLCB
+// that is not is quarantined and the caller builds the chunk instead.
 func (v *vaultChunking) adoptExistingGLCBIfPresent(pending *vaultctlfsm.OpenChunkManifest, key buildKey) (BuildResult, bool, error) {
-	glcbPath := ChunkGLCBPath(v.cfg.ChunkRoot, pending.ChunkID)
-	if _, err := os.Stat(glcbPath); err != nil {
-		if os.IsNotExist(err) {
-			return BuildResult{}, false, nil
-		}
-		return BuildResult{}, false, err
-	}
 	sealedAt := pending.SealedAt
 	if sealedAt.IsZero() {
 		if entry := v.fsm().Get(pending.ChunkID); entry != nil && !entry.WriteEnd.IsZero() {
 			sealedAt = entry.WriteEnd
 		}
 	}
-	result, readErr := BuildResultFromExistingGLCB(glcbPath, sealedAt)
-	if readErr != nil {
-		// Unified corrupt-GLCB story (glcb_corrupt.go): quarantine + alert,
-		// then report "not adopted" so the caller falls through to a full
-		// rebuild from source segments — self-heal with the corruption
-		// signal preserved.
-		v.quarantineCorruptGLCB(pending.ChunkID, glcbPath, readErr)
-		return BuildResult{}, false, nil
+	result, adopted, err := v.existingGLCBBuildOf(pending, sealedAt)
+	if err != nil || !adopted {
+		return BuildResult{}, false, err
 	}
-	// Readable again (e.g. a peer re-pull restored the canonical file after
-	// an earlier quarantine): the chunk is healed on this home.
-	v.clearCorruptGLCB(pending.ChunkID, "existing GLCB readable")
 	adoptKey := key
 	if adoptKey.sealedAt.IsZero() {
 		adoptKey.sealedAt = result.WriteEnd

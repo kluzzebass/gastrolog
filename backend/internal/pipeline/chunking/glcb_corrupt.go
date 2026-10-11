@@ -9,11 +9,12 @@ import (
 )
 
 // This file is the single corrupt-GLCB recovery story shared by the build
-// pass (adoptExistingGLCBIfPresent) and restart recovery (recoverBuiltGLCB).
+// pass (adoptExistingGLCBIfPresent) and restart recovery (recoverBuiltGLCB),
+// which both read an existing GLCB through existingGLCBBuildOf.
 //
 // The unified story: detect → quarantine → alert → heal.
 //
-//   - Detect: BuildResultFromExistingGLCB fails on an existing data.glcb.
+//   - Detect: an existing data.glcb's header or TOC footer cannot be read.
 //   - Quarantine: rename the file aside to data.glcb + GLCBCorruptSuffix.
 //     The rename degrades corrupt to EXACTLY the missing-GLCB state — a
 //     stat on the canonical path now fails — so every existing missing-GLCB

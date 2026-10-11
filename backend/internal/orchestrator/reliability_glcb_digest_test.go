@@ -1,6 +1,7 @@
 package orchestrator_test
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -101,12 +102,13 @@ func TestOrchPipeline_EveryHomeCopyCarriesTheSealedDigest(t *testing.T) {
 	}
 }
 
-// writeDivergentGLCB writes a well-formed GLCB for chunkID holding records
-// records that differ from anything ingested — a copy a home could build from
-// segment bytes that differ from the leader's — and returns its digest.
-func writeDivergentGLCB(t *testing.T, path string, vaultID glid.GLID, chunkID chunk.ChunkID, records uint32) [32]byte {
+// writePlantedGLCB writes a well-formed GLCB for chunkID holding records
+// records that are not the ones ingested — same chunk, same record count,
+// record timestamps outside anything the chunk's manifest spans — and returns
+// its digest.
+func writePlantedGLCB(t *testing.T, path string, vaultID glid.GLID, chunkID chunk.ChunkID, records uint32) [32]byte {
 	t.Helper()
-	at := time.Now().UTC()
+	at := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
 	segID := glid.New()
 	segPath := filepath.Join(t.TempDir(), segID.String())
 	sf, err := segment.Create(segPath, segment.Meta{ID: segID, VaultID: vaultID})
@@ -117,7 +119,7 @@ func writeDivergentGLCB(t *testing.T, path string, vaultID glid.GLID, chunkID ch
 		rec := record.Record{
 			EventID:  record.EventID{IngesterID: glid.New(), NodeID: glid.New(), IngestTS: at, IngestSeq: i},
 			IngestTS: at,
-			Raw:      []byte("divergent build"),
+			Raw:      []byte("planted build"),
 		}
 		if err := sf.Append(&rec, at); err != nil {
 			t.Fatal(err)
@@ -147,30 +149,23 @@ func writeDivergentGLCB(t *testing.T, path string, vaultID glid.GLID, chunkID ch
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	staged := path + ".planted"
-	if err := os.WriteFile(staged, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(staged, path); err != nil {
-		t.Fatal(err)
-	}
+	plantGLCBCopy(t, path, data)
 	return res.BlobDigest
 }
 
-// A home whose copy of a chunk differs from the copy the seal agreed on —
-// planted while the chunk is still open, so the home adopts it as its build —
-// must not claim it, must raise the divergence alarm, and must end up holding
-// the agreed copy, pulled from a peer and verified, and claimed.
+// Every home holding a GLCB for a chunk that is not a build of the chunk's
+// manifest — planted on each home while the chunk is still open — never gets
+// that copy sealed or claimed: whichever home leads vault-ctl when the chunk
+// seals, the sealed digest is a build of the manifest, and every home ends
+// with that copy and claims it.
 //
-// The planted home is chosen as a vault-ctl follower, but leadership can move
-// before the seal. If it moved to the planted home, that home's copy is the
-// one its seal recorded, and every other home is the divergent one; the
-// mechanism under test is the same either way, so the test asserts whichever
-// side the sealed digest puts each home on.
-func TestOrchPipeline_DivergentHomeCopyIsReplacedByTheAgreedCopy(t *testing.T) {
+// What a home does with its planted copy depends on which reaches it first.
+// Its build pass reaching the seal-queue head finds the copy is not a build
+// of the manifest and quarantines it as mismatched — the only outcome on the
+// home that seals. The seal applying first finds a copy whose digest differs
+// from the sealed one: the home holds a divergent copy, quarantines it,
+// raises the divergence alarm and pulls the agreed copy.
+func TestOrchPipeline_PlantedHomeCopyIsReplacedByTheAgreedCopy(t *testing.T) {
 	if testing.Short() {
 		t.Skip("multi-node pipeline acceptance test")
 	}
@@ -181,37 +176,48 @@ func TestOrchPipeline_DivergentHomeCopyIsReplacedByTheAgreedCopy(t *testing.T) {
 		withPipelineCluster(pipelineTestCompletePolicy, pipelineChunkMaxRecords),
 	)
 	v := h.vaults[1]
-	leader := h.waitForVaultCtlLeaderForVault(v)
-	var planted string
-	for _, idx := range homeIdxs {
-		if id := h.nodeIDs[idx]; id != leader.id {
-			planted = id
-			break
-		}
-	}
 
 	// Fill the open manifest one record short of sealing.
-	h.submitIngestRecords(h.nodeIDs[3], pipelineChunkMaxRecords-1, "divergent-before")
+	h.submitIngestRecords(h.nodeIDs[3], pipelineChunkMaxRecords-1, "planted-before")
 	var open chunk.ChunkID
-	h.waitProgress("open manifest one record short of sealing", 50*time.Millisecond, func() (string, bool) {
-		sub := h.vaultCtlSubFSM(v, planted)
-		if sub == nil {
-			return "fsm=<nil>", false
+	h.waitProgress("open manifest one record short of sealing on every home", 50*time.Millisecond, func() (string, bool) {
+		var views []string
+		ready := true
+		for _, idx := range homeIdxs {
+			sub := h.vaultCtlSubFSM(v, h.nodeIDs[idx])
+			if sub == nil {
+				views, ready = append(views, "fsm=<nil>"), false
+				continue
+			}
+			s, ok := sub.OpenChunkSummary()
+			if !ok {
+				views, ready = append(views, "open=<nil>"), false
+				continue
+			}
+			open = s.ChunkID
+			views = append(views, fmt.Sprintf("open=%s records=%d", s.ChunkID, s.TotalRecords))
+			ready = ready && s.TotalRecords == pipelineChunkMaxRecords-1
 		}
-		s, ok := sub.OpenChunkSummary()
-		if !ok {
-			return "open=<nil>", false
-		}
-		open = s.ChunkID
-		return fmt.Sprintf("open=%s records=%d", s.ChunkID, s.TotalRecords), s.TotalRecords == pipelineChunkMaxRecords-1
+		return fmt.Sprintf("%v", views), ready
 	}, func() { h.dumpPipelineState(v) })
 
-	plantedDigest := writeDivergentGLCB(t, h.pipelineGLCBPath(planted, v, open), v.id, open, pipelineChunkMaxRecords)
+	firstPath := h.pipelineGLCBPath(h.nodeIDs[homeIdxs[0]], v, open)
+	plantedDigest := writePlantedGLCB(t, firstPath, v.id, open, pipelineChunkMaxRecords)
+	plantedBytes, err := os.ReadFile(firstPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, idx := range homeIdxs[1:] {
+		plantGLCBCopy(t, h.pipelineGLCBPath(h.nodeIDs[idx], v, open), plantedBytes)
+	}
 
-	h.submitIngestRecords(h.nodeIDs[3], 1, "divergent-after")
+	h.submitIngestRecords(h.nodeIDs[3], 1, "planted-after")
 	entries := h.waitSealedRecords(v, h.nodeIDs[3], pipelineChunkMaxRecords)
 	if len(entries) != 1 || entries[0].ID != open {
 		t.Fatalf("sealed chunks = %v, want only the planted chunk %s", entryIDs(entries), open)
+	}
+	if entries[0].Hash == plantedDigest {
+		t.Fatalf("the seal recorded the planted copy's digest %x", plantedDigest[:8])
 	}
 
 	// Every home ends up holding byte-identical copies whose bytes hash to
@@ -219,31 +225,45 @@ func TestOrchPipeline_DivergentHomeCopyIsReplacedByTheAgreedCopy(t *testing.T) {
 	h.waitHoldersOnEveryHome(v, homeIdxs, entryIDs(entries))
 	h.waitGLCBsOnHomes(v, homeIdxs, entries)
 
-	divergent := map[string]bool{planted: true}
-	if entries[0].Hash == plantedDigest {
-		t.Logf("vault-ctl leadership moved to %s before the seal: its planted copy is the agreed one", h.nodes[planted].label)
-		divergent = map[string]bool{}
-		for _, idx := range homeIdxs {
-			if id := h.nodeIDs[idx]; id != planted {
-				divergent[id] = true
-			}
-		}
-	}
 	want := []string{buildDivergedAlarm + ":" + v.id.String()}
 	for _, idx := range homeIdxs {
 		nodeID := h.nodeIDs[idx]
+		label := h.nodes[nodeID].label
+		path := h.pipelineGLCBPath(nodeID, v, open)
+		if _, err := os.Stat(path + chunking.GLCBDivergentSuffix); !os.IsNotExist(err) {
+			t.Errorf("home %s left a divergent copy behind (stat=%v)", label, err)
+		}
 		alarms := h.standingDivergenceAlarms(nodeID)
-		if !divergent[nodeID] {
-			if len(alarms) != 0 {
-				t.Errorf("home %s raised %v though its copy was the agreed one", h.nodes[nodeID].label, alarms)
+		mismatched, mismatchedErr := os.ReadFile(path + chunking.GLCBMismatchedSuffix)
+		switch {
+		case len(alarms) != 0:
+			if !slices.Equal(alarms, want) {
+				t.Errorf("home %s alarms = %v, want %v", label, alarms, want)
 			}
-			continue
+			t.Logf("the seal reached home %s first: its planted copy was divergent", label)
+		case mismatchedErr == nil:
+			if !bytes.Equal(mismatched, plantedBytes) {
+				t.Errorf("home %s quarantined another file than its planted copy", label)
+			}
+			t.Logf("home %s's build pass reached the chunk first: its planted copy was mismatched", label)
+		default:
+			t.Errorf("home %s neither quarantined its planted copy as mismatched (err=%v) nor raised the divergence alarm", label, mismatchedErr)
 		}
-		if !slices.Equal(alarms, want) {
-			t.Errorf("divergent home %s alarms = %v, want %v", h.nodes[nodeID].label, alarms, want)
-		}
-		if _, err := os.Stat(h.pipelineGLCBPath(nodeID, v, open) + chunking.GLCBDivergentSuffix); !os.IsNotExist(err) {
-			t.Errorf("home %s left its replaced divergent copy behind (stat=%v)", h.nodes[nodeID].label, err)
-		}
+	}
+}
+
+// plantGLCBCopy puts data on a home's canonical GLCB path through a rename,
+// so the home never reads a partly written file.
+func plantGLCBCopy(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	staged := path + ".planted"
+	if err := os.WriteFile(staged, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(staged, path); err != nil {
+		t.Fatal(err)
 	}
 }
