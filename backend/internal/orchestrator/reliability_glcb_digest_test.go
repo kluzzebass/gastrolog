@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,11 +15,16 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/segment"
+	"gastrolog/internal/query"
 	"gastrolog/internal/record"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 const buildDivergedAlarm = "chunking-build-diverged"
+
+// plantedPayload is the payload of every record in a copy writePlantedGLCB
+// plants.
+const plantedPayload = "planted build"
 
 // standingDivergenceAlarms lists the build-divergence alarms standing on a
 // node.
@@ -119,7 +125,7 @@ func writePlantedGLCB(t *testing.T, path string, vaultID glid.GLID, chunkID chun
 		rec := record.Record{
 			EventID:  record.EventID{IngesterID: glid.New(), NodeID: glid.New(), IngestTS: at, IngestSeq: i},
 			IngestTS: at,
-			Raw:      []byte("planted build"),
+			Raw:      []byte(plantedPayload),
 		}
 		if err := sf.Append(&rec, at); err != nil {
 			t.Fatal(err)
@@ -250,6 +256,40 @@ func TestOrchPipeline_PlantedHomeCopyIsReplacedByTheAgreedCopy(t *testing.T) {
 			t.Errorf("home %s neither quarantined its planted copy as mismatched (err=%v) nor raised the divergence alarm", label, mismatchedErr)
 		}
 	}
+
+	// Every home serves the agreed copy's records, whichever copy it read
+	// before its landing check.
+	agreedPayloads := []string{"planted-before", "planted-after"}
+	for _, idx := range homeIdxs {
+		nodeID := h.nodeIDs[idx]
+		served := servedPayloads(t, h, v, nodeID)
+		if len(served) != pipelineChunkMaxRecords {
+			t.Errorf("home %s served %d records, want %d", h.nodes[nodeID].label, len(served), pipelineChunkMaxRecords)
+		}
+		for _, raw := range served {
+			if !slices.ContainsFunc(agreedPayloads, func(p string) bool { return strings.HasPrefix(raw, p) }) {
+				t.Fatalf("home %s served %q, a record of no agreed copy", h.nodes[nodeID].label, raw)
+			}
+		}
+	}
+}
+
+// servedPayloads runs a match-all search on nodeID and returns every served
+// record's payload.
+func servedPayloads(t *testing.T, h *orchRelHarness, v vaultSpec, nodeID string) []string {
+	t.Helper()
+	seq, _, err := h.nodes[nodeID].orch.Search(context.Background(), v.id, query.Query{}, nil)
+	if err != nil {
+		t.Fatalf("search on %s: %v", h.nodes[nodeID].label, err)
+	}
+	var out []string
+	for rec, err := range seq {
+		if err != nil {
+			t.Fatalf("search on %s: %v", h.nodes[nodeID].label, err)
+		}
+		out = append(out, string(rec.Raw))
+	}
+	return out
 }
 
 // plantGLCBCopy puts data on a home's canonical GLCB path through a rename,

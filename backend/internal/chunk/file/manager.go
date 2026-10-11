@@ -394,13 +394,6 @@ type chunkMeta struct {
 	// Used by uploadToCloud to populate cloud BlobMeta.RawBytes without
 	// re-parsing the seekable record body.
 	rawBytes int64
-
-	// blobDigest is the GLCB whole-blob hash from the TOC footer:
-	// sha256(header ‖ section_hashes_in_TOC_order ‖ TOC_bytes). Captured
-	// at sealToGLCB time so AnnounceUpload can publish it onto the FSM
-	// entry without re-reading the local file. Verified on every cache
-	// re-fetch.
-	blobDigest [32]byte
 }
 
 func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
@@ -3903,10 +3896,24 @@ func (m *Manager) evictLocalCopies(c cacheEntry) int64 {
 	return freed
 }
 
-// forgetEvictedGLCB drops the manager state that names an evicted chunk's
-// local GLCB: its external registration and a non-cloud meta registered
+// ForgetPipelineGLCB drops everything this manager holds of a chunk's
+// pipeline-built GLCB whose copy left its path: the cached mapping, the
+// external registration, and the meta registered from that copy. The next
+// lookup resolves the chunk afresh — the copy that lands on the path, or the
+// cloud-backed entry — so a copy quarantined as divergent or corrupt is never
+// served from a mapping or registration made before it left.
+//
+// Takes no chunk lock: it runs on the Raft apply path, which must not wait
+// for in-flight cursors to drain. A cursor already open keeps its pinned
+// mapping until it closes; no later read reaches that mapping.
+func (m *Manager) ForgetPipelineGLCB(id chunk.ChunkID) {
+	m.evictMappedGLCB(id)
+	m.forgetEvictedGLCB(id)
+}
+
+// forgetEvictedGLCB drops the manager state that names a chunk's local GLCB
+// that is gone: its external registration and a non-cloud meta registered
 // from the pipeline copy before the FSM marked the chunk cloud-backed.
-// Caller holds the chunk's write lock.
 func (m *Manager) forgetEvictedGLCB(id chunk.ChunkID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -4617,7 +4624,6 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*glcb.Writer, int64, error) {
 		meta.sourceIdxOffset = toc.SourceIdxOffset
 		meta.sourceIdxSize = toc.SourceIdxSize
 		meta.rawBytes = bm.RawBytes
-		meta.blobDigest = toc.BlobDigest
 	}
 	m.mu.Unlock()
 
@@ -4677,6 +4683,13 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	}
 	m.mu.Unlock()
 
+	glcbPath := m.glcbPath(id)
+	src, digest, err := m.openAgreedGLCB(id, glcbPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = src.Close() }()
+
 	// If the blob already exists (leader or another replica uploaded first),
 	// skip the upload and adopt the existing blob's size. This prevents
 	// multiple nodes from overwriting each other's uploads with slightly
@@ -4687,19 +4700,21 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	headCancel()
 	if err == nil && existing.Size > 0 {
 		m.logger.Debug("cloud blob already exists, skipping upload", "chunk", id, "bytes", existing.Size)
-		return m.adoptCloudBlob(id, existing.Size)
+		return m.adoptCloudBlob(id, existing.Size, digest)
 	}
-
-	glcbPath := m.glcbPath(id)
 
 	// Frame the uncompressed GLCB for transport: per-section zstd frames
 	// plus a raw tail directory, so readers can range-GET individual
 	// sections of the object (glcb.WrapForTransport documents the layout).
 	// The format itself stays uncompressed on local disk; cloud transport
 	// applies the framing here and DownloadAndUnwrap removes it on read.
+	// It streams src — the file whose digest was checked, not whatever the
+	// path names by now.
 	pr, pw := io.Pipe()
+	wrapped := make(chan struct{})
 	go func() {
-		if _, wrapErr := glcb.WrapForTransport(pw, glcbPath); wrapErr != nil {
+		defer close(wrapped)
+		if _, wrapErr := glcb.WrapFileForTransport(pw, src); wrapErr != nil {
 			_ = pw.CloseWithError(wrapErr)
 			return
 		}
@@ -4715,6 +4730,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	)
 	uploadCancel()
 	_ = pr.Close()
+	<-wrapped
 	m.trackCloudResult(err)
 	if err != nil {
 		return fmt.Errorf("upload GLCB: %w", err)
@@ -4759,7 +4775,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		m.cfg.Announcer.AnnounceUpload(id, blobSize,
 			toc.IngestIdxOffset, toc.IngestIdxSize,
 			toc.SourceIdxOffset, toc.SourceIdxSize,
-			meta.blobDigest, m.cfg.CloudServiceID, currentKeyScheme)
+			digest, m.cfg.CloudServiceID, currentKeyScheme)
 	}
 
 	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — they
@@ -4819,14 +4835,58 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	return nil
 }
 
+// ErrGLCBDisagreesWithSeal is returned by an upload whose local GLCB carries
+// a whole-blob digest other than the sealed digest. That copy is divergent,
+// and the cloud object becomes the chunk's durable copy, so only the agreed
+// copy may become it.
+var ErrGLCBDisagreesWithSeal = errors.New("local GLCB differs from the copy agreed at seal")
+
+// openAgreedGLCB opens the chunk's local GLCB for upload and returns the
+// whole-blob digest its TOC footer records. A copy whose digest differs from
+// the sealed digest is refused with ErrGLCBDisagreesWithSeal. A chunk with no
+// sealed digest — none recorded, or no verifier on this vault — accepts any
+// readable copy, and the upload announce records that copy's digest.
+func (m *Manager) openAgreedGLCB(id chunk.ChunkID, path string) (*os.File, [32]byte, error) {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, [32]byte{}, fmt.Errorf("open GLCB for upload: %w", err)
+	}
+	digest, err := m.checkGLCBAgainstSeal(id, f)
+	if err != nil {
+		_ = f.Close()
+		return nil, [32]byte{}, err
+	}
+	return f, digest, nil
+}
+
+func (m *Manager) checkGLCBAgainstSeal(id chunk.ChunkID, f *os.File) ([32]byte, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("stat GLCB for upload: %w", err)
+	}
+	toc, err := glcb.ReadTOC(f, info.Size())
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("read GLCB TOC for upload: %w", err)
+	}
+	if m.cfg.IntegrityVerifier == nil {
+		return toc.BlobDigest, nil
+	}
+	if sealed, ok := m.cfg.IntegrityVerifier.ExpectedDigest(id); ok && sealed != toc.BlobDigest {
+		return [32]byte{}, fmt.Errorf("chunk %s: %w (local %x, sealed %x)",
+			id, ErrGLCBDisagreesWithSeal, toc.BlobDigest[:8], sealed[:8])
+	}
+	return toc.BlobDigest, nil
+}
+
 // adoptCloudBlob transitions a local chunk to cloud-backed using an existing
 // S3 blob. Used when another node (typically the leader) already uploaded the
 // same chunk while we were preparing our own upload. The local data.glcb is
 // byte-identical to the cloud blob by construction (sealToGLCB and the cloud
 // writer share the encoder, and the input record set is the same), so the
 // TOC cached on chunkMeta during sealToGLCB matches what's in S3 — no range
-// request needed to read it back.
-func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
+// request needed to read it back. digest is the local copy's whole-blob
+// digest, already checked against the sealed digest.
+func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64, digest [32]byte) error {
 	// Per-chunk write lock around the FSM announce, the disk transition,
 	// and the meta mutation; same rationale as uploadToCloud.
 	// adoptCloudBlob fires when another node beat us to the upload — we
@@ -4855,7 +4915,6 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	ingestIdxSize := am.ingestIdxSize
 	sourceIdxOff := am.sourceIdxOffset
 	sourceIdxSize := am.sourceIdxSize
-	blobDigest := am.blobDigest
 
 	// FSM-first: announce before any local mutation. Applier.Apply blocks on
 	// quorum + local FSM apply, so once the announce returns the FSM is
@@ -4868,7 +4927,7 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 		m.cfg.Announcer.AnnounceUpload(id, blobSize,
 			ingestIdxOff, ingestIdxSize,
 			sourceIdxOff, sourceIdxSize,
-			blobDigest, m.cfg.CloudServiceID, currentKeyScheme)
+			digest, m.cfg.CloudServiceID, currentKeyScheme)
 	}
 
 	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — same

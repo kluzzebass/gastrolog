@@ -101,6 +101,11 @@ func installGLCBResolverOn(inst *VaultInstance, source func() (*vaultctlfsm.FSM,
 			return "", chunk.ExternalGLCBInfo{}, false
 		}
 		glcbPath := chunking.ChunkGLCBPath(chunkRoot, id)
+		// Only the agreed copy is served: a divergent copy that has not yet
+		// met its landing check must not be memoized as this chunk's bytes.
+		if _, agrees, err := chunking.GLCBAgreesWithSeal(glcbPath, *e); err != nil || !agrees {
+			return "", chunk.ExternalGLCBInfo{}, false
+		}
 		// File-enriched info: the memoized registration must be COMPLETE at
 		// first resolution — there is no eager re-registration pass to upgrade
 		// it afterward. For a Sealed entry the FSM already carries index

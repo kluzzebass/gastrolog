@@ -381,6 +381,18 @@ also what a cloud re-fetch is verified against; the FSM refuses a
 `CmdUploadChunk` whose digest differs from it, and an upload that carries no
 digest leaves it in place.
 
+Only the agreed copy is served or uploaded. The chunk manager's lazy resolver
+registers a home's copy for queries only when it carries the sealed digest. A
+landing check that finds a sealed chunk's copy is not the agreed one makes the
+chunk manager forget the copy — its external registration and its cached
+mapping — so the next read resolves afresh: the agreed copy once it lands, or
+the cloud object. The cached mapping is also keyed by file identity, not path
+alone, so a copy renamed aside and replaced on the same path is never read
+through the old mapping. A cloud upload reads the copy's digest from its TOC
+footer, refuses a copy whose digest differs from the sealed digest (it neither
+uploads it nor adopts an object another home stored), streams exactly the file
+it checked, and announces that digest on `CmdUploadChunk`.
+
 **Failure:**
 
 - Leader dies: new leader continues manifest from FSM.
