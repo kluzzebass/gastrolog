@@ -27,6 +27,18 @@ function routeExpression(r: RouteConfig): string {
   return "";
 }
 
+/**
+ * The expression as the card header shows it: a `_vault` comparison against a
+ * configured vault's ID reads with the vault's name in its place. An ID no
+ * vault carries stays as written.
+ */
+export function displayExpression(expr: string, vaults: ReadonlyArray<{ id: string; name: string }>): string {
+  return expr.replace(/(_vault\s*(?:==?|!=)\s*")([^"]*)(")/g, (match, open: string, id: string, close: string) => {
+    const vault = vaults.find((v) => v.id === id);
+    return vault?.name ? `${open}${vault.name}${close}` : match;
+  });
+}
+
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
 
 const ROUTE_COMPONENTS_HELP_REF = "routing#route-components";
@@ -214,7 +226,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
           </FormField>
           <FormField
             label="Match expression"
-            description='Match expression evaluated against each record. "*" matches everything. The lean editor with autocomplete and live validation lands later in this epic.'
+            description='Match expression evaluated against each record. "*" matches everything.'
             helpRef="routing#match-expressions"
             dark={dark}
           >
@@ -258,7 +270,10 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
         const destNames = route.destinations
           .map((d) => vaults.find((v) => encode(v.id) === encode(d.vaultId))?.name || encode(d.vaultId))
           .join(", ");
-        const expr = routeExpression(route);
+        const expr = displayExpression(
+          routeExpression(route),
+          vaults.map((v) => ({ id: encode(v.id), name: v.name })),
+        );
         return (
           <SettingsCard
             key={id}
@@ -315,7 +330,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
               </FormField>
               <FormField
                 label="Match expression"
-                description='Match expression evaluated against each record. "*" matches everything. The lean editor with autocomplete and live validation lands later in this epic.'
+                description='Match expression evaluated against each record. "*" matches everything.'
                 helpRef="routing#match-expressions"
                 dark={dark}
               >

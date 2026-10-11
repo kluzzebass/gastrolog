@@ -106,7 +106,7 @@ export function StaticAddForm({
       createDisabledReason={staticLookupIncompleteReason(draft, namePlaceholder)}
       typeBadge="static"
     >
-      <FormField label="Name" description="Registry name used in queries, e.g. | lookup teams" dark={dark}>
+      <FormField label="Name" description="Table name used in queries, e.g. | lookup teams" dark={dark}>
         <TextInput value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} placeholder={namePlaceholder} dark={dark} mono />
       </FormField>
       <EditableGrid
@@ -186,7 +186,7 @@ export function StaticCards({
           }
         >
           <div className="flex flex-col gap-3">
-            <FormField label="Name" description="Registry name used in queries, e.g. | lookup teams" dark={dark}>
+            <FormField label="Name" description="Table name used in queries, e.g. | lookup teams" dark={dark}>
               <TextInput value={s.name} onChange={(v) => onUpdate(i, { name: v })} placeholder="" dark={dark} mono />
             </FormField>
               <EditableGrid

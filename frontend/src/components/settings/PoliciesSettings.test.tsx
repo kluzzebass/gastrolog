@@ -40,6 +40,21 @@ function renderPolicies(generatedName: string) {
   return { qc, ...renderWritable(<PoliciesSettings dark />, { wrapper: settingsWrapper(qc) }) };
 }
 
+describe("PoliciesSettings labels", () => {
+  // The size bound is "Max Size" on the rotation form as on the retention
+  // form, matching the proto field and the CLI flag.
+  test("the size bound is labelled Max Size on the add form and on a policy card", async () => {
+    const { getByText, findByText, queryByText, getAllByText } = renderPolicies("weekly");
+    fireEvent.click(getByText("Add Policy"));
+    expect(await findByText("Set at least one condition")).toBeTruthy();
+    expect(getByText("Max Size")).toBeTruthy();
+    expect(queryByText("Max Bytes")).toBeNull();
+
+    fireEvent.click(getByText("daily"));
+    expect(getAllByText("Max Size").length).toBe(2);
+  });
+});
+
 describe("PoliciesSettings create gates", () => {
   // With no generated name the form falls back to "default", which a policy
   // of that name takes; the clash goes when that policy is renamed.

@@ -8,6 +8,7 @@ import { LiveValue } from "../LiveValue";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { NodeBadge } from "../settings/NodeBadge";
+import { ingesterTypeLabel } from "../settings/ingesterTypeLabel";
 import { CrossLinkBadge } from "./CrossLinkBadge";
 import { type EntityID } from "../../api/model/id";
 import type { Ingester, IngesterStatusVariant, NodeStatusMap } from "../../api/model/ingester";
@@ -85,7 +86,7 @@ export function IngesterCard({
   return (
     <ExpandableCard
       id={ingester.displayLabel}
-      typeBadge={ingester.type}
+      typeBadge={ingesterTypeLabel(ingester.type)}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}

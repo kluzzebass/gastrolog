@@ -263,6 +263,33 @@ describe("CloudServiceFields endpoint field per provider", () => {
   });
 });
 
+describe("CloudServiceFields cloud storage class transitions", () => {
+  // The provider's archival class is always cloud-qualified on screen: the
+  // same tab shows the numeric storage class that places a vault on a disk.
+  test("the transitions block and its class column say cloud storage class", () => {
+    const { getByText, queryByText, container } = renderWritable(
+      <CloudServiceFields
+        values={values({ archivalMode: "active", transitions: [{ after: "90d", cloudStorageClass: "GLACIER" }] })}
+        onChange={() => {}}
+        dark={true}
+      />,
+    );
+    expect(getByText("Cloud storage class transitions")).toBeTruthy();
+    expect(getByText("GastroLog moves sealed chunks between cloud storage classes by age.")).toBeTruthy();
+    expect(getByText("Cloud storage class")).toBeTruthy();
+    expect(queryByText("Storage Class Transitions")).toBeNull();
+    expect(queryByText("Storage Class")).toBeNull();
+    expect(inputForLabel(container, "After").placeholder).toBe("");
+  });
+
+  test("managed externally says whose rules move the chunks", () => {
+    const { getByText } = renderWritable(
+      <CloudServiceFields values={values({ archivalMode: "none" })} onChange={() => {}} dark={true} />,
+    );
+    expect(getByText(/Cloud storage class transitions are handled outside GastroLog/)).toBeTruthy();
+  });
+});
+
 describe("CloudServiceFields archival delete step", () => {
   test("Delete is not among the storage classes", () => {
     const { container } = renderWritable(

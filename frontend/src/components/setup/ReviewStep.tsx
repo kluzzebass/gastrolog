@@ -121,11 +121,11 @@ export function ReviewStep({
         )}
       </Section>
 
-      {(rotation.maxAge || rotation.maxBytes || rotation.maxRecords || rotation.cron) ? (
+      {(rotation.maxAge || rotation.maxSize || rotation.maxRecords || rotation.cron) ? (
         <Section title="Rotation Policy" dark={dark}>
           <Row label="Name" value={rotation.name || namePlaceholders?.rotation || "default"} dark={dark} />
           {rotation.maxAge && <Row label="Max Age" value={rotation.maxAge} dark={dark} />}
-          {rotation.maxBytes && <Row label="Max Bytes" value={rotation.maxBytes} dark={dark} />}
+          {rotation.maxSize && <Row label="Max Size" value={rotation.maxSize} dark={dark} />}
           {rotation.maxRecords && <Row label="Max Records" value={rotation.maxRecords} dark={dark} />}
           {rotation.cron && <Row label="Cron" value={rotation.cron} dark={dark} />}
         </Section>
@@ -133,12 +133,12 @@ export function ReviewStep({
         <SkippedSection title="Rotation Policy" dark={dark} />
       )}
 
-      {(retention.maxChunks || retention.maxAge || retention.maxBytes) ? (
+      {(retention.maxChunks || retention.maxAge || retention.maxSize) ? (
         <Section title="Retention Policy" dark={dark}>
           <Row label="Name" value={retention.name || namePlaceholders?.retention || "default"} dark={dark} />
           {retention.maxChunks && <Row label="Max Chunks" value={retention.maxChunks} dark={dark} />}
           {retention.maxAge && <Row label="Max Age" value={retention.maxAge} dark={dark} />}
-          {retention.maxBytes && <Row label="Max Bytes" value={retention.maxBytes} dark={dark} />}
+          {retention.maxSize && <Row label="Max Size" value={retention.maxSize} dark={dark} />}
         </Section>
       ) : (
         <SkippedSection title="Retention Policy" dark={dark} />

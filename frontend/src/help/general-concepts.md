@@ -31,7 +31,7 @@ Records are stored in **chunks** — bounded, append-only segments that hold a b
 
 A **vault** groups chunks under a single namespace with shared configuration:
 
-- **Type**: The storage engine (`file` or `memory`)
+- **Type**: The vault type (`file` or `memory`)
 - **Rotation policy**: Rules for when to seal the active chunk and start a new one
 - **Retention policy**: Rules for when to delete old sealed chunks
 - **Params**: Engine-specific configuration (e.g., home directory path)

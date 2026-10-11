@@ -36,13 +36,35 @@ function renderIngesters(generatedName = "fresh-ingester") {
   return renderWritable(<IngestersSettings dark />, { wrapper: settingsWrapper(qc) });
 }
 
+describe("IngestersSettings type labels", () => {
+  // The add menu and the card badges use the help topics' titles, so what
+  // the operator picks is what the help calls it.
+  test("the add menu and the type badges carry the help titles, not the raw type keys", () => {
+    const { getByText, getAllByText, queryByText } = renderIngesters();
+    expect(getByText("RELP")).toBeTruthy();
+    expect(queryByText("relp")).toBeNull();
+
+    fireEvent.click(getByText("Add Ingester"));
+    for (const title of ["Fluent Forward", "OTLP", "HTTP (Loki)", "Kafka", "Chatterbox"]) {
+      expect(getAllByText(title).some((el) => el.tagName === "BUTTON")).toBe(true);
+    }
+    expect(queryByText("fluentfwd")).toBeNull();
+    expect(queryByText("otlp")).toBeNull();
+
+    // Picking a type opens its add form, whose type badge carries the same title.
+    fireEvent.click(getAllByText("Fluent Forward").find((el) => el.tagName === "BUTTON")!);
+    expect(getByText("Create")).toBeTruthy();
+    expect(getAllByText("Fluent Forward").some((el) => el.tagName !== "BUTTON")).toBe(true);
+  });
+});
+
 describe("IngestersSettings create gates", () => {
   test("a missing required param disables Create with the field named, until it is set", async () => {
     const { getByText, findByText, getAllByText, queryByText } = renderIngesters();
 
     fireEvent.click(getByText("Add Ingester"));
-    // The existing syslog card's type badge also says "syslog"; the menu item is the button.
-    fireEvent.click(getAllByText("syslog").find((el) => el.tagName === "BUTTON")!);
+    // The existing syslog card's type badge also says "Syslog"; the menu item is the button.
+    fireEvent.click(getAllByText("Syslog").find((el) => el.tagName === "BUTTON")!);
 
     expect(await findByText("UDP Address or TCP Address is required")).toBeTruthy();
     expect(getByText("Create").closest("button")!.disabled).toBe(true);
@@ -67,7 +89,7 @@ describe("IngestersSettings create gates", () => {
     const { getByText, getAllByText } = renderWritable(<IngestersSettings dark />, { wrapper: settingsWrapper(qc) });
 
     fireEvent.click(getByText("Add Ingester"));
-    fireEvent.click(getAllByText("chatterbox").find((el) => el.tagName === "BUTTON")!);
+    fireEvent.click(getAllByText("Chatterbox").find((el) => el.tagName === "BUTTON")!);
 
     expect(getByText('An ingester named "chatterbox" already exists')).toBeTruthy();
     expect(getByText("Create").closest("button")!.disabled).toBe(true);

@@ -36,7 +36,7 @@ const defaultBadge = {
 /** The kind badge: where the certificate's key material lives. */
 export function certSourceBadge(cert: { fromFiles: boolean }) {
   return cert.fromFiles
-    ? { text: "files", title: "loaded from files on disk — reloaded when they change", helpRef: "certificates#hot-reload" }
+    ? { text: "files", title: "file-path certificate — read from files on disk, reloaded when they change", helpRef: "certificates#file-path-certificates" }
     : { text: "pem", title: "PEM material stored in the cluster configuration", helpRef: "certificates#adding-a-certificate" };
 }
 
@@ -343,7 +343,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
               Add pasted certificate
             </Button>
             <Button onClick={startAddFiles}>
-              Add monitored files
+              Add file-path certificate
             </Button>
           </div>
         </div>
@@ -352,9 +352,9 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
       <p
         className={`text-[0.85em] mb-5 ${c("text-text-muted", "text-light-text-muted")}`}
       >
-        TLS certificates for the server, ingesters, or storage engines. Choose
-        either pasted PEM content (stored in config) or file paths (monitored for
-        changes).
+        TLS certificates for HTTPS and ingester connections: a pasted certificate
+        stores PEM content in the configuration; a file-path certificate reads
+        files on the node and reloads them when they change.
       </p>
 
       {adding === "pem" && (
@@ -391,7 +391,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
 
       {adding === "files" && (
         <AddCertificatePanel
-          title="Add monitored files certificate"
+          title="Add file-path certificate"
           dark={dark}
           name={name}
           setName={setName}

@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { render } from "@testing-library/react";
 import { Timestamp } from "@bufbuild/protobuf";
-import { formatRaftContact, leaderLabel, nodeStatsEmptyText } from "./SystemStatsView";
+import { NodeStats } from "../../api/gen/gastrolog/v1/cluster_pb";
+import { HelpProvider } from "../../hooks/useHelp";
+import { SystemStatsView, formatRaftContact, leaderLabel, nodeStatsEmptyText } from "./SystemStatsView";
 
 const NOW_MS = 1_800_000_000_000;
 
@@ -41,5 +44,30 @@ describe("leaderLabel", () => {
   test("no leader is spelled out as no quorum", () => {
     expect(leaderLabel("")).toBe("none — no quorum");
     expect(leaderLabel("node-2")).toBe("node-2");
+  });
+});
+
+// The Raft liveness rows appear once the node has appended to its WAL; their
+// labels are spelled out, no abbreviations an operator has to decode.
+describe("SystemStatsView raft liveness", () => {
+  test("failed heartbeats are labelled in full", () => {
+    const stats = new NodeStats({
+      raftState: "Follower",
+      raftWalAppendsTotal: BigInt(12),
+      raftWalAppendAvgMs: 1.5,
+      raftWalAppendMaxMs: 9,
+      raftElectionsTotal: BigInt(1),
+      raftElectionsPerMin: 0,
+      raftLeaderLossesTotal: BigInt(0),
+      raftFailedHeartbeatsTotal: BigInt(3),
+    });
+    const { getByText, queryByText } = render(
+      <HelpProvider onOpen={() => {}}>
+        <SystemStatsView nodeStats={stats} dark />
+      </HelpProvider>,
+    );
+    expect(getByText("Failed heartbeats")).toBeTruthy();
+    expect(getByText("3")).toBeTruthy();
+    expect(queryByText("Failed HBs")).toBeNull();
   });
 });

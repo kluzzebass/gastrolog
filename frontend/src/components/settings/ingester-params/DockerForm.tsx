@@ -4,7 +4,7 @@ import { EligibilitySelect } from "../EligibilitySelect";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { Checkbox } from "../Checkbox";
 import { TestConnectionButton } from "./TestConnectionButton";
-import { CERTIFICATES_HELP_REF, NO_CERTIFICATES_MESSAGE, useCertOptions } from "./TlsFields";
+import { CERTIFICATES_HELP_REF, NO_CERTIFICATES_MESSAGE, TlsVerifyCheckbox, useCertOptions } from "./TlsFields";
 import type { SubFormProps } from "./types";
 
 export function DockerForm({
@@ -131,12 +131,7 @@ export function DockerForm({
                 />
               </FormField>
             </div>
-            <Checkbox
-              checked={params["tls_verify"] !== "false"}
-              onChange={(v) => set("tls_verify", v ? "true" : "false")}
-              label="Verify server certificate"
-              dark={dark}
-            />
+            <TlsVerifyCheckbox params={params} onChange={onChange} dark={dark} />
           </div>
         )}
       </div>

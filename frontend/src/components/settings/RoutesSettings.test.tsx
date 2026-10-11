@@ -5,7 +5,8 @@ import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 
 const mocks = installMockClients();
 
-import { RoutesSettings } from "./RoutesSettings";
+import { RoutesSettings, displayExpression } from "./RoutesSettings";
+import { encode } from "../../api/glid";
 import { renderWritable } from "../../testing/renderWritable";
 import { HelpProvider } from "../../hooks/useHelp";
 import { VaultType } from "../../api/gen/gastrolog/v1/system_pb";
@@ -257,6 +258,52 @@ describe("RoutesSettings", () => {
       expect(getByText("Name")).toBeTruthy();
       expect(getByText("Distribution")).toBeTruthy();
     });
+  });
+});
+
+describe("route header expression", () => {
+  const vaults = [{ id: "abc", name: "retention-source" }];
+
+  test("a _vault comparison against a configured vault shows the vault's name", () => {
+    expect(displayExpression('_source = "retention" AND _vault = "abc"', vaults)).toBe(
+      '_source = "retention" AND _vault = "retention-source"',
+    );
+    expect(displayExpression('_vault=="abc"', vaults)).toBe('_vault=="retention-source"');
+    expect(displayExpression('_vault != "abc"', vaults)).toBe('_vault != "retention-source"');
+  });
+
+  test("an ID no vault carries, and any other field, stay as written", () => {
+    expect(displayExpression('_vault = "zzz"', vaults)).toBe('_vault = "zzz"');
+    expect(displayExpression('_ingester = "abc"', vaults)).toBe('_ingester = "abc"');
+    expect(displayExpression("*", vaults)).toBe("*");
+  });
+
+  test("the card header renders the vault name; the editor keeps the ID", () => {
+    const vaultId = encode(testId(20));
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], {
+      ...sampleConfig,
+      routes: [{ ...sampleConfig.routes[0]!, stages: [matchStage(`_source = "retention" AND _vault = "${vaultId}"`)] }],
+    });
+    const { getByText, getByDisplayValue, queryByText } = renderWritable(<RoutesSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+    expect(getByText(/_vault = "vault-alpha"/)).toBeTruthy();
+    expect(queryByText(new RegExp(`_vault = "${vaultId}"`))).toBeNull();
+
+    fireEvent.click(getByText("default-route"));
+    expect(getByDisplayValue(`_source = "retention" AND _vault = "${vaultId}"`)).toBeTruthy();
+  });
+
+  test("an unknown vault ID in the header stays as written", () => {
+    const unknownId = encode(testId(99));
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], {
+      ...sampleConfig,
+      routes: [{ ...sampleConfig.routes[0]!, stages: [matchStage(`_vault = "${unknownId}"`)] }],
+    });
+    const { getByText } = renderWritable(<RoutesSettings dark />, { wrapper: settingsWrapper(qc) });
+    expect(getByText(new RegExp(`_vault = "${unknownId}"`))).toBeTruthy();
   });
 });
 

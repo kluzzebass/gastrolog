@@ -68,13 +68,13 @@ export function HttpAddForm({
       createDisabledReason={!draft.name.trim() && !namePlaceholder ? "Name is required" : "URL Template is required"}
       typeBadge="http"
     >
-      <FormField label="Name" description="Registry name used in queries, e.g. | lookup users" dark={dark}>
+      <FormField label="Name" description="Table name used in queries, e.g. | lookup users" dark={dark}>
         <TextInput value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} placeholder={namePlaceholder} dark={dark} mono />
       </FormField>
       <FormField label="URL Template" description="Use {param} placeholders matching parameter names below. Fields map positionally in queries." dark={dark}>
         <TextInput value={draft.urlTemplate} onChange={(v) => setDraft((d) => ({ ...d, urlTemplate: v }))} placeholder="" dark={dark} mono />
       </FormField>
-      <FormField label="Response Paths" description="JSONPath expressions to extract target objects. Results are merged." helpRef="lookups-settings#http-lookups" dark={dark}>
+      <FormField label="Response Paths" description="JSONPath expressions selecting the objects to use; the server runs each as jq and merges the results." helpRef="lookups-settings#http-lookups" dark={dark}>
         <StringListEditor values={draft.responsePaths} onChange={(v) => setDraft((d) => ({ ...d, responsePaths: v }))} placeholder="$.data.user" dark={dark} />
       </FormField>
       <FormField label="Parameters" description="Ordered list of URL template parameters. Names become {name} placeholders." dark={dark}>
@@ -83,7 +83,7 @@ export function HttpAddForm({
       <FormField label="Headers" description="Custom HTTP headers (e.g. Authorization)." dark={dark}>
         <ParamsEditor params={draft.headers} onChange={(v) => setDraft((d) => ({ ...d, headers: v }))} dark={dark} />
       </FormField>
-      <FormField label="Destinations" description="Outbound lookups reach public addresses only. Enable this for a lookup service on your own network — loopback, 10.x, 172.16–31.x, 192.168.x, 100.64–127.x or an IPv6 unique-local address — then save: Test uses the saved setting, not this form. Link-local (169.254.x, fe80::) and address-translation ranges stay blocked either way." helpRef="lookups-settings#destinations-and-limits" dark={dark}>
+      <FormField label="Destinations" description="Lookups reach public addresses only unless this is on; Test uses the saved setting, so save first." helpRef="lookups-settings#destinations-and-limits" dark={dark}>
         <Checkbox
           checked={draft.allowPrivateDestinations}
           onChange={(v) => setDraft((d) => ({ ...d, allowPrivateDestinations: v }))}
@@ -164,13 +164,13 @@ export function HttpCards({
           }
         >
           <div className="flex flex-col gap-3">
-            <FormField label="Name" description="Registry name used in queries, e.g. | lookup users" dark={dark}>
+            <FormField label="Name" description="Table name used in queries, e.g. | lookup users" dark={dark}>
               <TextInput value={h.name} onChange={(v) => onUpdate(i, { name: v })} placeholder="" dark={dark} mono />
             </FormField>
             <FormField label="URL Template" description="Use {param} placeholders matching parameter names below. Fields map positionally in queries." dark={dark}>
               <TextInput value={h.urlTemplate} onChange={(v) => onUpdate(i, { urlTemplate: v })} placeholder="" dark={dark} mono />
             </FormField>
-            <FormField label="Response Paths" description="JSONPath expressions to extract target objects. Results are merged." helpRef="lookups-settings#http-lookups" dark={dark}>
+            <FormField label="Response Paths" description="JSONPath expressions selecting the objects to use; the server runs each as jq and merges the results." helpRef="lookups-settings#http-lookups" dark={dark}>
               <StringListEditor values={h.responsePaths} onChange={(v) => onUpdate(i, { responsePaths: v })} placeholder="$.data.user" dark={dark} />
             </FormField>
             <FormField label="Parameters" description="Ordered list of URL template parameters. Names become {name} placeholders. Fields map positionally in queries." dark={dark}>
@@ -179,7 +179,7 @@ export function HttpCards({
             <FormField label="Headers" description="Custom HTTP headers (e.g. Authorization)." dark={dark}>
               <ParamsEditor params={h.headers} onChange={(v) => onUpdate(i, { headers: v })} dark={dark} />
             </FormField>
-            <FormField label="Destinations" description="Outbound lookups reach public addresses only. Enable this for a lookup service on your own network — loopback, 10.x, 172.16–31.x, 192.168.x, 100.64–127.x or an IPv6 unique-local address — then save: Test uses the saved setting, not this form. Link-local (169.254.x, fe80::) and address-translation ranges stay blocked either way." helpRef="lookups-settings#destinations-and-limits" dark={dark}>
+            <FormField label="Destinations" description="Lookups reach public addresses only unless this is on; Test uses the saved setting, so save first." helpRef="lookups-settings#destinations-and-limits" dark={dark}>
               <Checkbox
                 checked={h.allowPrivateDestinations}
                 onChange={(v) => onUpdate(i, { allowPrivateDestinations: v })}

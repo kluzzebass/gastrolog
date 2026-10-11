@@ -66,7 +66,7 @@ function fieldsFromData(data: GetSettingsResponse): ServiceFormState {
     refreshTokenDuration: auth?.refreshTokenDuration ?? "",
     maxFollowDuration: query?.maxFollowDuration ?? "",
     queryTimeout: query?.timeout ?? "",
-    maxResultCount: query?.maxResultCount ? String(query.maxResultCount) : "10000",
+    maxResultCount: String(query?.maxResultCount ?? 0),
     broadcastInterval: data.cluster?.broadcastInterval || "5s",
     pipelineBacklogMax:
       data.cluster && data.cluster.pipelineBacklogMax !== ""
@@ -84,6 +84,10 @@ export const TLS_ENABLED_BADGE = {
 };
 
 const DEFAULT_CERT_HELP_REF = "certificates#default-certificate";
+
+/** The server's rule, spelled out so the checkbox reads as real: the list it rejects, case-insensitively. */
+export const ANIMAL_NOISE_RULE =
+  "Rejects a password containing moo, woof, bark, meow, oink, quack, baa, neigh, roar, hiss, chirp, tweet, cluck, ribbit, buzz, howl, purr, squeak, growl, caw or gobble (case-insensitive)";
 
 const INITIAL_STATE: ServiceFormState = {
   tokenDuration: "", minPwLen: "", maxJobs: "",
@@ -183,7 +187,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
       s.refreshTokenDuration !== (data.auth?.refreshTokenDuration ?? "") ||
       s.maxFollowDuration !== (data.query?.maxFollowDuration ?? "") ||
       s.queryTimeout !== (data.query?.timeout ?? "") ||
-      s.maxResultCount !== String(data.query?.maxResultCount || 10000) ||
+      s.maxResultCount !== String(data.query?.maxResultCount ?? 0) ||
       s.broadcastInterval !== (data.cluster?.broadcastInterval || "5s") ||
       s.pipelineBacklogMax !==
         (data.cluster && data.cluster.pipelineBacklogMax !== ""
@@ -414,7 +418,17 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                 <Checkbox checked={s.requireMixedCase} onChange={set("requireMixedCase")} label="Require mixed case (upper + lowercase)" dark={dark} />
                 <Checkbox checked={s.requireDigit} onChange={set("requireDigit")} label="Require digit (0-9)" dark={dark} />
                 <Checkbox checked={s.requireSpecial} onChange={set("requireSpecial")} label="Require special character" dark={dark} />
-                <Checkbox checked={s.forbidAnimalNoise} onChange={set("forbidAnimalNoise")} label="Forbid animal noises (moo, woof, meow, ...)" dark={dark} />
+                <Checkbox
+                  checked={s.forbidAnimalNoise}
+                  onChange={set("forbidAnimalNoise")}
+                  label={
+                    <span className={`flex flex-col text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}>
+                      <span>Forbid animal noises</span>
+                      <span className="text-[0.85em] leading-tight">{ANIMAL_NOISE_RULE}</span>
+                    </span>
+                  }
+                  dark={dark}
+                />
               </div>
             </div>
             </ReadOnlyProvider>
@@ -455,13 +469,13 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
             <div className="flex flex-col gap-4">
               <FormField
                 label="Query Timeout"
-                description="Maximum duration for Search, Histogram, and GetContext queries. Leave empty to disable."
+                description="Longest a Search, Histogram or GetContext query may run; empty or 0s means no limit."
                 dark={dark}
               >
                 <TextInput
                   value={s.queryTimeout}
                   onChange={set("queryTimeout")}
-                  placeholder="30s"
+                  placeholder=""
                   dark={dark}
                   mono
                   examples={["15s", "30s", "1m", "5m"]}
@@ -470,13 +484,13 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
 
               <FormField
                 label="Max Follow Duration"
-                description="Maximum lifetime for a Follow stream before the server closes it. Leave empty to disable."
+                description="Longest a Follow stream stays open before the server closes it; empty or 0s means no limit."
                 dark={dark}
               >
                 <TextInput
                   value={s.maxFollowDuration}
                   onChange={set("maxFollowDuration")}
-                  placeholder="4h"
+                  placeholder=""
                   dark={dark}
                   mono
                   examples={["1h", "4h", "8h", "24h"]}
@@ -485,7 +499,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
 
               <FormField
                 label="Max Result Count"
-                description="Maximum number of records a single search request can return. Set to 0 for unlimited."
+                description="Most records one Search request returns; empty or 0 means no limit."
                 dark={dark}
               >
                 <NumberInput
@@ -584,7 +598,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
             <div className="flex flex-col gap-4">
               <FormField
                 label="Broadcast Interval"
-                description="How often each node broadcasts its full stats payload (vault stats, route stats, alerts) to peers. Lower values give fresher data but increase network traffic."
+                description="How often each node broadcasts its stats payload (vault stats, route stats, alarms) to peers; shorter is fresher but costs network traffic."
                 helpRef="service-settings#broadcasting"
                 dark={dark}
               >
@@ -618,7 +632,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
             <div className="flex flex-col gap-4">
               <FormField
                 label="Backlog Budget"
-                description="Per-vault budget for the pipeline backlog (completed segments awaiting chunking). At the budget, new records for that vault are refused cluster-wide — retryable backpressure — until chunking drains it. Bounds the backlog before disk pressure; the disk-space guard remains the backstop. Applies to every vault. Leave empty for unbounded."
+                description="Per-vault bound on completed segments awaiting chunking; at it the vault refuses new records until chunking drains below it. Empty means unbounded."
                 helpRef="service-settings#pipeline"
                 dark={dark}
               >
