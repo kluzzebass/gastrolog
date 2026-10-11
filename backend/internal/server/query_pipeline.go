@@ -59,7 +59,16 @@ func (s *QueryServer) searchPipeline(
 	}
 	return stream.Send(&apiv1.SearchResponse{
 		TableResult: tableResultToProto(table, pipeline),
-		Histogram:   HistogramToProto(eng.ComputeHistogram(ctx, q, 50)),
+		Histogram:   s.pipelineHistogram(ctx, eng, q),
+	})
+}
+
+// pipelineHistogram is a pipeline search's volume histogram over every vault in
+// scope: this node's vaults grouped by level, merged with each remote vault's
+// page histogram.
+func (s *QueryServer) pipelineHistogram(ctx context.Context, eng *query.Engine, q query.Query) []*apiv1.HistogramBucket {
+	return s.mergeRemoteHistogram(ctx, q, func() []*apiv1.HistogramBucket {
+		return HistogramToProto(eng.ComputeHistogram(ctx, q, pageHistogramBuckets))
 	})
 }
 
@@ -90,16 +99,14 @@ func (s *QueryServer) searchPipelineGlobal(
 
 	// Stream raw records from remote nodes (no pipeline — just the base
 	// query); the pipeline runs once, over local and remote records merged.
-	remoteIter, remoteHist, _ := s.collectRemoteForPipeline(ctx, q, pipeline)
+	remoteIter, _ := s.collectRemoteForPipeline(ctx, q, pipeline)
 
 	result, err := eng.RunPipelineWithRemote(ctx, q, pipeline, remoteIter, budget)
 	if err != nil {
 		return errQueryExecution(err)
 	}
 
-	// Compute and merge histogram.
-	localHist := HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
-	histogram := mergeHistogramBuckets(localHist, remoteHist)
+	histogram := s.pipelineHistogram(ctx, eng, q)
 
 	if result.Table != nil {
 		return stream.Send(&apiv1.SearchResponse{

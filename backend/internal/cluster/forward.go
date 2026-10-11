@@ -425,7 +425,8 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 		return sendForwardedTable(stream, tableResult, histogram)
 	}
 
-	// No results (vault has no leader instance on this node).
+	// No record stream: a histogram_only answer, or a vault with no leader
+	// instance on this node.
 	if searchIter == nil {
 		return stream.SendMsg(&gastrologv1.ForwardSearchResponse{Histogram: histogram})
 	}

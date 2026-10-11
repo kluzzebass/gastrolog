@@ -428,10 +428,9 @@ message RequestReplicaCatchupResponse {
   uint32 scheduled = 1; // number of chunk pushes scheduled (after leader-side filtering)
 }
 
-// ForwardSearchRequest is sent to a replica holder node to execute a
-// scoped search locally and return matching records. When sealed_chunk_ids
-// is empty and search_pipeline_chunks is false, the holder runs a legacy
-// leader-only full-vault search (backward compatible).
+// ForwardSearchRequest is sent to the node leading vault_id to run the query
+// against that vault: a record stream, a pipeline's table, or — with
+// histogram_only — the vault's page histogram.
 message ForwardSearchRequest {
   bytes vault_id = 1;
   string query = 2;
@@ -440,6 +439,10 @@ message ForwardSearchRequest {
   // count) so the coordinator can merge per-node tables instead of gathering
   // records.
   bool partial_aggregates = 4;
+  // Answer with the vault's page histogram over the query's window and no
+  // records. The coordinator asks for it beside the record stream, so a record
+  // stream never waits on the histogram's scan of the window.
+  bool histogram_only = 5;
 }
 
 message ForwardSearchResponse {
@@ -447,7 +450,7 @@ message ForwardSearchResponse {
   bytes resume_token = 2;
   bool has_more = 3;
   TableResult table_result = 4;          // Pipeline results (timechart, stats)
-  repeated HistogramBucket histogram = 5; // Volume histogram from this node's vaults
+  repeated HistogramBucket histogram = 5; // The vault's page histogram, answering histogram_only
 }
 
 // ForwardGetContextRequest asks a remote node to return records surrounding

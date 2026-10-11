@@ -339,7 +339,8 @@ node honours a source-time window or a `pos=` address the same way a local one
 does. A legacy token/key-value query is folded into its filter first, so it
 never reaches a peer as an unfiltered scan. What the text does not carry
 travels in the request beside it: the resume cursor in `ResumeToken`, the
-partial-aggregate request in `PartialAggregates`. A test fails when a
+partial-aggregate request in `PartialAggregates`, the histogram request in
+`HistogramOnly`. A test fails when a
 `query.Query` field is neither round-tripped through the wire form nor named
 with the channel that carries it instead. `Query.String()` is a display form
 for Explain, not the wire.
@@ -365,14 +366,22 @@ which node the client connected to and on how routing fanned copies across
 vaults. EventID's fields are intrinsic to the event and identical on every copy
 of it, so every node ranks any two records the same way.
 
-**Histograms travel ahead of records.** Each remote vault's histogram arrives
-whole in its stream's first message, and `SearchStream`'s `getHistogram` must
-answer from that message alone. The coordinator reads every vault's histogram
-*before* it starts draining any vault's records, so a getter that waited for
-its stream to finish would deadlock the fan-out: the record channel fills, the
-peer's producer parks on a send nobody is reading, and the coordinator is still
-waiting on the histogram. It only bites past the channel's depth, which is why
-paged queries never showed it and an unlimited one did.
+**Histograms travel beside records, never inside them.** The page-1 histogram
+covers the whole window, while a vault's record stream stops at the page
+limit, so no record scan can produce it: a filtered histogram is its own scan
+of the window (`timechartScanPath`), an unfiltered one counts from the
+timestamp index. On the first page the coordinator computes its own leader
+vaults' share and, concurrently, `collectRemoteHistogram` sends every remote
+vault's leader a `ForwardSearch` with `histogram_only` set; the peer answers
+with `ComputeSearchPageHistogram` over the forwarded query — the function the
+coordinator runs for its own vaults — and no records. The shares sum bucket by
+bucket on the grid every node derives from the same absolute window. Record
+streams carry no histogram, and later pages ask for none, so no record waits on
+a histogram's scan and the response's closing message is the only one that
+does. Pipeline searches merge the remote shares the same way. If any remote
+vault fails to answer, the response carries no histogram: a sum missing one
+vault's share would understate volume while looking authoritative. A remote
+vault whose record stream fails fails the search itself.
 
 **Resume tokens** carry the coordinator's local chunk positions plus one
 canonical cursor for the merged stream: the last emitted record's timestamp on
