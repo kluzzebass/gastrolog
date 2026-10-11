@@ -78,7 +78,11 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 // already in flight has to build it the same way — hence one function rather
 // than two format calls that can drift.
 func postSealJobName(vaultID glid.GLID, chunkID chunk.ChunkID) string {
-	return fmt.Sprintf("post-seal:%s:%s", vaultID, chunkID)
+	return postSealJobPrefix(vaultID) + chunkID.String()
+}
+
+func postSealJobPrefix(vaultID glid.GLID) string {
+	return "post-seal:" + vaultID.String() + ":"
 }
 
 // postSealInFlight reports whether a post-seal job for this chunk is currently

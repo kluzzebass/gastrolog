@@ -371,12 +371,7 @@ func (o *Orchestrator) finishDrain(vaultID glid.GLID) {
 		return // already removed (e.g. CancelDrain + ForceRemoveVault raced)
 	}
 
-	// Cancel pending post-seal/compress/index jobs before closing the chunk manager
-	// to prevent use-after-close on the managers they capture.
-	vaultPrefix := vaultID.String()
-	o.scheduler.RemoveJobsByPrefix("post-seal:" + vaultPrefix)
-	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
-	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
+	o.cancelPendingChunkJobs(vaultID)
 
 	if err := vault.Close(); err != nil {
 		o.drainLogger.Warn("drain: failed to close vault", "vault", vaultID, "error", err)

@@ -290,6 +290,15 @@ func (o *Orchestrator) removeVaultJobs(_ glid.GLID, vault *Vault) {
 	}
 }
 
+// cancelPendingChunkJobs cancels a vault's pending post-seal and index jobs,
+// which read through its chunk and index managers: run after the vault closes,
+// they would act on closed managers.
+func (o *Orchestrator) cancelPendingChunkJobs(vaultID glid.GLID) {
+	o.scheduler.RemoveJobsByPrefix(postSealJobPrefix(vaultID))
+	o.scheduler.RemoveJobsByPrefix(indexRebuildJobPrefix(vaultID))
+	o.scheduler.RemoveJob(homeIndexSweepJobName(vaultID))
+}
+
 // teardownVault performs the common cleanup for all vault removal paths:
 // cancels pending jobs, closes managers, and removes from the registry. The
 // pipeline routing table and Origin registrations are reconciled separately by
@@ -297,11 +306,7 @@ func (o *Orchestrator) removeVaultJobs(_ glid.GLID, vault *Vault) {
 func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	o.decommissionVaultControlPlaneRaftGroup(id)
 
-	// Cancel pending post-seal/compress/index jobs to prevent use-after-close.
-	vaultPrefix := id.String()
-	o.scheduler.RemoveJobsByPrefix("post-seal:" + vaultPrefix)
-	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
-	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
+	o.cancelPendingChunkJobs(id)
 	// Same reasoning as removeVaultJobs: a torn-down vault must not leave a
 	// stranded cloud-backfill-stuck alarm behind, and an in-flight upload
 	// must not outlive the chunk manager it reads through.
@@ -508,11 +513,7 @@ func (o *Orchestrator) removeVaultInstance(vaultID glid.GLID, deleteData bool) b
 		return false
 	}
 
-	// Cancel pending jobs for this vault.
-	prefix := vaultID.String()
-	o.scheduler.RemoveJobsByPrefix("post-seal:" + prefix + ":" + vaultID.String())
-	o.scheduler.RemoveJobsByPrefix("compress:" + prefix + ":" + vaultID.String())
-	o.scheduler.RemoveJobsByPrefix("index-build:" + prefix + ":" + vaultID.String())
+	o.cancelPendingChunkJobs(vaultID)
 
 	// Destructive cleanup — only on explicit deletion.
 	if deleteData {
@@ -668,11 +669,7 @@ func (o *Orchestrator) UnregisterVault(id glid.GLID) error {
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, id)
 	}
 
-	// Cancel pending post-seal/compress/index jobs before closing the chunk manager.
-	vaultPrefix := id.String()
-	o.scheduler.RemoveJobsByPrefix("post-seal:" + vaultPrefix)
-	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
-	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
+	o.cancelPendingChunkJobs(id)
 
 	// Stop vault control-plane Raft before closing chunk managers — same
 	// ordering as teardownVault. Otherwise trailing apply callbacks can
