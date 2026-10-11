@@ -1434,7 +1434,7 @@ the collector.
   vault-ctl and served for pulls; retained until release.
 - **pre-head/** — in-flight transfers on a collecting home; invisible to
   queries and Chunking. A failed or corrupt transfer is discarded here and
-  re-pulled from another holder.
+  re-pulled from the next holder in the same collect pass.
 - **head/** — whole, checksum-verified, immutable segments awaiting chunking.
   Where the recent, queryable records live: an Active chunk's records are
   read from its manifest's segments here.

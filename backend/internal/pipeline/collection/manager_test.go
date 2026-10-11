@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -64,15 +65,21 @@ func (p *memoryPull) Put(segmentID glid.GLID, data []byte) {
 	p.mu.Unlock()
 }
 
-func (p *memoryPull) Pull(_ context.Context, _ glid.GLID, segmentID glid.GLID, dest io.Writer) error {
+// memorySource is the single source a memoryPull serves from.
+const memorySource = "memory"
+
+func (p *memoryPull) Pull(_ context.Context, _ glid.GLID, segmentID glid.GLID, exclude []string, dest io.Writer) (string, error) {
+	if slices.Contains(exclude, memorySource) {
+		return "", fmt.Errorf("%w: only source excluded", collection.ErrSegmentUnavailable)
+	}
 	p.mu.Lock()
 	data := p.data[segmentID]
 	p.mu.Unlock()
 	if data == nil {
-		return io.ErrUnexpectedEOF
+		return "", io.ErrUnexpectedEOF
 	}
 	_, err := dest.Write(data)
-	return err
+	return memorySource, err
 }
 
 type recordingReceipts struct {
@@ -431,7 +438,9 @@ func TestCollectOnceUnknownVault(t *testing.T) {
 
 type errPull struct{ err error }
 
-func (p errPull) Pull(context.Context, glid.GLID, glid.GLID, io.Writer) error { return p.err }
+func (p errPull) Pull(context.Context, glid.GLID, glid.GLID, []string, io.Writer) (string, error) {
+	return "", p.err
+}
 
 // TestCollectOnceWaitersShareWorkerPass verifies concurrent CollectOnce calls
 // with an active worker coalesce on one worker pass instead of each caller
@@ -508,7 +517,7 @@ type gatedPull struct {
 	pulled  map[glid.GLID]bool
 }
 
-func (g *gatedPull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
+func (g *gatedPull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, exclude []string, dest io.Writer) (string, error) {
 	g.first.Do(func() {
 		close(g.started)
 		<-g.release
@@ -519,7 +528,7 @@ func (g *gatedPull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, dest
 	}
 	g.pulled[segmentID] = true
 	g.mu.Unlock()
-	return g.inner.Pull(ctx, vaultID, segmentID, dest)
+	return g.inner.Pull(ctx, vaultID, segmentID, exclude, dest)
 }
 
 func (g *gatedPull) pulledSegment(id glid.GLID) bool {
@@ -601,10 +610,10 @@ type countingSlowPull struct {
 	pulls atomic.Int64
 }
 
-func (s *countingSlowPull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
+func (s *countingSlowPull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, exclude []string, dest io.Writer) (string, error) {
 	s.pulls.Add(1)
 	time.Sleep(s.delay)
-	return s.inner.Pull(ctx, vaultID, segmentID, dest)
+	return s.inner.Pull(ctx, vaultID, segmentID, exclude, dest)
 }
 
 func TestCollectOncePullFailure(t *testing.T) {
@@ -940,13 +949,16 @@ type mismatchThenMatchPull struct {
 	bad   atomic.Int32
 }
 
-func (p *mismatchThenMatchPull) Pull(_ context.Context, _, _ glid.GLID, dest io.Writer) error {
+func (p *mismatchThenMatchPull) Pull(_ context.Context, _, _ glid.GLID, exclude []string, dest io.Writer) (string, error) {
+	if slices.Contains(exclude, memorySource) {
+		return "", fmt.Errorf("%w: only source excluded", collection.ErrSegmentUnavailable)
+	}
 	data := p.right
 	if p.bad.Add(-1) >= 0 {
 		data = p.wrong
 	}
 	_, err := dest.Write(data)
-	return err
+	return memorySource, err
 }
 
 // TestRunRepullsAfterChecksumMismatch pins retryability: a checksum mismatch
@@ -1002,6 +1014,119 @@ func TestRunRepullsAfterChecksumMismatch(t *testing.T) {
 		n := receipts.count()
 		return fmt.Sprintf("bad pulls left=%d head=%v receipts=%d", pull.bad.Load(), head, n), head && n == 1
 	})
+}
+
+// namedSource is one holder's copy of a segment.
+type namedSource struct {
+	name string
+	data []byte
+}
+
+// orderedSourcesPull serves from the first source not excluded, in order, and
+// records which sources it served.
+type orderedSourcesPull struct {
+	sources []namedSource
+
+	mu     sync.Mutex
+	served []string
+}
+
+func (p *orderedSourcesPull) Pull(_ context.Context, _, _ glid.GLID, exclude []string, dest io.Writer) (string, error) {
+	for _, s := range p.sources {
+		if slices.Contains(exclude, s.name) {
+			continue
+		}
+		p.mu.Lock()
+		p.served = append(p.served, s.name)
+		p.mu.Unlock()
+		_, err := dest.Write(s.data)
+		return s.name, err
+	}
+	return "", fmt.Errorf("%w: every source excluded", collection.ErrSegmentUnavailable)
+}
+
+func (p *orderedSourcesPull) servedSources() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.served...)
+}
+
+// TestCollectOncePullsNextSourceAfterCorruptCopy: a copy that fails
+// verification excludes its source, and the same pass pulls the next one.
+func TestCollectOncePullsNextSourceAfterCorruptCopy(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+
+	right := writeSegmentBytes(t, vaultID, segID, "right bytes")
+	wrong := writeSegmentBytes(t, vaultID, segID, "stale bytes from a rotten holder")
+	pull := &orderedSourcesPull{sources: []namedSource{
+		{name: "rotten-a", data: wrong},
+		{name: "torn-b", data: right[:len(right)/2]},
+		{name: "healthy-c", data: right},
+	}}
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{VaultID: vaultID, SegmentID: segID, Checksum: segmentChecksumOf(t, right)})
+	receipts := &recordingReceipts{}
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{Log: log, Pull: pull, Receipts: receipts}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
+		t.Fatalf("CollectOnce: %v", err)
+	}
+	got, err := os.ReadFile(paths.HeadSegment(root, segID))
+	if err != nil || !bytes.Equal(got, right) {
+		t.Fatalf("head/ copy missing or wrong: err=%v", err)
+	}
+	if receipts.count() != 1 {
+		t.Fatalf("receipts = %d, want 1", receipts.count())
+	}
+	if served, want := pull.servedSources(), []string{"rotten-a", "torn-b", "healthy-c"}; !slices.Equal(served, want) {
+		t.Fatalf("served = %v, want %v", served, want)
+	}
+}
+
+// TestCollectOnceStopsWhenClientServesExcludedSource: a pull client that
+// ignores the exclusion and keeps serving the same corrupt copy ends the pass
+// with the corruption after one repeat, instead of looping on it.
+func TestCollectOnceStopsWhenClientServesExcludedSource(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+
+	right := writeSegmentBytes(t, vaultID, segID, "right bytes")
+	wrong := writeSegmentBytes(t, vaultID, segID, "stale bytes served forever")
+	pull := &countingSlowPull{inner: &ignoringExcludePull{data: wrong}}
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{VaultID: vaultID, SegmentID: segID, Checksum: segmentChecksumOf(t, right)})
+	receipts := &recordingReceipts{}
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{Log: log, Pull: pull, Receipts: receipts}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := mgr.CollectOnce(context.Background(), vaultID)
+	if !errors.Is(err, collection.ErrCorruptSegment) {
+		t.Fatalf("CollectOnce = %v, want ErrCorruptSegment", err)
+	}
+	if n := pull.pulls.Load(); n != 2 {
+		t.Fatalf("pulls = %d, want 2 (the corrupt copy, then one repeat that ends the pass)", n)
+	}
+	if receipts.count() != 0 {
+		t.Fatalf("receipts = %d, want 0", receipts.count())
+	}
+}
+
+// ignoringExcludePull serves the same source whatever is excluded.
+type ignoringExcludePull struct{ data []byte }
+
+func (p *ignoringExcludePull) Pull(_ context.Context, _, _ glid.GLID, _ []string, dest io.Writer) (string, error) {
+	_, err := dest.Write(p.data)
+	return "stubborn", err
 }
 
 // TestCollectSegmentsVerifiesPublishedChecksum: the targeted path (chunking
@@ -1107,11 +1232,11 @@ type retryablePull struct {
 	failures atomic.Int32
 }
 
-func (p *retryablePull) Pull(ctx context.Context, nodeID glid.GLID, segmentID glid.GLID, dest io.Writer) error {
+func (p *retryablePull) Pull(ctx context.Context, nodeID glid.GLID, segmentID glid.GLID, exclude []string, dest io.Writer) (string, error) {
 	if p.failures.Add(-1) >= 0 {
-		return fmt.Errorf("pull segment %s: %w", segmentID, os.ErrNotExist)
+		return "", fmt.Errorf("pull segment %s: %w", segmentID, os.ErrNotExist)
 	}
-	return p.inner.Pull(ctx, nodeID, segmentID, dest)
+	return p.inner.Pull(ctx, nodeID, segmentID, exclude, dest)
 }
 
 // TestDeferredPassRetriesWithoutNewEvents pins the retry edge for deferred
@@ -1236,11 +1361,11 @@ type missingSegmentPull struct {
 	missing glid.GLID
 }
 
-func (p *missingSegmentPull) Pull(ctx context.Context, nodeID glid.GLID, segmentID glid.GLID, dest io.Writer) error {
+func (p *missingSegmentPull) Pull(ctx context.Context, nodeID glid.GLID, segmentID glid.GLID, exclude []string, dest io.Writer) (string, error) {
 	if segmentID == p.missing {
-		return fmt.Errorf("pull segment %s: %w", segmentID, os.ErrNotExist)
+		return "", fmt.Errorf("pull segment %s: %w", segmentID, os.ErrNotExist)
 	}
-	return p.inner.Pull(ctx, nodeID, segmentID, dest)
+	return p.inner.Pull(ctx, nodeID, segmentID, exclude, dest)
 }
 
 // failingPull fails every pull retryably (os.ErrNotExist) and closes started
@@ -1250,9 +1375,9 @@ type failingPull struct {
 	started chan struct{}
 }
 
-func (p *failingPull) Pull(_ context.Context, _ glid.GLID, segmentID glid.GLID, _ io.Writer) error {
+func (p *failingPull) Pull(_ context.Context, _ glid.GLID, segmentID glid.GLID, _ []string, _ io.Writer) (string, error) {
 	p.once.Do(func() { close(p.started) })
-	return fmt.Errorf("pull segment %s: %w", segmentID, os.ErrNotExist)
+	return "", fmt.Errorf("pull segment %s: %w", segmentID, os.ErrNotExist)
 }
 
 // TestPartialPassFiresOnPassCompleteOnce pins partial-pass progress:
@@ -1402,12 +1527,12 @@ type segGatedPull struct {
 	once    sync.Once
 }
 
-func (g *segGatedPull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
+func (g *segGatedPull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, exclude []string, dest io.Writer) (string, error) {
 	if segmentID == g.gateSeg {
 		g.once.Do(func() { close(g.started) })
 		<-g.release
 	}
-	return g.inner.Pull(ctx, vaultID, segmentID, dest)
+	return g.inner.Pull(ctx, vaultID, segmentID, exclude, dest)
 }
 
 // TestCollectSegmentsDoesNotWaitForFullPass: a targeted CollectSegments
@@ -1485,7 +1610,7 @@ type concurrencyProbePull struct {
 	peak     int
 }
 
-func (p *concurrencyProbePull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
+func (p *concurrencyProbePull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, exclude []string, dest io.Writer) (string, error) {
 	p.mu.Lock()
 	p.inflight++
 	if p.inflight > p.peak {
@@ -1493,11 +1618,11 @@ func (p *concurrencyProbePull) Pull(ctx context.Context, vaultID, segmentID glid
 	}
 	p.mu.Unlock()
 	time.Sleep(20 * time.Millisecond)
-	err := p.inner.Pull(ctx, vaultID, segmentID, dest)
+	source, err := p.inner.Pull(ctx, vaultID, segmentID, exclude, dest)
 	p.mu.Lock()
 	p.inflight--
 	p.mu.Unlock()
-	return err
+	return source, err
 }
 
 func (p *concurrencyProbePull) peakInflight() int {

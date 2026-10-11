@@ -3,6 +3,7 @@ package collection
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"os"
@@ -52,6 +53,7 @@ type collectDeps struct {
 type vaultCollect struct {
 	vaultID glid.GLID
 	root    string
+	logger  *slog.Logger
 	// deferWrites mirrors Config.DeferWrites (nil = never defer).
 	deferWrites func() bool
 	// deps is the current collaborator bundle; never nil after construction.
@@ -138,6 +140,7 @@ func newVaultCollect(vaultID glid.GLID, root string, cfg VaultConfig, logger *sl
 	v := &vaultCollect{
 		vaultID:   vaultID,
 		root:      root,
+		logger:    logger,
 		wake:      notify.NewSignal(),
 		receipted: make(map[glid.GLID]struct{}),
 	}
@@ -199,16 +202,39 @@ func (v *vaultCollect) collectOne(ctx context.Context, ref AssignedSegment) erro
 		}
 		// Corrupt orphan discarded — fall through to a fresh pull.
 	}
-	prePath, err := PullToPreHead(ctx, v.root, ref.VaultID, ref.SegmentID, v.deps.Load().pull)
-	if err != nil {
-		return err
+	return v.pullVerified(ctx, ref)
+}
+
+// pullVerified pulls a segment into pre-head and promotes it, excluding each
+// source whose copy fails verification and pulling again from the next one.
+// The exclusions live only for this call: a later pass offers every source
+// again, so a holder that repairs its copy is not shunned. Terminates because
+// every corrupt copy shrinks the remaining source set, and a client that
+// serves an already-excluded source ends the call.
+func (v *vaultCollect) pullVerified(ctx context.Context, ref AssignedSegment) error {
+	pull := v.deps.Load().pull
+	var rejected []string
+	var rejections []error
+	for {
+		prePath, source, err := PullToPreHead(ctx, v.root, ref.VaultID, ref.SegmentID, rejected, pull)
+		if err != nil {
+			return erragg.SummaryJoin(append(rejections, err)...)
+		}
+		dest, hdr, err := PromoteVerified(prePath, v.root, ref.Checksum)
+		if err == nil {
+			if len(rejections) > 0 {
+				v.logger.Warn("discarded corrupt segment copies, collected from another source",
+					"segment", ref.SegmentID, "source", source, "rejected", erragg.SummaryJoin(rejections...))
+			}
+			v.finishCollect(ref.SegmentID, dest, hdr)
+			return nil
+		}
+		if !errors.Is(err, ErrCorruptSegment) || slices.Contains(rejected, source) {
+			return erragg.SummaryJoin(append(rejections, err)...)
+		}
+		rejected = append(rejected, source)
+		rejections = append(rejections, fmt.Errorf("copy from %s: %w", source, err))
 	}
-	dest, hdr, err := PromoteVerified(prePath, v.root, ref.Checksum)
-	if err != nil {
-		return err
-	}
-	v.finishCollect(ref.SegmentID, dest, hdr)
-	return nil
 }
 
 // finishCollect records a promoted segment: stage-throughput counters plus

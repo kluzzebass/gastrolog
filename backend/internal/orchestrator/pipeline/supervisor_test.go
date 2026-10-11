@@ -128,8 +128,8 @@ type supervisorPull struct {
 	sup *Supervisor
 }
 
-func (p *supervisorPull) Pull(_ context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
-	return p.sup.ServePull(distribution.PullRequest{
+func (p *supervisorPull) Pull(_ context.Context, vaultID, segmentID glid.GLID, _ []string, dest io.Writer) (string, error) {
+	return "supervisor", p.sup.ServePull(distribution.PullRequest{
 		VaultID:   vaultID,
 		SegmentID: segmentID,
 		Dest:      dest,
