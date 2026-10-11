@@ -21,8 +21,7 @@ var (
 
 	// ErrPreHeadPurged is returned when the pre-head file vanishes between
 	// the pull's rename-in and the promote — a concurrent purge
-	// (paths.PurgeHeadStaging on segment release, via the supervisor's
-	// OnReleaseSegments hook or chunking's release/stale purges) deleted it
+	// (the pipeline's release purge, or chunking's release/stale purges) deleted it
 	// because the registry no longer needs the segment. A catch-up race, not
 	// a data-integrity failure: no byte was ever verified and found wrong.
 	// Joining ErrCorruptSegment here instead surfaced every such race as a

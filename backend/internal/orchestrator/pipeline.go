@@ -613,25 +613,6 @@ func (o *Orchestrator) pipelineVaultChunkRoot(vaultID glid.GLID) (string, bool) 
 	return pipelineChunkRoot(pipelineVaultRoot(o.segmentsDir, vaultID)), true
 }
 
-// pipelineVaultStagingRoot returns the segment staging root for a vault
-// when this node runs the pipeline for it in any role
-// (<segmentsDir>/<vaultID> — the parent of working/, completed/, head/,
-// pre-head/ and chunks/). Unlike pipelineVaultChunkRoot it is NOT
-// home-gated: origins hold completed/ files too, and the staging-orphan
-// sweep must purge released segments on every role.
-//
-// Lock-free for the same reason as pipelineVaultChunkRoot: reachable from the
-// Raft apply pump, which must not block on o.mu.
-func (o *Orchestrator) pipelineVaultStagingRoot(vaultID glid.GLID) (string, bool) {
-	if o.segmentsDir == "" {
-		return "", false
-	}
-	if _, registered := o.lookupPipelineVault(vaultID); !registered {
-		return "", false
-	}
-	return filepath.Join(o.segmentsDir, vaultID.String()), true
-}
-
 // errNoVaultCtlHandle rejects publishes while no vault-ctl handle is available.
 // It is retryable by distribution's publish-retry classification (anything but
 // ErrUnknownVault / bytes-missing), so refused segments stay staged in the

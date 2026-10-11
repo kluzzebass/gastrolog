@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -205,15 +206,14 @@ type vaultRoles struct {
 	release  *releaseConsumer
 }
 
-// stagingHeadPurgeRoots returns distinct vault staging roots whose head/ copies
-// must be dropped after ReleaseSegments. Origin and home often share one root
-// in production; tests and misconfig can split them.
-func stagingHeadPurgeRoots(originRoot, homeRoot string, origin, homeSide bool) []string {
+// stagingRoots returns the distinct staging roots this node uses for a vault.
+// Origin and home share one root in production; tests can split them.
+func stagingRoots(originRoot, homeRoot string, origin, homeSide bool) []string {
 	var roots []string
 	if origin && originRoot != "" {
 		roots = append(roots, originRoot)
 	}
-	if homeSide && homeRoot != "" && homeRoot != originRoot {
+	if homeSide && homeRoot != "" && !slices.Contains(roots, homeRoot) {
 		roots = append(roots, homeRoot)
 	}
 	return roots
@@ -690,21 +690,21 @@ func (s *Supervisor) RegisterVault(spec VaultSpec) error {
 }
 
 // newReleaseConsumer builds the vault's release consumer, or nil when the spec
-// carries no vault-ctl FSM or no staging root. Head copies are dropped on every
-// staging root this node uses: distribution promotes under OriginRoot,
+// carries no vault-ctl FSM or no staging root. Released copies are dropped on
+// every staging root this node uses: distribution promotes under OriginRoot,
 // collection and chunking use HomeRoot.
 func (s *Supervisor) newReleaseConsumer(spec VaultSpec, homeSide bool) *releaseConsumer {
-	if spec.FSM == nil || (spec.OriginRoot == "" && spec.HomeRoot == "") {
+	roots := stagingRoots(spec.OriginRoot, spec.HomeRoot, spec.Origin, homeSide)
+	if spec.FSM == nil || len(roots) == 0 {
 		return nil
 	}
 	c := &releaseConsumer{
-		vaultID:   spec.VaultID,
-		dist:      s.dist,
-		logger:    s.logger,
-		headRoots: stagingHeadPurgeRoots(spec.OriginRoot, spec.HomeRoot, spec.Origin, homeSide && spec.HomeRoot != ""),
+		vaultID: spec.VaultID,
+		logger:  s.logger,
+		roots:   roots,
 	}
 	if spec.Origin {
-		c.completedRoot = spec.OriginRoot
+		c.dist = s.dist
 	}
 	return c
 }

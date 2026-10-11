@@ -205,7 +205,15 @@ contrast with any earlier design. It states only what V3 *is*, never what it
     growing without limit. Ordering is the safety invariant: purge only after the data
     survives in a replicated chunk, so a returning or long-offline node never needs a
     purged segment — it gets those records via chunk replication, not a segment
-    re-pull.
+    re-pull. Release leaves a **released-segment tombstone** behind the registry entry:
+    a node that missed the release still has the segment in `completed/` and
+    republishes it on restart, and only the tombstone stops that publish from
+    re-registering records already in a chunk. Each node's staging sweep purges every
+    tombstoned segment it holds and then confirms the release sequence it covered;
+    the vault-ctl leader prunes the tombstones every member of the group has
+    confirmed. The tombstones are therefore bounded by the releases some member has
+    not swept yet — a member that stays down holds them until it returns or leaves
+    the cluster — not by total ingest.
 
 ### Revised by lived experience (implementation + soak, 2026-07)
 

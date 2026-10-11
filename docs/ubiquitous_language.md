@@ -1496,16 +1496,33 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
   chunks (holder-gated). The FSM-level end of a segment's registry life;
   bytes may still exist on disk.
 
+- **Released-segment tombstone** (vault-ctl) — the FSM's record that a
+  segment was released, kept after its registry entry is gone and tagged
+  with the **release sequence** it was released at (`releaseSeq`, counting
+  the `ReleaseSegments` applies that tombstoned a segment). A
+  `PublishCompletedSegment` naming one is ignored — the restart republish of
+  a node that missed the release — and the release consumer's catch-up and
+  the released-segment sweep purge its bytes on sight
+  (`FSM.SegmentReleased`).
+
+- **Purge confirmation** (vault-ctl) — a node's `ConfirmSegmentPurgeCommand`:
+  it holds no staging copy of any segment released at or before the named
+  release sequence. Every node sends one after its released-segment sweep
+  (`Orchestrator.sweepReleasedSegments`); the vault-ctl leader's
+  `PruneReleasedSegmentsCommand` drops the tombstones every member of its
+  Raft configuration has confirmed, and the confirmations of nodes no longer
+  in it.
+
 - **Retire** (distribution) — drop a node's in-memory tracking of a segment
   and mark it so the stranded rescan does not republish still-on-disk
   `completed/` bytes (`Manager.RetireSegments`, `vaultDist.retireSegment`).
   Node-local bookkeeping, downstream of release.
 
 - **Purge** (paths / disk) — delete the segment's bytes from staging areas
-  (`paths.PurgeCompleted` on the origin after release, whether or not the
-  origin is a home; `paths.PurgeHeadStaging`
-  after a home materializes the sealed GLCB; `paths.PurgeSegmentStaging` for
-  all three areas). The physical end of a segment's life, ordered strictly
+  (`paths.PurgeSegmentStaging` for all three areas once the segment is
+  released, on every node whether or not it is a home;
+  `paths.PurgeHeadStaging` after a home materializes the sealed GLCB). The
+  physical end of a segment's life, ordered strictly
   after its records survive in a replicated chunk — a returning node gets
   those records via chunk replication, never a segment re-pull.
 

@@ -299,6 +299,18 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
      */
     value: ArchiveChunkCommand;
     case: "archiveChunk";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.ConfirmSegmentPurgeCommand confirm_segment_purge = 26;
+     */
+    value: ConfirmSegmentPurgeCommand;
+    case: "confirmSegmentPurge";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.PruneReleasedSegmentsCommand prune_released_segments = 27;
+     */
+    value: PruneReleasedSegmentsCommand;
+    case: "pruneReleasedSegments";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<VaultCtlCommand>) {
@@ -334,6 +346,8 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
     { no: 23, name: "discard_unbuildable_manifests", kind: "message", T: DiscardUnbuildableManifestsCommand, oneof: "command" },
     { no: 24, name: "clear_transfer_source", kind: "message", T: ClearTransferSourceCommand, oneof: "command" },
     { no: 25, name: "archive_chunk", kind: "message", T: ArchiveChunkCommand, oneof: "command" },
+    { no: 26, name: "confirm_segment_purge", kind: "message", T: ConfirmSegmentPurgeCommand, oneof: "command" },
+    { no: 27, name: "prune_released_segments", kind: "message", T: PruneReleasedSegmentsCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultCtlCommand {
@@ -1890,6 +1904,97 @@ export class ReleaseSegmentsCommand extends Message<ReleaseSegmentsCommand> {
 }
 
 /**
+ * ConfirmSegmentPurgeCommand is a node's purge confirmation: node_id holds no
+ * staging bytes for any segment released at or before release_seq. A
+ * released-segment tombstone is pruned only once every vault-ctl member has
+ * confirmed past it, because a node still holding a released segment's
+ * completed/ file republishes it after a restart.
+ *
+ * @generated from message gastrolog.v1.ConfirmSegmentPurgeCommand
+ */
+export class ConfirmSegmentPurgeCommand extends Message<ConfirmSegmentPurgeCommand> {
+  /**
+   * @generated from field: string node_id = 1;
+   */
+  nodeId = "";
+
+  /**
+   * @generated from field: uint64 release_seq = 2;
+   */
+  releaseSeq = protoInt64.zero;
+
+  constructor(data?: PartialMessage<ConfirmSegmentPurgeCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ConfirmSegmentPurgeCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "release_seq", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ConfirmSegmentPurgeCommand {
+    return new ConfirmSegmentPurgeCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ConfirmSegmentPurgeCommand {
+    return new ConfirmSegmentPurgeCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ConfirmSegmentPurgeCommand {
+    return new ConfirmSegmentPurgeCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ConfirmSegmentPurgeCommand | PlainMessage<ConfirmSegmentPurgeCommand> | undefined, b: ConfirmSegmentPurgeCommand | PlainMessage<ConfirmSegmentPurgeCommand> | undefined): boolean {
+    return proto3.util.equals(ConfirmSegmentPurgeCommand, a, b);
+  }
+}
+
+/**
+ * PruneReleasedSegmentsCommand drops the released-segment tombstones every
+ * node in members has confirmed purging, and the purge confirmations of nodes
+ * no longer in members. Proposed by the vault-ctl leader with its Raft
+ * configuration's server IDs.
+ *
+ * @generated from message gastrolog.v1.PruneReleasedSegmentsCommand
+ */
+export class PruneReleasedSegmentsCommand extends Message<PruneReleasedSegmentsCommand> {
+  /**
+   * @generated from field: repeated string members = 1;
+   */
+  members: string[] = [];
+
+  constructor(data?: PartialMessage<PruneReleasedSegmentsCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PruneReleasedSegmentsCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "members", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PruneReleasedSegmentsCommand {
+    return new PruneReleasedSegmentsCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PruneReleasedSegmentsCommand {
+    return new PruneReleasedSegmentsCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PruneReleasedSegmentsCommand {
+    return new PruneReleasedSegmentsCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PruneReleasedSegmentsCommand | PlainMessage<PruneReleasedSegmentsCommand> | undefined, b: PruneReleasedSegmentsCommand | PlainMessage<PruneReleasedSegmentsCommand> | undefined): boolean {
+    return proto3.util.equals(PruneReleasedSegmentsCommand, a, b);
+  }
+}
+
+/**
  * AckSegmentHolderCommand records that a node has pulled, verified, and now
  * holds one or more completed segments (Rubicon C). Appends node_id to each
  * segment registry entry's holder set; idempotent per segment. Batched so a
@@ -2518,13 +2623,13 @@ export class VaultCtlSnapshot extends Message<VaultCtlSnapshot> {
   segmentResume: SegmentResumeRecordNumber[] = [];
 
   /**
-   * Segment IDs dropped by ReleaseSegments. PublishCompletedSegment after
-   * release is ignored so a stale distribution publish cannot re-register
-   * metadata without bytes (permanent collection/chunking wedge).
+   * Released-segment tombstones: segments dropped by ReleaseSegments and not
+   * yet pruned. PublishCompletedSegment naming one is ignored so a stale
+   * distribution publish cannot re-register a released segment.
    *
-   * @generated from field: repeated bytes released_segment_ids = 8;
+   * @generated from field: repeated gastrolog.v1.ReleasedSegment released_segments = 8;
    */
-  releasedSegmentIds: Uint8Array[] = [];
+  releasedSegments: ReleasedSegment[] = [];
 
   /**
    * Segment → containing chunk IDs, for release-by-chunk-replication after
@@ -2543,6 +2648,19 @@ export class VaultCtlSnapshot extends Message<VaultCtlSnapshot> {
    */
   sealedChunkManifests: OpenChunkManifestState[] = [];
 
+  /**
+   * Count of ReleaseSegments applies that tombstoned a segment; each
+   * tombstone records the value it was released at.
+   *
+   * @generated from field: uint64 release_seq = 11;
+   */
+  releaseSeq = protoInt64.zero;
+
+  /**
+   * @generated from field: repeated gastrolog.v1.SegmentPurgeConfirmation segment_purge_confirmations = 12;
+   */
+  segmentPurgeConfirmations: SegmentPurgeConfirmation[] = [];
+
   constructor(data?: PartialMessage<VaultCtlSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2558,9 +2676,11 @@ export class VaultCtlSnapshot extends Message<VaultCtlSnapshot> {
     { no: 5, name: "open_chunk", kind: "message", T: OpenChunkManifestState },
     { no: 6, name: "sealed_manifests", kind: "message", T: OpenChunkManifestState, repeated: true },
     { no: 7, name: "segment_resume", kind: "message", T: SegmentResumeRecordNumber, repeated: true },
-    { no: 8, name: "released_segment_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 8, name: "released_segments", kind: "message", T: ReleasedSegment, repeated: true },
     { no: 9, name: "segment_chunks", kind: "message", T: SegmentChunkIDs, repeated: true },
     { no: 10, name: "sealed_chunk_manifests", kind: "message", T: OpenChunkManifestState, repeated: true },
+    { no: 11, name: "release_seq", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 12, name: "segment_purge_confirmations", kind: "message", T: SegmentPurgeConfirmation, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultCtlSnapshot {
@@ -2577,6 +2697,97 @@ export class VaultCtlSnapshot extends Message<VaultCtlSnapshot> {
 
   static equals(a: VaultCtlSnapshot | PlainMessage<VaultCtlSnapshot> | undefined, b: VaultCtlSnapshot | PlainMessage<VaultCtlSnapshot> | undefined): boolean {
     return proto3.util.equals(VaultCtlSnapshot, a, b);
+  }
+}
+
+/**
+ * ReleasedSegment is one released-segment tombstone.
+ *
+ * @generated from message gastrolog.v1.ReleasedSegment
+ */
+export class ReleasedSegment extends Message<ReleasedSegment> {
+  /**
+   * @generated from field: bytes segment_id = 1;
+   */
+  segmentId = new Uint8Array(0);
+
+  /**
+   * @generated from field: uint64 release_seq = 2;
+   */
+  releaseSeq = protoInt64.zero;
+
+  constructor(data?: PartialMessage<ReleasedSegment>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ReleasedSegment";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "segment_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "release_seq", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ReleasedSegment {
+    return new ReleasedSegment().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ReleasedSegment {
+    return new ReleasedSegment().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ReleasedSegment {
+    return new ReleasedSegment().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ReleasedSegment | PlainMessage<ReleasedSegment> | undefined, b: ReleasedSegment | PlainMessage<ReleasedSegment> | undefined): boolean {
+    return proto3.util.equals(ReleasedSegment, a, b);
+  }
+}
+
+/**
+ * SegmentPurgeConfirmation is the highest release_seq a node has confirmed
+ * purging through (ConfirmSegmentPurgeCommand).
+ *
+ * @generated from message gastrolog.v1.SegmentPurgeConfirmation
+ */
+export class SegmentPurgeConfirmation extends Message<SegmentPurgeConfirmation> {
+  /**
+   * @generated from field: string node_id = 1;
+   */
+  nodeId = "";
+
+  /**
+   * @generated from field: uint64 release_seq = 2;
+   */
+  releaseSeq = protoInt64.zero;
+
+  constructor(data?: PartialMessage<SegmentPurgeConfirmation>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SegmentPurgeConfirmation";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "release_seq", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SegmentPurgeConfirmation {
+    return new SegmentPurgeConfirmation().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SegmentPurgeConfirmation {
+    return new SegmentPurgeConfirmation().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SegmentPurgeConfirmation {
+    return new SegmentPurgeConfirmation().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SegmentPurgeConfirmation | PlainMessage<SegmentPurgeConfirmation> | undefined, b: SegmentPurgeConfirmation | PlainMessage<SegmentPurgeConfirmation> | undefined): boolean {
+    return proto3.util.equals(SegmentPurgeConfirmation, a, b);
   }
 }
 

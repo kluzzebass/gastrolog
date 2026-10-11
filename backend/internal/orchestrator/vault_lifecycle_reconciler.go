@@ -60,7 +60,6 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
-	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -75,7 +74,6 @@ type reconcilerHost interface {
 	// Pipeline-vault topology and recovery.
 	isPipelineIngestVault(vaultID glid.GLID) bool
 	pipelineVaultChunkRoot(vaultID glid.GLID) (string, bool)
-	pipelineVaultStagingRoot(vaultID glid.GLID) (string, bool)
 	recoverPipelineVault(ctx context.Context, vaultID glid.GLID) error
 
 	// Post-seal scheduling and pipeline follow-up work.
@@ -939,9 +937,8 @@ func (r *VaultLifecycleReconciler) onPruneNode(prunedNodeID string, finalizable 
 // itself.
 //
 // Point queries that are cheap and per-candidate (IsTombstoned,
-// SegmentReleased, SealedManifest, Chunks.Meta) stay live — copying
-// whole tombstone/release histories into the view would cost more than
-// it saves.
+// SealedManifest, Chunks.Meta) stay live — copying whole tombstone
+// histories into the view would cost more than it saves.
 type reconcileView struct {
 	ready       bool
 	entries     []vaultctlfsm.ManifestEntry
@@ -1019,7 +1016,10 @@ func (r *VaultLifecycleReconciler) gatherManifestView() *reconcileView {
 //   - localOrphans        event: snapshot install (ReconcileFromSnapshot)
 //   - log-replay onRequestDelete. Tick = backstop.
 //   - stagingOrphans      event: snapshot install (ReconcileFromSnapshot)
-//   - segment release. Tick = backstop.
+//   - chunk finalize-delete. Tick = backstop. Released
+//     segments' staging copies belong to the pipeline's
+//     release consumer and the orchestrator's
+//     released-segment sweep, which run on every node.
 //   - missingReplicas     event: lead-gained + snapshot install
 //     (ReconcileMembershipCatchup). No reliable
 //     per-chunk edge (the leader's seal-time push has
@@ -1293,30 +1293,23 @@ func (r *VaultLifecycleReconciler) alertUnknownOrphan(meta chunk.ChunkMeta) {
 			r.vaultLabel(r.vaultID), meta.ID, meta.RecordCount))
 }
 
-// SweepStagingOrphans is the pipeline-staging counterpart of
-// SweepLocalOrphans. SweepLocalOrphans covers the chunk
-// Manager's store, but V3 keeps its bytes in the pipeline staging
-// areas (<segmentsDir>/<vaultID>/{completed,head,pre-head,chunks}) which
-// the Manager only learns about lazily via FSM activity — files whose
-// release/delete effect this node missed while offline are invisible to
-// it forever. This sweep enumerates the staging directories on DISK and
-// reconciles them against the replicated FSM with positive evidence
-// only:
+// SweepStagingOrphans is the chunk-staging counterpart of
+// SweepLocalOrphans. SweepLocalOrphans covers the chunk Manager's store,
+// but V3 builds chunks under the pipeline staging root
+// (<segmentsDir>/<vaultID>/chunks), which the Manager only learns about
+// lazily via FSM activity — a dir whose delete this node missed while
+// offline is invisible to it forever. This sweep enumerates chunks/ on
+// DISK and removes a dir iff the FSM has no manifest entry, no
+// pendingDeletes obligation, AND a tombstone — positive proof a
+// finalize-delete applied while this node was offline. Unknown dirs are
+// preserved per the no-auto-delete-of-unknown-orphans invariant, so a
+// not-yet-caught-up FSM can only DELAY cleanup, never delete live data.
+// Idempotent; runs on the vaultCatchupSweepAll cadence.
 //
-//   - segment files (completed/, head/, pre-head/) are purged iff
-//     FSM.SegmentReleased(id) — the release effect this node missed. A
-//     registry entry means the segment is live (keep); registry-absent
-//     WITHOUT release evidence means a completed segment awaiting its
-//     distribution publish (keep — deleting it loses ingested records).
-//   - chunk staging dirs (chunks/<id>/) are removed iff the FSM has no
-//     manifest entry, no pendingDeletes obligation, AND a tombstone —
-//     positive proof a finalize-delete applied while this node was
-//     offline. Unknown dirs are preserved per the
-//     no-auto-delete-of-unknown-orphans invariant.
-//
-// A not-yet-caught-up FSM can therefore only DELAY cleanup (evidence not
-// applied yet), never delete live data. Idempotent; runs on every node's
-// vaultCatchupSweepAll cadence.
+// Released segments' staging copies (completed/, head/, pre-head/) are not
+// this sweep's: the pipeline's release consumer and the orchestrator's
+// released-segment sweep purge them on every node, not only where a vault
+// instance (and so this reconciler) lives.
 func (r *VaultLifecycleReconciler) SweepStagingOrphans() {
 	if v := r.gatherReconcileView(); v != nil {
 		r.reconcileStagingOrphans(v)
@@ -1327,45 +1320,7 @@ func (r *VaultLifecycleReconciler) reconcileStagingOrphans(v *reconcileView) {
 	if r.orch == nil || !v.ready {
 		return
 	}
-	r.sweepReleasedSegmentStaging()
 	r.sweepTombstonedChunkStaging(v)
-}
-
-func (r *VaultLifecycleReconciler) sweepReleasedSegmentStaging() {
-	root, ok := r.orch.pipelineVaultStagingRoot(r.vaultID)
-	if !ok {
-		return
-	}
-	candidates := make(map[glid.GLID]struct{})
-	for _, dir := range []string{paths.CompletedDir(root), paths.HeadDir(root), paths.PreHeadDir(root)} {
-		ids, err := paths.ListSegmentIDs(dir)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				r.logger.Warn("staging-orphan sweep: list segment dir failed",
-					"dir", dir, "error", err)
-			}
-			continue
-		}
-		for id := range ids {
-			candidates[id] = struct{}{}
-		}
-	}
-	purged := 0
-	for id := range candidates {
-		if !r.fsm.Load().SegmentReleased(id) {
-			continue
-		}
-		if err := paths.PurgeSegmentStaging(root, id); err != nil {
-			r.logger.Warn("staging-orphan sweep: segment purge failed",
-				"segment", id, "error", err)
-			continue
-		}
-		purged++
-	}
-	if purged > 0 {
-		r.logger.Info("staging-orphan sweep: purged released segments this node missed",
-			"segments", purged)
-	}
 }
 
 func (r *VaultLifecycleReconciler) sweepTombstonedChunkStaging(v *reconcileView) {
