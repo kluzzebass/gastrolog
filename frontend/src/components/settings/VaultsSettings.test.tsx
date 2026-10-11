@@ -9,7 +9,7 @@ const mocks = installMockClients();
 
 import { VaultsSettings } from "./VaultsSettings";
 import { TRANSFER_HELP_REF, transferSourceIneligibility, transferTargetOptions } from "./transferEligibility";
-import { VaultConfig, VaultType } from "../../api/gen/gastrolog/v1/system_pb";
+import { RetentionRule, VaultConfig, VaultPlacement, VaultType } from "../../api/gen/gastrolog/v1/system_pb";
 import { renderWritable } from "../../testing/renderWritable";
 
 /** Create a distinct 16-byte Uint8Array test ID from a small number. */
@@ -525,6 +525,233 @@ describe("transferTargetOptions", () => {
       "alpha",
       "zulu",
     ]);
+  });
+});
+
+// ── Placement block, RF cap, storage class labels ────────────────────
+//
+// Two nodes, each with one class-1 file storage: the RF cap for class 1
+// is 2, and a vault placed on both storages is at RF=2.
+
+const twoNodeConfig = {
+  ...oneVaultConfig,
+  nodeConfigs: [
+    { id: testId(40), name: "node-1" },
+    { id: testId(41), name: "node-2" },
+  ],
+  nodeStorageConfigs: [
+    { nodeId: testId(40), fileStorages: [{ id: testId(50), storageClass: 1 }] },
+    { nodeId: testId(41), fileStorages: [{ id: testId(51), storageClass: 1 }] },
+  ],
+};
+
+function placedOnBoth(rf: number): VaultConfig {
+  return fileVault(1, "vault-alpha", {
+    replicationFactor: rf,
+    placements: [
+      new VaultPlacement({ storageId: testId(50), leader: true }),
+      new VaultPlacement({ storageId: testId(51), leader: false }),
+    ],
+  });
+}
+
+function renderVaults(config: unknown) {
+  const qc = createTestQueryClient();
+  qc.setQueryData(["system"], config);
+  return renderWritable(<VaultsSettings dark />, { wrapper: settingsWrapper(qc) });
+}
+
+describe("placement block", () => {
+  test("a placed vault names its leader, followers, RF and the cap with its cause", () => {
+    const { getByText, queryByText } = renderVaults({ ...twoNodeConfig, vaults: [placedOnBoth(2)] });
+    expandVault(getByText);
+
+    expect(getByText("Placement")).toBeTruthy();
+    expect(getByText("leader: node-1 · followers: node-2")).toBeTruthy();
+    expect(getByText("RF 2 · cap 2 (2 file storages with class 1)")).toBeTruthy();
+    expect(queryByText(/short by/)).toBeNull();
+    expect(queryByText(/placements —/)).toBeNull();
+  });
+
+  test("a vault with no storage of its class is unplaced, with the cause and the action", () => {
+    const vault = fileVault(1, "vault-alpha", { storageClass: 3 });
+    const { getByText } = renderVaults({ ...twoNodeConfig, vaults: [vault] });
+
+    // The header counts placements and names the action while collapsed.
+    expect(getByText("0 of 1 placement — add 1 file storage with class 3")).toBeTruthy();
+    expandVault(getByText);
+    expect(getByText("unplaced — no file storage has class 3")).toBeTruthy();
+    expect(getByText("RF 1 · cap 1 (no file storage has class 3)")).toBeTruthy();
+  });
+
+  test("a vault with eligible storages but no leader is unplaced pending placement", () => {
+    const { getByText } = renderVaults({ ...twoNodeConfig, vaults: [fileVault(1, "vault-alpha")] });
+    expect(getByText("0 of 1 placement — placement pending")).toBeTruthy();
+    expandVault(getByText);
+    expect(getByText("unplaced — no leader assigned yet")).toBeTruthy();
+  });
+
+  test("an RF shortfall counts placements and says what raises the count", () => {
+    const { getByText } = renderVaults({ ...twoNodeConfig, vaults: [placedOnBoth(3)] });
+    expect(getByText("2 of 3 placements — add 1 file storage with class 1")).toBeTruthy();
+    expandVault(getByText);
+    expect(getByText("short by 1 placement — add 1 file storage with class 1")).toBeTruthy();
+  });
+
+  test("with enough storages for the RF the shortfall is pending placement, not a missing storage", () => {
+    const config = {
+      ...twoNodeConfig,
+      vaults: [placedOnBoth(3)],
+      nodeStorageConfigs: [
+        ...twoNodeConfig.nodeStorageConfigs,
+        { nodeId: testId(41), fileStorages: [{ id: testId(52), storageClass: 1 }] },
+      ],
+    };
+    const { getByText } = renderVaults(config);
+    expect(getByText("2 of 3 placements — placement pending")).toBeTruthy();
+  });
+
+  test("the placement block links to its help section", () => {
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], { ...twoNodeConfig, vaults: [placedOnBoth(2)] });
+    const openHelp = mock((_helpRef?: string) => {});
+    const { getByText } = renderWritable(
+      <HelpProvider onOpen={openHelp}>
+        <VaultsSettings dark />
+      </HelpProvider>,
+      { wrapper: settingsWrapper(qc) },
+    );
+    expandVault(getByText);
+    fireEvent.click(getByText("Placement").parentElement!.querySelector('button[aria-label="Help"]')!);
+    expect(openHelp).toHaveBeenCalledWith("vaults-config#placement");
+  });
+});
+
+describe("replication factor cap", () => {
+  test("the field states the cap and the storages it derives from", () => {
+    const { getByText } = renderVaults({ ...twoNodeConfig, vaults: [placedOnBoth(2)] });
+    expandVault(getByText);
+    expect(getByText(/Cap 2: 2 file storages with class 1\./)).toBeTruthy();
+  });
+
+  test("dropping a storage from the class lowers the stated cap", () => {
+    const config = { ...twoNodeConfig, vaults: [placedOnBoth(2)], nodeStorageConfigs: twoNodeConfig.nodeStorageConfigs.slice(0, 1) };
+    const { getByText, queryByText } = renderVaults(config);
+    expandVault(getByText);
+    expect(queryByText(/Cap 2:/)).toBeNull();
+    expect(getByText(/Cap 1: 1 file storage with class 1\./)).toBeTruthy();
+  });
+
+  test("a memory vault's cap is the node count", () => {
+    const vault = new VaultConfig({ id: testId(1), name: "vault-alpha", type: VaultType.MEMORY, replicationFactor: 1 });
+    const { getByText } = renderVaults({ ...twoNodeConfig, vaults: [vault] });
+    expandVault(getByText);
+    expect(getByText(/Cap 2: 2 nodes in the cluster\./)).toBeTruthy();
+  });
+});
+
+describe("storage class options", () => {
+  test("each class names its file storage count and nodes", async () => {
+    m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
+    const { getByText, getByLabelText } = renderVaults({ ...twoNodeConfig, vaults: [] });
+    fireEvent.click(getByText("Add Vault"));
+    await waitFor(() => expect(getByText("Create")).toBeTruthy());
+    fireEvent.change(getByLabelText("Storage Type"), { target: { value: "file" } });
+
+    expect(optionStates(getByLabelText("Storage Class")).map((o) => o.label)).toEqual([
+      "Select storage class...",
+      "Class 1 — 2 file storages on node-1, node-2",
+    ]);
+  });
+});
+
+// ── Retention policies: multi-attach ─────────────────────────────────
+
+const twoPoliciesConfig = {
+  ...oneVaultConfig,
+  retentionPolicies: [
+    { id: testId(30), name: "30-day" },
+    { id: testId(31), name: "90-day" },
+  ],
+};
+
+function checkboxFor(getByText: (text: string) => HTMLElement, label: string): HTMLElement {
+  return getByText(label).closest('[role="checkbox"]')!;
+}
+
+async function savedRetentionPolicyIds(): Promise<string[]> {
+  let ids: string[] = [];
+  await waitFor(() => {
+    expect(m(mocks.systemClient, "putVault")).toHaveBeenCalledTimes(1);
+    const call = m(mocks.systemClient, "putVault").mock.calls[0]! as unknown[];
+    const arg = call[0] as { config: { retentionRules: { retentionPolicyId: Uint8Array }[] } };
+    ids = arg.config.retentionRules.map((r) => encode(r.retentionPolicyId));
+  });
+  return ids;
+}
+
+describe("retention policies", () => {
+  test("every attached policy shows checked, and detaching one saves the rest", async () => {
+    m(mocks.systemClient, "putVault").mockClear();
+    m(mocks.systemClient, "putVault").mockResolvedValue({});
+    const vault = fileVault(1, "vault-alpha", {
+      retentionRules: [
+        new RetentionRule({ retentionPolicyId: testId(30) }),
+        new RetentionRule({ retentionPolicyId: testId(31) }),
+      ],
+    });
+    const { getByText } = renderVaults({ ...twoPoliciesConfig, vaults: [vault] });
+    expandVault(getByText);
+
+    expect(getByText("2 policies attached. Every attached policy is evaluated on each sweep; the tightest bound wins.")).toBeTruthy();
+    expect(checkboxFor(getByText, "30-day").getAttribute("aria-checked")).toBe("true");
+    expect(checkboxFor(getByText, "90-day").getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(checkboxFor(getByText, "30-day"));
+    expect(getByText("1 policy attached. Every attached policy is evaluated on each sweep; the tightest bound wins.")).toBeTruthy();
+    fireEvent.click(getByText("Save").closest("button")!);
+
+    expect(await savedRetentionPolicyIds()).toEqual([encode(testId(31))]);
+  });
+
+  test("attaching policies saves one rule per policy in attachment order", async () => {
+    m(mocks.systemClient, "putVault").mockClear();
+    m(mocks.systemClient, "putVault").mockResolvedValue({});
+    const { getByText } = renderVaults(twoPoliciesConfig);
+    expandVault(getByText);
+
+    expect(getByText("None attached: sealed chunks stay until the default size floor drains them.")).toBeTruthy();
+    fireEvent.click(checkboxFor(getByText, "90-day"));
+    fireEvent.click(checkboxFor(getByText, "30-day"));
+    fireEvent.click(getByText("Save").closest("button")!);
+
+    expect(await savedRetentionPolicyIds()).toEqual([encode(testId(31)), encode(testId(30))]);
+  });
+
+  test("creating a vault attaches every checked policy", async () => {
+    m(mocks.systemClient, "putVault").mockClear();
+    m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
+    m(mocks.systemClient, "putVault").mockResolvedValueOnce({});
+    const { getByText, getByLabelText } = renderVaults({ ...twoPoliciesConfig, vaults: [] });
+    fireEvent.click(getByText("Add Vault"));
+    await waitFor(() => expect(getByText("Create")).toBeTruthy());
+    fireEvent.change(getByLabelText("Storage Type"), { target: { value: "memory" } });
+    fireEvent.click(checkboxFor(getByText, "30-day"));
+    fireEvent.click(checkboxFor(getByText, "90-day"));
+    fireEvent.click(getByText("Create").closest("button")!);
+
+    expect(await savedRetentionPolicyIds()).toEqual([encode(testId(30)), encode(testId(31))]);
+  });
+});
+
+describe("vault actions", () => {
+  test("each action states its consequence beside the button", () => {
+    const { getByText } = renderVaults(oneVaultConfig);
+    expandVault(getByText);
+    expect(getByText("Actions")).toBeTruthy();
+    expect(getByText("Seals every active chunk holding records; the next record opens a new one.")).toBeTruthy();
+    expect(getByText("Rebuilds every sealed chunk's indexes as a tracked job; records are untouched.")).toBeTruthy();
+    expect(getByText("Resets the retry backoff on unreadable chunks so the next retention sweep retries them all.")).toBeTruthy();
   });
 });
 

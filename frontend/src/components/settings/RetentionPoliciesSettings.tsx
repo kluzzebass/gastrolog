@@ -89,7 +89,7 @@ function addRetentionFormReducer(state: AddRetentionFormState, action: AddRetent
   }
 }
 
-export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{ dark: boolean; onNavigateTo?: NavigateTo }>) {
+export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean; onNavigateTo?: NavigateTo }>) {
   const _c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putPolicy = usePutRetentionPolicy();
@@ -285,7 +285,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
                 {putPolicy.isPending ? "Saving..." : "Save"}
               </Button>
             }
-            status={<UsedByStatus dark={dark} refs={refs} />}
+            status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo && ((ref) => onNavigateTo("vaults", ref))} />}
           >
             <div className="flex flex-col gap-3">
               <FormField label="Name" dark={dark}>
