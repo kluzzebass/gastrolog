@@ -15,7 +15,6 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/raftgroup"
-	"gastrolog/internal/vaultraft"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -47,13 +46,8 @@ func TestOrchRel_DeferredVaultCtlGroupBindsInstanceWhenPeerResolves(t *testing.T
 	}
 	h.waitForAllReady()
 
-	leader := h.waitForVaultCtlLeaderForVault(v)
 	chunkID := chunk.NewChunkID()
-	cmd := vaultraft.MarshalVaultChunkCommand(v.id,
-		vaultctlfsm.MarshalRequestDelete(chunkID, time.Now(), "test", []string{deferred.id}))
-	if err := leader.groupMgr.GetGroup(gid).Raft.Apply(cmd, 5*time.Second).Error(); err != nil {
-		t.Fatalf("propose request-delete: %v", err)
-	}
+	h.applyOnVaultCtlLeader(v, vaultctlfsm.MarshalRequestDelete(chunkID, time.Now(), "test", []string{deferred.id}))
 
 	h.waitProgress("the deferred node acks the delete obligation naming it", 50*time.Millisecond, func() (string, bool) {
 		var views []string
