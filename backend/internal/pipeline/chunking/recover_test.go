@@ -3,6 +3,7 @@ package chunking_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -85,7 +86,10 @@ func TestRecoverOnceSealsFromExistingGLCB(t *testing.T) {
 	}
 }
 
-func TestRecoverOnceSealsOrphanActiveGLCB(t *testing.T) {
+// A GLCB of the open chunk survives restart recovery untouched: the chunk
+// has not sealed in this FSM, so recovery does not seal it ahead of its
+// rotation policy. Once its seal applies, the build pass adopts the GLCB.
+func TestRecoveryLeavesTheOpenChunksGLCBForTheBuildPass(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
 	segID := glid.New()
@@ -105,7 +109,7 @@ func TestRecoverOnceSealsOrphanActiveGLCB(t *testing.T) {
 		SliceBytes:        2048,
 		RefAddedAt:        openedAt,
 	}))
-	// GLCB built locally but SealOpenChunkManifest never applied — crash mid-flight.
+	// A GLCB of the open manifest's records, ahead of this FSM's seal.
 	sealedAt := base.Add(2 * time.Minute)
 	_, err := chunking.BuildSealedChunk(chunking.BuildInput{
 		Manifest: chunking.SealedManifest{
@@ -140,6 +144,18 @@ func TestRecoverOnceSealsOrphanActiveGLCB(t *testing.T) {
 	}
 	if err := mgr.RecoverOnce(context.Background(), vaultID); err != nil {
 		t.Fatalf("RecoverOnce: %v", err)
+	}
+	if e := fsm.Get(chunkID); e == nil || e.IsSealed() {
+		t.Fatalf("chunk entry after recovery = %+v, want the open chunk unsealed", e)
+	}
+	glcbPath := chunking.ChunkGLCBPath(filepath.Join(home, "chunks"), chunkID)
+	if _, err := os.Stat(glcbPath); err != nil {
+		t.Fatalf("recovery moved the open chunk's GLCB: %v", err)
+	}
+
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
+	if err := mgr.BuildOnce(context.Background(), vaultID); err != nil {
+		t.Fatalf("BuildOnce: %v", err)
 	}
 	entry := fsm.Get(chunkID)
 	if entry == nil || entry.State != chunk.ChunkStateSealed {

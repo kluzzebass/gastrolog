@@ -321,22 +321,77 @@ func TestRestartRecoveryAdoptsOnlyAGLCBBuiltFromTheManifest(t *testing.T) {
 	}
 }
 
-// Recovery also finds GLCBs of chunks that are not the seal-queue head: the
-// open chunk and chunks queued behind the head. Each is checked against its
-// own manifest.
+// Recovery also finds GLCBs of chunks that are not the seal-queue head. A chunk
+// queued behind the head is checked against its own manifest. The open
+// chunk's GLCB is left where it is: the open manifest still grows, and right
+// after a restart this node's FSM can lag the build it made before stopping.
+// The build pass judges that GLCB once the chunk's seal applies.
 func TestRestartRecoveryChecksChunksBehindTheHeadAgainstTheirManifests(t *testing.T) {
 	t.Parallel()
 	plan := newStalePlan(t)
 	stale := mismatchedGLCBs(t, plan)["another record count"]
 
-	t.Run("the open chunk", func(t *testing.T) {
+	t.Run("the open chunk's build, ahead of this FSM, is adopted once it seals", func(t *testing.T) {
 		t.Parallel()
 		p := plan
+		home := t.TempDir()
+		segA, segB := glid.New(), glid.New()
+		writeHeadSegment(t, home, segA, p.vaultID, []recordForSeg{{0, p.at, "first"}})
+		writeHeadSegment(t, home, segB, p.vaultID, []recordForSeg{{0, p.at.Add(time.Second), "second"}})
+		refA := boundedRef(t, home, segA, 0, 0, p.at)
+		refB := boundedRef(t, home, segB, 0, 0, p.at)
+		built, digest := glcbBytes(t, home, p.vaultID, p.chunkID, refA, refB)
+
+		// This FSM has applied the manifest's first ref only; the GLCB is a
+		// build of the whole manifest.
+		fsm := vaultctlfsm.New()
+		apply := fsmApply(t, fsm)
+		publish := func(segID glid.GLID) {
+			apply(vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+				SegmentID: segID, RecordCount: 1, ByteSize: 1, FirstIngestTS: p.at, LastIngestTS: p.at, Checksum: 1, PublishedAt: p.at,
+			}))
+		}
+		publish(segA)
+		apply(vaultctlfsm.MarshalOpenChunkManifest(p.chunkID, p.at))
+		apply(vaultctlfsm.MarshalAddOpenChunkSegmentRef(p.chunkID, refA))
+		glcbPath := plantGLCB(t, filepath.Join(home, "chunks"), p.chunkID, built)
+		mgr := registerLeader(t, p.vaultID, home, fsm)
+
+		if err := mgr.RecoverOnce(t.Context(), p.vaultID); err != nil {
+			t.Fatalf("RecoverOnce: %v", err)
+		}
+		if _, err := os.Stat(glcbPath + chunking.GLCBMismatchedSuffix); !os.IsNotExist(err) {
+			t.Fatalf("recovery quarantined the open chunk's build against a manifest this FSM has only partly applied (stat=%v)", err)
+		}
+		if got := verifiedDigest(t, glcbPath); got != digest {
+			t.Fatal("recovery replaced the open chunk's GLCB")
+		}
+		if e := fsm.Get(p.chunkID); e != nil && e.IsSealed() {
+			t.Fatalf("recovery sealed the open chunk: %+v", e)
+		}
+
+		publish(segB)
+		apply(vaultctlfsm.MarshalAddOpenChunkSegmentRef(p.chunkID, refB))
+		apply(vaultctlfsm.MarshalSealOpenChunkManifest(p.chunkID, p.at.Add(time.Minute)))
+		if err := mgr.BuildOnce(t.Context(), p.vaultID); err != nil {
+			t.Fatalf("BuildOnce: %v", err)
+		}
+		requireSealedWithDigest(t, fsm, p.chunkID, glcbPath, digest)
+		if _, err := os.Stat(glcbPath + chunking.GLCBMismatchedSuffix); !os.IsNotExist(err) {
+			t.Fatalf("the build of the manifest was quarantined (stat=%v)", err)
+		}
+	})
+
+	t.Run("a mismatched GLCB of the open chunk is quarantined once it seals", func(t *testing.T) {
+		t.Parallel()
+		p := plan
+		p.home = t.TempDir()
+		writeHeadSegment(t, p.home, p.segID, p.vaultID, []recordForSeg{{0, p.at, "one"}, {1, p.at.Add(time.Second), "two"}})
+		_, fresh := glcbBytes(t, p.home, p.vaultID, p.chunkID, p.ref)
 		fsm := vaultctlfsm.New()
 		planManifest(fsmApply(t, fsm), p.chunkID, p.ref, 2, p.at, false)
-		home := t.TempDir()
-		glcbPath := plantGLCB(t, filepath.Join(home, "chunks"), p.chunkID, stale)
-		mgr := registerLeader(t, p.vaultID, home, fsm)
+		glcbPath := plantGLCB(t, filepath.Join(p.home, "chunks"), p.chunkID, stale)
+		mgr := registerLeader(t, p.vaultID, p.home, fsm)
 
 		if err := mgr.RecoverOnce(t.Context(), p.vaultID); err != nil {
 			t.Fatalf("RecoverOnce: %v", err)
@@ -344,23 +399,13 @@ func TestRestartRecoveryChecksChunksBehindTheHeadAgainstTheirManifests(t *testin
 		if e := fsm.Get(p.chunkID); e != nil && e.IsSealed() {
 			t.Fatalf("recovery sealed a mismatched GLCB of the open chunk: %+v", e)
 		}
-		requireQuarantinedMismatched(t, glcbPath, stale)
-	})
 
-	t.Run("the open chunk's own build is sealed", func(t *testing.T) {
-		t.Parallel()
-		p := plan
-		built, digest := glcbBytes(t, p.home, p.vaultID, p.chunkID, p.ref)
-		fsm := vaultctlfsm.New()
-		planManifest(fsmApply(t, fsm), p.chunkID, p.ref, 2, p.at, false)
-		home := t.TempDir()
-		glcbPath := plantGLCB(t, filepath.Join(home, "chunks"), p.chunkID, built)
-		mgr := registerLeader(t, p.vaultID, home, fsm)
-
-		if err := mgr.RecoverOnce(t.Context(), p.vaultID); err != nil {
-			t.Fatalf("RecoverOnce: %v", err)
+		fsmApply(t, fsm)(vaultctlfsm.MarshalSealOpenChunkManifest(p.chunkID, p.at.Add(time.Minute)))
+		if err := mgr.BuildOnce(t.Context(), p.vaultID); err != nil {
+			t.Fatalf("BuildOnce: %v", err)
 		}
-		requireSealedWithDigest(t, fsm, p.chunkID, glcbPath, digest)
+		requireQuarantinedMismatched(t, glcbPath, stale)
+		requireSealedWithDigest(t, fsm, p.chunkID, glcbPath, fresh)
 	})
 
 	t.Run("a chunk queued behind the head", func(t *testing.T) {

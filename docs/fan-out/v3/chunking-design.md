@@ -349,12 +349,15 @@ however many seals the leader ran ahead, and a restart rebuilds the same work fr
 the restored FSM. Sealed-chunk manifests are part of the vault-ctl snapshot.
 
 **Adopting a GLCB already on disk.** When the build pass reaches the seal-queue
-head, or restart recovery finds a GLCB for a chunk not yet sealed, a GLCB already
+head, or restart recovery finds a GLCB for a chunk in the seal queue, a GLCB already
 on the chunk's canonical path is adopted instead of rebuilt only when it is a build
 of the chunk's manifest: its header names the chunk, it holds the manifest's record
 count, its record timestamps span the manifest's recorded bounds, and, for a chunk
-already sealed, it carries the sealed digest. Recovery checks each chunk against
-its own manifest — the seal-queue entry, or the open manifest for the open chunk.
+already sealed, it carries the sealed digest. Recovery checks each queued chunk
+against its own seal-queue entry and leaves the open chunk's GLCB where it is: the
+open manifest still grows, and right after a restart the node's FSM can lag the
+build it made before stopping, so the build pass judges that GLCB once the chunk's
+seal applies.
 Any other GLCB there is mismatched: it is renamed to `data.glcb.mismatched` (kept
 for investigation until the chunk directory goes) and the chunk is built from its
 segments. Without the check the leader would seal the other blob's digest and every
