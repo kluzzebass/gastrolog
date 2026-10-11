@@ -1635,13 +1635,15 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
   `ManifestEntry.Hash`. Write-once: a later seal or a cloud upload carrying a
   different digest is refused, and a cloud re-fetch is verified against it.
   A home's copy that carries it is the **agreed copy** — the only copy a home
-  indexes or claims a holder receipt for, and the only copy a peer pull
-  promotes (its bytes hashed, not its footer read).
+  indexes, serves, uploads to the cloud or claims a holder receipt for, and
+  the only copy a peer pull promotes (its bytes hashed, not its footer read).
 
 - **Divergent copy** — a home's copy of a sealed chunk whose digest differs
   from the sealed digest. Renamed aside to a `data.glcb.divergent` sibling so
-  the canonical path reads as missing, never rebuilt (the same manifest over
-  the same local segments builds the same bytes), and replaced by the agreed
+  the canonical path reads as missing, forgotten by the chunk manager (its
+  registration and cached mapping dropped), never uploaded, never rebuilt (the
+  same manifest over the same local segments builds the same bytes), and
+  replaced by the agreed
   copy through GLCB catch-up. Raises the latched `chunking-build-diverged`
   software-fault alarm, one per vault (`chunking/glcb_divergent.go`).
 

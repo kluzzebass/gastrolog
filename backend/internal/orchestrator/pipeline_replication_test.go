@@ -3,13 +3,13 @@ package orchestrator
 import (
 	"context"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
+	"gastrolog/internal/chunk/glcb/glcbtest"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/system"
@@ -44,12 +44,9 @@ func TestSweepMissingReplicas_PipelineVault_SyncsGLCBNotCatchup(t *testing.T) {
 	markPipelineIngestVault(t, orch, vaultID, true)
 
 	chunkRoot := filepath.Join(orch.segmentsDir, vaultID.String(), "chunks")
-	glcbPath := chunking.ChunkGLCBPath(chunkRoot, chunkID)
-	if err := os.MkdirAll(filepath.Dir(glcbPath), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(glcbPath, []byte("pipeline-glcb"), 0o600); err != nil {
-		t.Fatal(err)
+	glcbPath, _ := glcbtest.WriteSealedBlob(t, chunkRoot, chunkID, vaultID, glcbtest.Records(3, now, glid.New(), "pipeline-glcb"))
+	if glcbPath != chunking.ChunkGLCBPath(chunkRoot, chunkID) {
+		t.Fatalf("premise: the GLCB is at the chunk root's path for the chunk, got %s", glcbPath)
 	}
 
 	cm, err := chunkfile.NewManager(chunkfile.Config{

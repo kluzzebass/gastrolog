@@ -1,6 +1,7 @@
 package orchestrator_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,11 +14,16 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/segment"
+	"gastrolog/internal/query"
 	"gastrolog/internal/record"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 const buildDivergedAlarm = "chunking-build-diverged"
+
+// plantedPayload is the payload of every record in a copy writeDivergentGLCB
+// plants.
+const plantedPayload = "divergent build"
 
 // standingDivergenceAlarms lists the build-divergence alarms standing on a
 // node.
@@ -117,7 +123,7 @@ func writeDivergentGLCB(t *testing.T, path string, vaultID glid.GLID, chunkID ch
 		rec := record.Record{
 			EventID:  record.EventID{IngesterID: glid.New(), NodeID: glid.New(), IngestTS: at, IngestSeq: i},
 			IngestTS: at,
-			Raw:      []byte("divergent build"),
+			Raw:      []byte(plantedPayload),
 		}
 		if err := sf.Append(&rec, at); err != nil {
 			t.Fatal(err)
@@ -246,4 +252,37 @@ func TestOrchPipeline_DivergentHomeCopyIsReplacedByTheAgreedCopy(t *testing.T) {
 			t.Errorf("home %s left its replaced divergent copy behind (stat=%v)", h.nodes[nodeID].label, err)
 		}
 	}
+
+	// Every home serves the agreed copy's records, whichever copy it read
+	// before its landing check.
+	agreedPayloads := []string{"divergent-before", "divergent-after"}
+	if !divergent[planted] {
+		agreedPayloads = []string{plantedPayload}
+	}
+	for _, idx := range homeIdxs {
+		nodeID := h.nodeIDs[idx]
+		for _, raw := range servedPayloads(t, h, v, nodeID) {
+			if !slices.ContainsFunc(agreedPayloads, func(p string) bool { return strings.HasPrefix(raw, p) }) {
+				t.Fatalf("home %s served %q, a record of no agreed copy", h.nodes[nodeID].label, raw)
+			}
+		}
+	}
+}
+
+// servedPayloads runs a match-all search on nodeID and returns every served
+// record's payload.
+func servedPayloads(t *testing.T, h *orchRelHarness, v vaultSpec, nodeID string) []string {
+	t.Helper()
+	seq, _, err := h.nodes[nodeID].orch.Search(context.Background(), v.id, query.Query{}, nil)
+	if err != nil {
+		t.Fatalf("search on %s: %v", h.nodes[nodeID].label, err)
+	}
+	var out []string
+	for rec, err := range seq {
+		if err != nil {
+			t.Fatalf("search on %s: %v", h.nodes[nodeID].label, err)
+		}
+		out = append(out, string(rec.Raw))
+	}
+	return out
 }

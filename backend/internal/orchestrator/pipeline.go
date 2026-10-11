@@ -299,7 +299,11 @@ func (o *Orchestrator) onPipelineChunkBuilt(vaultID glid.GLID, fsm *vaultctlfsm.
 // that is not is quarantined by the check, and its agreed copy pulled.
 func (o *Orchestrator) onGLCBLanded(vaultID glid.GLID, ti *VaultInstance, e vaultctlfsm.ManifestEntry) {
 	if !o.landedGLCBAgrees(vaultID, e) {
-		if e.IsSealed() && !e.CloudBacked {
+		if !e.IsSealed() {
+			return
+		}
+		forgetPipelineGLCB(ti, e.ID)
+		if !e.CloudBacked {
 			// Off the caller's goroutine: the seal apply runs this on the Raft
 			// apply pump, and the pull's guards take locks the pump must not
 			// wait on. The catch-up sweep retries a pull this one misses. A
@@ -314,6 +318,25 @@ func (o *Orchestrator) onGLCBLanded(vaultID glid.GLID, ti *VaultInstance, e vaul
 	}
 	if ti.Reconciler != nil {
 		ti.Reconciler.ackOwnHolderReceipt(e)
+	}
+}
+
+// pipelineGLCBForgetter is the chunk-manager seam that drops a pipeline GLCB's
+// cached mapping and registration once the copy is no longer the one to serve.
+type pipelineGLCBForgetter interface {
+	ForgetPipelineGLCB(chunk.ChunkID)
+}
+
+// forgetPipelineGLCB makes the instance's chunk manager resolve the chunk
+// afresh: a sealed chunk whose landed copy is not the agreed copy has been
+// quarantined off its path or is not there at all, and a mapping or
+// registration made from it must not keep serving it.
+func forgetPipelineGLCB(ti *VaultInstance, id chunk.ChunkID) {
+	if ti == nil || ti.Chunks == nil {
+		return
+	}
+	if f, ok := ti.Chunks.(pipelineGLCBForgetter); ok {
+		f.ForgetPipelineGLCB(id)
 	}
 }
 

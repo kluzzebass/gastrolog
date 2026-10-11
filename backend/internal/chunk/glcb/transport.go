@@ -130,6 +130,13 @@ func WrapForTransport(dst io.Writer, blobPath string) (int64, error) {
 		return 0, fmt.Errorf("open %s: %w", blobPath, err)
 	}
 	defer func() { _ = f.Close() }()
+	return WrapFileForTransport(dst, f)
+}
+
+// WrapFileForTransport is WrapForTransport over an already-open blob, so a
+// caller that inspected the blob streams exactly the file it inspected.
+func WrapFileForTransport(dst io.Writer, f *os.File) (int64, error) {
+	blobPath := f.Name()
 	info, err := f.Stat()
 	if err != nil {
 		return 0, fmt.Errorf("stat %s: %w", blobPath, err)

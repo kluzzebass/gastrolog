@@ -27,7 +27,10 @@ import (
 //     canonical path then reads as missing, so the copy is not served, no
 //     receipt is claimed for it, and the GLCB catch-up pull fetches the agreed
 //     copy from a peer home, verifying its bytes against the sealed digest
-//     before it lands.
+//     before it lands. The orchestrator's landing path makes the vault's
+//     chunk manager forget the copy (ForgetPipelineGLCB), so no registration
+//     or cached mapping made before the check keeps serving it, and the cloud
+//     upload refuses any copy that does not carry the sealed digest.
 //   - No rebuild: the build pass skips a divergent chunk. The same manifest
 //     over the same local segments builds the same divergent bytes again.
 //   - Alarm: one per vault while any chunk on this home is divergent. Two
