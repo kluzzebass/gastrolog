@@ -24,9 +24,9 @@ flowchart TD
 ## Expression Parsing
 
 The expression string (e.g. `level=error last=5m limit=10`) is parsed in
-`server/query.go → parseExpression()`. Whitespace-separated tokens are classified
-as either **directives** (key=value pairs the engine understands) or **filter
-predicates** (fed to the query language parser).
+`server/query_convert.go → parseExpression()`. Whitespace-separated tokens are
+classified by `applyDirective()` as either **directives** (key=value pairs the
+engine understands) or **filter predicates** (fed to the query language parser).
 
 ```mermaid
 flowchart LR
@@ -40,7 +40,7 @@ flowchart LR
 | Directive | Effect |
 |-----------|--------|
 | `last=<dur>` | Sets `Start = now-dur`, `End = now` |
-| `start=<t>` / `end=<t>` | Explicit IngestTS bounds (RFC3339 or relative) |
+| `start=<t>` / `end=<t>` | Explicit IngestTS bounds (RFC3339, RFC3339Nano, or Unix seconds — `parseTime()`) |
 | `source_start=` / `source_end=` | SourceTS bounds: the seek key under `order=source_ts`, a runtime filter otherwise. `start=`/`end=` stay ingest bounds under every ordering |
 | `limit=<n>` | Max records to return |
 | `reverse=true` | Newest-first ordering |
@@ -58,56 +58,71 @@ flowchart TD
     VF --> CF["ExtractChunkFilter()"]
     CF --> CV["collectVaultChunks()"]
 
-    CV --> ListLocal["cm.List() per vault"]
-    ListLocal --> SC["selectChunks()"]
-
-    SC --> TimeCheck{"IngestTS overlap?"}
-    TimeCheck -->|Yes| Include["Include chunk"]
-    TimeCheck -->|No| Skip["Skip chunk"]
+    CV --> ListMetas["vaultChunkMetas() per vault (FSM manifest)"]
+    ListMetas --> SC["selectChunks()"]
 
     SC --> ArchiveCheck{"Archived?"}
-    ArchiveCheck -->|Yes| Skip
-    ArchiveCheck -->|No| TimeCheck
+    ArchiveCheck -->|Yes| Skip["Skip chunk"]
+    ArchiveCheck -->|No| TimeCheck{"IngestTS overlap?"}
+    TimeCheck -->|Yes| Include["Include chunk"]
+    TimeCheck -->|No| Skip
 
-    SC --> Sort["Sort by WriteStart"]
+    Include --> Sort["Sort across vaults (chunkCmp)"]
 ```
 
-**`selectChunks`** filters chunks by time overlap. A chunk is included if its
-`[IngestStart, IngestEnd]` range intersects the query's `[lower, upper]` bounds.
-Unsealed (active) chunks are always included since their WriteEnd is not final.
+**Chunk listing.** `vaultChunkMetas()` (`query/histogram.go`) reads chunk
+metadata from the vault-ctl FSM manifest: the registry's `SearchChunkMetas`
+resolves to the orchestrator's `SearchChunkMetasForVault`
+(`orchestrator/pipeline_search.go`), which returns every manifest entry —
+sealed chunks and the active and sealing pipeline chunks — with timestamp
+bounds overlaid. On a node with no vault-ctl FSM for the vault it falls back to
+the manifest reader's sealed entries plus the chunk manager's active chunk; with
+no registry wired at all, to `cm.List()`. For **memory vaults**, all chunks are
+in-memory.
 
-For **file vaults**, `cm.List()` returns both in-memory metadata (local chunks)
-and B+ tree entries (cloud-backed chunks). For **memory vaults**, all chunks are in-memory.
+**`selectChunks`** filters chunks by time overlap. A chunk is included if its
+`[IngestStart, IngestEnd]` range intersects the query's `[lower, upper]` bounds;
+`source_start=`/`source_end=` bounds apply the same test to
+`[SourceStart, SourceEnd]`. Active chunks get the same test as sealed ones. A
+bound that is still zero does not exclude a chunk, except that under a
+time-bounded query a Sealed or Sealing chunk with neither `IngestStart` nor
+`IngestEnd` known is excluded rather than treated as matching everything.
+
+**Sort order** (`chunkCmp`, `query/query.go`) is global across vaults, because
+lazy priming assumes adjacent chunks are time-ordered. Forward: ascending
+start (`IngestStart`, or `SourceStart` under `order=source_ts`). Reverse:
+unsealed chunks first — they may hold records newer than their metadata —
+then descending end, then descending start.
 
 ## Merge Heap Priming
 
 The engine uses a min-heap to merge records from multiple chunks in timestamp
-order. Priming opens a scanner per chunk and pushes its first record onto the heap.
+order. Priming opens a scanner for a chunk and pushes its first record onto the
+heap. Chunks are primed **lazily, in planner order**: `lazyOpenCompeting()`
+opens the next pending chunk only while it can still compete for the next
+merge record.
 
 ```mermaid
 flowchart TD
-    AllChunks["All matching chunks"] --> Classify{"Cloud-backed?"}
-
-    Classify -->|Local| Prime["openAndPrimeScanner()"]
-    Classify -->|Cloud| Defer["Add to deferred list"]
-
-    Prime --> Heap["Push first record onto heap"]
-
-    Heap --> Check{"heapLen > 0 AND limit > 0?"}
-    Check -->|Yes| DeferCloud["Skip cloud-backed chunks"]
-    Check -->|No| PrimeCloud["Prime cloud-backed chunks too"]
-
-    DeferCloud --> MergeLoop
-    PrimeCloud --> MergeLoop
-
-    MergeLoop["runMergeLoop()"]
+    AllChunks["Matching chunks in planner order"] --> Lazy["lazyOpenCompeting()"]
+    Lazy --> HeapEmpty{"Heap empty?"}
+    HeapEmpty -->|Yes| Open["openAndPrimeScanner(next chunk)"]
+    HeapEmpty -->|No| Overlap{"Next chunk's upper bound reaches heap top?"}
+    Overlap -->|Yes| Open
+    Overlap -->|No| MergeLoop["runMergeLoop()"]
+    Open --> Heap["Push first record onto heap"]
+    Heap --> Lazy
+    MergeLoop -->|"after each pop"| Lazy
 ```
 
-**Cloud deferral**: local chunks are primed first. If any local chunk produces
-a record and the query has a limit, cloud-backed chunks are deferred entirely — they're
-never downloaded. This is why a `last=5m limit=10` query with an active chunk
-serving data does zero cloud I/O. (The `limit=` directive works in both the UI
-query input and the CLI's `--limit` flag.)
+For chunks whose time ranges do not overlap, only one scanner is open at a
+time; for overlapping ranges, every chunk whose upper bound can still beat the
+current heap top is opened. `runMergeLoop()` calls `lazyOpenCompeting()` again
+as the heap advances, so a chunk is opened only when the merge reaches it. A
+`last=5m limit=10` query that fills its limit from the newest chunks never opens
+older ones — local or cloud-backed alike. There is no separate local/cloud
+priming pass. (The `limit=` directive works in both the UI query input and the
+CLI's `--limit` flag.)
 
 ## Scanner Pipeline
 
@@ -130,23 +145,23 @@ flowchart TD
 
     BoolExpr -->|No| Sequential["Sequential scan"]
 
-    RuntimeFilters --> TSScanner["buildTSOrderedScanner()"]
+    RuntimeFilters --> TSScanner["Choose ordering path"]
     Sequential --> TSScanner
 
-    TSScanner --> TSCheck{"Rank view?"}
-    TSCheck -->|"Sealed: mmap'd ITSI/STSI"| TSIndex["Walk TS index rank-by-rank"]
-    TSCheck -->|"Active: B+ tree rank view"| TSIndex
+    TSScanner --> TSCheck{"TS index?"}
+    TSCheck -->|"Sealed or local GLCB: mmap'd ITSI/STSI"| TSIndex["buildTSOrderedScanner(): walk TS index rank-by-rank"]
+    TSCheck -->|"No local GLCB, ingest order"| SeqBuild["b.build() over segment spans"]
+    TSCheck -->|"No local GLCB, other order"| SortMem["buildSortedScanner(): sort in memory"]
     TSCheck -->|"None (locally materialized)"| Fail["Error: TS index required"]
-
-    TSIndex --> FinalBuild["b.build() → scanner"]
 ```
 
 ### Position Narrowing
 
 For **sealed chunks** with indexes, the engine narrows which records to read:
 
-1. **Time-based**: B+ tree (active) or flat index (sealed) finds the first
-   position with IngestTS ≥ lower bound → `setMinPosition()`
+1. **Time-based**: the index manager's TS index (sealed) or the chunk
+   manager's `FindIngestStartPosition` finds the first position with
+   IngestTS ≥ lower bound → `setMinPosition()`
 2. **Token index**: posting lists intersected for all required tokens
 3. **KV index**: positions of records matching key/value predicates
 4. **Glob index**: prefix-based positions, verified at runtime
@@ -158,18 +173,15 @@ filters.
 ### TS-Ordered Scanning
 
 Records are stored in physical write order (WriteTS) but must always be yielded
-in IngestTS order (the default) or SourceTS order. Every query goes through the
-TS-ordered scanning path:
+in IngestTS order (the default) or SourceTS order:
 
 | Chunk Type | Strategy |
 |------------|----------|
 | Sealed (local or warm-cached cloud) | Walk the embedded mmap'd ITSI/STSI rank-by-rank, seek to positions in TS order |
-| Active (unsealed) | Same rank-ordered path via the chunk manager's B+ tree rank view (`IngestTSRankView`) |
-| Locally materialized, no rank view | Query fails with `TS index required` — there is no buffer-and-sort fallback |
-| Not locally materialized, no TS index | Sequential scan (`b.build()`), yielded in write order |
-
-The old `reorderByTS` buffer-and-sort path was removed (gastrolog-2o9e9,
-gastrolog-1dg3i); rank-based TS index scanning is the only TS-ordered path.
+| Active or Sealing pipeline chunk with a local GLCB | Same rank-ordered path over the GLCB's embedded ITSI/STSI |
+| Active or Sealing pipeline chunk without a local GLCB, ingest order | Sequential scan (`b.build()`) of the manifest-listed segment spans, which already yield in ingest order |
+| Active or Sealing pipeline chunk without a local GLCB, any other ordering | Sorted in memory (`buildSortedScanner`, `query/order_sort_scanner.go`): one pass collects each surviving record's ordering key and position, charged against the memory budget, then the records are read back sorted |
+| Locally materialized, no rank view | Query fails with `TS index required` |
 
 ## Chunk Access Paths
 
@@ -181,7 +193,10 @@ flowchart TD
     IsCloud -->|Yes| CloudPath["Warm-cache fill: whole-blob download → mmap data.glcb"]
     IsCloud -->|No| IsSealed{"Sealed?"}
     IsSealed -->|Yes| MmapPath["mmap data.glcb (GLCB)"]
-    IsSealed -->|No| StdioPath["pread on raw.log / idx.log / attr.log"]
+    IsSealed -->|"No: ErrChunkNotFound"| Pipeline["OpenPipelineChunkCursor()"]
+    Pipeline --> HasGLCB{"Local GLCB built?"}
+    HasGLCB -->|Yes| GLCBCursor["GLCB cursor over local data.glcb"]
+    HasGLCB -->|No| SpanCursor["manifestRecordCursor over segment spans"]
 
     subgraph Memory Vault
         MemOpen["cm.OpenCursor()"] --> MemSlice["Direct slice access"]
@@ -192,12 +207,20 @@ flowchart TD
 
 | Chunk State | Cursor Type | I/O Method |
 |-------------|------------|------------|
-| Active (unsealed) | `stdioCursor` | `pread` on raw.log, idx.log, attr.log |
-| Sealing (local) | `stdioCursor` (no GLCB yet) or `mmapCursor` (GLCB committed) | Read path adapts to whichever artifacts are present; `OpenCursor` prefers `data.glcb` when it exists |
+| Active or Sealing (pipeline), local GLCB built | GLCB cursor (`chunking.OpenGLCBCursor`) | Memory-mapped local `data.glcb` |
+| Active or Sealing (pipeline), no local GLCB | `manifestRecordCursor` | Reads the manifest-listed segment spans; the first `Seek` switches to a positional reader |
 | Sealed (local) | `mmapCursor` | Memory-mapped GLCB, random access via record-index offsets |
 | Cloud-backed | `glcbCursor` (after warm-cache fill) | One whole-object download → reassemble GLCB → mmap; reads are local from then on. Histogram rank lookups on cold chunks skip the fill: the ITSI section arrives via KB-scale range GETs |
 
-For Phase 3 (gastrolog-1huz5) Sealing chunks, the query engine branches on the **local** `meta.Sealed` (active-form closed?) rather than the cluster `State == Sealed` (GLCB committed?). This is the one place where local truth is the right truth — the chunk is locally readable as soon as the active-form files are closed; whether the cluster has finished publishing its GLCB digest is irrelevant to the read path. If `PostSealProcess` hasn't built the embedded indexes yet, TS-ordered scanning has no rank view for the chunk (the B+ tree rank view serves only the live active chunk) and the query fails with `TS index required` — no buffer-and-sort fallback exists.
+Active and Sealing pipeline chunks come from the FSM manifest, not from the
+chunk manager. `openSearchChunkCursor()` (`query/query.go`) tries
+`cm.OpenCursor()` first; on `ErrChunkNotFound` it opens the chunk through
+`OpenPipelineChunkCursor()` (`orchestrator/pipeline_search.go`), which reads
+the local GLCB when this home has built it and the manifest-listed segment
+spans otherwise. A Sealing chunk without a local GLCB therefore does not fail:
+it is scanned sequentially or sorted in memory as described under TS-Ordered
+Scanning. A chunk the manifest lists but this node cannot open at all is
+skipped with a warning.
 
 ### Memory Vault Cursors
 
@@ -206,15 +229,15 @@ by direct slice indexing — no disk I/O, no file formats.
 
 ### Cloud-Backed Chunk Read Path
 
-Cloud-backed chunks are deferred during heap priming — if local chunks satisfy the
-query's limit, cloud cursors are never opened and zero cloud I/O occurs.
-Cloud cursors are opened when the query needs more records than local
-chunks can provide — typically for longer time ranges or unbounded queries.
+Cloud-backed chunks are primed lazily in planner order like every other chunk
+(see Merge Heap Priming): a cloud cursor opens only when the merge reaches the
+chunk, so a query whose limit fills from newer chunks does no cloud I/O. A
+cloud-backed chunk whose blob cannot be read is skipped with a warning
+(`handleCloudPrimeError`) instead of failing the query.
 
-Phase 6 (gastrolog-69fd5) replaced the per-record range-request path with
-a whole-blob download + warm-cache fill. The first cursor pays one
-download; every subsequent read on the same chunk goes through the local
-mmap fast path:
+Reads go through a whole-blob download and warm-cache fill. The first cursor
+pays one download; every subsequent read on the same chunk goes through the
+local mmap fast path:
 
 ```mermaid
 sequenceDiagram
