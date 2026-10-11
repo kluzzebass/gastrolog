@@ -6,6 +6,7 @@ import (
 	"gastrolog/internal/glid"
 	"iter"
 	"log/slog"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -26,18 +27,18 @@ import (
 // Nil in single-node mode.
 type RemoteSearcher interface {
 	// Search collects a full streamed ForwardSearch response. Used by
-	// collectRemotePipeline which needs the complete TableResult.
+	// collectRemotePipeline, which needs the complete TableResult, and by
+	// collectRemoteHistogram.
 	Search(ctx context.Context, nodeID string, req *apiv1.ForwardSearchRequest) (*apiv1.ForwardSearchResponse, error)
 	// SearchStream opens a streaming ForwardSearch.
-	// Returns record batches channel, tableResult, error channel, resume-token
-	// getter, and histogram getter. The stream opens without blocking on the
-	// first remote batch so the coordinator can merge as holders produce data.
+	// Returns record batches channel, tableResult, error channel, and
+	// resume-token getter. The stream opens without blocking on the first
+	// remote batch so the coordinator can merge as holders produce data.
 	SearchStream(ctx context.Context, nodeID string, req *apiv1.ForwardSearchRequest) (
 		records <-chan []*apiv1.ExportRecord,
 		tableResult *apiv1.TableResult,
 		errCh <-chan error,
 		getResumeToken func() []byte,
-		getHistogram func() []*apiv1.HistogramBucket,
 	)
 	GetContext(ctx context.Context, nodeID string, req *apiv1.ForwardGetContextRequest) (*apiv1.ForwardGetContextResponse, error)
 	Explain(ctx context.Context, nodeID string, req *apiv1.ForwardExplainRequest) (*apiv1.ForwardExplainResponse, error)
@@ -179,6 +180,10 @@ func (s *QueryServer) searchDirect(
 	// records as the user scrolls.
 	frozenStart, frozenEnd := q.Start, q.End
 
+	// One ledger for this node's share of the query: the scan and the page-1
+	// histogram running beside it charge the same budget.
+	q = q.WithBudget(eng.NewBudget())
+
 	// Bound this page's search (not the histogram) at the previous page's
 	// highwater, and let the cursor skip what that page already emitted at
 	// the boundary timestamp. This is what makes pagination survive
@@ -190,7 +195,7 @@ func (s *QueryServer) searchDirect(
 
 	localResume := s.localResumePositions(resume)
 	localIter, getLocalToken := eng.Search(ctx, q, localResume)
-	remoteIter, remoteHist, contributingVaults := s.collectRemote(ctx, q)
+	remoteIter, contributingVaults := s.collectRemote(ctx, q)
 
 	// Histogram is computed only on the FIRST page of a paginated search.
 	var histCh chan []*apiv1.HistogramBucket
@@ -198,7 +203,7 @@ func (s *QueryServer) searchDirect(
 		histCh = make(chan []*apiv1.HistogramBucket, 1)
 		go func() {
 			histCh <- s.guardedHistogram(func() []*apiv1.HistogramBucket {
-				return s.computePageHistogram(ctx, eng, histogramQ, remoteHist)
+				return s.computePageHistogram(ctx, eng, histogramQ)
 			})
 		}()
 	}
@@ -249,18 +254,41 @@ func (s *QueryServer) guardedHistogram(compute func() []*apiv1.HistogramBucket) 
 	return compute()
 }
 
-// computePageHistogram builds the page-1 volume histogram for a search.
-// Counts only — level breakdown is omitted so histogram work stays on the
-// ITSI fast path and cannot block search completion.
-func (s *QueryServer) computePageHistogram(ctx context.Context, eng *query.Engine, histogramQ query.Query, remoteHist []*apiv1.HistogramBucket) []*apiv1.HistogramBucket {
+// computePageHistogram builds the page-1 volume histogram for a search: this
+// node's share from the vaults it leads, merged with every remote vault's
+// share. Counts only — level breakdown is omitted so histogram work stays on
+// the ITSI fast path where the query has no filter.
+func (s *QueryServer) computePageHistogram(ctx context.Context, eng *query.Engine, histogramQ query.Query) []*apiv1.HistogramBucket {
 	if s.histogramFullyLocal(ctx, histogramQ) {
 		localEng := s.orch.LocalVaultQueryEngine()
 		if s.lookupResolver != nil {
 			localEng.SetLookupResolver(s.lookupResolver)
 		}
-		return HistogramToProto(localEng.ComputeSearchPageHistogram(ctx, histogramQ, 50))
+		return HistogramToProto(localEng.ComputeSearchPageHistogram(ctx, histogramQ, pageHistogramBuckets))
 	}
-	localHist := HistogramToProto(eng.ComputeSearchPageHistogram(ctx, histogramQ, 50))
+	return s.mergeRemoteHistogram(ctx, histogramQ, func() []*apiv1.HistogramBucket {
+		return HistogramToProto(eng.ComputeSearchPageHistogram(ctx, histogramQ, pageHistogramBuckets))
+	})
+}
+
+// mergeRemoteHistogram computes this node's share of a histogram with local
+// while the remote vaults compute theirs, and sums them. It yields no
+// histogram when any share is missing.
+func (s *QueryServer) mergeRemoteHistogram(ctx context.Context, q query.Query, local func() []*apiv1.HistogramBucket) []*apiv1.HistogramBucket {
+	var localHist []*apiv1.HistogramBucket
+	var localErr error
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		localErr = panicguard.Call(s.logger, "search histogram", func() error {
+			localHist = local()
+			return nil
+		})
+	})
+	remoteHist, remoteOK := s.collectRemoteHistogram(ctx, q)
+	wg.Wait()
+	if localErr != nil || !remoteOK {
+		return nil
+	}
 	return mergeHistogramBuckets(localHist, remoteHist)
 }
 
@@ -367,6 +395,8 @@ func mapSearchError(err error) error {
 		return connect.NewError(connect.CodeCanceled, err)
 	case errors.Is(err, query.ErrInvalidResumeToken):
 		return errInvalidArg(err)
+	case resourceExhausted(err):
+		return connect.NewError(connect.CodeResourceExhausted, err)
 	default:
 		return errInternal(err)
 	}

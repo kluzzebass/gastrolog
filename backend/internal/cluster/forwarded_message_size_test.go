@@ -102,7 +102,7 @@ func requireRecordsInOrder(t *testing.T, got []*gastrologv1.ExportRecord, want [
 // drainSearchStream collects every batch of a SearchStream and its error.
 func drainSearchStream(t *testing.T, sf *SearchForwarder) ([][]*gastrologv1.ExportRecord, error) {
 	t.Helper()
-	recCh, _, errCh, _, _ := sf.SearchStream(context.Background(), "owner", forwardSearchRequest())
+	recCh, _, errCh, _ := sf.SearchStream(context.Background(), "owner", forwardSearchRequest())
 	var batches [][]*gastrologv1.ExportRecord
 	for batch := range recCh {
 		batches = append(batches, batch)

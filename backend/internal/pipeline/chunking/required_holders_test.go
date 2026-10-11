@@ -87,18 +87,18 @@ func TestUnresolvedPlacementFailsReleaseAndPurgeClosed(t *testing.T) {
 	fsm := sealedReleasableFSM(t, segID)
 
 	// Resolved: the gate opens (sanity for the fail-closed assertions below).
-	if !testMayRelease(fsm, segID, required, true, 2, 0, time.Time{}) {
+	if !testMayRelease(fsm, segID, required, true, 0, time.Time{}) {
 		t.Fatal("fixture broken: segment should release when placement is resolved")
 	}
-	if !mayPurgeHeadAfterBuild(fsm, segID, required, true, 2) {
+	if !mayPurgeHeadAfterBuild(fsm, segID, required, true) {
 		t.Fatal("fixture broken: head purge should pass when placement is resolved")
 	}
 
 	// Unresolved: both gates fail closed regardless of readiness.
-	if testMayRelease(fsm, segID, nil, false, 2, 0, time.Time{}) {
+	if testMayRelease(fsm, segID, nil, false, 0, time.Time{}) {
 		t.Fatal("release gate opened on an unresolved placement lookup")
 	}
-	if mayPurgeHeadAfterBuild(fsm, segID, nil, false, 2) {
+	if mayPurgeHeadAfterBuild(fsm, segID, nil, false) {
 		t.Fatal("head purge allowed on an unresolved placement lookup")
 	}
 }
@@ -113,10 +113,48 @@ func TestNoRequiredHoldersReleasesExhaustedSegments(t *testing.T) {
 	fsm := sealedReleasableFSM(t, segID)
 	required, resolved := NoRequiredHolders()
 
-	if !testMayRelease(fsm, segID, required, resolved, 0, 0, time.Time{}) {
+	if !testMayRelease(fsm, segID, required, resolved, 0, time.Time{}) {
 		t.Fatal("explicit no-holder-gate vault should release exhausted segments")
 	}
-	if !mayPurgeHeadAfterBuild(fsm, segID, required, resolved, 0) {
+	if !mayPurgeHeadAfterBuild(fsm, segID, required, resolved) {
 		t.Fatal("explicit no-holder-gate vault should purge head after build")
+	}
+}
+
+// TestReleaseAndPurgeIgnoreChunkHoldersOutsidePlacement: the vault was on
+// homes {home-a, home-b}, both built the chunk and acked; home-b's disk died
+// and the vault was re-placed to {home-a, home-c}. The raw chunk holder set
+// still meets RF 2, but only home-a holds a managed copy — the segment must
+// neither release from the registry nor have its head copy purged until
+// home-c holds the chunk.
+func TestReleaseAndPurgeIgnoreChunkHoldersOutsidePlacement(t *testing.T) {
+	t.Parallel()
+	segID := glid.New()
+	fsm := sealedReleasableFSM(t, segID)
+	rePlaced := []string{"home-a", "home-c"}
+
+	if testMayRelease(fsm, segID, rePlaced, true, 0, time.Time{}) {
+		t.Fatal("registry release counted a chunk holder outside the placement")
+	}
+	if mayPurgeHeadAfterBuild(fsm, segID, rePlaced, true) {
+		t.Fatal("head purge counted a chunk holder outside the placement")
+	}
+
+	entries := fsm.List()
+	if len(entries) != 1 {
+		t.Fatalf("fixture: %d chunks, want 1", len(entries))
+	}
+	data, err := vaultctlfsm.MarshalAckChunkHolders([]chunk.ChunkID{entries[0].ID}, "home-c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err, ok := fsm.Apply(&hraft.Log{Data: data}).(error); ok && err != nil {
+		t.Fatal(err)
+	}
+	if !testMayRelease(fsm, segID, rePlaced, true, 0, time.Time{}) {
+		t.Fatal("segment not releasable once two placed homes hold its chunk")
+	}
+	if !mayPurgeHeadAfterBuild(fsm, segID, rePlaced, true) {
+		t.Fatal("head purge refused once two placed homes hold its chunk")
 	}
 }

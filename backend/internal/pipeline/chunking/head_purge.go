@@ -33,13 +33,12 @@ func (v *vaultChunking) flushHeadPurgeForManifest(pending *vaultctlfsm.OpenChunk
 	// drainReleasedPurge) and by later manifests referencing the same
 	// segment.
 	required, resolved := v.requiredHolders()
-	minChunk := v.plannerMinHolders()
 	fsm := v.fsm()
 	purged := 0
 	failed := 0
 	var firstErr error
 	for _, id := range segmentIDs {
-		if !mayPurgeHeadAfterBuild(fsm, id, required, resolved, minChunk) {
+		if !mayPurgeHeadAfterBuild(fsm, id, required, resolved) {
 			continue
 		}
 		// Per-segment detail at Debug: purges are a healthy-path event that

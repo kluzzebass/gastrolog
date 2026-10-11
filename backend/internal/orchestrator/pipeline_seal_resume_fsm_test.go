@@ -112,7 +112,7 @@ func TestResumeSealingFromFSM_RecoversTheStrandOnly(t *testing.T) {
 	fsm, stranded, building := fsmWithBothSealingPopulations(t)
 
 	r := newResumeReconciler(t)
-	r.fsm = fsm
+	r.fsm.Store(fsm)
 	var scheduled []chunk.ChunkID
 	r.postSealHook = func(_ glid.GLID, _ chunk.ChunkManager, id chunk.ChunkID) {
 		scheduled = append(scheduled, id)

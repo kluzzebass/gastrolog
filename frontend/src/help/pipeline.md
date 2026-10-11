@@ -33,7 +33,7 @@ Hitting the budget fails the query rather than trimming the result to fit — a 
 
 Two separate caps do return a partial table, and both mark it truncated in the result so you can see it happened: `stats` stops admitting new groups past 10,000 distinct groups, and `bin()` gap-filling stops padding empty time bins once it would cross that cap. If a result comes back flagged as truncated, group by something coarser or widen the bin.
 
-The budget is **per query, per node**. A query that fans out across a cluster gets its own budget on each node that runs part of it, plus the coordinator's own share for the records it gathers back; there is no cluster-wide total. Each node bounds only what it holds itself, which is what keeps any one node from being exhausted by a single query.
+The budget is **per query, per node**. A query that fans out across a cluster gets its own budget on each node that runs part of it, plus the coordinator's own share for the records it gathers back; there is no cluster-wide total. Each node bounds only what it holds itself, which is what keeps any one node from being exhausted by a single query. On each node, everything the query holds at once counts against that one budget together — its scan, the volume histogram beside it, and the buffer used to put recent, not-yet-indexed records in source order for `order=source_ts`. A node that runs out fails the whole query with the same error, whichever node you are connected to.
 
 If a query hits the budget, narrow it rather than retrying: a shorter time range, a tighter filter, a `head` cap, or grouping by a field with fewer distinct values.
 

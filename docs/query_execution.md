@@ -350,7 +350,8 @@ node honours a source-time window or a `pos=` address the same way a local one
 does. A legacy token/key-value query is folded into its filter first, so it
 never reaches a peer as an unfiltered scan. What the text does not carry
 travels in the request beside it: the resume cursor in `ResumeToken`, the
-partial-aggregate request in `PartialAggregates`. A test fails when a
+partial-aggregate request in `PartialAggregates`, the histogram request in
+`HistogramOnly`. A test fails when a
 `query.Query` field is neither round-tripped through the wire form nor named
 with the channel that carries it instead. `Query.String()` is a display form
 for Explain, not the wire.
@@ -376,14 +377,22 @@ which node the client connected to and on how routing fanned copies across
 vaults. EventID's fields are intrinsic to the event and identical on every copy
 of it, so every node ranks any two records the same way.
 
-**Histograms travel ahead of records.** Each remote vault's histogram arrives
-whole in its stream's first message, and `SearchStream`'s `getHistogram` must
-answer from that message alone. The coordinator reads every vault's histogram
-*before* it starts draining any vault's records, so a getter that waited for
-its stream to finish would deadlock the fan-out: the record channel fills, the
-peer's producer parks on a send nobody is reading, and the coordinator is still
-waiting on the histogram. It only bites past the channel's depth, which is why
-paged queries never showed it and an unlimited one did.
+**Histograms travel beside records, never inside them.** The page-1 histogram
+covers the whole window, while a vault's record stream stops at the page
+limit, so no record scan can produce it: a filtered histogram is its own scan
+of the window (`timechartScanPath`), an unfiltered one counts from the
+timestamp index. On the first page the coordinator computes its own leader
+vaults' share and, concurrently, `collectRemoteHistogram` sends every remote
+vault's leader a `ForwardSearch` with `histogram_only` set; the peer answers
+with `ComputeSearchPageHistogram` over the forwarded query — the function the
+coordinator runs for its own vaults — and no records. The shares sum bucket by
+bucket on the grid every node derives from the same absolute window. Record
+streams carry no histogram, and later pages ask for none, so no record waits on
+a histogram's scan and the response's closing message is the only one that
+does. Pipeline searches merge the remote shares the same way. If any remote
+vault fails to answer, the response carries no histogram: a sum missing one
+vault's share would understate volume while looking authoritative. A remote
+vault whose record stream fails fails the search itself.
 
 **Resume tokens** carry the coordinator's local chunk positions plus one
 canonical cursor for the merged stream: the last emitted record's timestamp on
@@ -403,7 +412,8 @@ and the next page restarts it under the cursor, which the narrowed time bound
 lets the rank scan seek to directly. An open pipeline chunk has no source
 index yet; under `order=source_ts` it is put in canonical order in memory —
 one pass collects each surviving record's ordering key and position, charged
-against the memory budget, and the records are read back sorted. The engine applies its own token's cursor,
+against the query's memory budget until the chunk is done, and the records are
+read back sorted. The engine applies its own token's cursor,
 so pagination is exact at the engine boundary too, not only through the
 server. This is what makes `order=source_ts` pageable on the same terms as
 the default ordering.
@@ -423,12 +433,18 @@ without changing the answer.
 
 Every path that retains data charges it: the record buffer behind an uncapped
 sort, the top-N working set behind a capped one, the slot array a `tail`/`slice`
-declares, the dedup seen-event set, stats group state, and the collections
-inside `dcount`, `median`, `values`, `first`, and `last`. Records are charged
+declares, the dedup seen-event set, stats group state, the collections
+inside `dcount`, `median`, `values`, `first`, and `last`, the sort keys of an
+unindexed chunk put in source order, and the histogram's working state. Records are charged
 *after* field extraction, since the JSON/logfmt fields that materialization
 moves into `Attrs` are most of what a buffered record retains. Exceeding the
 budget fails the query with a `query.MemoryLimitError` naming the structure that
 overflowed and the ceiling; the RPC layer surfaces it as `ResourceExhausted`.
+A peer whose share overflows answers its forwarded search, follow, or context
+request with a `ResourceExhausted` status, and the coordinator passes that code
+on to the client, so the same query fails the same way whichever node holds the
+data. The overflow is the query's size, not the vault's health: it is never
+reported as a vault read failure and raises no vault alarm.
 The budget never trims a result to fit.
 
 Two older caps do produce a partial table, and both label it: exceeding
@@ -439,11 +455,22 @@ result is flagged rather than silent — but it is still partial, which is a
 different contract from the budget's outright failure.
 
 The budget is **per query, per node**. Each node executing part of a fan-out
-gets its own, and the coordinator runs its whole share — the local scan and the
-records streaming back from peers — on one ledger. There is no cluster-wide
-total: the exhaustion being prevented is a node running out of memory, a
-per-node resource, and a shared counter would need a cluster round trip on the
-per-record path.
+gets its own, and runs its whole share on one ledger (`query.Budget`): the
+caller opens it with `Engine.NewBudget` and attaches it with
+`Query.WithBudget`, or hands it to `RunPipelineWithRemote`, and every engine
+entry point charges the ledger its query carries, opening one only when the
+caller attached none. On the coordinator that ledger covers the local scan,
+the page-1 histogram, and the records streaming back from peers. Every chunk
+the merge holds open charges the same ledger, so several unindexed chunks
+sorted at once are bounded together rather than each against its own ceiling.
+A structure that finishes before the query hands back what it held: a sorted
+scanner releases its keys when its chunk is drained or abandoned, and the
+histogram charges a sub-account it closes when its buckets are built. The
+page-1 histogram runs on its own goroutine beside the scan, so the ledger is a
+single atomic counter, safe for concurrent use without a lock on the charge
+path. There is no cluster-wide total: the exhaustion being prevented is a node
+running out of memory, a per-node resource, and a shared counter would need a
+cluster round trip on the per-record path.
 
 A pipeline that ends in `stats` or `timechart` with combinable aggregates
 (`count`, `sum`, `min`, `max`, `avg`) is split at the aggregating operator. Every node

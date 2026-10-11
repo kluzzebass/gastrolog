@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -141,11 +142,11 @@ type gateFlowPull struct {
 	open  atomic.Bool
 }
 
-func (p *gateFlowPull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
+func (p *gateFlowPull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, exclude []string, dest io.Writer) (string, error) {
 	if !p.open.Load() {
-		return fmt.Errorf("origin unreachable")
+		return "", fmt.Errorf("origin unreachable")
 	}
-	return p.inner.Pull(ctx, vaultID, segmentID, dest)
+	return p.inner.Pull(ctx, vaultID, segmentID, exclude, dest)
 }
 
 func (p *gateFlowPull) allow() {
@@ -200,11 +201,11 @@ type flakyFlowPull struct {
 	maxFail  int32
 }
 
-func (p *flakyFlowPull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
+func (p *flakyFlowPull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, exclude []string, dest io.Writer) (string, error) {
 	if p.attempts.Add(1) <= p.maxFail {
-		return fmt.Errorf("origin node unreachable")
+		return "", fmt.Errorf("origin node unreachable")
 	}
-	return p.inner.Pull(ctx, vaultID, segmentID, dest)
+	return p.inner.Pull(ctx, vaultID, segmentID, exclude, dest)
 }
 
 func applyFlowFSM(t *testing.T, fsm *vaultctlfsm.FSM, data []byte) {
@@ -1144,8 +1145,13 @@ type flowDistributionPull struct {
 	dist *distribution.Manager
 }
 
-func (p *flowDistributionPull) Pull(_ context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
-	return p.dist.ServePull(distribution.PullRequest{
+const flowOriginSource = "origin"
+
+func (p *flowDistributionPull) Pull(_ context.Context, vaultID, segmentID glid.GLID, exclude []string, dest io.Writer) (string, error) {
+	if slices.Contains(exclude, flowOriginSource) {
+		return "", fmt.Errorf("%w: origin excluded", collection.ErrSegmentUnavailable)
+	}
+	return flowOriginSource, p.dist.ServePull(distribution.PullRequest{
 		VaultID:   vaultID,
 		SegmentID: segmentID,
 		Dest:      dest,

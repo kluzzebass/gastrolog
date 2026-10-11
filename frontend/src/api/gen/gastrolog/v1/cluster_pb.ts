@@ -1882,10 +1882,9 @@ export class RequestReplicaCatchupResponse extends Message<RequestReplicaCatchup
 }
 
 /**
- * ForwardSearchRequest is sent to a replica holder node to execute a
- * scoped search locally and return matching records. When sealed_chunk_ids
- * is empty and search_pipeline_chunks is false, the holder runs a legacy
- * leader-only full-vault search (backward compatible).
+ * ForwardSearchRequest is sent to the node leading vault_id to run the query
+ * against that vault: a record stream, a pipeline's table, or — with
+ * histogram_only — the vault's page histogram.
  *
  * @generated from message gastrolog.v1.ForwardSearchRequest
  */
@@ -1916,6 +1915,15 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
    */
   partialAggregates = false;
 
+  /**
+   * Answer with the vault's page histogram over the query's window and no
+   * records. The coordinator asks for it beside the record stream, so a record
+   * stream never waits on the histogram's scan of the window.
+   *
+   * @generated from field: bool histogram_only = 5;
+   */
+  histogramOnly = false;
+
   constructor(data?: PartialMessage<ForwardSearchRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1928,6 +1936,7 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
     { no: 2, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 4, name: "partial_aggregates", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 5, name: "histogram_only", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSearchRequest {
@@ -1974,7 +1983,7 @@ export class ForwardSearchResponse extends Message<ForwardSearchResponse> {
   tableResult?: TableResult;
 
   /**
-   * Volume histogram from this node's vaults
+   * The vault's page histogram, answering histogram_only
    *
    * @generated from field: repeated gastrolog.v1.HistogramBucket histogram = 5;
    */

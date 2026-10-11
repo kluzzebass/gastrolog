@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -785,9 +786,8 @@ func TestSweepMissingReplicasBatchesCatchupRequests(t *testing.T) {
 // When leadership transfers to a node that doesn't have historical
 // sealed chunks (e.g. a scale-out joiner that became leader),
 // SweepMissingReplicas on the LEADER must ask its follower targets to
-// push the missing chunks back. Without this, the new leader is
-// permanently under-replicated until the stale-fsm sweep deletes the
-// chunks as "unrecoverable" — silent data loss.
+// push the missing chunks back. Without this, the new leader stays
+// permanently under-replicated.
 //
 // This test pins the leader-side direction of the symmetric peer-to-peer
 // catchup: leader has empty disk, FollowerTargets enumerates two peers,
@@ -1407,9 +1407,8 @@ func TestReconcileFromSnapshotResumesSealingChunks(t *testing.T) {
 // but the local Manager doesn't hold the chunk, the reconciler must
 // NOT schedule PostSealProcess — there are no active-form files to
 // assemble from. Dispatching would just hand the chunk Manager an
-// ID it can't find. The Sealing entry stays in the FSM until either
-// a peer with the local files becomes leader and resumes it, or
-// stale-fsm cleanup retires it.
+// ID it can't find. The Sealing entry stays in the FSM until a peer
+// with the local files becomes leader and resumes it.
 func TestReconcileFromSnapshotSkipsSealingWithNoLocalChunk(t *testing.T) {
 	t.Parallel()
 
@@ -1481,194 +1480,7 @@ func TestReconcileFromSnapshotSkipsSealingWithUnsealedLocalChunk(t *testing.T) {
 	}
 }
 
-// TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk pins
-// the Sealing half of SweepStaleLeaderFSMEntries: when the FSM holds a
-// Sealing entry whose chunk this leader does not have locally — the classic
-// "leader transferred mid-PostSealProcess" case in 1:1:1 placement — the
-// sweep must propose CmdRequestDelete after the grace period, not skip it.
-// Without this, a stranded Sealing entry sits in the FSM forever, blocking
-// nothing useful but accumulating as garbage.
-//
-// Setup seeds three chunks with carefully aged WriteStarts so the grace
-// period anchors are easy to reason about:
-//   - sealedFresh: Sealed, just sealed → must skip (within grace period)
-//   - sealedStale: Sealed, past grace → must propose delete (positive control)
-//   - sealingStranded: Sealing, past grace, no local files → must propose delete
-//   - activeStranded: Active, past grace, no local files → must skip (Active
-//     is not the sweep's responsibility; ingest reroute handles it)
-func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *testing.T) {
-	t.Parallel()
-
-	fsm := vaultctlfsm.New()
-	now := time.Now()
-	old := now.Add(-2 * time.Hour) // well past the 1h grace period
-
-	idSealedFresh := chunk.NewChunkID()
-	idSealedStale := chunk.NewChunkID()
-	idSealingStranded := chunk.NewChunkID()
-	idActiveStranded := chunk.NewChunkID()
-
-	// Fresh Sealed: created and sealed now.
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idSealedFresh, now, now, now)}); err != nil {
-		t.Fatalf("create fresh sealed: %v", err)
-	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealedFresh, now, 1, 1, now, now, now, false, now)}); err != nil {
-		t.Fatalf("seal fresh: %v", err)
-	}
-
-	// Stale Sealed: created and sealed 2h ago.
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idSealedStale, old, old, old)}); err != nil {
-		t.Fatalf("create stale sealed: %v", err)
-	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealedStale, old, 1, 1, old, old, old, false, old)}); err != nil {
-		t.Fatalf("seal stale: %v", err)
-	}
-
-	// Stranded Sealing: created 2h ago, BeginSeal applied, no SealChunk
-	// (PostSealProcess never finished — leader transferred away).
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idSealingStranded, old, old, old)}); err != nil {
-		t.Fatalf("create stranded sealing: %v", err)
-	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalBeginSeal(idSealingStranded)}); err != nil {
-		t.Fatalf("begin-seal stranded: %v", err)
-	}
-
-	// Stranded Active: created 2h ago, no BeginSeal yet.
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idActiveStranded, old, old, old)}); err != nil {
-		t.Fatalf("create stranded active: %v", err)
-	}
-
-	// Local chunk Manager has only the fresh Sealed chunk (the leader
-	// for that chunk is this node and the seal recently completed).
-	cm := &reconcilerFakeChunkManager{}
-	cm.chunks = []chunk.ChunkMeta{{ID: idSealedFresh, Sealed: true}}
-
-	var deletedRequests []chunk.ChunkID
-	var deleteReasons []string
-	vaultInst := &VaultInstance{
-		VaultID:    glid.New(),
-		Chunks:     cm,
-		IsFollower: false,
-		RaftApplyFacet: RaftApplyFacet{
-			ApplyRaftRequestDelete: func(id chunk.ChunkID, reason string, _ []string) error {
-				deletedRequests = append(deletedRequests, id)
-				deleteReasons = append(deleteReasons, reason)
-				return nil
-			},
-		},
-	}
-
-	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
-
-	rec.SweepStaleLeaderFSMEntries()
-
-	if len(deletedRequests) != 2 {
-		t.Fatalf("delete proposals = %d (%v), want 2 (sealedStale + sealingStranded)",
-			len(deletedRequests), deletedRequests)
-	}
-	got := map[chunk.ChunkID]bool{deletedRequests[0]: true, deletedRequests[1]: true}
-	if !got[idSealedStale] {
-		t.Errorf("expected delete proposal for stale Sealed chunk %s; got %v", idSealedStale, deletedRequests)
-	}
-	if !got[idSealingStranded] {
-		t.Errorf("expected delete proposal for stranded Sealing chunk %s; got %v", idSealingStranded, deletedRequests)
-	}
-	if got[idSealedFresh] {
-		t.Errorf("must NOT propose delete for fresh Sealed chunk %s (within grace period)", idSealedFresh)
-	}
-	if got[idActiveStranded] {
-		t.Errorf("must NOT propose delete for stranded Active chunk %s (Active is out of scope)", idActiveStranded)
-	}
-	for _, reason := range deleteReasons {
-		if reason != "stale-fsm-leader-missing" {
-			t.Errorf("delete reason = %q, want stale-fsm-leader-missing", reason)
-		}
-	}
-}
-
-func TestSweepStaleLeaderFSMEntriesSkipsPipelineVault(t *testing.T) {
-	t.Parallel()
-
-	fsm := vaultctlfsm.New()
-	old := time.Now().Add(-2 * time.Hour)
-	id := chunk.NewChunkID()
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, old, old, old)}); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, old, 1, 1, old, old, old, false, old)}); err != nil {
-		t.Fatalf("seal: %v", err)
-	}
-
-	vaultID := glid.New()
-	orch := &Orchestrator{segmentsDir: t.TempDir()}
-	orch.setPipelineVaultLocked(vaultID, pipelineVaultReg{home: true, hasHandle: true})
-	var deleted []chunk.ChunkID
-	vaultInst := &VaultInstance{
-		VaultID:    vaultID,
-		Chunks:     &reconcilerFakeChunkManager{},
-		IsFollower: false,
-		RaftLeadershipFacet: RaftLeadershipFacet{
-			HasRaftLeader: func() bool { return true },
-		},
-		RaftApplyFacet: RaftApplyFacet{
-			ApplyRaftRequestDelete: func(id chunk.ChunkID, _ string, _ []string) error {
-				deleted = append(deleted, id)
-				return nil
-			},
-		},
-	}
-	rec := NewVaultLifecycleReconciler(orch, vaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
-
-	rec.SweepStaleLeaderFSMEntries()
-
-	if len(deleted) != 0 {
-		t.Fatalf("pipeline vault must skip stale-fsm sweep; got deletes %v", deleted)
-	}
-}
-
-func TestSweepStaleLeaderFSMEntriesRespectsSealedAtGrace(t *testing.T) {
-	t.Parallel()
-
-	fsm := vaultctlfsm.New()
-	now := time.Now()
-	oldWrite := now.Add(-3 * time.Hour)
-	recentSeal := now.Add(-10 * time.Minute)
-	id := chunk.NewChunkID()
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, oldWrite, oldWrite, oldWrite)}); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, oldWrite, 1, 1, oldWrite, oldWrite, oldWrite, false, recentSeal)}); err != nil {
-		t.Fatalf("seal: %v", err)
-	}
-
-	var deleted []chunk.ChunkID
-	vaultInst := &VaultInstance{
-		VaultID:    glid.New(),
-		Chunks:     &reconcilerFakeChunkManager{},
-		IsFollower: false,
-		RaftLeadershipFacet: RaftLeadershipFacet{
-			HasRaftLeader: func() bool { return true },
-		},
-		RaftApplyFacet: RaftApplyFacet{
-			ApplyRaftRequestDelete: func(id chunk.ChunkID, _ string, _ []string) error {
-				deleted = append(deleted, id)
-				return nil
-			},
-		},
-	}
-	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
-
-	rec.SweepStaleLeaderFSMEntries()
-
-	if len(deleted) != 0 {
-		t.Fatalf("recent SealedAt must keep chunk within grace despite old WriteEnd; deleted=%v", deleted)
-	}
-}
-
-// TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes pins the
+// TestSweepNodesOutsidePlacementPrunesNonPlacementNodes pins the
 // self-healing receipt-protocol-unstick path: after a vault placement
 // change (kubectl scale, vault rebalance), pendingDelete entries can
 // carry stale ExpectedFrom node IDs for nodes no longer in the
@@ -1680,7 +1492,7 @@ func TestSweepStaleLeaderFSMEntriesRespectsSealedAtGrace(t *testing.T) {
 // Setup mirrors the live K8s incident: first-vault has chunks stuck
 // retention-pending with ExpectedFrom containing only stale-node, while
 // current placement is {leader-node + follower-node}.
-func TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes(t *testing.T) {
+func TestSweepNodesOutsidePlacementPrunesNonPlacementNodes(t *testing.T) {
 	t.Parallel()
 
 	fsm := vaultctlfsm.New()
@@ -1711,9 +1523,9 @@ func TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes(t *testing.T) {
 	}
 
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "leader-node", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
-	rec.SweepStalePendingDeleteAcks()
+	rec.SweepNodesOutsidePlacement()
 
 	if len(prunedNodes) != 1 {
 		t.Fatalf("expected 1 prune proposal for stale-node, got %d (%v)", len(prunedNodes), prunedNodes)
@@ -1723,12 +1535,12 @@ func TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes(t *testing.T) {
 	}
 }
 
-// TestSweepStalePendingDeleteAcksSkipsCurrentPlacementMembers pins the
+// TestSweepNodesOutsidePlacementSkipsCurrentPlacementMembers pins the
 // negative case: nodes in the current placement (leader + followers)
 // MUST NOT be pruned, even if they haven't acked yet. Live deletes
 // in-flight to current placement members are the receipt protocol's
 // normal operation, not stale references.
-func TestSweepStalePendingDeleteAcksSkipsCurrentPlacementMembers(t *testing.T) {
+func TestSweepNodesOutsidePlacementSkipsCurrentPlacementMembers(t *testing.T) {
 	t.Parallel()
 
 	fsm := vaultctlfsm.New()
@@ -1759,20 +1571,84 @@ func TestSweepStalePendingDeleteAcksSkipsCurrentPlacementMembers(t *testing.T) {
 	}
 
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "leader-node", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
-	rec.SweepStalePendingDeleteAcks()
+	rec.SweepNodesOutsidePlacement()
 
 	if len(prunedNodes) != 0 {
 		t.Errorf("MUST NOT prune current placement members; got %v", prunedNodes)
 	}
 }
 
-// TestSweepStalePendingDeleteAcksFollowersAreNoOp pins the leader-only
-// gate: only the vault-ctl leader should propose CmdPruneNode, mirroring
-// SweepStaleLeaderFSMEntries' leader-only design. Without this, every
-// node would race to propose the same prune on every sweep tick.
-func TestSweepStalePendingDeleteAcksFollowersAreNoOp(t *testing.T) {
+// TestSweepNodesOutsidePlacementPrunesHolderClaims: a node that left the
+// vault's placement keeps its chunk and segment holder claims forever — no
+// reconciler of its own runs to revoke them. With no pending delete naming
+// it, the sweep still prunes it; the claims of current placement members
+// stay, and once pruned the sweep has nothing left to propose.
+func TestSweepNodesOutsidePlacementPrunesHolderClaims(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	apply := func(data []byte) {
+		t.Helper()
+		if err, ok := fsm.Apply(&hraft.Log{Data: data}).(error); ok && err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+	}
+	chunkID := chunk.NewChunkID()
+	apply(vaultctlfsm.MarshalCreateChunk(chunkID, time.Now(), time.Now(), time.Now()))
+	for _, node := range []string{"leader-node", "chunk-departed"} {
+		data, err := vaultctlfsm.MarshalAckChunkHolders([]chunk.ChunkID{chunkID}, node)
+		if err != nil {
+			t.Fatal(err)
+		}
+		apply(data)
+	}
+	segID := glid.New()
+	apply(vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID: segID, RecordCount: 1,
+	}))
+	apply(vaultctlfsm.MarshalAckSegmentHolders([]glid.GLID{segID}, "follower-node"))
+	apply(vaultctlfsm.MarshalAckSegmentHolders([]glid.GLID{segID}, "segment-departed"))
+
+	var prunedNodes []string
+	vaultInst := &VaultInstance{
+		VaultID:         glid.New(),
+		FollowerTargets: []system.ReplicationTarget{{NodeID: "follower-node"}},
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftPruneNode: func(nodeID string) error {
+				prunedNodes = append(prunedNodes, nodeID)
+				apply(vaultctlfsm.MarshalPruneNode(nodeID))
+				return nil
+			},
+		},
+	}
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "leader-node", slog.Default())
+	rec.fsm.Store(fsm)
+
+	rec.SweepNodesOutsidePlacement()
+
+	if want := []string{"chunk-departed", "segment-departed"}; !slices.Equal(prunedNodes, want) {
+		t.Fatalf("pruned %v, want %v", prunedNodes, want)
+	}
+	if got := fsm.Get(chunkID).Holders; !slices.Equal(got, []string{"leader-node"}) {
+		t.Errorf("chunk holders = %v, want [leader-node]", got)
+	}
+	if got := fsm.GetCompletedSegment(segID).Holders; !slices.Equal(got, []string{"follower-node"}) {
+		t.Errorf("segment holders = %v, want [follower-node]", got)
+	}
+
+	prunedNodes = nil
+	rec.SweepNodesOutsidePlacement()
+	if len(prunedNodes) != 0 {
+		t.Fatalf("converged sweep proposed %v, want nothing", prunedNodes)
+	}
+}
+
+// TestSweepNodesOutsidePlacementFollowersAreNoOp pins the leader-only
+// gate: only the vault-ctl leader should propose CmdPruneNode. Without
+// this, every node would race to propose the same prune on every sweep tick.
+func TestSweepNodesOutsidePlacementFollowersAreNoOp(t *testing.T) {
 	t.Parallel()
 
 	fsm := vaultctlfsm.New()
@@ -1796,9 +1672,9 @@ func TestSweepStalePendingDeleteAcksFollowersAreNoOp(t *testing.T) {
 	}
 
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-X", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
-	rec.SweepStalePendingDeleteAcks()
+	rec.SweepNodesOutsidePlacement()
 
 	if len(prunedNodes) != 0 {
 		t.Errorf("followers MUST NOT propose CmdPruneNode; got %v", prunedNodes)
@@ -1903,7 +1779,7 @@ func TestSweepIdleActiveSealsLocalActivePastThreshold(t *testing.T) {
 
 	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepIdleActiveChunks()
 
@@ -1951,7 +1827,7 @@ func TestSweepIdleActiveSealsMetadataOnlyOrphan(t *testing.T) {
 
 	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepIdleActiveChunks()
 
@@ -1993,7 +1869,7 @@ func TestSweepIdleActiveSkipsFreshActiveEntries(t *testing.T) {
 
 	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepIdleActiveChunks()
 
@@ -2033,7 +1909,7 @@ func TestSweepIdleActiveSkipsChunksNotHeldLocally(t *testing.T) {
 
 	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepIdleActiveChunks()
 
@@ -2086,7 +1962,7 @@ func TestSweepIdleActiveSkipsAlreadyLocallySealedChunks(t *testing.T) {
 
 	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepIdleActiveChunks()
 
@@ -2133,7 +2009,7 @@ func TestSweepIdleActiveSkipsSealingAndSealedEntries(t *testing.T) {
 
 	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepIdleActiveChunks()
 
@@ -2200,7 +2076,7 @@ func TestReconcileFromSnapshotDeletesTombstonedLocalOrphan(t *testing.T) {
 }
 
 // TestReconcileMembershipCatchupPrunesStalePendingAcks pins the
-// stale-pending-ack category's event source: gaining vault-ctl leadership
+// outside-placement prune category's event source: gaining vault-ctl leadership
 // (ReconcileMembershipCatchup, wired to onVaultCtlLeadGained). A leader
 // that inherits a pendingDelete whose ExpectedFrom references a node
 // dropped from placement must prune it on the leadership edge, not wait
@@ -2232,7 +2108,7 @@ func TestReconcileMembershipCatchupPrunesStalePendingAcks(t *testing.T) {
 	}
 
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "leader-node", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	// Fire ONLY the lead-gained catchup wake. No ReconcileTick.
 	rec.ReconcileMembershipCatchup()

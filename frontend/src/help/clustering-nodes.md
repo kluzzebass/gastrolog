@@ -54,13 +54,13 @@ Each node card carries its role (**leader** or **follower**) and suffrage (**vot
 | Badge | Meaning |
 |-------|---------|
 | _(none)_ | Live: a cluster member in Raft contact |
-| **unreachable** | The cluster has lost Raft contact with the node — check the process and its network; its placements wait for it |
-| **maintenance** | An operator declared the node absent; the cluster expects it back and keeps its placements |
+| **unreachable** | The cluster has lost Raft contact with the node — check the process and its network; its placements wait for it, and for each vault it follows, a spare live node (if there is one) joins as an extra follower until it returns |
+| **maintenance** | An operator declared the node absent; the cluster expects it back and keeps its placements; for each vault it follows, a spare live node (if there is one) joins as an extra follower until it returns |
 | **draining** | Chunks are being transferred off the node ahead of its removal |
 | **decommissioning** | The node is being removed from the cluster and stops receiving placements |
 | **offline** | A live node whose stats broadcast has stopped arriving — it is down or unreachable; the badge shows how long it has been silent |
 
-The duration after a state badge is how long the node has been in that state.
+The duration after a state badge is how long the node has been in that state. Only a live node receives new vault placements; a node in any other state keeps the placements it holds. A node that is merely restarting keeps all of its placements — the cluster waits for the unreachable threshold before treating its absence as anything more.
 
 ## Offline Nodes
 

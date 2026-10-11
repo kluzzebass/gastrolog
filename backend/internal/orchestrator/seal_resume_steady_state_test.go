@@ -7,8 +7,7 @@ package orchestrator
 // ReconcileFromSnapshot, fired only by the vault-ctl FSM's after-restore hook —
 // so a post-seal that failed or never got scheduled left its manifest entry in
 // Sealing until the node restarted. The chunk is then neither writable nor
-// durable-complete, and nothing else picks it up: the stale-fsm sweep skips
-// exactly the chunks the leader holds locally.
+// durable-complete, and nothing else picks it up.
 //
 // TestReconcileFromSnapshotResumesSealingChunks covers the restore path; these
 // cover the steady state. Idempotency of a resume that lands while a healthy
@@ -61,7 +60,7 @@ func sealResumeFixture(t *testing.T, logger *slog.Logger) (*VaultLifecycleReconc
 	}
 	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", logger)
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 	return rec, idSealing
 }
 
@@ -169,10 +168,9 @@ func TestSealResumeDoesNotWarnAboutInFlightSeals(t *testing.T) {
 	}
 }
 
-// The no-local-chunk case belongs to the stale-fsm sweep and its grace
-// period, not here: this path cannot rebuild a GLCB it has no bytes for.
-// Steady state skips it silently rather than warning every tick about a
-// condition another category is already timing out.
+// The no-local-chunk case is not this path's to act on: it cannot rebuild a
+// GLCB it has no bytes for. Steady state skips it silently rather than warning
+// every tick about a condition it can do nothing about.
 func TestSealResumeSkipsAndStaysQuietWhenChunkIsAbsentLocally(t *testing.T) {
 	t.Parallel()
 	var out syncBuffer
@@ -191,7 +189,7 @@ func TestSealResumeSkipsAndStaysQuietWhenChunkIsAbsentLocally(t *testing.T) {
 		t.Errorf("resumed %v with no local chunk to assemble from; want nothing", *scheduled)
 	}
 	if got := out.String(); strings.Contains(got, "cannot resume") {
-		t.Errorf("steady-state pass warned about a case the stale-fsm sweep owns; log was:\n%s", got)
+		t.Errorf("steady-state pass warned about a chunk it holds no bytes for; log was:\n%s", got)
 	}
 }
 
@@ -211,7 +209,7 @@ func TestSnapshotResumeStillWarnsOnUnrecoverableSealing(t *testing.T) {
 	cm.chunks = nil
 	recordScheduled(rec)
 
-	rec.ReconcileFromSnapshot(rec.fsm)
+	rec.ReconcileFromSnapshot(rec.fsm.Load())
 
 	if got := out.String(); !strings.Contains(got, "cannot resume") {
 		t.Errorf("restore path went quiet about an unrecoverable Sealing entry; log was:\n%s", got)

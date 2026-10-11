@@ -273,5 +273,8 @@ func followError(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil
 	}
+	if resourceExhausted(err) {
+		return connect.NewError(connect.CodeResourceExhausted, err)
+	}
 	return errInternal(err)
 }

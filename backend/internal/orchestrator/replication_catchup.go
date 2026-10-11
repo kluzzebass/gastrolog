@@ -204,8 +204,7 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, n
 // AND responders. The receiver doesn't need to be the placement leader —
 // it just needs to have the chunks locally. This enables a newly-elected
 // leader to backfill historical chunks from followers that still have
-// them, instead of waiting for the stale-fsm sweep to declare the chunks
-// unrecoverable.
+// them.
 func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.GLID, requesterNodeID string, chunkIDs []chunk.ChunkID) (uint32, error) {
 	if o.isPipelineIngestVault(vaultID) {
 		return 0, nil

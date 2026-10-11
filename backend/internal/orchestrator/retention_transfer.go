@@ -189,7 +189,8 @@ func (r *retentionRunner) fireTransferEvent(id chunk.ChunkID, target *glid.GLID)
 		tick = ticker.C
 		stop = ticker.Stop
 	}
-	ok := r.waitForDestHolders(destFSM, id, destRF, tick)
+	destPlacement := func() []string { return r.orch.vaultPlacementNodeIDs(targetID) }
+	ok := r.waitForDestHolders(destFSM, id, destRF, destPlacement, tick)
 	stop()
 	if !ok {
 		r.markTransferTargetStalledThisSweep(targetID)
@@ -450,21 +451,24 @@ func localCopyAndPromoteGLCB(srcPath, destPath string, e vaultctlfsm.ManifestEnt
 	return verifyAndPromoteGLCB(tmp, destPath, e, logger)
 }
 
-// waitForDestHolders blocks until the destination FSM reports at least
-// need holders for chunkID, or the receipts wait stalls — no NEW holder
-// for transferReceiptsMaxStallTicks consecutive ticks. tick is injected so
+// waitForDestHolders blocks until at least need of chunkID's holders in the
+// destination FSM are members of the destination's current placement, or the
+// receipts wait stalls — no NEW placed holder for
+// transferReceiptsMaxStallTicks consecutive ticks. placement is re-read on
+// every check, so a holder that leaves the destination's placement mid-wait
+// stops counting toward the source delete. tick is injected so
 // tests drive the wait without wall-clock sleeps (the same pattern
 // retention_watchdog.go uses for the route fan-out's progress monitor);
 // production passes a real time.Ticker channel. Returns immediately,
 // without consuming a tick, when the destination already meets need (the
 // idempotent-retry and single-node local-copy fast paths both land here).
-func (r *retentionRunner) waitForDestHolders(fsm *vaultctlfsm.FSM, chunkID chunk.ChunkID, need int, tick <-chan time.Time) bool {
+func (r *retentionRunner) waitForDestHolders(fsm *vaultctlfsm.FSM, chunkID chunk.ChunkID, need int, placement func() []string, tick <-chan time.Time) bool {
 	holderCount := func() int {
 		e := fsm.Get(chunkID)
 		if e == nil {
 			return 0
 		}
-		return len(e.Holders)
+		return vaultctlfsm.PlacedHolderCount(e.Holders, placement())
 	}
 	last := holderCount()
 	if last >= need {

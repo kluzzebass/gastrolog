@@ -364,8 +364,9 @@ Reading records back, filtering, aggregating, and rendering them.
   cross-chunk and cross-node paths. Terminates with `chunk.ErrNoMoreRecords`.
 
 - **collectRemote** — the orchestrator entry point that fans a search out to
-  peer nodes and merges results. Used by Search, Histogram, Explain,
-  GetContext, GetFields.
+  peer nodes and merges results. Used by Search, Explain, GetContext,
+  GetFields. Its histogram counterpart, `collectRemoteHistogram`, asks each
+  remote vault's leader for its page histogram beside the record stream.
 
 ---
 
@@ -419,7 +420,8 @@ gRPC transport:
 - **Pending delete** (`vaultctlfsm.PendingDelete`) — a chunk delete
   committed in the vault FSM (`CmdRequestDelete`) and awaiting a
   `CmdAckDelete` from every node in its `ExpectedFrom` set; the manifest
-  entry goes when the last ack commits (or a node prune drains the set).
+  entry goes when the last ack commits (or a node prune — see **Holder** —
+  drains the set).
   The chunk has already left the retained set: retention sweeps and the
   age/count bound re-check skip it, while the manifest and residency keep
   reporting it until the acks land.
@@ -503,7 +505,16 @@ one segmented file set, one batch-writer goroutine.
 
 - **Placement manager** — the subsystem that owns placement decisions. Runs
   on the cluster-ctl Raft leader, reacts to node join/leave, vault create/delete,
-  and ingester changes.
+  and ingester changes. Only a live node takes a placement it does not already
+  hold; a node in any other state keeps what it holds, and so does a live node
+  whose heartbeat has lapsed.
+
+- **Working replica** — a placement member that counts toward the vault's
+  replication factor: its node is live or draining and its storage for the
+  vault is not under disk protect. A **degraded member** — on an unreachable,
+  maintenance or decommissioning node, or under disk protect — is retained but
+  not counted, and the placement manager backfills a follower on a live node
+  until it recovers.
 
 - **Removal gate** — a leader-side check that runs before a node removal
   commits, refusing removals that would cost data or redundancy. Two gates
@@ -672,7 +683,9 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 - **Vault readiness** — a vault on this node is "ready" iff it has a local
   instance AND that instance's `IsFSMReady()` callback returns `true` (i.e.
   the vault-ctl Raft has applied at least one log entry on this node, or
-  restored from a snapshot). Canonical definition in
+  restored from a snapshot). An instance whose vault-ctl group creation is
+  still deferred on this node is not ready; on a node without vault-ctl
+  Raft the callback is nil and the instance is ready. Canonical definition in
   [`vault_readiness.go`](../backend/internal/orchestrator/vault_readiness.go).
   Checked by every read and write path before touching vault state.
 
@@ -1157,7 +1170,7 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   an operator mid-incident, which makes it a different register from code and
   logs even when it names the same concepts. Three rules: name entities the
   way the operator knows them (a vault by name, never a bare GLID); never
-  print source notation (`min(2, placement)` is `plannerMinHolders` spelled
+  print source notation (`min(2, placement)` is `HolderQuorum` spelled
   as Go — say "a second node must hold a copy"), and never
   `time.Duration.String()` (use `system.FormatDuration`, which drops the zero
   components that make "3m0s"); and lead a Critical alarm with the
@@ -1386,10 +1399,16 @@ describes what the code does today.
   segment registry entry and on chunk state). Placement says who *should*
   hold; the holder set says who *does*. `holders ⊇ homes` is a release fast
   path, never the sole gate (a dead home must not pin a segment forever).
+  A holder outside the vault's current placement runs no vault instance, so
+  nothing of its own maintains its claim: every gate that destroys another
+  copy counts only **placed holders** (`vaultctlfsm.PlacedHolderCount`), and
+  **node prune** (`CmdPruneNode`) removes the node's claims — proposed by the
+  placement leader's outside-placement prune when the node leaves the
+  placement, and by the vault-ctl leader when it leaves the cluster.
   For a cloud-backed chunk a holder's GLCB is a **warm-cache** copy: every
   home's cache eviction may remove it, and the home's holder receipt is
-  withdrawn with it. The uploaded object, not the holder count, is what makes
-  a cloud-backed chunk supersede its segments.
+  withdrawn with it. The uploaded object, not the placed-holder count, is
+  what makes a cloud-backed chunk supersede its segments.
 
 - **Holder receipt** — the vault-ctl commit a node makes after it has pulled
   and verified bytes (`AckSegmentHolderCommand` for segments,
@@ -1403,8 +1422,9 @@ describes what the code does today.
   from the supervisor's `ChunkRequiredHolders`). Mandatory at registration;
   an unresolved lookup fails the release/purge gates closed, and
   `chunking.NoRequiredHolders` is the explicit no-holder-gate opt-out for
-  single-node vaults. The planner floor for chunk-holder eligibility is
-  `min(2, placement size)` (`plannerMinHolders`).
+  single-node vaults. The replication quorum — the placed-holder count the
+  planner's segment eligibility, segment supersession, and head purge all
+  require — is `min(2, placement size)` (`vaultctlfsm.HolderQuorum`).
 
 ### Staging areas
 
@@ -1419,7 +1439,7 @@ the collector.
   vault-ctl and served for pulls; retained until release.
 - **pre-head/** — in-flight transfers on a collecting home; invisible to
   queries and Chunking. A failed or corrupt transfer is discarded here and
-  re-pulled from another holder.
+  re-pulled from the next holder in the same collect pass.
 - **head/** — whole, checksum-verified, immutable segments awaiting chunking.
   Where the recent, queryable records live: an Active chunk's records are
   read from its manifest's segments here.
@@ -1465,7 +1485,8 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
   Node-local bookkeeping, downstream of release.
 
 - **Purge** (paths / disk) — delete the segment's bytes from staging areas
-  (`paths.PurgeCompleted` on the origin after release; `paths.PurgeHeadStaging`
+  (`paths.PurgeCompleted` on the origin after release, whether or not the
+  origin is a home; `paths.PurgeHeadStaging`
   after a home materializes the sealed GLCB; `paths.PurgeSegmentStaging` for
   all three areas). The physical end of a segment's life, ordered strictly
   after its records survive in a replicated chunk — a returning node gets

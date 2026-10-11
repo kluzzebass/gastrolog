@@ -133,13 +133,12 @@ func (s *QueryServer) searchContext(
 	isAnchor func(*apiv1.Record) bool,
 ) ([]*apiv1.Record, error) {
 	eng := s.orch.LeaderVaultQueryEngine()
-	localIter, _ := eng.Search(ctx, q, nil)
-	remoteIter, _, _ := s.collectRemote(ctx, q)
-
 	// The context window comes from the client, so the records held while
 	// merging local and remote sides are bounded by the same per-query budget
-	// as any other materializing work.
-	budget := query.NewBudget()
+	// as the local scan and any other materializing work.
+	budget := eng.NewBudget()
+	localIter, _ := eng.Search(ctx, q.WithBudget(budget), nil)
+	remoteIter, _ := s.collectRemote(ctx, q)
 
 	reverse := q.Reverse()
 	isBefore := func(a, b time.Time) bool {

@@ -53,7 +53,7 @@ func TestSweepAbandonedTransferAnnouncesRetractsOnlyTheStalePhantom(t *testing.T
 	seedTransfer(idHasHolder, old, []string{"node-B"}) // old but landed: must survive
 
 	// A normal (non-transfer) old sealed chunk must be untouched by this
-	// sweep — that's SweepStaleLeaderFSMEntries's job, not this one's.
+	// sweep.
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idNotTransfer, old, old, old)}); err != nil {
 		t.Fatalf("create idNotTransfer: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestSweepAbandonedTransferAnnouncesRetractsOnlyTheStalePhantom(t *testing.T
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepAbandonedTransferAnnounces()
 
@@ -121,7 +121,7 @@ func TestSweepAbandonedTransferAnnouncesFollowerNoOp(t *testing.T) {
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 
 	rec.SweepAbandonedTransferAnnounces()
 

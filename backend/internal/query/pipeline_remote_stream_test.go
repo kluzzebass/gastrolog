@@ -157,9 +157,9 @@ func TestClusterPipelineRetainsWorkingSetNotMatchSet(t *testing.T) {
 			eng, remote := clusterHalves(t, perSide)
 			budget := &Budget{limit: limit}
 			runClusterQuery(t, eng, remote, tc.expr, budget)
-			if budget.used > tc.retained {
+			if budget.used.Load() > tc.retained {
 				t.Errorf("%s still holds %d bytes after answering; a working set of this shape should stay under %d",
-					tc.expr, budget.used, tc.retained)
+					tc.expr, budget.used.Load(), tc.retained)
 			}
 		})
 	}
@@ -213,7 +213,7 @@ func TestClusterCapSelectsAcrossSources(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.expr, func(t *testing.T) {
-			got := raws(runClusterQuery(t, eng, remote, tc.expr, NewBudget()))
+			got := raws(runClusterQuery(t, eng, remote, tc.expr, testBudget()))
 			if !slices.Equal(got, tc.want) {
 				t.Errorf("%s = %v, want %v", tc.expr, got, tc.want)
 			}
@@ -296,7 +296,7 @@ func TestClusterStreamErrorFailsTheQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	_, err = eng.RunPipelineWithRemote(context.Background(), Query{}, pipeline, truncated, NewBudget())
+	_, err = eng.RunPipelineWithRemote(context.Background(), Query{}, pipeline, truncated, testBudget())
 	if err == nil {
 		t.Fatal("a remote stream that failed mid-flight must fail the pipeline, not answer from the records that arrived")
 	}

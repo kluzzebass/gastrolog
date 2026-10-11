@@ -261,8 +261,10 @@ R3. **The release predicate must use all three signals in 28, not just the first
     home, a dead home stalls it exactly as the segment gate does. The purge threshold
     is **RF, not home-set** — a segment is superseded once every chunk holding its
     records is sealed and replicated to `min(2, placement)` holders (the same
-    `plannerMinHolders` floor eligibility already uses), reached among the *live*
-    homes. The dead home then catches up at the **chunk** level, whose reconcile (30)
+    `HolderQuorum` floor eligibility already uses), reached among the *live*
+    homes — and only holders in the vault's *current* placement count: a node
+    re-placed away (its disk died) keeps a claim it can no longer maintain until
+    node prune removes it. The dead home then catches up at the **chunk** level, whose reconcile (30)
     tolerates a long absence, not the segment's seconds-to-minutes transport window.
     The chunk's *desired* holder set is still all homes; only the segment-purge
     *trigger* is the lower RF threshold. A **cloud-backed** chunk meets the
@@ -383,7 +385,10 @@ the node's available storages (default). Two constraints:
 - *Head invariant.* A segment enters the head only when complete and
   checksum-verified; in-flight transfers sit in pre-head, invisible to queries and
   Chunking. A failed or corrupt transfer is discarded and re-fetched from another
-  holder. Everything in the head is a whole, verified, immutable segment.
+  holder in the same collect pass: a source whose copy fails verification is
+  skipped for that segment until the pass ends, so a rotten copy cannot block the
+  segment while a healthy holder exists. Everything in the head is a whole,
+  verified, immutable segment.
 - *Rename-paired areas co-locate.* Promotion is an atomic `rename(2)`, so paired
   areas must share storage: `working`↔`completed` on the origin, pre-head↔head on
   the collector. A locally written segment needs no transfer — Segmentation's
@@ -539,7 +544,11 @@ whatever the failure; it never waits for a later publish, which a quiet vault ma
 never make. Channels carry record pointers, not files.
 
 On a remote home node, Collection lands each pull in pre-head and promotes it to the
-head by an atomic rename once it is whole and verified. When the origin is itself a
+head by an atomic rename once it is whole and verified. Sources are tried in order —
+the home's own copy, the origin, then every other holder — and a source whose copy
+fails verification is excluded for the rest of that pass, so the same pass moves on
+to the next holder. When every copy fails, the pass reports the corruption and
+retries on the home's backoff with every source eligible again. When the origin is itself a
 holder, there is no pull at all: Distribution renames `completed/` straight into the
 co-located head — a local move, not a stream to self. Either way Chunking reads a
 vault-ctl plan and merges the named head segments into a GLCB chunk, running off the

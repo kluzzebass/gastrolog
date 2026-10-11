@@ -536,12 +536,6 @@ func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActiv
 	return nil
 }
 
-// proposePruneNodeForVault fans CmdPruneNode out to every instance sub-FSM
-// in the vault after the vault-ctl Raft leader removed a node from the
-// voter set. Each instance's applier transparently routes the propose to
-// the leader, so this callback can fire from the leader's reconcile
-// pass without needing per-vault leadership checks.
-//
 // afterVaultCtlRestore is wired from vaultraft.FSM.SetOnAfterRestore and
 // must return immediately — GroupManager.CreateGroup holds groupMgr.mu
 // across NewRaft→fsm.Restore, and the deferred worker calls
@@ -562,18 +556,18 @@ func (o *Orchestrator) scheduleAfterVaultCtlRestore(vaultID glid.GLID) {
 }
 
 func (o *Orchestrator) runAfterVaultCtlRestore(vaultID glid.GLID) {
-	o.mu.RLock()
-	vault := o.vaults[vaultID]
+	// Snapshot install swaps in new vaultctlfsm sub-FSM objects: bind the
+	// vault and its instance to the replacements before reconciling.
+	if g := o.vaultCtlGroup(vaultID); g != nil {
+		o.bindVaultCtlGroup(vaultID, g)
+	}
+	o.mu.Lock()
 	var t *VaultInstance
-	if vault != nil {
+	if vault := o.vaults[vaultID]; vault != nil {
 		t = vault.Instance
 	}
-	o.mu.RUnlock()
-
-	// Snapshot install swaps in new vaultctlfsm sub-FSM objects — rebind
-	// reconciler + instance callbacks before reconciling. See
-	// rewireVaultInstanceAfterCtlRestore.
-	liveFSM := o.rewireVaultInstanceAfterCtlRestore(vaultID, t)
+	liveFSM := o.bindVaultInstanceToCtlLocked(vaultID, t)
+	o.mu.Unlock()
 	if t != nil && t.Reconciler != nil && liveFSM != nil {
 		t.Reconciler.ReconcileFromSnapshot(liveFSM)
 	}
@@ -597,11 +591,11 @@ func (o *Orchestrator) runAfterVaultCtlRestore(vaultID glid.GLID) {
 // Gaining vault-ctl leadership is also the upstream edge for the
 // reconciler's leader-only categories: fire
 // ReconcileMembershipCatchup so a late-joining leader pulls missing
-// replicas, retires unrecoverable FSM entries, prunes stale ExpectedFrom
-// nodes, and retracts abandoned transfer announces immediately instead of
+// replicas, retires unrecoverable FSM entries, prunes nodes outside the
+// placement, and retracts abandoned transfer announces immediately instead of
 // waiting for the periodic backstop tick. Applies to every vault with a
 // reconciler, not just pipeline ingest vaults — the replicated-vault
-// missing-replica and stale-pending-ack categories are exactly the ones a
+// missing-replica and outside-placement prune categories are exactly the ones a
 // new leader must run. Dispatched on auxWg: the categories propose Raft
 // applies that route to this new leader's apply queue, so they must not
 // run on the leadership-tracking goroutine.
@@ -634,14 +628,18 @@ func (o *Orchestrator) onVaultCtlLeadGained(vaultID glid.GLID) {
 }
 
 // reconcilePipelineAfterCtlRestore rebinds pipeline managers to the live vault-ctl
-// FSM after snapshot restore and runs chunk recover. Returns ErrUnknownVault when
-// pipeline has not registered the vault on this home yet — caller must defer.
+// FSM after snapshot restore and, on a chunking home, runs chunk recover. Returns
+// ErrUnknownVault when pipeline has not registered the vault on this node yet —
+// caller must defer.
 func (o *Orchestrator) reconcilePipelineAfterCtlRestore(vaultID glid.GLID) error {
 	if o.pipeline == nil || !o.isPipelineIngestVault(vaultID) {
 		return nil
 	}
 	if err := o.rewirePipelineAfterCtlRestore(vaultID); err != nil {
 		return err
+	}
+	if !o.pipeline.ChunkingRegistered(vaultID) {
+		return nil
 	}
 	if err := o.pipeline.RecoverVault(context.Background(), vaultID); err != nil {
 		return err
@@ -676,9 +674,10 @@ func (o *Orchestrator) finishPendingPipelineCtlRestore(vaultID glid.GLID) {
 	}()
 }
 
-// rewirePipelineAfterCtlRestore rebinds chunking/collection to the live vault-ctl
-// sub-FSM. vaultraft.FSM.Restore allocates fresh sub-FSMs; pipeline managers
-// otherwise keep reading the pre-restore object and the planner stalls.
+// rewirePipelineAfterCtlRestore rebinds release consumption, chunking, and
+// collection to the live vault-ctl sub-FSM. vaultraft.FSM.Restore allocates
+// fresh sub-FSMs; pipeline managers otherwise keep reading the pre-restore
+// object — the planner stalls and released segments are never purged.
 func (o *Orchestrator) rewirePipelineAfterCtlRestore(vaultID glid.GLID) error {
 	fsm, applier, _, ok := o.vaultCtlHandle(vaultID)
 	if !ok || fsm == nil {
@@ -723,24 +722,16 @@ func (o *Orchestrator) recoverPipelineVaultAfterRestore(vaultID glid.GLID) {
 	}
 }
 
-// Errors are logged at warn but do not abort: the next reconcile pass
-// will re-propose CmdPruneNode for any instance where the apply failed
-// (the FSM's applyPruneNode is idempotent — repeated prunes for the
-// same node are no-ops on entries where it's already gone).
+// proposePruneNodeForVault proposes CmdPruneNode on the vault's chunk FSM
+// after the vault-ctl Raft leader removed a node from the voter set: the
+// node left the cluster, so its delete obligations and holder claims go
+// with it. Proposed through the vault-ctl group itself rather than a local
+// vault instance — the vault-ctl leader need not be one of the vault's
+// homes. A failed propose is logged; the outside-placement prune on the
+// vault's placement leader removes the same node once placement drops it.
 func (o *Orchestrator) proposePruneNodeForVault(vaultID glid.GLID, removedNodeID string) {
-	o.mu.RLock()
-	vault := o.vaults[vaultID]
-	if vault == nil {
-		o.mu.RUnlock()
-		return
-	}
-	t := vault.Instance
-	o.mu.RUnlock()
-
-	if t == nil || t.ApplyRaftPruneNode == nil {
-		return
-	}
-	if err := t.ApplyRaftPruneNode(removedNodeID); err != nil {
+	data := vaultraft.MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalPruneNode(removedNodeID))
+	if err := o.ApplyVaultControlPlane(vaultID, data); err != nil {
 		o.vaultOpsLogger.Warn("prune-node propose failed",
 			"vault", vaultID,
 			"removed_node", removedNodeID, "error", err)

@@ -150,8 +150,8 @@ func (h *orchRelHarness) assertSearchBodiesExactly(v vaultSpec, nodeID string, b
 // and published to vault-ctl → pulled by every home over the real PullSegment
 // transport → sealed GLCBs built and byte-identical on every home → holder
 // receipts committed by every home → the leader releases every source segment
-// from the completed-segment registry → every home purges its head/ copies —
-// and afterwards every ingested record is still served, exactly once, from
+// from the completed-segment registry → every home purges its head/ copies and
+// the origin purges its completed/ copies — and afterwards every ingested record is still served, exactly once, from
 // the sealed GLCBs alone.
 func TestOrchPipeline_ReleaseDrainsRegistryAndHead(t *testing.T) {
 	if testing.Short() {
@@ -188,6 +188,9 @@ func TestOrchPipeline_ReleaseDrainsRegistryAndHead(t *testing.T) {
 	// home. Raw segments are gone; the GLCBs are the only copy left.
 	h.waitRegistryDrained(v, []int{0, 1, 2, 3})
 	h.waitHeadDrained(v, homeIdxs)
+	// The non-home origin consumes the same release: its completed/ copies,
+	// which homes pulled from, are reclaimed too.
+	h.waitCompletedDrained(v, []int{0, 1, 2, 3})
 
 	// Record integrity after release: a follower home serves every ingested
 	// record exactly once from the sealed GLCBs.

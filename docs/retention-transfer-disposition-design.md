@@ -24,7 +24,8 @@ archive vault want exactly this.
   PullChunkGLCB verify-before-promote machinery, pointed at the
   destination vault's chunk root; the destination vault-ctl FSM registers
   the chunk (the ImportSealedChunk / registerPipelineGLCB seams); chunk
-  holder receipts confirm the destination holds ≥ its replication factor;
+  holder receipts from homes in the destination's current placement
+  confirm the destination holds ≥ its replication factor;
   ONLY THEN does the source propose its delete (CmdRequestDelete-style
   receipt protocol). No loss window: the source keeps its copies until the
   destination's RF is met. Duplicate-on-retry at the destination is

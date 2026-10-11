@@ -142,7 +142,7 @@ func (s *QueryServer) runExportJob(
 	// them to the target, so it is bounded by the same per-query budget as any
 	// other materializing work. An export too large to hold at once fails with
 	// a named limit and can be re-run over narrower time ranges.
-	budget := query.NewBudget()
+	budget := eng.NewBudget()
 
 	hasMaterializingPipeline := pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline)
 	hasStreamingPipeline := pipeline != nil && len(pipeline.Pipes) > 0 && !hasMaterializingPipeline
@@ -216,7 +216,7 @@ func (s *QueryServer) runExportJob(
 // cluster. The pipeline consumes the remote stream itself, so only its own
 // working set lands on this node — not a second copy of every remote record.
 func (s *QueryServer) exportPipelineRecords(ctx context.Context, eng *query.Engine, q query.Query, pipeline *querylang.Pipeline, budget *query.Budget) ([]chunk.Record, error) {
-	remoteIter, _, _ := s.collectRemoteForPipeline(ctx, q, pipeline)
+	remoteIter, _ := s.collectRemoteForPipeline(ctx, q, pipeline)
 	result, err := eng.RunPipelineWithRemote(ctx, q, pipeline, remoteIter, budget)
 	if err != nil {
 		return nil, fmt.Errorf("pipeline execution: %w", err)
@@ -232,7 +232,7 @@ func (s *QueryServer) exportClusterRecords(ctx context.Context, eng *query.Engin
 		return nil, fmt.Errorf("gather cluster records: %w", err)
 	}
 	var records []chunk.Record
-	localIter, _ := eng.Search(ctx, q, nil)
+	localIter, _ := eng.Search(ctx, q.WithBudget(budget), nil)
 	for rec, searchErr := range localIter {
 		if searchErr != nil {
 			return nil, fmt.Errorf("search: %w", searchErr)
@@ -304,7 +304,7 @@ func (s *QueryServer) resolveVaultByID(ctx context.Context, id glid.GLID, target
 // vault that is quietly missing whatever the failed node held, with nothing
 // in the result to say so.
 func (s *QueryServer) drainRemoteRecords(ctx context.Context, q query.Query, budget *query.Budget) ([]chunk.Record, error) {
-	remoteIter, _, _ := s.collectRemote(ctx, q)
+	remoteIter, _ := s.collectRemote(ctx, q)
 	if remoteIter == nil {
 		return nil, nil
 	}
