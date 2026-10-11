@@ -28,12 +28,16 @@ func (e *VaultReadError) Unwrap() error { return e.Err }
 
 // asReadError wraps a cursor open or read failure so callers can attribute
 // it to the vault and chunk. Cancellation is the caller's doing, not the
-// vault's, and passes through unchanged.
+// vault's, and a query outgrowing its memory budget is the query's size, not
+// the vault's health; both pass through unchanged.
 func asReadError(vaultID glid.GLID, chunkID chunk.ChunkID, err error) error {
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
 	if _, ok := errors.AsType[*VaultReadError](err); ok {
+		return err
+	}
+	if _, ok := errors.AsType[*MemoryLimitError](err); ok {
 		return err
 	}
 	return &VaultReadError{VaultID: vaultID, ChunkID: chunkID, Err: err}

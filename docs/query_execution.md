@@ -392,7 +392,8 @@ and the next page restarts it under the cursor, which the narrowed time bound
 lets the rank scan seek to directly. An open pipeline chunk has no source
 index yet; under `order=source_ts` it is put in canonical order in memory —
 one pass collects each surviving record's ordering key and position, charged
-against the memory budget, and the records are read back sorted. The engine applies its own token's cursor,
+against the query's memory budget until the chunk is done, and the records are
+read back sorted. The engine applies its own token's cursor,
 so pagination is exact at the engine boundary too, not only through the
 server. This is what makes `order=source_ts` pageable on the same terms as
 the default ordering.
@@ -412,12 +413,18 @@ without changing the answer.
 
 Every path that retains data charges it: the record buffer behind an uncapped
 sort, the top-N working set behind a capped one, the slot array a `tail`/`slice`
-declares, the dedup seen-event set, stats group state, and the collections
-inside `dcount`, `median`, `values`, `first`, and `last`. Records are charged
+declares, the dedup seen-event set, stats group state, the collections
+inside `dcount`, `median`, `values`, `first`, and `last`, the sort keys of an
+unindexed chunk put in source order, and the histogram's working state. Records are charged
 *after* field extraction, since the JSON/logfmt fields that materialization
 moves into `Attrs` are most of what a buffered record retains. Exceeding the
 budget fails the query with a `query.MemoryLimitError` naming the structure that
 overflowed and the ceiling; the RPC layer surfaces it as `ResourceExhausted`.
+A peer whose share overflows answers its forwarded search, follow, or context
+request with a `ResourceExhausted` status, and the coordinator passes that code
+on to the client, so the same query fails the same way whichever node holds the
+data. The overflow is the query's size, not the vault's health: it is never
+reported as a vault read failure and raises no vault alarm.
 The budget never trims a result to fit.
 
 Two older caps do produce a partial table, and both label it: exceeding
@@ -428,11 +435,22 @@ result is flagged rather than silent — but it is still partial, which is a
 different contract from the budget's outright failure.
 
 The budget is **per query, per node**. Each node executing part of a fan-out
-gets its own, and the coordinator runs its whole share — the local scan and the
-records streaming back from peers — on one ledger. There is no cluster-wide
-total: the exhaustion being prevented is a node running out of memory, a
-per-node resource, and a shared counter would need a cluster round trip on the
-per-record path.
+gets its own, and runs its whole share on one ledger (`query.Budget`): the
+caller opens it with `Engine.NewBudget` and attaches it with
+`Query.WithBudget`, or hands it to `RunPipelineWithRemote`, and every engine
+entry point charges the ledger its query carries, opening one only when the
+caller attached none. On the coordinator that ledger covers the local scan,
+the page-1 histogram, and the records streaming back from peers. Every chunk
+the merge holds open charges the same ledger, so several unindexed chunks
+sorted at once are bounded together rather than each against its own ceiling.
+A structure that finishes before the query hands back what it held: a sorted
+scanner releases its keys when its chunk is drained or abandoned, and the
+histogram charges a sub-account it closes when its buckets are built. The
+page-1 histogram runs on its own goroutine beside the scan, so the ledger is a
+single atomic counter, safe for concurrent use without a lock on the charge
+path. There is no cluster-wide total: the exhaustion being prevented is a node
+running out of memory, a per-node resource, and a shared counter would need a
+cluster round trip on the per-record path.
 
 A pipeline that ends in `stats` or `timechart` with combinable aggregates
 (`count`, `sum`, `min`, `max`, `avg`) is split at the aggregating operator. Every node

@@ -143,6 +143,18 @@ type mnConfig struct {
 	histogramAtStreamEnd bool
 	// clusterSearch is set by WithClusterSearch.
 	clusterSearch bool
+	// peerQueryMemoryLimit is set by WithPeerQueryMemoryLimit.
+	peerQueryMemoryLimit int64
+}
+
+// WithPeerQueryMemoryLimit lowers the per-query memory ceiling of the engine
+// each peer runs a forwarded search on, so a test can overflow a peer's share
+// of a query without building hundreds of megabytes of working set. It applies
+// to the production ForwardSearch handler, so pair it with WithClusterSearch.
+func WithPeerQueryMemoryLimit(limit int64) mnOption {
+	return func(c *mnConfig) {
+		c.peerQueryMemoryLimit = limit
+	}
 }
 
 // WithClusterSearch makes the coordinator reach remote vaults through the
@@ -382,7 +394,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	// stats collectors below) was built earlier, before node creation — see
 	// that block's comment.
 
-	clusterPeers := startClusterPeers(t, nodes, coordinatorID, vaultsDir)
+	clusterPeers := startClusterPeers(t, nodes, coordinatorID, vaultsDir, cfg.peerQueryMemoryLimit)
 	routingFwd := routing.NewForwarder(clusterPeers)
 	var coordSearcher server.RemoteSearcher = remoteSearcher
 	if cfg.clusterSearch {
@@ -1302,13 +1314,14 @@ func (d *directRemoteIndexer) GetIndexes(_ context.Context, nodeID string, req *
 // crosses the same frame encoding and error translation as in production.
 func newClusterForwarder(t *testing.T, nodes map[string]multinodeTestNode, selfID, vaultsDir string) *routing.Forwarder {
 	t.Helper()
-	return routing.NewForwarder(startClusterPeers(t, nodes, selfID, vaultsDir))
+	return routing.NewForwarder(startClusterPeers(t, nodes, selfID, vaultsDir, 0))
 }
 
 // startClusterPeers starts a real cluster gRPC server on loopback for every
 // node but selfID, serving ForwardRPC and ForwardSearch, and returns selfID's
-// connection manager to them.
-func startClusterPeers(t *testing.T, nodes map[string]multinodeTestNode, selfID, vaultsDir string) *cluster.PeerConnManager {
+// connection manager to them. A positive memLimit lowers the per-query ceiling
+// of every peer's search engine.
+func startClusterPeers(t *testing.T, nodes map[string]multinodeTestNode, selfID, vaultsDir string, memLimit int64) *cluster.PeerConnManager {
 	t.Helper()
 	addrs := make(map[string]string, len(nodes))
 	for id, node := range nodes {
@@ -1325,7 +1338,7 @@ func startClusterPeers(t *testing.T, nodes map[string]multinodeTestNode, selfID,
 		}
 		cs.Transport()
 		cs.SetInternalHandler(remoteSrv.BuildInternalHandler())
-		cs.SetSearchExecutor(mnForwardSearchExecutor(node.orch))
+		cs.SetSearchExecutor(mnForwardSearchExecutor(node.orch, memLimit))
 		if err := cs.Start(); err != nil {
 			t.Fatalf("start cluster server for %s: %v", id, err)
 		}
@@ -1341,19 +1354,24 @@ func startClusterPeers(t *testing.T, nodes map[string]multinodeTestNode, selfID,
 }
 
 // mnForwardSearchExecutor answers ForwardSearch on a harness node's cluster
-// server as the production executor does: the vault's leader engine, a
-// pipeline's table, or the record stream resumed at the coordinator's cursor.
-func mnForwardSearchExecutor(orch *orchestrator.Orchestrator) cluster.SearchExecutor {
+// server as the production executor does: the vault's leader engine, one
+// ledger for the node's share of the query, a pipeline's table, or the record
+// stream resumed at the coordinator's cursor.
+func mnForwardSearchExecutor(orch *orchestrator.Orchestrator, memLimit int64) cluster.SearchExecutor {
 	return func(ctx context.Context, req *gastrologv1.ForwardSearchRequest) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
 		eng, err := server.ForwardSearchEngine(orch, req)
 		if err != nil || eng == nil {
 			return nil, nil, nil, nil, err
+		}
+		if memLimit > 0 {
+			eng.SetMemoryLimit(memLimit)
 		}
 		q, pipeline, err := server.ParseExpression(req.GetQuery())
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("parse query: %w", err)
 		}
 		q.PartialAggregates = req.GetPartialAggregates()
+		q = q.WithBudget(eng.NewBudget())
 		var histogram []*gastrologv1.HistogramBucket
 		if server.ForwardSearchIncludesHistogram(q) {
 			histogram = server.HistogramToProto(eng.ComputeSearchPageHistogram(ctx, q, 50))

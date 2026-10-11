@@ -61,7 +61,7 @@ func TestClusterCappedTimechartBinsTheMergedStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	result, err := eng.RunPipelineWithRemote(context.Background(), q, pipeline, remote, NewBudget())
+	result, err := eng.RunPipelineWithRemote(context.Background(), q, pipeline, remote, testBudget())
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestClusterCappedTimechartGroupsTheMergedStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	result, err := eng.RunPipelineWithRemote(context.Background(), q, pipeline, remote, NewBudget())
+	result, err := eng.RunPipelineWithRemote(context.Background(), q, pipeline, remote, testBudget())
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestClusterCappedTimechartDerivesRangeFromSurvivors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	result, err := eng.RunPipelineWithRemote(context.Background(), Query{}, pipeline, remote, NewBudget())
+	result, err := eng.RunPipelineWithRemote(context.Background(), Query{}, pipeline, remote, testBudget())
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}

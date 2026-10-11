@@ -26,15 +26,18 @@ const sortedEntryBytes = 64
 // axis in canonical order anyway. It reads the chunk once, keeping the
 // ordering key and position of every record that passes the time bounds and
 // filters, sorts those keys, and reads the records back in that order. The
-// keys are charged against the memory budget, so a chunk too large to order
-// fails with a named limit instead of being served in the wrong order.
+// keys are charged against the query's budget for as long as the scanner
+// holds them, so a chunk too large to order fails with a named limit instead
+// of being served in the wrong order, and the chunks the merge holds open
+// together are bounded together.
 //
 // Records come back Reordered: a resume token carries no position for them,
 // and the next page restarts the chunk under the canonical cursor.
 func (e *Engine) buildSortedScanner(ctx context.Context, cursor chunk.RecordCursor, q Query, b *scannerBuilder, meta chunk.ChunkMeta) iter.Seq2[recordWithRef, error] {
 	vaultID := b.vaultID
 	return func(yield func(recordWithRef, error) bool) {
-		entries, err := e.collectOrderKeys(ctx, cursor, q, b, meta)
+		entries, err := collectOrderKeys(ctx, cursor, q, b, meta)
+		defer q.budget.Release(int64(len(entries)) * sortedEntryBytes)
 		if err != nil {
 			yield(recordWithRef{VaultID: vaultID}, err)
 			return
@@ -62,10 +65,10 @@ func (e *Engine) buildSortedScanner(ctx context.Context, cursor chunk.RecordCurs
 
 // collectOrderKeys reads the chunk from its start and returns the ordering
 // key and position of every record inside the ingest window that passes the
-// filters, charging each against a fresh budget.
-func (e *Engine) collectOrderKeys(ctx context.Context, cursor chunk.RecordCursor, q Query, b *scannerBuilder, meta chunk.ChunkMeta) ([]sortedEntry, error) {
+// filters, charging each against the query's budget. Every entry it returns
+// has been charged, on error as well, so the caller releases exactly that.
+func collectOrderKeys(ctx context.Context, cursor chunk.RecordCursor, q Query, b *scannerBuilder, meta chunk.ChunkMeta) ([]sortedEntry, error) {
 	lower, upper := q.TimeBounds()
-	budget := e.newBudget()
 	if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: 0}); err != nil {
 		return nil, err
 	}
@@ -73,7 +76,7 @@ func (e *Engine) collectOrderKeys(ctx context.Context, cursor chunk.RecordCursor
 	for n := 0; ; n++ {
 		if n&1023 == 0 {
 			if err := ctx.Err(); err != nil {
-				return nil, err
+				return entries, err
 			}
 		}
 		rec, ref, err := cursor.Next()
@@ -81,7 +84,7 @@ func (e *Engine) collectOrderKeys(ctx context.Context, cursor chunk.RecordCursor
 			return entries, nil
 		}
 		if err != nil {
-			return nil, err
+			return entries, err
 		}
 		if (!lower.IsZero() && rec.IngestTS.Before(lower)) || (!upper.IsZero() && !rec.IngestTS.Before(upper)) {
 			continue
@@ -89,9 +92,9 @@ func (e *Engine) collectOrderKeys(ctx context.Context, cursor chunk.RecordCursor
 		if !applyFilters(rec, b.filters) {
 			continue
 		}
-		if err := budget.Charge(consumerRecordBuffer, sortedEntryBytes); err != nil {
-			return nil, err
-		}
 		entries = append(entries, sortedEntry{ts: q.OrderBy.RecordTS(rec), event: rec.EventID, pos: ref.Pos})
+		if err := q.budget.Charge(consumerSortBuffer, sortedEntryBytes); err != nil {
+			return entries, err
+		}
 	}
 }

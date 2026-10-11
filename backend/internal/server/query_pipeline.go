@@ -42,6 +42,7 @@ func (s *QueryServer) searchPipeline(
 	// Every node, this one included, answers in the combinable form the
 	// merge expects.
 	q.PartialAggregates = true
+	q = q.WithBudget(eng.NewBudget())
 	result, err := eng.RunPipeline(ctx, q, dist.PerNode)
 	if err != nil {
 		return errQueryExecution(err)
@@ -86,7 +87,8 @@ func (s *QueryServer) searchPipelineGlobal(
 	}
 
 	// One account for this node's whole share of the query.
-	budget := query.NewBudget()
+	budget := eng.NewBudget()
+	q = q.WithBudget(budget)
 
 	// Stream raw records from remote nodes (no pipeline — just the base
 	// query); the pipeline runs once, over local and remote records merged.

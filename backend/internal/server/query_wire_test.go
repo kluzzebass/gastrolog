@@ -27,6 +27,7 @@ var queryFieldsOffTheWire = map[string]string{
 	"ResumeAfterEvent":  "travels in ForwardSearchRequest.ResumeToken",
 	"PartialAggregates": "travels in ForwardSearchRequest.PartialAggregates",
 	"SkipCloud":         "local histogram option, never forwarded",
+	"budget":            "a per-node memory ledger: the peer opens its own",
 }
 
 // The forwarded expression is the whole query as the peer sees it: every

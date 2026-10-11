@@ -179,6 +179,10 @@ func (s *QueryServer) searchDirect(
 	// records as the user scrolls.
 	frozenStart, frozenEnd := q.Start, q.End
 
+	// One ledger for this node's share of the query: the scan and the page-1
+	// histogram running beside it charge the same budget.
+	q = q.WithBudget(eng.NewBudget())
+
 	// Bound this page's search (not the histogram) at the previous page's
 	// highwater, and let the cursor skip what that page already emitted at
 	// the boundary timestamp. This is what makes pagination survive
@@ -367,6 +371,8 @@ func mapSearchError(err error) error {
 		return connect.NewError(connect.CodeCanceled, err)
 	case errors.Is(err, query.ErrInvalidResumeToken):
 		return errInvalidArg(err)
+	case resourceExhausted(err):
+		return connect.NewError(connect.CodeResourceExhausted, err)
 	default:
 		return errInternal(err)
 	}
