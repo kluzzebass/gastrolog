@@ -145,6 +145,7 @@ type pipelineSealHost struct {
 
 func (pipelineSealHost) isPipelineIngestVault(glid.GLID) bool                 { return true }
 func (pipelineSealHost) pipelineVaultChunkRoot(glid.GLID) (string, bool)      { return "", false }
+func (pipelineSealHost) homeHoldsGLCB(glid.GLID, chunk.ChunkID) bool          { return false }
 func (pipelineSealHost) schedulePipelineCloudUpload(glid.GLID, chunk.ChunkID) {}
 func (pipelineSealHost) EmitChunkSealed(glid.GLID, chunk.ChunkMeta)           {}
 func (pipelineSealHost) alertSink() alert.Sink                                { return nil }

@@ -87,6 +87,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 	vault.StorageType = string(vaultCfg.Type)
 	o.vaults[vaultCfg.ID] = vault
 	o.signalVaultReadyChange()
+	o.scheduleHomeIndexSweep(vaultCfg.ID, instance)
 
 	// Recompile the routing table immediately so the vault can receive
 	// records right away. The rotation sweep also reconciles every 15s
@@ -648,6 +649,7 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 	}
 	vault.Instance = ti
 	o.signalVaultReadyChange()
+	o.scheduleHomeIndexSweep(vaultID, ti)
 	o.logger.Info("vault placement added", "vault", vaultID)
 	return nil
 }

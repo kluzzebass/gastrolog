@@ -207,17 +207,10 @@ func (o *Orchestrator) runGLCBPull(destVaultID, sourceVaultID glid.GLID, e vault
 	if o.pipeline != nil {
 		o.pipeline.NoteGLCBRestored(destVaultID, e.ID)
 	}
-	o.mu.RLock()
-	var rec *VaultLifecycleReconciler
-	if vault := o.vaults[destVaultID]; vault != nil && vault.Instance != nil {
-		rec = vault.Instance.Reconciler
-	}
-	o.mu.RUnlock()
-	if rec != nil {
-		// The pulled bytes are now on the canonical path; the lazy resolver
-		// makes them queryable on first lookup. Propose this node's holder
-		// receipt event-driven now that the verified copy is on disk.
-		rec.ackOwnHolderReceipt(e)
+	// The pulled bytes are now on the canonical path; the lazy resolver makes
+	// them queryable on first lookup.
+	if ti := o.findLocalVaultInstance(destVaultID); ti != nil {
+		o.onGLCBLanded(destVaultID, ti, e)
 	}
 }
 

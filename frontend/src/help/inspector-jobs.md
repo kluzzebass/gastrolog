@@ -44,6 +44,7 @@ Some scheduled work is created per vault or chunk. Names follow predictable patt
 | `replicate-*` | `replicate-<chunk-id>` | Replicate a sealed chunk to followers |
 | `replication-catchup-*` | `replication-catchup-<node>` | Catch up sealed chunks to a follower |
 | `rebuild-index-*` | `rebuild-index-<chunk-id>` | Rebuild missing indexes for one chunk |
+| `home-index-sweep:*` | `home-index-sweep:<vault-id>` | Build missing indexes for the chunks this home holds of a vault, once its vault instance and home registration both exist |
 | `rebuild-all-*` | `rebuild-all-<vault-id>` | Rebuild all indexes for a vault |
 | `drain-vault-*` | `drain-vault-<vault-id>` | Drain a vault off this node |
 

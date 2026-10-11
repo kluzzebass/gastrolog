@@ -81,6 +81,8 @@ type reconcilerHost interface {
 	schedulePipelineCloudUpload(vaultID glid.GLID, chunkID chunk.ChunkID)
 	noteRegisterSkip(vaultID glid.GLID, id chunk.ChunkID, reason string)
 	pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.ManifestEntry)
+	homeHoldsGLCB(vaultID glid.GLID, id chunk.ChunkID) bool
+	onGLCBLanded(vaultID glid.GLID, ti *VaultInstance, e vaultctlfsm.ManifestEntry)
 
 	// Watch-subscriber and event-journal notifications.
 	EmitChunkSealed(vault glid.GLID, meta chunk.ChunkMeta)
@@ -739,9 +741,8 @@ func (r *VaultLifecycleReconciler) SweepSealingResume() {
 // chunk yet must NOT claim one (durable truth, not counters). The gate is the
 // same pipeline-home ChunkRoot + on-disk GLCB check the retired
 // registerPipelineGLCB performed before registering. When a caller fires this
-// before the bytes exist (e.g. onSeal on a home whose build finishes after
-// CmdSealChunk applies), the receipt is skipped here and the later
-// build-completion event (OnBuilt) fires it once the file is present.
+// before the bytes exist, the receipt is skipped here and the event that
+// lands the file (onGLCBLanded) fires it once the file is present.
 // Queryability itself does not depend on this call: the lazy on-miss GLCB
 // resolver serves the chunk on first lookup.
 func (r *VaultLifecycleReconciler) ackOwnHolderReceipt(e vaultctlfsm.ManifestEntry) {
@@ -829,11 +830,13 @@ func (r *VaultLifecycleReconciler) onSeal(e vaultctlfsm.ManifestEntry) {
 			}
 		}
 	}
-	// What remains event-driven is the holder receipt — propose it now that
-	// this home's copy is (usually) built and on disk; the gate inside skips
-	// it when the build lags the seal, and OnBuilt fires it once the file
-	// lands. No-op for non-home vaults.
-	r.ackOwnHolderReceipt(e)
+	// A copy this home already holds lands at its seal: the build usually
+	// finishes first, and a restart replays the seals committed after the
+	// last vault-ctl snapshot without any build or pull firing for those
+	// copies again. When the build lags the seal, OnBuilt lands the copy.
+	if r.orch != nil && r.orch.homeHoldsGLCB(r.vaultID, e.ID) {
+		r.orch.onGLCBLanded(r.vaultID, r.vaultInst, e)
+	}
 	if r.orch != nil && r.orch.isPipelineIngestVault(r.vaultID) {
 		r.orch.schedulePipelineCloudUpload(r.vaultID, e.ID)
 	}
