@@ -70,6 +70,8 @@ message VaultCtlCommand {
     DiscardUnbuildableManifestsCommand discard_unbuildable_manifests = 23;
     ClearTransferSourceCommand clear_transfer_source = 24;
     ArchiveChunkCommand archive_chunk = 25;
+    ConfirmSegmentPurgeCommand confirm_segment_purge = 26;
+    PruneReleasedSegmentsCommand prune_released_segments = 27;
   }
 }
 
@@ -311,6 +313,24 @@ message ReleaseSegmentsCommand {
   repeated bytes segment_ids = 1;
 }
 
+// ConfirmSegmentPurgeCommand is a node's purge confirmation: node_id holds no
+// staging bytes for any segment released at or before release_seq. A
+// released-segment tombstone is pruned only once every vault-ctl member has
+// confirmed past it, because a node still holding a released segment's
+// completed/ file republishes it after a restart.
+message ConfirmSegmentPurgeCommand {
+  string node_id = 1;
+  uint64 release_seq = 2;
+}
+
+// PruneReleasedSegmentsCommand drops the released-segment tombstones every
+// node in members has confirmed purging, and the purge confirmations of nodes
+// no longer in members. Proposed by the vault-ctl leader with its Raft
+// configuration's server IDs.
+message PruneReleasedSegmentsCommand {
+  repeated string members = 1;
+}
+
 // AckSegmentHolderCommand records that a node has pulled, verified, and now
 // holds one or more completed segments (Rubicon C). Appends node_id to each
 // segment registry entry's holder set; idempotent per segment. Batched so a
@@ -466,10 +486,10 @@ message VaultCtlSnapshot {
   // chunks are still building without freezing ingest at rotation limits.
   repeated OpenChunkManifestState sealed_manifests = 6;
   repeated SegmentResumeRecordNumber segment_resume = 7;
-  // Segment IDs dropped by ReleaseSegments. PublishCompletedSegment after
-  // release is ignored so a stale distribution publish cannot re-register
-  // metadata without bytes (permanent collection/chunking wedge).
-  repeated bytes released_segment_ids = 8;
+  // Released-segment tombstones: segments dropped by ReleaseSegments and not
+  // yet pruned. PublishCompletedSegment naming one is ignored so a stale
+  // distribution publish cannot re-register a released segment.
+  repeated ReleasedSegment released_segments = 8;
   // Segment → containing chunk IDs, for release-by-chunk-replication after
   // the manifest leaves the seal queue.
   repeated SegmentChunkIDs segment_chunks = 9;
@@ -477,6 +497,23 @@ message VaultCtlSnapshot {
   // kept until a segment it references is released or its chunk is deleted,
   // so every home can build the chunk from its refs.
   repeated OpenChunkManifestState sealed_chunk_manifests = 10;
+  // Count of ReleaseSegments applies that tombstoned a segment; each
+  // tombstone records the value it was released at.
+  uint64 release_seq = 11;
+  repeated SegmentPurgeConfirmation segment_purge_confirmations = 12;
+}
+
+// ReleasedSegment is one released-segment tombstone.
+message ReleasedSegment {
+  bytes segment_id = 1;
+  uint64 release_seq = 2;
+}
+
+// SegmentPurgeConfirmation is the highest release_seq a node has confirmed
+// purging through (ConfirmSegmentPurgeCommand).
+message SegmentPurgeConfirmation {
+  string node_id = 1;
+  uint64 release_seq = 2;
 }
 
 // VaultGroupSnapshot is the snapshot of the whole vault-ctl Raft group: one

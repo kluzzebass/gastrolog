@@ -1463,6 +1463,22 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
   chunks (holder-gated). The FSM-level end of a segment's registry life;
   bytes may still exist on disk.
 
+- **Released-segment tombstone** (vault-ctl) — the FSM's record that a
+  segment was released, kept after its registry entry is gone and tagged
+  with the **release sequence** it was released at (`releaseSeq`, counting
+  the `ReleaseSegments` applies that tombstoned a segment). A
+  `PublishCompletedSegment` naming one is ignored — the restart republish of
+  a node that missed the release — and the staging sweeps purge its bytes on
+  sight (`FSM.SegmentReleased`).
+
+- **Purge confirmation** (vault-ctl) — a node's `ConfirmSegmentPurgeCommand`:
+  it holds no staging copy of any segment released at or before the named
+  release sequence. Every node sends one after its released-segment sweep
+  (`Orchestrator.sweepReleasedSegments`); the vault-ctl leader's
+  `PruneReleasedSegmentsCommand` drops the tombstones every member of its
+  Raft configuration has confirmed, and the confirmations of nodes no longer
+  in it.
+
 - **Retire** (distribution) — drop a node's in-memory tracking of a segment
   and mark it so the stranded rescan does not republish still-on-disk
   `completed/` bytes (`Manager.RetireSegments`, `vaultDist.retireSegment`).

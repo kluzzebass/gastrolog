@@ -321,7 +321,8 @@ func (o *Orchestrator) retentionSweepAll() {
 // orphans, staging orphans, missing replicas, stale leader FSM entries,
 // nodes outside the placement, idle actives). See
 // VaultLifecycleReconciler.ReconcileTick for the category catalogue and
-// per-category ownership docs.
+// per-category ownership docs. It then runs the released-segment sweep for
+// every vault, instance or not (sweepReleasedSegments).
 //
 // BACKSTOP, not the primary driver. Every category has an upstream event
 // that drives its primary convergence — delete obligations on
@@ -353,6 +354,7 @@ func (o *Orchestrator) vaultCatchupSweepAll() {
 	for _, t := range vaultInsts {
 		t.Reconciler.ReconcileTick()
 	}
+	o.sweepReleasedSegments()
 }
 
 // enforceMemoryBudgets checks memory vaults for budget overruns and transitions

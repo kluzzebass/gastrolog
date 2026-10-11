@@ -675,7 +675,9 @@ func (f *FSM) SegmentReferencedInManifest(segmentID glid.GLID) bool {
 // delete local segment files whose release effect this node missed while
 // offline. Registry absence alone is NOT evidence: a completed segment
 // awaiting its distribution publish is also registry-absent, and deleting
-// it would lose ingested records.
+// it would lose ingested records. The tombstone is pruned only after every
+// vault-ctl member has confirmed purging it, so no node is left holding bytes
+// it can no longer recognise as released.
 func (f *FSM) SegmentReleased(segmentID glid.GLID) bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -720,6 +722,7 @@ func (f *FSM) segmentRangeReferencedLocked(segID glid.GLID, first, last uint32) 
 
 func (f *FSM) applyReleaseSegments(c *gastrologv1.ReleaseSegmentsCommand) []glid.GLID {
 	var released []glid.GLID
+	seq := f.releaseSeq + 1
 	// A sealed chunk whose segment is released can no longer be built from
 	// segments on any home; a home still missing it pulls the GLCB from a
 	// peer instead.
@@ -740,9 +743,12 @@ func (f *FSM) applyReleaseSegments(c *gastrologv1.ReleaseSegmentsCommand) []glid
 			released = append(released, segID)
 		}
 		if f.releasedSegments == nil {
-			f.releasedSegments = make(map[glid.GLID]struct{})
+			f.releasedSegments = make(map[glid.GLID]uint64)
 		}
-		f.releasedSegments[segID] = struct{}{}
+		if _, tombstoned := f.releasedSegments[segID]; !tombstoned {
+			f.releasedSegments[segID] = seq
+			f.releaseSeq = seq
+		}
 		delete(f.completedSegments, segID)
 		f.removeCompletedSegmentOrder(segID)
 		delete(f.segmentResume, segID)

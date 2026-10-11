@@ -306,7 +306,12 @@ Build at seal:
 Release:
   When chunk replicated per holder-set / RF rules
   Leader: ReleaseSegments(segmentIDs…) — origin and holders purge work-area copies;
-          drops every sealed-chunk manifest that references a released segment
+          drops every sealed-chunk manifest that references a released segment;
+          leaves a released-segment tombstone that refuses a late publish
+  Every node: purges its staging copies of tombstoned segments, then
+          ConfirmSegmentPurge(releaseSeq)
+  Leader: PruneReleasedSegments(members) — drops the tombstones every member of
+          its Raft configuration has confirmed
 ```
 
 **What a home builds.** Each build pass derives its work from vault-ctl FSM state

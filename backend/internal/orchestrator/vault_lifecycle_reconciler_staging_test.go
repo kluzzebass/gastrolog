@@ -15,19 +15,22 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
-// SweepStagingOrphans reconciles the pipeline staging areas on disk
-// against the replicated FSM with positive evidence only. These tests
-// pin the safety contract: released/tombstoned files go, everything
-// else — live, awaiting-publish, unknown, pending-delete — stays. The
-// failure mode of a stale FSM must be a delayed cleanup, never a
-// deleted live file (the cardinal rule).
+// The staging sweeps (SweepStagingOrphans for chunks/, the orchestrator's
+// purgeReleasedSegmentStaging for segment files) reconcile the pipeline
+// staging areas on disk against the replicated FSM with positive evidence
+// only. These tests pin the safety contract: released/tombstoned files go,
+// everything else — live, awaiting-publish, unknown, pending-delete — stays.
+// The failure mode of a stale FSM must be a delayed cleanup, never a deleted
+// live file (the cardinal rule).
 
 // stagingSweepFixture builds an on-disk vault staging root, an
 // orchestrator that resolves it, and a wired reconciler.
 type stagingSweepFixture struct {
-	root string
-	fsm  *vaultctlfsm.FSM
-	rec  *VaultLifecycleReconciler
+	vaultID glid.GLID
+	root    string
+	orch    *Orchestrator
+	fsm     *vaultctlfsm.FSM
+	rec     *VaultLifecycleReconciler
 }
 
 func newStagingSweepFixture(t *testing.T) *stagingSweepFixture {
@@ -45,7 +48,18 @@ func newStagingSweepFixture(t *testing.T) *stagingSweepFixture {
 	fsm := vaultctlfsm.New()
 	rec := NewVaultLifecycleReconciler(orch, vaultID, &VaultInstance{VaultID: vaultID}, "node-A", slog.Default())
 	rec.Wire(fsm)
-	return &stagingSweepFixture{root: root, fsm: fsm, rec: rec}
+	return &stagingSweepFixture{vaultID: vaultID, root: root, orch: orch, fsm: fsm, rec: rec}
+}
+
+// purgeReleased runs the released-segment purge and returns the release
+// sequence it covered.
+func (f *stagingSweepFixture) purgeReleased(t *testing.T) uint64 {
+	t.Helper()
+	covered, _, err := f.orch.purgeReleasedSegmentStaging(f.vaultID, f.fsm)
+	if err != nil {
+		t.Fatalf("purgeReleasedSegmentStaging: %v", err)
+	}
+	return covered
 }
 
 func (f *stagingSweepFixture) apply(t *testing.T, data []byte) {
@@ -87,7 +101,7 @@ func publishEntry(id glid.GLID) vaultctlfsm.CompletedSegmentEntry {
 	}
 }
 
-func TestStagingSweepPurgesReleasedSegmentsEverywhere(t *testing.T) {
+func TestReleasedSegmentPurgeRemovesEveryStagingCopy(t *testing.T) {
 	t.Parallel()
 	f := newStagingSweepFixture(t)
 
@@ -116,7 +130,9 @@ func TestStagingSweepPurgesReleasedSegmentsEverywhere(t *testing.T) {
 	unpubCompleted := paths.CompletedSegment(f.root, unpublished)
 	f.writeSegmentFile(t, unpubCompleted)
 
-	f.rec.SweepStagingOrphans()
+	if covered := f.purgeReleased(t); covered != f.fsm.ReleaseSeq() {
+		t.Errorf("purge covered release seq %d, want %d", covered, f.fsm.ReleaseSeq())
+	}
 
 	for _, path := range []string{relCompleted, relHead, relPreHead} {
 		if exists(path) {
@@ -131,7 +147,7 @@ func TestStagingSweepPurgesReleasedSegmentsEverywhere(t *testing.T) {
 	}
 
 	// Idempotent: a second pass with nothing to do changes nothing.
-	f.rec.SweepStagingOrphans()
+	f.purgeReleased(t)
 	if !exists(liveCompleted) || !exists(unpubCompleted) {
 		t.Error("second sweep pass deleted files the first pass correctly kept")
 	}
@@ -202,6 +218,7 @@ func TestStagingSweepNoopBeforeFSMReady(t *testing.T) {
 	dir := f.writeChunkDir(t, chunk.NewChunkID())
 
 	f.rec.SweepStagingOrphans()
+	f.purgeReleased(t)
 
 	if !exists(segFile) || !exists(dir) {
 		t.Error("sweep acted before the FSM was Ready")
@@ -216,12 +233,6 @@ func TestReconcileTickRunsCategoriesAgainstOneView(t *testing.T) {
 	t.Parallel()
 	f := newStagingSweepFixture(t)
 	now := time.Now()
-
-	released := glid.New()
-	f.apply(t, vaultctlfsm.MarshalPublishCompletedSegment(publishEntry(released)))
-	f.apply(t, vaultctlfsm.MarshalReleaseSegments([]glid.GLID{released}))
-	relFile := paths.CompletedSegment(f.root, released)
-	f.writeSegmentFile(t, relFile)
 
 	tombstoned := chunk.NewChunkID()
 	f.apply(t, vaultctlfsm.MarshalCreateChunk(tombstoned, now, now, now))
@@ -238,9 +249,6 @@ func TestReconcileTickRunsCategoriesAgainstOneView(t *testing.T) {
 
 	f.rec.ReconcileTick()
 
-	if exists(relFile) {
-		t.Error("ReconcileTick did not purge the released segment")
-	}
 	if exists(tombstonedDir) {
 		t.Error("ReconcileTick did not remove the tombstoned chunk dir")
 	}
@@ -295,5 +303,29 @@ func TestReconcileFromSnapshotRunsStagingOrphanCleanup(t *testing.T) {
 	}
 	if !exists(liveDir) {
 		t.Error("ReconcileFromSnapshot deleted a live chunk dir")
+	}
+}
+
+// A purge that cannot delete a released segment's staging copy reports it, so
+// the sweep does not confirm a release sequence whose bytes are still on disk.
+func TestReleasedSegmentPurgeReportsAFailedDelete(t *testing.T) {
+	t.Parallel()
+	f := newStagingSweepFixture(t)
+	released := glid.New()
+	f.apply(t, vaultctlfsm.MarshalPublishCompletedSegment(publishEntry(released)))
+	f.apply(t, vaultctlfsm.MarshalReleaseSegments([]glid.GLID{released}))
+	headFile := paths.HeadSegment(f.root, released)
+	f.writeSegmentFile(t, headFile)
+	headDir := paths.HeadDir(f.root)
+	if err := os.Chmod(headDir, 0o555); err != nil {
+		t.Fatalf("chmod head/: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(headDir, 0o755) })
+
+	if _, _, err := f.orch.purgeReleasedSegmentStaging(f.vaultID, f.fsm); err == nil {
+		t.Fatal("purge reported success while the released segment's head/ copy could not be deleted")
+	}
+	if !exists(headFile) {
+		t.Fatal("head/ copy deleted from a read-only directory; the failure was not exercised")
 	}
 }

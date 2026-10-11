@@ -355,10 +355,16 @@ type FSM struct {
 	// chunk replication (records live in an RF-replicated chunk) after the build.
 	// Cleared when the segment is released.
 	segmentChunks map[glid.GLID][]chunk.ChunkID
-	// releasedSegments records segment IDs dropped by ReleaseSegments. Stale
-	// PublishCompletedSegment replays after release must not re-add registry
-	// entries without on-disk bytes (distribution publish race).
-	releasedSegments map[glid.GLID]struct{}
+	// releasedSegments holds the released-segment tombstones: segment ID →
+	// the release sequence it was released at. A PublishCompletedSegment
+	// naming one is ignored, and the staging sweeps purge its bytes on sight.
+	// See released_segments.go for how tombstones are pruned.
+	releasedSegments map[glid.GLID]uint64
+	// releaseSeq counts the ReleaseSegments applies that tombstoned a segment.
+	releaseSeq uint64
+	// segmentPurgeConfirmed maps node ID → the highest release sequence the
+	// node has confirmed purging through.
+	segmentPurgeConfirmed map[string]uint64
 
 	// onSealedManifest fires after SealOpenChunkManifest transitions open →
 	// sealed manifest awaiting local GLCB build (outside the FSM lock).
@@ -397,13 +403,14 @@ type FSM struct {
 // New creates an empty chunk metadata FSM.
 func New() *FSM {
 	return &FSM{
-		chunks:            make(map[chunk.ChunkID]*ManifestEntry),
-		tombstones:        make(map[chunk.ChunkID]time.Time),
-		pendingDeletes:    make(map[chunk.ChunkID]*PendingDelete),
-		completedSegments: make(map[glid.GLID]*CompletedSegmentEntry),
-		segmentResume:     make(map[glid.GLID]uint32),
-		segmentChunks:     make(map[glid.GLID][]chunk.ChunkID),
-		releasedSegments:  make(map[glid.GLID]struct{}),
+		chunks:                make(map[chunk.ChunkID]*ManifestEntry),
+		tombstones:            make(map[chunk.ChunkID]time.Time),
+		pendingDeletes:        make(map[chunk.ChunkID]*PendingDelete),
+		completedSegments:     make(map[glid.GLID]*CompletedSegmentEntry),
+		segmentResume:         make(map[glid.GLID]uint32),
+		segmentChunks:         make(map[glid.GLID][]chunk.ChunkID),
+		releasedSegments:      make(map[glid.GLID]uint64),
+		segmentPurgeConfirmed: make(map[string]uint64),
 	}
 }
 
@@ -1183,6 +1190,10 @@ func (f *FSM) tryApplySegmentPipelineLocked(cmd *gastrologv1.VaultCtlCommand) (a
 			fx.releasedSegmentIDs = released
 		}
 		return nil, fx, true
+	case *gastrologv1.VaultCtlCommand_ConfirmSegmentPurge:
+		return f.applyConfirmSegmentPurge(c.ConfirmSegmentPurge), fx, true
+	case *gastrologv1.VaultCtlCommand_PruneReleasedSegments:
+		return f.applyPruneReleasedSegments(c.PruneReleasedSegments), fx, true
 	case *gastrologv1.VaultCtlCommand_DiscardUnbuildableManifests:
 		discarded, err := f.applyDiscardUnbuildableManifests(c.DiscardUnbuildableManifests)
 		if err != nil {
@@ -1330,11 +1341,7 @@ func (f *FSM) snapshotProtoLocked() *gastrologv1.VaultCtlSnapshot {
 		SegmentChunks:        f.snapshotSegmentChunksLocked(),
 	}
 
-	releasedIDs := slices.SortedFunc(maps.Keys(f.releasedSegments), glid.Compare)
-	for _, id := range releasedIDs {
-		idCopy := id
-		snap.ReleasedSegmentIds = append(snap.ReleasedSegmentIds, idCopy[:])
-	}
+	f.snapshotReleasedSegmentsLocked(snap)
 
 	entryIDs := slices.SortedFunc(maps.Keys(f.chunks), chunk.ChunkID.Compare)
 	for _, id := range entryIDs {
@@ -1404,10 +1411,7 @@ func (f *FSM) restoreFromProtoLocked(snap *gastrologv1.VaultCtlSnapshot) {
 		f.pendingDeletes[p.ChunkID] = &p
 	}
 	f.restoreCompletedSegmentsLocked(snap.GetCompletedSegments())
-	f.releasedSegments = make(map[glid.GLID]struct{}, len(snap.GetReleasedSegmentIds()))
-	for _, raw := range snap.GetReleasedSegmentIds() {
-		f.releasedSegments[glid.FromBytes(raw)] = struct{}{}
-	}
+	f.restoreReleasedSegmentsLocked(snap)
 	f.restoreOpenChunkLocked(snap)
 	f.repairSealedManifestChunkEntryLocked()
 	f.ready = true
