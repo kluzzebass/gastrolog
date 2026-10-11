@@ -139,10 +139,20 @@ type mnConfig struct {
 	// tests that DO need it (waiting for a real tick) opt in per node via
 	// WithDiskGuard.
 	diskGuardNodes map[string]bool
-	// histogramAtStreamEnd is set by WithHistogramAtStreamEnd.
-	histogramAtStreamEnd bool
 	// clusterSearch is set by WithClusterSearch.
 	clusterSearch bool
+	// peerQueryMemoryLimit is set by WithPeerQueryMemoryLimit.
+	peerQueryMemoryLimit int64
+}
+
+// WithPeerQueryMemoryLimit lowers the per-query memory ceiling of the engine
+// each peer runs a forwarded search on, so a test can overflow a peer's share
+// of a query without building hundreds of megabytes of working set. It applies
+// to the production ForwardSearch handler, so pair it with WithClusterSearch.
+func WithPeerQueryMemoryLimit(limit int64) mnOption {
+	return func(c *mnConfig) {
+		c.peerQueryMemoryLimit = limit
+	}
 }
 
 // WithClusterSearch makes the coordinator reach remote vaults through the
@@ -151,16 +161,6 @@ type mnConfig struct {
 func WithClusterSearch() mnOption {
 	return func(c *mnConfig) {
 		c.clusterSearch = true
-	}
-}
-
-// WithHistogramAtStreamEnd makes the ForwardSearch stand-in withhold each
-// remote vault's histogram until its whole record stream has been produced —
-// a contract the coordinator cannot work with, since it reads the histogram
-// before it drains any records. Only a test asserting that should ask for it.
-func WithHistogramAtStreamEnd() mnOption {
-	return func(c *mnConfig) {
-		c.histogramAtStreamEnd = true
 	}
 }
 
@@ -359,7 +359,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		}
 		remoteOrchestrators[id] = nodes[id].orch
 	}
-	remoteSearcher := &directRemoteSearcher{nodes: remoteOrchestrators, histogramAtStreamEnd: cfg.histogramAtStreamEnd}
+	remoteSearcher := &directRemoteSearcher{nodes: remoteOrchestrators}
 	remoteIndexer := &directRemoteIndexer{nodes: remoteOrchestrators}
 
 	peerJobs := &mnPeerJobs{peers: map[string][]*gastrologv1.Job{}, changes: notify.NewSignal()}
@@ -382,7 +382,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	// stats collectors below) was built earlier, before node creation — see
 	// that block's comment.
 
-	clusterPeers := startClusterPeers(t, nodes, coordinatorID, vaultsDir)
+	clusterPeers := startClusterPeers(t, nodes, coordinatorID, vaultsDir, cfg.peerQueryMemoryLimit)
 	routingFwd := routing.NewForwarder(clusterPeers)
 	var coordSearcher server.RemoteSearcher = remoteSearcher
 	if cfg.clusterSearch {
@@ -837,10 +837,15 @@ type directRemoteSearcher struct {
 	// full channel, so a count short of the total says it never had to drain
 	// the whole match set.
 	batchesSent atomic.Int64
-	// histogramAtStreamEnd makes getHistogram wait for the whole record stream
-	// instead of answering from the first message. Only a test asserting that
-	// the coordinator deadlocks against such a peer sets it.
-	histogramAtStreamEnd bool
+	// histogramHold, when set, holds every histogram_only request until it
+	// closes, so a test can tell whether records reach the client while a
+	// remote histogram is still being computed.
+	histogramHold chan struct{}
+	// histogramFails names nodes whose histogram_only requests fail while
+	// their record streams keep answering.
+	histogramFails map[string]bool
+	// histogramRequests counts histogram_only requests.
+	histogramRequests atomic.Int64
 }
 
 func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *gastrologv1.ForwardSearchRequest) (*gastrologv1.ForwardSearchResponse, error) {
@@ -869,6 +874,21 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 	}
 	q.PartialAggregates = req.GetPartialAggregates()
 
+	if req.GetHistogramOnly() {
+		d.histogramRequests.Add(1)
+		if d.histogramFails[nodeID] {
+			return nil, fmt.Errorf("histogram from %s: connection refused", nodeID)
+		}
+		if d.histogramHold != nil {
+			select {
+			case <-d.histogramHold:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return &gastrologv1.ForwardSearchResponse{Histogram: server.ForwardSearchHistogram(ctx, eng, q)}, nil
+	}
+
 	// Pipeline query: run locally and return table.
 	if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
 		result, err := eng.RunPipeline(ctx, q, pipeline)
@@ -882,19 +902,6 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 		}
 	}
 
-	// Compute histogram for legacy full-vault forwards only.
-	var histProto []*gastrologv1.HistogramBucket
-	if server.ForwardSearchIncludesHistogram(q) {
-		histogram := eng.ComputeHistogram(ctx, q, 50)
-		for _, b := range histogram {
-			histProto = append(histProto, &gastrologv1.HistogramBucket{
-				TimestampMs: b.TimestampMs,
-				Count:       b.Count,
-				GroupCounts: b.GroupCounts,
-			})
-		}
-	}
-
 	// Regular search.
 	searchIter, _ := eng.Search(ctx, q, nil)
 
@@ -905,10 +912,7 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 		}
 		records = append(records, convert.RecordToExport(rec))
 	}
-	return &gastrologv1.ForwardSearchResponse{
-		Records:   records,
-		Histogram: histProto,
-	}, nil
+	return &gastrologv1.ForwardSearchResponse{Records: records}, nil
 }
 
 func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, req *gastrologv1.ForwardSearchRequest) (
@@ -916,20 +920,18 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 	*gastrologv1.TableResult,
 	<-chan error,
 	func() []byte,
-	func() []*gastrologv1.HistogramBucket,
 ) {
 	d.recordStreams.Add(1)
 	recCh := make(chan []*gastrologv1.ExportRecord, mnSearchStreamSlots)
 	errCh := make(chan error, 1)
 	nilToken := func() []byte { return nil }
-	nilHist := func() []*gastrologv1.HistogramBucket { return nil }
 
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		errCh <- fmt.Errorf("unknown node: %s", nodeID)
 		close(recCh)
 		close(errCh)
-		return recCh, nil, errCh, nilToken, nilHist
+		return recCh, nil, errCh, nilToken
 	}
 
 	vaultID := glid.FromBytes(req.GetVaultId())
@@ -937,7 +939,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		errCh <- fmt.Errorf("invalid vault_id: empty or too short")
 		close(recCh)
 		close(errCh)
-		return recCh, nil, errCh, nilToken, nilHist
+		return recCh, nil, errCh, nilToken
 	}
 
 	// Match production behavior: only search leader vaults on this node.
@@ -946,12 +948,12 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		errCh <- engErr
 		close(recCh)
 		close(errCh)
-		return recCh, nil, errCh, nilToken, nilHist
+		return recCh, nil, errCh, nilToken
 	}
 	if eng == nil {
 		close(recCh)
 		close(errCh)
-		return recCh, nil, errCh, nilToken, nilHist
+		return recCh, nil, errCh, nilToken
 	}
 
 	q, pipeline, parseErr := server.ParseExpression(req.GetQuery())
@@ -959,7 +961,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		errCh <- fmt.Errorf("parse: %w", parseErr)
 		close(recCh)
 		close(errCh)
-		return recCh, nil, errCh, nilToken, nilHist
+		return recCh, nil, errCh, nilToken
 	}
 
 	// Pipeline query: return table result synchronously.
@@ -969,39 +971,13 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 			errCh <- runErr
 			close(recCh)
 			close(errCh)
-			return recCh, nil, errCh, nilToken, nilHist
+			return recCh, nil, errCh, nilToken
 		}
 		if result.Table != nil {
 			close(recCh)
 			close(errCh)
-			return recCh, server.TableResultToBasicProto(result.Table), errCh, nilToken, nilHist
+			return recCh, server.TableResultToBasicProto(result.Table), errCh, nilToken
 		}
-	}
-
-	// Compute histogram for legacy full-vault forwards only.
-	var histProto []*gastrologv1.HistogramBucket
-	if server.ForwardSearchIncludesHistogram(q) {
-		histogram := eng.ComputeHistogram(ctx, q, 50)
-		for _, b := range histogram {
-			histProto = append(histProto, &gastrologv1.HistogramBucket{
-				TimestampMs: b.TimestampMs,
-				Count:       b.Count,
-				GroupCounts: b.GroupCounts,
-			})
-		}
-	}
-	// Mirrors the forwarder's contract: a remote search's histogram is known
-	// from the stream's first message, so the getter answers without the
-	// caller having read any records. Under histogramAtStreamEnd the getter
-	// waits for the producer instead, which strands a coordinator that asks
-	// for the histogram before it starts draining records.
-	histReady := make(chan struct{})
-	getHistogram := func() []*gastrologv1.HistogramBucket {
-		<-histReady
-		return histProto
-	}
-	if !d.histogramAtStreamEnd {
-		close(histReady)
 	}
 
 	// Decode the resume token
@@ -1015,7 +991,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 			errCh <- fmt.Errorf("invalid resume token: %w", err)
 			close(recCh)
 			close(errCh)
-			return recCh, nil, errCh, nilToken, getHistogram
+			return recCh, nil, errCh, nilToken
 		}
 	}
 
@@ -1034,9 +1010,6 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		defer d.streamers.Done()
 		defer close(recCh)
 		defer close(errCh)
-		if d.histogramAtStreamEnd {
-			defer close(histReady)
-		}
 
 		const batchSize = 200
 		batch := make([]*gastrologv1.ExportRecord, 0, batchSize)
@@ -1065,7 +1038,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		}
 	}()
 
-	return recCh, nil, errCh, getTokenBytes, getHistogram
+	return recCh, nil, errCh, getTokenBytes
 }
 
 func (d *directRemoteSearcher) GetContext(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error) {
@@ -1302,13 +1275,14 @@ func (d *directRemoteIndexer) GetIndexes(_ context.Context, nodeID string, req *
 // crosses the same frame encoding and error translation as in production.
 func newClusterForwarder(t *testing.T, nodes map[string]multinodeTestNode, selfID, vaultsDir string) *routing.Forwarder {
 	t.Helper()
-	return routing.NewForwarder(startClusterPeers(t, nodes, selfID, vaultsDir))
+	return routing.NewForwarder(startClusterPeers(t, nodes, selfID, vaultsDir, 0))
 }
 
 // startClusterPeers starts a real cluster gRPC server on loopback for every
 // node but selfID, serving ForwardRPC and ForwardSearch, and returns selfID's
-// connection manager to them.
-func startClusterPeers(t *testing.T, nodes map[string]multinodeTestNode, selfID, vaultsDir string) *cluster.PeerConnManager {
+// connection manager to them. A positive memLimit lowers the per-query ceiling
+// of every peer's search engine.
+func startClusterPeers(t *testing.T, nodes map[string]multinodeTestNode, selfID, vaultsDir string, memLimit int64) *cluster.PeerConnManager {
 	t.Helper()
 	addrs := make(map[string]string, len(nodes))
 	for id, node := range nodes {
@@ -1325,7 +1299,7 @@ func startClusterPeers(t *testing.T, nodes map[string]multinodeTestNode, selfID,
 		}
 		cs.Transport()
 		cs.SetInternalHandler(remoteSrv.BuildInternalHandler())
-		cs.SetSearchExecutor(mnForwardSearchExecutor(node.orch))
+		cs.SetSearchExecutor(mnForwardSearchExecutor(node.orch, memLimit))
 		if err := cs.Start(); err != nil {
 			t.Fatalf("start cluster server for %s: %v", id, err)
 		}
@@ -1341,22 +1315,27 @@ func startClusterPeers(t *testing.T, nodes map[string]multinodeTestNode, selfID,
 }
 
 // mnForwardSearchExecutor answers ForwardSearch on a harness node's cluster
-// server as the production executor does: the vault's leader engine, a
-// pipeline's table, or the record stream resumed at the coordinator's cursor.
-func mnForwardSearchExecutor(orch *orchestrator.Orchestrator) cluster.SearchExecutor {
+// server as the production executor does: the vault's leader engine, one
+// ledger for the node's share of the query, its page histogram for a
+// histogram-only request, a pipeline's table, or the record stream resumed at
+// the coordinator's cursor.
+func mnForwardSearchExecutor(orch *orchestrator.Orchestrator, memLimit int64) cluster.SearchExecutor {
 	return func(ctx context.Context, req *gastrologv1.ForwardSearchRequest) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
 		eng, err := server.ForwardSearchEngine(orch, req)
 		if err != nil || eng == nil {
 			return nil, nil, nil, nil, err
+		}
+		if memLimit > 0 {
+			eng.SetMemoryLimit(memLimit)
 		}
 		q, pipeline, err := server.ParseExpression(req.GetQuery())
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("parse query: %w", err)
 		}
 		q.PartialAggregates = req.GetPartialAggregates()
-		var histogram []*gastrologv1.HistogramBucket
-		if server.ForwardSearchIncludesHistogram(q) {
-			histogram = server.HistogramToProto(eng.ComputeSearchPageHistogram(ctx, q, 50))
+		q = q.WithBudget(eng.NewBudget())
+		if req.GetHistogramOnly() {
+			return nil, nil, nil, server.ForwardSearchHistogram(ctx, eng, q), nil
 		}
 		if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
 			result, err := eng.RunPipeline(ctx, q, pipeline)
@@ -1364,7 +1343,7 @@ func mnForwardSearchExecutor(orch *orchestrator.Orchestrator) cluster.SearchExec
 				return nil, nil, nil, nil, err
 			}
 			if result.Table != nil {
-				return nil, nil, server.TableResultToBasicProto(result.Table), histogram, nil
+				return nil, nil, server.TableResultToBasicProto(result.Table), nil, nil
 			}
 			return func(yield func(chunk.Record, error) bool) {
 				for _, rec := range result.Records {
@@ -1372,7 +1351,7 @@ func mnForwardSearchExecutor(orch *orchestrator.Orchestrator) cluster.SearchExec
 						return
 					}
 				}
-			}, nil, nil, histogram, nil
+			}, nil, nil, nil, nil
 		}
 		var resume *query.ResumeToken
 		if rt := req.GetResumeToken(); len(rt) > 0 {
@@ -1386,7 +1365,7 @@ func mnForwardSearchExecutor(orch *orchestrator.Orchestrator) cluster.SearchExec
 				return server.ResumeTokenToProto(token)
 			}
 			return nil
-		}, nil, histogram, nil
+		}, nil, nil, nil
 	}
 }
 
@@ -2430,90 +2409,67 @@ func TestMultiNode_EarlyTerminationReleasesTheFanOut(t *testing.T) {
 	}
 }
 
-// searchWithDeadline runs a Search RPC under a deadline and returns the
-// records it managed to stream plus the terminating error. The deadline is a
-// failure detector for a query that cannot finish, not a lever on timing.
-func searchWithDeadline(t *testing.T, client gastrologv1connect.QueryServiceClient, expr string, d time.Duration) ([]*gastrologv1.Record, []*gastrologv1.HistogramBucket, error) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), d)
-	defer cancel()
-
-	stream, err := client.Search(ctx, connect.NewRequest(&gastrologv1.SearchRequest{
-		Query: &gastrologv1.Query{Expression: expr},
-	}))
-	if err != nil {
-		return nil, nil, err
-	}
-	var records []*gastrologv1.Record
-	var histogram []*gastrologv1.HistogramBucket
-	for stream.Receive() {
-		records = append(records, stream.Msg().Records...)
-		if len(stream.Msg().Histogram) > 0 {
-			histogram = stream.Msg().Histogram
-		}
-	}
-	if err := stream.Err(); err != nil && err != io.EOF {
-		return records, histogram, err
-	}
-	return records, histogram, nil
-}
-
-// The coordinator reads each remote vault's histogram before it starts
-// draining that vault's records, so a forwarder that only produces the
-// histogram once its whole stream has been sent strands the query: the record
-// channel fills, the peer's producer parks on a send nobody is reading, and
-// the coordinator is still waiting for the histogram. It only shows up past
-// the channel's depth, which is why paged queries never hit it and an
-// unlimited one does.
-func TestMultiNode_HistogramDoesNotSerializeTheRecordStream(t *testing.T) {
+// A remote vault's histogram is its own request, beside the vault's record
+// stream: every record reaches the client while the histogram is still being
+// computed, and only the response's closing message waits for it. A search
+// whose records waited on a histogram's scan of the window would deliver
+// nothing until the slowest vault's scan finished.
+func TestMultiNode_HistogramDoesNotHoldBackTheRecordStream(t *testing.T) {
 	t.Parallel()
 	// Well past the stand-in's channel depth (mnSearchStreamSlots batches of
-	// 200), so the peer's producer must park before its stream ends.
+	// 200), so the peer's producer parks unless the coordinator keeps draining.
 	const remoteRecords = 4000
 
-	seed := func(h *multiNodeHarness) {
-		addMNRecords(t, h.Node(t, "data-1"), "one", remoteRecords, nil)
+	for _, tc := range []struct{ name, expr string }{
+		{"unfiltered", ""},
+		{"filtered", "level=error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+			addMNRecords(t, h.Node(t, "data-1"), "one", remoteRecords, map[string]string{"level": "error"})
+			hold := make(chan struct{})
+			h.remoteSearcher.histogramHold = hold
+
+			// The deadline only detects a search that cannot finish.
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			stream, err := h.client.Search(ctx, connect.NewRequest(&gastrologv1.SearchRequest{
+				Query: &gastrologv1.Query{Expression: tc.expr},
+			}))
+			if err != nil {
+				t.Fatalf("Search: %v", err)
+			}
+
+			var records int
+			var histogram []*gastrologv1.HistogramBucket
+			for stream.Receive() {
+				records += len(stream.Msg().Records)
+				if len(stream.Msg().Histogram) > 0 {
+					histogram = stream.Msg().Histogram
+				}
+				if records == remoteRecords && hold != nil {
+					// Every record arrived with the histogram still held.
+					close(hold)
+					hold = nil
+				}
+			}
+			if err := stream.Err(); err != nil && err != io.EOF {
+				t.Fatalf("search with the remote histogram held received %d of %d records, then: %v", records, remoteRecords, err)
+			}
+			if hold != nil {
+				t.Fatalf("received %d of %d records with the histogram held", records, remoteRecords)
+			}
+
+			var total int64
+			for _, b := range histogram {
+				total += b.Count
+			}
+			if total != remoteRecords {
+				t.Errorf("histogram counts sum to %d over %d buckets, want %d", total, len(histogram), remoteRecords)
+			}
+		})
 	}
-
-	// Premise: with the histogram withheld until end of stream, the query
-	// cannot complete at all.
-	t.Run("premise: waiting for the whole stream strands the query", func(t *testing.T) {
-		t.Parallel()
-		h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"), WithHistogramAtStreamEnd())
-		seed(h)
-
-		records, _, err := searchWithDeadline(t, h.client, "", 3*time.Second)
-		if err == nil {
-			t.Fatalf("query returned %d records instead of stranding: the stall this test guards is not reachable, so the assertion below proves nothing", len(records))
-		}
-		if got := connect.CodeOf(err); got != connect.CodeDeadlineExceeded {
-			t.Fatalf("code: got %v, want %v (err: %v)", got, connect.CodeDeadlineExceeded, err)
-		}
-	})
-
-	t.Run("histogram from the first message streams every record", func(t *testing.T) {
-		t.Parallel()
-		h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
-		seed(h)
-
-		records, histogram, err := searchWithDeadline(t, h.client, "", 30*time.Second)
-		if err != nil {
-			t.Fatalf("search: %v", err)
-		}
-		if len(records) != remoteRecords {
-			t.Errorf("streamed %d records, want %d", len(records), remoteRecords)
-		}
-
-		// The histogram has to be right as well as prompt: publishing it early
-		// must not drop or truncate the merged counts.
-		var total int64
-		for _, b := range histogram {
-			total += b.Count
-		}
-		if total != remoteRecords {
-			t.Errorf("histogram counts sum to %d over %d buckets, want %d", total, len(histogram), remoteRecords)
-		}
-	})
 }
 
 // An export moves data. When a node holding part of the match set cannot be

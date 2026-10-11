@@ -98,7 +98,7 @@ func newLostAnnounceFixture(t *testing.T) (*Orchestrator, glid.GLID, *vaultctlfs
 	// question can be asked of the real reconcile categories rather than
 	// skipped.
 	rec := NewVaultLifecycleReconciler(orch, vaultID, inst, "node-A", slog.Default())
-	rec.fsm = fsm
+	rec.fsm.Store(fsm)
 	inst.Reconciler = rec
 	return orch, vaultID, fsm, applier
 }

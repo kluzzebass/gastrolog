@@ -27,6 +27,7 @@ var queryFieldsOffTheWire = map[string]string{
 	"ResumeAfterEvent":  "travels in ForwardSearchRequest.ResumeToken",
 	"PartialAggregates": "travels in ForwardSearchRequest.PartialAggregates",
 	"SkipCloud":         "local histogram option, never forwarded",
+	"budget":            "a per-node memory ledger: the peer opens its own",
 }
 
 // The forwarded expression is the whole query as the peer sees it: every
@@ -146,7 +147,7 @@ type streamRecordingSearcher struct {
 }
 
 func (r *streamRecordingSearcher) SearchStream(ctx context.Context, nodeID string, req *apiv1.ForwardSearchRequest) (
-	<-chan []*apiv1.ExportRecord, *apiv1.TableResult, <-chan error, func() []byte, func() []*apiv1.HistogramBucket,
+	<-chan []*apiv1.ExportRecord, *apiv1.TableResult, <-chan error, func() []byte,
 ) {
 	r.mu.Lock()
 	r.sent = append(r.sent, req.GetQuery())
@@ -187,7 +188,7 @@ func TestCollectRemoteForPipelineForwardsTheScanLimit(t *testing.T) {
 				t.Fatalf("parse %q: pipeline=%v err=%v", tc.expr, pipeline, err)
 			}
 			q.Limit = 100
-			it, _, _ := qs.collectRemoteForPipeline(context.Background(), q, pipeline)
+			it, _ := qs.collectRemoteForPipeline(context.Background(), q, pipeline)
 			for range it {
 			}
 
@@ -220,7 +221,7 @@ func TestCollectRemoteForwardsThePageSizeOfAPlainSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	q.Limit = 100
-	it, _, _ := qs.collectRemote(context.Background(), q)
+	it, _ := qs.collectRemote(context.Background(), q)
 	for range it {
 	}
 	searcher.mu.Lock()

@@ -476,7 +476,7 @@ func TestRunPipelineWithRemote(t *testing.T) {
 		End:   t0.Add(60 * time.Minute),
 	}
 
-	result, err := eng.RunPipelineWithRemote(context.Background(), q, pipeline, recordSeq(extra), query.NewBudget())
+	result, err := eng.RunPipelineWithRemote(context.Background(), q, pipeline, recordSeq(extra), eng.NewBudget())
 	if err != nil {
 		t.Fatalf("RunPipelineWithRemote: %v", err)
 	}
@@ -501,7 +501,7 @@ func TestRunPipelineWithRemote(t *testing.T) {
 	// that ran per-source instead of over the merged stream would return ten
 	// local records here.
 	headOnly := &querylang.Pipeline{Pipes: []querylang.PipeOp{&querylang.HeadOp{N: 10}}}
-	result, err = eng.RunPipelineWithRemote(context.Background(), q, headOnly, recordSeq(extra), query.NewBudget())
+	result, err = eng.RunPipelineWithRemote(context.Background(), q, headOnly, recordSeq(extra), eng.NewBudget())
 	if err != nil {
 		t.Fatalf("RunPipelineWithRemote head-only: %v", err)
 	}

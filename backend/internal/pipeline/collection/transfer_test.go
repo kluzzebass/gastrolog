@@ -79,7 +79,7 @@ func segmentChecksumOf(t *testing.T, data []byte) uint64 {
 // production transfer path (PullToPreHead).
 func pullToPreHead(t *testing.T, root string, segID glid.GLID, data []byte) string {
 	t.Helper()
-	path, err := collection.PullToPreHead(context.Background(), root, glid.New(), segID, stubPull{data: data})
+	path, _, err := collection.PullToPreHead(context.Background(), root, glid.New(), segID, nil, stubPull{data: data})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestPullToPreHeadPullErrorCleansUp(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	segID := glid.New()
-	_, err := collection.PullToPreHead(context.Background(), root, glid.New(), segID,
+	_, _, err := collection.PullToPreHead(context.Background(), root, glid.New(), segID, nil,
 		stubPull{err: errors.New("transfer interrupted")})
 	if err == nil {
 		t.Fatal("expected pull error")
@@ -338,12 +338,12 @@ type stubPull struct {
 	err  error
 }
 
-func (p stubPull) Pull(_ context.Context, _, _ glid.GLID, dest io.Writer) error {
+func (p stubPull) Pull(_ context.Context, _, _ glid.GLID, _ []string, dest io.Writer) (string, error) {
 	if p.err != nil {
-		return p.err
+		return "", p.err
 	}
 	_, err := io.Copy(dest, bytes.NewReader(p.data))
-	return err
+	return "stub", err
 }
 
 func TestPullToPreHeadStreamsWithoutBuffer(t *testing.T) {
@@ -353,7 +353,7 @@ func TestPullToPreHeadStreamsWithoutBuffer(t *testing.T) {
 	data := writeSegmentBytes(t, vaultID, segID, "streamed segment")
 	root := t.TempDir()
 
-	path, err := collection.PullToPreHead(context.Background(), root, vaultID, segID, stubPull{data: data})
+	path, _, err := collection.PullToPreHead(context.Background(), root, vaultID, segID, nil, stubPull{data: data})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,17 +373,17 @@ type localFirstPull struct {
 	remote stubPull
 }
 
-func (p localFirstPull) Pull(_ context.Context, _, segmentID glid.GLID, dest io.Writer) error {
+func (p localFirstPull) Pull(_ context.Context, _, segmentID glid.GLID, exclude []string, dest io.Writer) (string, error) {
 	for _, path := range []string{
 		paths.PreHeadSegment(p.root, segmentID),
 	} {
 		data, err := os.ReadFile(path)
 		if err == nil && len(data) > 0 {
 			_, werr := dest.Write(data)
-			return werr
+			return "local", werr
 		}
 	}
-	return p.remote.Pull(context.Background(), glid.New(), segmentID, dest)
+	return p.remote.Pull(context.Background(), glid.New(), segmentID, exclude, dest)
 }
 
 func TestPullToPreHeadDoesNotCopyEmptyPreHeadPlaceholder(t *testing.T) {
@@ -393,7 +393,7 @@ func TestPullToPreHeadDoesNotCopyEmptyPreHeadPlaceholder(t *testing.T) {
 	data := writeSegmentBytes(t, vaultID, segID, "remote segment")
 	root := t.TempDir()
 
-	path, err := collection.PullToPreHead(context.Background(), root, vaultID, segID, localFirstPull{
+	path, _, err := collection.PullToPreHead(context.Background(), root, vaultID, segID, nil, localFirstPull{
 		root:   root,
 		seg:    segID,
 		remote: stubPull{data: data},

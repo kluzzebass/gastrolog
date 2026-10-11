@@ -86,6 +86,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 	vault.Name = vaultCfg.Name
 	vault.StorageType = string(vaultCfg.Type)
 	o.vaults[vaultCfg.ID] = vault
+	o.bindVaultInstanceToCtlLocked(vaultCfg.ID, instance)
 	o.signalVaultReadyChange()
 
 	// Recompile the routing table immediately so the vault can receive
@@ -588,6 +589,7 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 		return fmt.Errorf("vault %s not found in config", vaultID)
 	}
 
+	// Every node is a vault-ctl voter, storage placement or not.
 	o.ensureVaultControlPlaneRaftGroup(vaultID, rt.Nodes, factories)
 
 	nscs := rt.NodeStorageConfigs
@@ -597,9 +599,6 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 	isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
 	isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
 	if !isLeader && !isFollower {
-		// No storage placement, but still join the vault control-plane Raft
-		// group as a voter for this vault's replicated instance metadata.
-		o.ensureVaultCtlMetadata(*vaultCfg, rt.Nodes, factories)
 		return nil
 	}
 
@@ -647,6 +646,7 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 		return nil
 	}
 	vault.Instance = ti
+	o.bindVaultInstanceToCtlLocked(vaultID, ti)
 	o.signalVaultReadyChange()
 	o.logger.Info("vault placement added", "vault", vaultID)
 	return nil
@@ -718,6 +718,9 @@ func (o *Orchestrator) VaultConfig(id glid.GLID) (system.VaultConfig, error) {
 // nodes without storage only participate in the Raft group.
 func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories) (*VaultInstance, error) {
 	rt := &sys.Runtime
+	// The group comes up before the chunk manager: Raft log replay is fast,
+	// the chunk manager's disk scan is slow, so the group elects and catches
+	// up while chunks load.
 	o.ensureVaultControlPlaneRaftGroup(vaultCfg.ID, rt.Nodes, factories)
 
 	vaultID := vaultCfg.ID
@@ -731,9 +734,6 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 	isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
 	isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
 	if !isLeader && !isFollower {
-		// No storage placement on this node, but still join the vault
-		// control-plane Raft group as a voter for replicated instance metadata.
-		o.ensureVaultCtlMetadata(vaultCfg, rt.Nodes, factories)
 		return nil, nil
 	}
 
@@ -810,14 +810,7 @@ func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.V
 // corrupting the leader's stored diskBytes and breaking all future cloud reads.
 func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories, isFollower bool) (*VaultInstance, error) {
 	cfg := &sys.Config
-	rt := &sys.Runtime
 	factoryName := mapVaultTypeToFactory(vaultCfg.Type)
-
-	// Create the vault-ctl Raft group BEFORE the chunk manager. Group creation is
-	// fast (Raft log replay). Chunk manager creation is slow (scans disk for
-	// existing chunks). Starting the Raft group early gives it time to elect
-	// a leader and catch up while the chunk manager is loading.
-	vaultGroup, applier, raftCB := o.ensureVaultCtlMetadata(vaultCfg, rt.Nodes, factories)
 
 	// Build params from instance system.
 	params := buildVaultParams(sys, vaultCfg, o.localNodeID)
@@ -859,8 +852,6 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 		return nil, err
 	}
 
-	// Wire the Raft announcer now that both the group and chunk manager exist.
-	setVaultRaftAnnouncer(cm, applier, o.phase, o.logger, o.announceResultHook(vaultCfg.ID))
 	// Wire the FSM-backed integrity verifier so cold-cache cloud downloads
 	// reject blobs whose digest doesn't match what the leader stamped at
 	// upload time.
@@ -873,9 +864,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 			Type:    string(vaultCfg.Type),
 			Chunks:  cm,
 		}
-		ti.applyRaftCallbacks(raftCB)
-		o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
-		wireVaultFSMOnCreate(vaultGroup, vaultCfg.ID, cm, o)
+		ti.Reconciler = NewVaultLifecycleReconciler(o, vaultCfg.ID, ti, o.localNodeID, o.baseLogger)
 		return ti, nil
 	}
 
@@ -914,33 +903,9 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 		Indexes: im,
 		Query:   qe,
 	}
-	ti.applyRaftCallbacks(raftCB)
-	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
-	wireVaultFSMOnCreate(vaultGroup, vaultCfg.ID, cm, o)
-	wireVaultFSMOnUpload(vaultGroup, vaultCfg.ID, o)
-	o.wireLazyCloudBackedResolver(vaultGroup, vaultCfg.ID, cm)
+	ti.Reconciler = NewVaultLifecycleReconciler(o, vaultCfg.ID, ti, o.localNodeID, o.baseLogger)
 	o.installPipelineGLCBResolver(ti, vaultCfg.ID)
 	return ti, nil
-}
-
-// attachLifecycleReconciler constructs a VaultLifecycleReconciler for the given
-// vault instance and binds it to the instance sub-FSM in the vault control-plane
-// Raft group. Skipped silently when there is no group (memory-mode vaults
-// without replication) — single-node deletes go straight through the chunk
-// manager via deleteChunk's local-only fallback.
-//
-// Multiple TIs on the same node share an instance sub-FSM (1:1:1 placement makes
-// this rare, but possible). Each TI's reconciler.Wire() call rebinds the
-// callback set on the FSM; last-writer-wins matches the existing OnCreate /
-// OnUpload behavior wired alongside.
-func (o *Orchestrator) attachLifecycleReconciler(ti *VaultInstance, vaultID glid.GLID, vaultGroup *raftgroup.Group) {
-	ti.Reconciler = NewVaultLifecycleReconciler(o, vaultID, ti, o.localNodeID, o.baseLogger)
-	if vaultGroup == nil {
-		return
-	}
-	if vfsm, ok := vaultGroup.FSM.(*vaultraft.FSM); ok && vfsm != nil {
-		ti.Reconciler.Wire(vfsm.EnsureVaultFSM(vaultID))
-	}
 }
 
 // buildInstanceForStorage creates a VaultInstance whose data directory is
@@ -948,15 +913,10 @@ func (o *Orchestrator) attachLifecycleReconciler(ti *VaultInstance, vaultID glid
 // explicit storage placements and followers (one per node per instance).
 func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg system.VaultConfig, factories Factories, storageID string, isFollower bool) (*VaultInstance, error) {
 	cfg := &sys.Config
-	rt := &sys.Runtime
-	fs := findFileStorageByID(rt, storageID)
+	fs := findFileStorageByID(&sys.Runtime, storageID)
 	if fs == nil {
 		return nil, fmt.Errorf("file storage %s not found", storageID)
 	}
-
-	// Create the vault-ctl Raft group BEFORE the chunk manager — same rationale
-	// as buildInstance: start elections while chunk loading is in progress.
-	vaultGroup, applier, raftCB := o.ensureVaultCtlMetadata(vaultCfg, rt.Nodes, factories)
 
 	// Build params normally, then override the dir with this storage's path.
 	params := buildVaultParams(sys, vaultCfg, o.localNodeID)
@@ -991,9 +951,6 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 		return nil, err
 	}
 
-	// Wire Raft announcer now that chunk manager exists.
-	setVaultRaftAnnouncer(cm, applier, o.phase, o.logger, o.announceResultHook(vaultCfg.ID))
-
 	// Follower replicas need index builders for local queries.
 	imFactory, ok := factories.IndexManagers[factoryName]
 	if !ok {
@@ -1027,11 +984,7 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 		Indexes: im,
 		Query:   qe,
 	}
-	ti.applyRaftCallbacks(raftCB)
-	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
-	wireVaultFSMOnCreate(vaultGroup, vaultCfg.ID, cm, o)
-	wireVaultFSMOnUpload(vaultGroup, vaultCfg.ID, o)
-	o.wireLazyCloudBackedResolver(vaultGroup, vaultCfg.ID, cm)
+	ti.Reconciler = NewVaultLifecycleReconciler(o, vaultCfg.ID, ti, o.localNodeID, o.baseLogger)
 	o.installPipelineGLCBResolver(ti, vaultCfg.ID)
 	return ti, nil
 }
@@ -1102,23 +1055,146 @@ func (o *Orchestrator) decommissionVaultControlPlaneRaftGroup(vaultID glid.GLID)
 	}
 }
 
-// ensureVaultControlPlaneRaftGroup starts the per-vault control-plane Raft group
-// when cluster mode is enabled (shared GroupManager + full member list).
-// Idempotent; safe on every reconfigure sweep.
+// ensureVaultControlPlaneRaftGroup joins this node to the vault's vault-ctl
+// Raft group, creating it when the full cluster member set resolves, and
+// binds the group (bindVaultCtlGroup). Creation defers while the local node
+// is not yet in the cluster node list or a peer is not yet resolvable;
+// RefreshVaultCtlMembers retries on the next node-config change. Idempotent;
+// safe on every reconfigure sweep.
 func (o *Orchestrator) ensureVaultControlPlaneRaftGroup(vaultID glid.GLID, clusterNodes []system.NodeConfig, factories Factories) {
-	gid := raftgroup.VaultControlPlaneGroupID(vaultID)
 	if factories.GroupManager == nil {
 		return
 	}
-	if g := factories.GroupManager.GetGroup(gid); g != nil {
-		if vfsm, ok := g.FSM.(*vaultraft.FSM); ok && vfsm != nil {
-			vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
-		}
-		return
-	}
+	gid := raftgroup.VaultControlPlaneGroupID(vaultID)
 	vfsm := vaultraft.NewFSM()
 	vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
-	_, _ = o.tryStartClusterWideRaftGroup(gid, vfsm, clusterNodes, factories)
+	g, members := o.tryStartClusterWideRaftGroup(gid, vfsm, clusterNodes, factories)
+	if g != nil {
+		o.vaultCtlLeaders.SetDesiredMembers(vaultID, members)
+	} else if g = factories.GroupManager.GetGroup(gid); g == nil {
+		return
+	}
+	o.bindVaultCtlGroup(vaultID, g)
+}
+
+// bindVaultCtlGroup wires the vault-level consumers of a vault-ctl group: the
+// after-restore hook, the pipeline chunk events on the live sub-FSM, and the
+// leader loop. Every node runs them, local instance or not. Idempotent.
+func (o *Orchestrator) bindVaultCtlGroup(vaultID glid.GLID, g *raftgroup.Group) {
+	if vfsm, ok := g.FSM.(*vaultraft.FSM); ok && vfsm != nil {
+		vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
+		wireVaultFSMPipelineChunkEvents(o, vaultID, vfsm.EnsureVaultFSM(vaultID))
+	}
+	o.vaultCtlLeaders.Start(vaultID, g)
+}
+
+// bindVaultInstanceToCtlLocked binds a vault's local instance to its vault's
+// vault-ctl group. It runs wherever an instance and its group meet — instance
+// registration, group creation by RefreshVaultCtlMembers, and snapshot restore
+// — and is idempotent.
+//
+// The Raft-backed facets and the announcer are installed once, at
+// registration, and read the instance's group pointer on every call: before
+// the group exists on this node they report not-ready and nothing, and they
+// follow the group through its creation and through restores without being
+// rewritten. What the sub-FSM pushes — the lifecycle reconciler's callbacks,
+// OnCreate, OnUpload — and the cloud-backed resolver attach to the live
+// sub-FSM, and move when a restore replaces it.
+//
+// Returns the live sub-FSM, or nil while the group does not exist. Caller
+// holds o.mu.
+func (o *Orchestrator) bindVaultInstanceToCtlLocked(vaultID glid.GLID, t *VaultInstance) *vaultctlfsm.FSM {
+	if t == nil || o.groupMgr == nil {
+		return nil
+	}
+	g := o.vaultCtlGroup(vaultID)
+	if t.IsFSMReady == nil && (o.vaultCtlReplicated || g != nil) {
+		applier := instanceVaultCtlChunkApplier{o: o, t: t}
+		t.applyRaftCallbacks(instanceVaultRaftCallbacks(t, applier))
+		setVaultRaftAnnouncer(t.Chunks, applier, o.phase, o.logger, o.announceResultHook(vaultID))
+	}
+	if g == nil {
+		return nil
+	}
+	t.vaultCtlGroup.Store(g)
+	live := vaultCtlSubFSM(g, vaultID)
+	if live == nil || t.vaultCtl == live {
+		return live
+	}
+	if t.Reconciler != nil {
+		t.Reconciler.Wire(live)
+	}
+	wireVaultFSMOnCreate(g, vaultID, t.Chunks, o)
+	wireVaultFSMOnUpload(g, vaultID, o)
+	o.wireLazyCloudBackedResolver(g, vaultID, t.Chunks)
+	t.vaultCtl = live
+	return live
+}
+
+// vaultCtlGroup returns the vault's vault-ctl group on this node, or nil.
+func (o *Orchestrator) vaultCtlGroup(vaultID glid.GLID) *raftgroup.Group {
+	if o.groupMgr == nil {
+		return nil
+	}
+	return o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+}
+
+// instanceVaultRaftCallbacks builds an instance's Raft-backed callbacks
+// against the group the instance is bound to at call time.
+func instanceVaultRaftCallbacks(t *VaultInstance, applier vaultctlfsm.Applier) vaultRaftCallbacks {
+	raft := func() *hraft.Raft {
+		if g := t.vaultCtlGroup.Load(); g != nil {
+			return g.Raft
+		}
+		return nil
+	}
+	fsm := func() *vaultctlfsm.FSM {
+		if g := t.vaultCtlGroup.Load(); g != nil {
+			return vaultCtlSubFSM(g, t.VaultID)
+		}
+		return nil
+	}
+	return buildVaultRaftCallbacks(raft, fsm, applier)
+}
+
+// instanceVaultCtlChunkApplier applies a vault's sub-FSM commands through the
+// group its instance is bound to at Apply time.
+type instanceVaultCtlChunkApplier struct {
+	o *Orchestrator
+	t *VaultInstance
+}
+
+func (a instanceVaultCtlChunkApplier) Apply(data []byte) error {
+	g := a.t.vaultCtlGroup.Load()
+	if g == nil {
+		return fmt.Errorf("vault control-plane raft group %q not running on this node", raftgroup.VaultControlPlaneGroupID(a.t.VaultID))
+	}
+	return a.o.vaultCtlChunkApplier(g, a.t.VaultID).Apply(data)
+}
+
+// vaultCtlSubFSM returns the vault's sub-FSM inside its vault-ctl group,
+// creating it empty when no command has reached it yet.
+func vaultCtlSubFSM(g *raftgroup.Group, vaultID glid.GLID) *vaultctlfsm.FSM {
+	switch raw := g.FSM.(type) {
+	case *vaultctlfsm.FSM:
+		return raw
+	case *vaultraft.FSM:
+		if raw != nil {
+			return raw.EnsureVaultFSM(vaultID)
+		}
+	}
+	return nil
+}
+
+// vaultCtlChunkApplier returns the applier for a vault's sub-FSM commands:
+// forwarded to the group leader when peers are wired, applied through the
+// local group otherwise.
+func (o *Orchestrator) vaultCtlChunkApplier(g *raftgroup.Group, vaultID glid.GLID) vaultctlfsm.Applier {
+	if o.peerConns != nil {
+		gid := raftgroup.VaultControlPlaneGroupID(vaultID)
+		return cluster.NewVaultCtlChunkApplyForwarder(g.Raft, gid, vaultID, groupApplyWait(g), o.peerConns, cluster.ReplicationTimeout)
+	}
+	return &vaultCtlApplier{o: o, vaultID: vaultID}
 }
 
 // tryStartClusterWideRaftGroup creates or returns an existing cluster-wide Raft group
@@ -1185,60 +1261,11 @@ type vaultRaftCallbacks struct {
 	manifestEntry           func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
 }
 
-// ensureVaultCtlMetadata joins this node to the vault control-plane
-// Raft group for the vault's vault (creating the group if needed) and
-// returns the applier + callbacks for this instance's chunk metadata. Every
-// instance in the same vault shares the same vault-ctl Raft group; each
-// instance's chunk FSM is a sub-FSM keyed by instance ID (see vaultraft.FSM and
-// vaultraft/vaultctlfsm.FSM). With no GroupManager, returns nils.
-//
-// Call this BEFORE creating the chunk manager so Raft can start
-// elections while chunk loading is still in progress.
-func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg system.VaultConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, vaultctlfsm.Applier, vaultRaftCallbacks) {
-	if factories.GroupManager == nil {
-		return nil, nil, vaultRaftCallbacks{}
-	}
-	vaultGID := raftgroup.VaultControlPlaneGroupID(vaultCfg.ID)
-	g, members := o.tryStartClusterWideRaftGroup(vaultGID, vaultraft.NewFSM(), clusterNodes, factories)
-	if g == nil {
-		return nil, nil, vaultRaftCallbacks{}
-	}
-
-	o.vaultCtlLeaders.SetDesiredMembers(vaultCfg.ID, members)
-	o.vaultCtlLeaders.Start(vaultCfg.ID, g)
-
-	vfsm, ok := g.FSM.(*vaultraft.FSM)
-	if !ok || vfsm == nil {
-		return nil, nil, vaultRaftCallbacks{}
-	}
-	// Wire the after-restore hook so that vault-ctl snapshot install on
-	// this node triggers the receipt protocol's catchup pass on every
-	// instance reconciler in the vault. Idempotent — calling SetOnAfterRestore
-	// on every ensureVaultCtlMetadata invocation is fine; later calls
-	// just rebind to the same closure. Without this hook, the receipt
-	// protocol's pendingDeletes silently leak across snapshot install
-	// boundaries.
-	vaultID := vaultCfg.ID
-	vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
-	vaultFSM := vfsm.EnsureVaultFSM(vaultCfg.ID)
-	wireVaultFSMPipelineChunkEvents(o, vaultID, vaultFSM)
-	r := g.Raft
-	timeout := cluster.ReplicationTimeout
-
-	var applier vaultctlfsm.Applier
-	if factories.PeerConns != nil {
-		applier = cluster.NewVaultCtlChunkApplyForwarder(r, vaultGID, vaultCfg.ID, vfsm.ApplyWait(), factories.PeerConns, timeout)
-	} else {
-		applier = &vaultCtlApplier{o: o, vaultID: vaultCfg.ID}
-	}
-
-	return g, applier, buildVaultRaftCallbacks(r, vaultFSM, applier)
-}
-
 // buildVaultRaftCallbacks constructs the callback struct for replicated instance
-// chunk metadata (vault control-plane Raft in cluster mode).
-// Extracted from ensureVaultCtlMetadata to keep cognitive complexity within lint
-// thresholds.
+// chunk metadata (vault control-plane Raft in cluster mode). raft and fsm
+// resolve the vault-ctl group's Raft and the vault's sub-FSM at call time;
+// either may return nil, and leadership and readiness then report false and
+// reads report nothing.
 //
 // Readiness uses the Raft applied index, not the FSM's ready flag. hraft
 // filters LogNoop and LogConfiguration entries before calling FSM.Apply —
@@ -1249,18 +1276,20 @@ func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg system.VaultConfig, clust
 // index is the authoritative "this group is live on this node" signal:
 // it advances on bootstrap, elections, snapshot restore, and normal
 // replication alike.
-//
-// Before 5xxbd, vault-ctl FSM was a top-level Raft group whose Ready flag
-// flipped on every apply in practice, because `CmdPutVault` was a LogCommand
-// that hit it. After 5xxbd the instance sub-FSM only sees OpVaultChunkFSM commands,
-// which a fresh vault with no chunks never sends — keying readiness on any
-// FSM-level signal leaves every fresh vault wedged as "not ready" until
-// first ingestion.
-func buildVaultRaftCallbacks(r *hraft.Raft, fsm *vaultctlfsm.FSM, applier vaultctlfsm.Applier) vaultRaftCallbacks {
+func buildVaultRaftCallbacks(raft func() *hraft.Raft, fsm func() *vaultctlfsm.FSM, applier vaultctlfsm.Applier) vaultRaftCallbacks {
 	return vaultRaftCallbacks{
-		hasLeader:  func() bool { return r.Leader() != "" },
-		isLeader:   func() bool { return r.State() == hraft.Leader },
-		isFSMReady: func() bool { return r.AppliedIndex() > 0 },
+		hasLeader: func() bool {
+			r := raft()
+			return r != nil && r.Leader() != ""
+		},
+		isLeader: func() bool {
+			r := raft()
+			return r != nil && r.State() == hraft.Leader
+		},
+		isFSMReady: func() bool {
+			r := raft()
+			return r != nil && r.AppliedIndex() > 0
+		},
 		applyRequestDelete: func(id chunk.ChunkID, reason string, expectedFrom []string) error {
 			return applier.Apply(vaultctlfsm.MarshalRequestDelete(id, time.Now(), reason, expectedFrom))
 		},
@@ -1291,62 +1320,59 @@ func buildVaultRaftCallbacks(r *hraft.Raft, fsm *vaultctlfsm.FSM, applier vaultc
 			return applier.Apply(data)
 		},
 		isTombstoned: func(id chunk.ChunkID) bool {
-			if fsm == nil {
-				return false
-			}
-			return fsm.IsTombstoned(id)
+			f := fsm()
+			return f != nil && f.IsTombstoned(id)
 		},
 		listChunks: func() []chunk.ChunkID {
-			if fsm == nil {
+			f := fsm()
+			if f == nil {
 				return nil
 			}
-			entries := fsm.List()
+			entries := f.List()
 			ids := make([]chunk.ChunkID, len(entries))
 			for i := range entries {
 				ids[i] = entries[i].ID
 			}
 			return ids
 		},
-		listRetPending: listFSMByFlag(fsm, func(e vaultctlfsm.ManifestEntry) bool { return e.RetentionPending }),
-		listPendingDeletes: func() []chunk.ChunkID {
-			if fsm == nil {
+		listRetPending: func() []chunk.ChunkID {
+			f := fsm()
+			if f == nil {
 				return nil
 			}
-			return fsm.PendingDeleteIDs()
+			var ids []chunk.ChunkID
+			for _, e := range f.List() {
+				if e.RetentionPending {
+					ids = append(ids, e.ID)
+				}
+			}
+			return ids
+		},
+		listPendingDeletes: func() []chunk.ChunkID {
+			f := fsm()
+			if f == nil {
+				return nil
+			}
+			return f.PendingDeleteIDs()
 		},
 		manifestEntries: func() []vaultctlfsm.ManifestEntry {
-			if fsm == nil {
+			f := fsm()
+			if f == nil {
 				return nil
 			}
-			return fsm.List()
+			return f.List()
 		},
 		manifestEntry: func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
-			if fsm == nil {
+			f := fsm()
+			if f == nil {
 				return vaultctlfsm.ManifestEntry{}, false
 			}
-			e := fsm.Get(id)
+			e := f.Get(id)
 			if e == nil {
 				return vaultctlfsm.ManifestEntry{}, false
 			}
 			return *e, true
 		},
-	}
-}
-
-// listFSMByFlag returns a function that filters the FSM's entries by a
-// boolean predicate (e.g., RetentionPending or TransitionStreamed).
-func listFSMByFlag(fsm *vaultctlfsm.FSM, pred func(vaultctlfsm.ManifestEntry) bool) func() []chunk.ChunkID {
-	return func() []chunk.ChunkID {
-		if fsm == nil {
-			return nil
-		}
-		var ids []chunk.ChunkID
-		for _, e := range fsm.List() {
-			if pred(e) {
-				ids = append(ids, e.ID)
-			}
-		}
-		return ids
 	}
 }
 
@@ -1382,43 +1408,6 @@ func setVaultRaftAnnouncer(cm chunk.ChunkManager, applier vaultctlfsm.Applier, p
 		ann.SetResultHook(onResult)
 	}
 	setter.SetAnnouncer(ann)
-}
-
-// rewireVaultInstanceAfterCtlRestore rebinds the vault instance's reconciler
-// and Raft-backed metadata callbacks to the live vault-ctl sub-FSM after a
-// group-level snapshot Restore. vaultraft.FSM.Restore replaces the entire
-// vaults map with freshly allocated sub-FSMs; any reconciler or callback
-// closure still pointing at the pre-restore object reads a frozen manifest
-// (SweepMissingReplicas sees missing=0 forever, overlay/tombstone checks
-// go stale). Returns the live sub-FSM, or nil when nothing to rewire.
-func (o *Orchestrator) rewireVaultInstanceAfterCtlRestore(vaultID glid.GLID, t *VaultInstance) *vaultctlfsm.FSM {
-	if o.groupMgr == nil || t == nil {
-		return nil
-	}
-	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
-	if g == nil {
-		return nil
-	}
-	vfsm, ok := g.FSM.(*vaultraft.FSM)
-	if !ok || vfsm == nil {
-		return nil
-	}
-	live := vfsm.VaultFSM(vaultID)
-	if live == nil {
-		return nil
-	}
-	vaultGID := raftgroup.VaultControlPlaneGroupID(vaultID)
-	var applier vaultctlfsm.Applier
-	if o.peerConns != nil {
-		applier = cluster.NewVaultCtlChunkApplyForwarder(g.Raft, vaultGID, vaultID, vfsm.ApplyWait(), o.peerConns, cluster.ReplicationTimeout)
-	} else {
-		applier = &vaultCtlApplier{o: o, vaultID: vaultID}
-	}
-	t.applyRaftCallbacks(buildVaultRaftCallbacks(g.Raft, live, applier))
-	if t.Reconciler != nil {
-		t.Reconciler.Wire(live)
-	}
-	return live
 }
 
 // clearVaultFSMChunkCallbacks clears OnUpload for a vault's FSM slice
@@ -1487,12 +1476,13 @@ func wireVaultFSMOnCreate(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 // OpenChunkManifest / SealOpenChunkManifest instead and need their own
 // path so the inspector chunk list shows active and sealing chunks without
 // polling ListChunks. Uses AddOn* so the chunking manager's SetOn* slot-0
-// callbacks are not disturbed. Idempotent per vaultID.
+// callbacks are not disturbed. Idempotent per sub-FSM: a snapshot restore's
+// replacement sub-FSM gets its own subscribers.
 func wireVaultFSMPipelineChunkEvents(o *Orchestrator, vaultID glid.GLID, fsm *vaultctlfsm.FSM) {
 	if o == nil || fsm == nil {
 		return
 	}
-	if _, loaded := o.vaultCtlPipelineChunkEvents.LoadOrStore(vaultID, struct{}{}); loaded {
+	if prev, loaded := o.vaultCtlPipelineChunkEvents.Swap(vaultID, fsm); loaded && prev == fsm {
 		return
 	}
 	fsm.AddOnOpenChunkManifest(func(m *vaultctlfsm.OpenChunkManifest) {
@@ -1580,6 +1570,10 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, o *Orchestrator
 // by the original members with "node is not in configuration", blocking
 // chunk catchup and RF expansion.
 //
+// It is also where a deferred vault-ctl group gets created: every local vault
+// whose group is missing is ensured, and each local instance is bound to its
+// group (bindVaultInstanceToCtlLocked).
+//
 // Partial resolution short-circuits: if any cluster node's address can't
 // be resolved (transient — the cluster-ctl Raft config has not caught up yet),
 // the refresh is skipped rather than passing a partial set to the
@@ -1609,19 +1603,21 @@ func (o *Orchestrator) RefreshVaultCtlMembers(clusterNodes []system.NodeConfig, 
 	o.mu.RUnlock()
 
 	for _, vaultID := range vaultIDs {
-		// Joiners can land here with a vault that was registered before
-		// their own NodeConfig had propagated into the cluster FSM —
-		// tryStartClusterWideRaftGroup returned nil on the original
-		// AddVault and the vault-ctl Raft group was never created on
-		// this node. Re-attempt creation now that we have a complete
-		// resolvable member set; the call is idempotent and returns
-		// the existing group when it's already up. Without this,
-		// joiners stay permanently missing from every vault-ctl group,
-		// blocking AddVoter commits cluster-wide once quorum starts
-		// requiring an ACK from a new voter.
+		// A vault registered before this node's NodeConfig reached the
+		// cluster node list, or while a peer was unresolvable, has no group
+		// here yet; the complete member set now lets it be created.
 		o.ensureVaultControlPlaneRaftGroup(vaultID, clusterNodes, factories)
 		o.vaultCtlLeaders.SetDesiredMembers(vaultID, members)
 	}
+
+	o.mu.Lock()
+	for _, vaultID := range vaultIDs {
+		if v := o.vaults[vaultID]; v != nil {
+			o.bindVaultInstanceToCtlLocked(vaultID, v.Instance)
+		}
+	}
+	o.signalVaultReadyChange()
+	o.mu.Unlock()
 }
 
 // buildVaultRaftMembers returns ALL cluster nodes as Raft members for a vault

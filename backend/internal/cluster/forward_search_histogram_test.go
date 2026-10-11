@@ -61,11 +61,10 @@ func recordSeqOfN(n int) iter.Seq2[chunk.Record, error] {
 	}
 }
 
-// The whole fan-out rests on a remote search's histogram arriving complete in
-// the stream's FIRST response and in no other: the coordinator publishes that
-// message's histogram and never looks again, so a handler that moved the
-// buckets to a later message — or split them across batches — would truncate
-// every remote histogram in the cluster while every other test stayed green.
+// A remote vault's histogram arrives complete in the stream's first response
+// and in no other: the collecting client keeps one message's buckets, so a
+// handler that split them across batches would truncate every remote
+// histogram in the cluster while every other test stayed green.
 func TestForwardSearchSendsHistogramOnlyInTheFirstResponse(t *testing.T) {
 	buckets := []*gastrologv1.HistogramBucket{
 		{TimestampMs: 1000, Count: 5},

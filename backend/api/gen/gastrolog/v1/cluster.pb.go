@@ -2284,10 +2284,9 @@ func (x *RequestReplicaCatchupResponse) GetScheduled() uint32 {
 	return 0
 }
 
-// ForwardSearchRequest is sent to a replica holder node to execute a
-// scoped search locally and return matching records. When sealed_chunk_ids
-// is empty and search_pipeline_chunks is false, the holder runs a legacy
-// leader-only full-vault search (backward compatible).
+// ForwardSearchRequest is sent to the node leading vault_id to run the query
+// against that vault: a record stream, a pipeline's table, or — with
+// histogram_only — the vault's page histogram.
 type ForwardSearchRequest struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	VaultId     []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
@@ -2297,8 +2296,12 @@ type ForwardSearchRequest struct {
 	// count) so the coordinator can merge per-node tables instead of gathering
 	// records.
 	PartialAggregates bool `protobuf:"varint,4,opt,name=partial_aggregates,json=partialAggregates,proto3" json:"partial_aggregates,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Answer with the vault's page histogram over the query's window and no
+	// records. The coordinator asks for it beside the record stream, so a record
+	// stream never waits on the histogram's scan of the window.
+	HistogramOnly bool `protobuf:"varint,5,opt,name=histogram_only,json=histogramOnly,proto3" json:"histogram_only,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ForwardSearchRequest) Reset() {
@@ -2359,13 +2362,20 @@ func (x *ForwardSearchRequest) GetPartialAggregates() bool {
 	return false
 }
 
+func (x *ForwardSearchRequest) GetHistogramOnly() bool {
+	if x != nil {
+		return x.HistogramOnly
+	}
+	return false
+}
+
 type ForwardSearchResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Records       []*ExportRecord        `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
 	ResumeToken   []byte                 `protobuf:"bytes,2,opt,name=resume_token,json=resumeToken,proto3" json:"resume_token,omitempty"`
 	HasMore       bool                   `protobuf:"varint,3,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
 	TableResult   *TableResult           `protobuf:"bytes,4,opt,name=table_result,json=tableResult,proto3" json:"table_result,omitempty"` // Pipeline results (timechart, stats)
-	Histogram     []*HistogramBucket     `protobuf:"bytes,5,rep,name=histogram,proto3" json:"histogram,omitempty"`                        // Volume histogram from this node's vaults
+	Histogram     []*HistogramBucket     `protobuf:"bytes,5,rep,name=histogram,proto3" json:"histogram,omitempty"`                        // The vault's page histogram, answering histogram_only
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5166,12 +5176,13 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\tchunk_ids\x18\x02 \x03(\fR\bchunkIds\x12*\n" +
 	"\x11requester_node_id\x18\x03 \x01(\fR\x0frequesterNodeId\"=\n" +
 	"\x1dRequestReplicaCatchupResponse\x12\x1c\n" +
-	"\tscheduled\x18\x01 \x01(\rR\tscheduled\"\x99\x01\n" +
+	"\tscheduled\x18\x01 \x01(\rR\tscheduled\"\xc0\x01\n" +
 	"\x14ForwardSearchRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x12!\n" +
 	"\fresume_token\x18\x03 \x01(\fR\vresumeToken\x12-\n" +
-	"\x12partial_aggregates\x18\x04 \x01(\bR\x11partialAggregates\"\x86\x02\n" +
+	"\x12partial_aggregates\x18\x04 \x01(\bR\x11partialAggregates\x12%\n" +
+	"\x0ehistogram_only\x18\x05 \x01(\bR\rhistogramOnly\"\x86\x02\n" +
 	"\x15ForwardSearchResponse\x124\n" +
 	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\x12!\n" +
 	"\fresume_token\x18\x02 \x01(\fR\vresumeToken\x12\x19\n" +

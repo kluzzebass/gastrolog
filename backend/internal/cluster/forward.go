@@ -14,6 +14,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/pipeline/collection"
+	"gastrolog/internal/query"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
@@ -355,12 +356,12 @@ func forwardFollowStreamHandler(srv any, stream grpc.ServerStream) error {
 
 	records, err := s.followExecutor(stream.Context(), vaultIDs, req.GetQuery())
 	if err != nil {
-		return status.Errorf(codes.Internal, "follow: %v", err)
+		return queryFailure("follow", err)
 	}
 
 	for rec, err := range records {
 		if err != nil {
-			return status.Errorf(codes.Internal, "follow record: %v", err)
+			return queryFailure("follow record", err)
 		}
 		resp := &gastrologv1.ForwardFollowResponse{
 			Records: []*gastrologv1.ExportRecord{convert.RecordToExport(rec)},
@@ -418,14 +419,15 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 
 	searchIter, getToken, tableResult, histogram, err := s.searchExecutor(stream.Context(), req)
 	if err != nil {
-		return status.Errorf(codes.Internal, "search: %v", err)
+		return queryFailure("search", err)
 	}
 
 	if tableResult != nil {
 		return sendForwardedTable(stream, tableResult, histogram)
 	}
 
-	// No results (vault has no leader instance on this node).
+	// No record stream: a histogram_only answer, or a vault with no leader
+	// instance on this node.
 	if searchIter == nil {
 		return stream.SendMsg(&gastrologv1.ForwardSearchResponse{Histogram: histogram})
 	}
@@ -439,7 +441,7 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 			if errors.Is(iterErr, io.EOF) || errors.Is(iterErr, fs.ErrNotExist) {
 				break
 			}
-			return status.Errorf(codes.Internal, "search record: %v", iterErr)
+			return queryFailure("search record", iterErr)
 		}
 		er := convert.RecordToExport(rec)
 		n := repeatedEntrySize(forwardSearchRecordsField, er)
@@ -463,6 +465,17 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 		batch.resp.HasMore = len(batch.resp.ResumeToken) > 0
 	}
 	return sendForwarded(stream, batch.resp)
+}
+
+// queryFailure is the status a failed forwarded query returns. A share of the
+// query that outgrew this node's memory budget leaves as ResourceExhausted, so
+// the coordinator reports the query as too large rather than as a fault here.
+func queryFailure(what string, err error) error {
+	code := codes.Internal
+	if _, ok := errors.AsType[*query.MemoryLimitError](err); ok {
+		code = codes.ResourceExhausted
+	}
+	return status.Errorf(code, "%s: %v", what, err)
 }
 
 // forwardBatchMaxRecords and forwardBatchMaxBytes bound one ForwardSearch
@@ -571,7 +584,7 @@ func (s *Server) forwardGetContext(ctx context.Context, req *gastrologv1.Forward
 
 	before, anchor, after, err := s.contextExecutor(ctx, vaultID, chunkID, req.GetPos(), int(req.GetBefore()), int(req.GetAfter()))
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "get context: %v", err)
+		return nil, queryFailure("get context", err)
 	}
 
 	resp := &gastrologv1.ForwardGetContextResponse{

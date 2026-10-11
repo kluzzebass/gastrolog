@@ -169,6 +169,18 @@ type Query struct {
 	// SkipCloud skips cloud-backed chunks during search. Used by the
 	// histogram to compute filtered counts from local data only.
 	SkipCloud bool
+
+	// budget is the memory ledger this query's execution charges on this
+	// node. Copies of the query share it; nil means the engine opens one.
+	budget *Budget
+}
+
+// WithBudget returns q running on budget: every structure the engine builds
+// for it — sort keys, histogram state, pipeline working sets — charges that
+// one ledger.
+func (q Query) WithBudget(b *Budget) Query {
+	q.budget = b
+	return q
 }
 
 // String returns a human-readable representation of the query including all parameters.

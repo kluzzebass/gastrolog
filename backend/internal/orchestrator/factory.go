@@ -112,6 +112,7 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 	// chunking is gated cluster-wide for want of second holders.
 	o.groupMgr = factories.GroupManager
 	o.peerConns = factories.PeerConns
+	o.vaultCtlReplicated = factories.GroupManager != nil && factories.NodeAddressResolver != nil
 	if factories.PeerConns != nil && o.segmentPuller == nil {
 		o.segmentPuller = cluster.NewSegmentPuller(factories.PeerConns)
 		o.chunkGLCBPuller = cluster.NewChunkGLCBPuller(factories.PeerConns)

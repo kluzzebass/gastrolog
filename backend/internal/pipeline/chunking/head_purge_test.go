@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/chunk/glcb/glcbtest"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/paths"
@@ -169,6 +170,13 @@ func TestPurgeStaleHeadCatchUpDropsOrphans(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(chunkID, base.Add(2*time.Minute), 2, 100, base, base, base, true, base.Add(2*time.Minute))}); err != nil {
 		t.Fatal(err)
 	}
+
+	// This home already holds the sealed chunk, so the only purge in play is
+	// the catch-up sweep; a home lacking it would build it and then purge
+	// the head the chunk consumed.
+	glcbtest.WriteSealedBlob(t, filepath.Join(home, "chunks"), chunkID, vaultID, []chunk.Record{{
+		IngestTS: base, WriteTS: base, SourceTS: base, Raw: []byte("done"),
+	}})
 
 	mgr := chunking.New(chunking.Config{})
 	ctx, cancel := context.WithCancel(context.Background())

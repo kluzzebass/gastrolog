@@ -122,8 +122,11 @@ func segmentNeedsLocalRepull(fsm *vaultctlfsm.FSM, entry vaultctlfsm.CompletedSe
 }
 
 // segmentPullClient implements collection.PullClient by resolving a segment's
-// source node from the local registry entry (origin first, then any other
-// holder for recovery) and streaming bytes over the PullSegment RPC. A failed
+// source from the local registry entry (this node's own copy first, then the
+// origin, then any other holder for recovery), skipping sources the collector
+// excluded, and streaming remote bytes over the PullSegment RPC. The local
+// copy is reported as source localNodeID so a corrupt one is excluded like any
+// remote holder's. A failed
 // candidate must never leave partial bytes in dest for the next candidate (or
 // for the collector's pre-head temp file): when dest can rewind (the
 // production pre-head temp file), each candidate streams directly into it and
@@ -152,17 +155,17 @@ type rewindableWriter interface {
 	Truncate(size int64) error
 }
 
-func (c *segmentPullClient) Pull(ctx context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
+func (c *segmentPullClient) Pull(ctx context.Context, vaultID, segmentID glid.GLID, exclude []string, dest io.Writer) (string, error) {
 	fsm := c.lookup()
 	if fsm == nil {
-		return errors.New("vault-ctl FSM required")
+		return "", errors.New("vault-ctl FSM required")
 	}
 	entry := fsm.GetCompletedSegment(segmentID)
 	if entry == nil {
 		// Deferred, not failed: the local FSM has not caught up to the
 		// publish yet; the next apply retries (collection.ErrSegmentUnavailable
 		// drives the retry classification — never this message's prose).
-		return fmt.Errorf("%w: segment %s not in vault-ctl registry", collection.ErrSegmentUnavailable, segmentID)
+		return "", fmt.Errorf("%w: segment %s not in vault-ctl registry", collection.ErrSegmentUnavailable, segmentID)
 	}
 
 	rw, streaming := dest.(rewindableWriter)
@@ -176,22 +179,28 @@ func (c *segmentPullClient) Pull(ctx context.Context, vaultID, segmentID glid.GL
 		}
 	}
 
-	if c.vaultRoot != "" {
+	if c.vaultRoot != "" && !slices.Contains(exclude, c.localNodeID) {
 		err := copyLocalSegmentFile(c.vaultRoot, segmentID, dest)
 		if err == nil {
-			return nil
+			return c.localNodeID, nil
 		}
 		if streaming {
 			if derr := discardPartial(rw, start); derr != nil {
-				return derr
+				return "", derr
 			}
 		}
 	}
-	sources := segmentPullSources(entry, c.localNodeID)
+	sources := slices.DeleteFunc(segmentPullSources(entry, c.localNodeID), func(node string) bool {
+		return slices.Contains(exclude, node)
+	})
 	if len(sources) == 0 {
 		// Deferred, not failed: the registry lists the segment before any
-		// holder ack lands; a later publish or retry wake resolves it.
-		return fmt.Errorf("%w: no remote holder for segment %s", collection.ErrSegmentUnavailable, segmentID)
+		// holder ack lands, or every holder's copy was excluded for this
+		// attempt; a later publish or retry wake resolves it.
+		if len(exclude) > 0 {
+			return "", fmt.Errorf("%w: no remaining holder for segment %s (excluded %v)", collection.ErrSegmentUnavailable, segmentID, exclude)
+		}
+		return "", fmt.Errorf("%w: no remote holder for segment %s", collection.ErrSegmentUnavailable, segmentID)
 	}
 	if streaming {
 		return c.pullStreaming(ctx, sources, vaultID, segmentID, rw, start)
@@ -214,24 +223,24 @@ func discardPartial(rw rewindableWriter, start int64) error {
 
 // pullStreaming streams each candidate directly into the rewindable dest,
 // truncating partial bytes from a failed source before trying the next.
-func (c *segmentPullClient) pullStreaming(ctx context.Context, sources []string, vaultID, segmentID glid.GLID, rw rewindableWriter, start int64) error {
+func (c *segmentPullClient) pullStreaming(ctx context.Context, sources []string, vaultID, segmentID glid.GLID, rw rewindableWriter, start int64) (string, error) {
 	var errs []error
 	for _, node := range sources {
 		err := c.puller.Pull(ctx, node, vaultID, segmentID, rw)
 		if err == nil {
-			return nil
+			return node, nil
 		}
 		errs = append(errs, fmt.Errorf("pull from %s: %w", node, err))
 		if derr := discardPartial(rw, start); derr != nil {
-			return errors.Join(derr, erragg.SummaryJoin(errs...))
+			return "", errors.Join(derr, erragg.SummaryJoin(errs...))
 		}
 	}
-	return erragg.SummaryJoin(errs...)
+	return "", erragg.SummaryJoin(errs...)
 }
 
 // pullBuffered pulls each candidate into a private buffer and copies to dest
 // only on success — the fallback when dest cannot rewind.
-func (c *segmentPullClient) pullBuffered(ctx context.Context, sources []string, vaultID, segmentID glid.GLID, dest io.Writer) error {
+func (c *segmentPullClient) pullBuffered(ctx context.Context, sources []string, vaultID, segmentID glid.GLID, dest io.Writer) (string, error) {
 	var errs []error
 	for _, node := range sources {
 		var buf bytes.Buffer
@@ -240,11 +249,11 @@ func (c *segmentPullClient) pullBuffered(ctx context.Context, sources []string, 
 			continue
 		}
 		if _, err := io.Copy(dest, &buf); err != nil {
-			return err
+			return "", err
 		}
-		return nil
+		return node, nil
 	}
-	return erragg.SummaryJoin(errs...)
+	return "", erragg.SummaryJoin(errs...)
 }
 
 // copyLocalSegmentFile streams a segment from this home's head/, completed/,

@@ -534,8 +534,8 @@ func (o *Orchestrator) PendingDeleteAcks(vaultID glid.GLID) map[chunk.ChunkID][]
 		return nil
 	}
 	result := make(map[chunk.ChunkID][]string)
-	if vaultInst := vault.Instance; vaultInst != nil && vaultInst.Reconciler != nil && vaultInst.Reconciler.fsm != nil {
-		for _, p := range vaultInst.Reconciler.fsm.PendingDeletes() {
+	if vaultInst := vault.Instance; vaultInst != nil && vaultInst.Reconciler != nil && vaultInst.Reconciler.fsm.Load() != nil {
+		for _, p := range vaultInst.Reconciler.fsm.Load().PendingDeletes() {
 			expected := make([]string, 0, len(p.ExpectedFrom))
 			for nodeID := range p.ExpectedFrom {
 				expected = append(expected, nodeID)

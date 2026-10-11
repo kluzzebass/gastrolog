@@ -274,6 +274,14 @@ type Orchestrator struct {
 	// second copy can drift out of sync with it.
 	pipelineVaults atomic.Pointer[map[glid.GLID]pipelineVaultReg]
 
+	// pipelineReregisterHook, if non-nil, is invoked during a vault's
+	// (re-)registration after the supervisor has dropped its previous
+	// registration and before it registers the new one — the instant the
+	// supervisor holds no registration for the vault. Test-only: it lets a
+	// test run lock-free readers of the registration inside that window. Nil
+	// in production.
+	pipelineReregisterHook func(vaultID glid.GLID)
+
 	// segmentPuller streams completed segments from peer holders for
 	// collection. Set from factories during ApplyConfig (cluster mode only).
 	segmentPuller *cluster.SegmentPuller
@@ -337,8 +345,17 @@ type Orchestrator struct {
 	// during ApplyConfig; used by ApplyVaultControlPlane forwarding.
 	peerConns *cluster.PeerConnManager
 
-	// vaultCtlPipelineChunkEvents tracks vaults whose vault-ctl FSM already has
-	// pipeline manifest → chunk-bus wiring (AddOn* subscribers).
+	// vaultCtlReplicated is true when vault metadata replicates through
+	// per-vault vault-ctl Raft groups on this node (a GroupManager and a node
+	// address resolver are both wired). A local instance whose group does not
+	// exist yet then reports not-ready; without it there is no group to wait
+	// for and the instance's own chunk manager is authoritative.
+	vaultCtlReplicated bool
+
+	// vaultCtlPipelineChunkEvents maps each vault to the vault-ctl sub-FSM
+	// that carries its pipeline manifest → chunk-bus wiring (AddOn*
+	// subscribers). A snapshot restore replaces the sub-FSM, so the entry
+	// names the object, not just the vault.
 	vaultCtlPipelineChunkEvents sync.Map
 
 	// pipelineChunkBoundsCache memoizes ingest bounds overlaid from GLCB/manifest

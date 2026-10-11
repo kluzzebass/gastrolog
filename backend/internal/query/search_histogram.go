@@ -67,11 +67,13 @@ func (e *Engine) computeHistogram(ctx context.Context, q Query, numBuckets int, 
 		acc.groupCounts[i] = make(map[string]int64)
 	}
 
+	budget := e.histogramBudget(&q)
+	defer budget.close()
 	hasFilter := q.BoolExpr != nil
 	if _, err := e.runTimechartStrategy(ctx, q, nil, selectedVaults,
 		start, end, bucketWidth, numBuckets,
 		hasFilter, false, groupByLevel, histogramGroupField,
-		acc, e.newBudget()); err != nil {
+		acc, budget); err != nil {
 		// Partial counts would understate volume while looking authoritative.
 		e.logger.Warn("histogram abandoned", "error", err)
 		return nil
@@ -116,17 +118,29 @@ func (e *Engine) computeHistogramForVaults(ctx context.Context, q Query, numBuck
 		acc.groupCounts[i] = make(map[string]int64)
 	}
 
+	budget := e.histogramBudget(&q)
+	defer budget.close()
 	hasFilter := q.BoolExpr != nil
 	if _, err := e.runTimechartStrategy(ctx, q, nil, vaultIDs,
 		start, end, bucketWidth, numBuckets,
 		hasFilter, false, groupByLevel, histogramGroupField,
-		acc, e.newBudget()); err != nil {
+		acc, budget); err != nil {
 		// Partial counts would understate volume while looking authoritative.
 		e.logger.Warn("histogram abandoned", "error", err)
 		return nil
 	}
 
 	return buildHistogramBuckets(start, bucketWidth, numBuckets, acc.counts, acc.groupCounts, acc.cloudFlags, acc.cloudCounts)
+}
+
+// histogramBudget opens the histogram's sub-account on the query's ledger and
+// points q at it, so the scan the histogram runs charges it too. The histogram
+// finishes before the search it accompanies and keeps none of its working set,
+// so the caller closes the sub-account when the buckets are built.
+func (e *Engine) histogramBudget(q *Query) *Budget {
+	b := e.budgetFor(*q).subAccount()
+	q.budget = b
+	return b
 }
 
 // buildHistogramBuckets converts raw count arrays into HistogramBucket structs.

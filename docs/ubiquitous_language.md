@@ -364,8 +364,9 @@ Reading records back, filtering, aggregating, and rendering them.
   cross-chunk and cross-node paths. Terminates with `chunk.ErrNoMoreRecords`.
 
 - **collectRemote** — the orchestrator entry point that fans a search out to
-  peer nodes and merges results. Used by Search, Histogram, Explain,
-  GetContext, GetFields.
+  peer nodes and merges results. Used by Search, Explain, GetContext,
+  GetFields. Its histogram counterpart, `collectRemoteHistogram`, asks each
+  remote vault's leader for its page histogram beside the record stream.
 
 ---
 
@@ -504,7 +505,16 @@ one segmented file set, one batch-writer goroutine.
 
 - **Placement manager** — the subsystem that owns placement decisions. Runs
   on the cluster-ctl Raft leader, reacts to node join/leave, vault create/delete,
-  and ingester changes.
+  and ingester changes. Only a live node takes a placement it does not already
+  hold; a node in any other state keeps what it holds, and so does a live node
+  whose heartbeat has lapsed.
+
+- **Working replica** — a placement member that counts toward the vault's
+  replication factor: its node is live or draining and its storage for the
+  vault is not under disk protect. A **degraded member** — on an unreachable,
+  maintenance or decommissioning node, or under disk protect — is retained but
+  not counted, and the placement manager backfills a follower on a live node
+  until it recovers.
 
 - **Removal gate** — a leader-side check that runs before a node removal
   commits, refusing removals that would cost data or redundancy. Two gates
@@ -673,7 +683,9 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 - **Vault readiness** — a vault on this node is "ready" iff it has a local
   instance AND that instance's `IsFSMReady()` callback returns `true` (i.e.
   the vault-ctl Raft has applied at least one log entry on this node, or
-  restored from a snapshot). Canonical definition in
+  restored from a snapshot). An instance whose vault-ctl group creation is
+  still deferred on this node is not ready; on a node without vault-ctl
+  Raft the callback is nil and the instance is ready. Canonical definition in
   [`vault_readiness.go`](../backend/internal/orchestrator/vault_readiness.go).
   Checked by every read and write path before touching vault state.
 
@@ -1423,7 +1435,7 @@ the collector.
   vault-ctl and served for pulls; retained until release.
 - **pre-head/** — in-flight transfers on a collecting home; invisible to
   queries and Chunking. A failed or corrupt transfer is discarded here and
-  re-pulled from another holder.
+  re-pulled from the next holder in the same collect pass.
 - **head/** — whole, checksum-verified, immutable segments awaiting chunking.
   Where the recent, queryable records live: an Active chunk's records are
   read from its manifest's segments here.
@@ -1485,7 +1497,8 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
   Node-local bookkeeping, downstream of release.
 
 - **Purge** (paths / disk) — delete the segment's bytes from staging areas
-  (`paths.PurgeCompleted` on the origin after release; `paths.PurgeHeadStaging`
+  (`paths.PurgeCompleted` on the origin after release, whether or not the
+  origin is a home; `paths.PurgeHeadStaging`
   after a home materializes the sealed GLCB; `paths.PurgeSegmentStaging` for
   all three areas). The physical end of a segment's life, ordered strictly
   after its records survive in a replicated chunk — a returning node gets

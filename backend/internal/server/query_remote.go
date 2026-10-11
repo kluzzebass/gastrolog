@@ -19,26 +19,25 @@ import (
 )
 
 // collectRemote opens streaming ForwardSearch RPCs to all remote vaults and
-// returns a merged sorted iterator over their records, the combined
-// histogram, and the set of remote vaults this search fanned out to. The
-// iterator performs a k-way merge — at most one record per remote vault is
-// held in memory at any time.
+// returns a merged sorted iterator over their records and the set of remote
+// vaults this search fanned out to. The iterator performs a k-way merge — at
+// most one record per remote vault is held in memory at any time.
 //
-// The third return is the per-vault stream-health signal: the remote vaults
+// The second return is the per-vault stream-health signal: the remote vaults
 // contributing to this merged search. Because a remote stream failure aborts
 // the whole search (mergeIterators → mapSearchError, the same policy the
 // pipeline path uses for fail-on-remote-failure), any successfully-returned
 // response has been assembled from EVERY vault in this set — so the fanned-out
 // set is exactly the contributor set. nil when there are no remote vaults in
 // scope.
-func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) (iter.Seq2[chunk.Record, error], []*apiv1.HistogramBucket, []glid.GLID) {
+func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) (iter.Seq2[chunk.Record, error], []glid.GLID) {
 	if s.remoteSearcher == nil || s.cfgStore == nil {
-		return nil, nil, nil
+		return nil, nil
 	}
 	selectedVaults, _ := query.ExtractVaultFilter(q.Normalize().BoolExpr, nil)
 	byNode := s.remoteVaultsByNode(ctx, selectedVaults)
 	if len(byNode) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 
 	queryExpr := forwardedQueryExpression(q)
@@ -46,13 +45,11 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) (iter.Se
 
 	// Fan out streaming RPCs concurrently — one per remote vault.
 	type vaultStream struct {
-		records      <-chan []*apiv1.ExportRecord
-		errCh        <-chan error
-		getHistogram func() []*apiv1.HistogramBucket
-		vaultID      glid.GLID
+		records <-chan []*apiv1.ExportRecord
+		errCh   <-chan error
+		vaultID glid.GLID
 	}
 	var streams []vaultStream
-	var allHist []*apiv1.HistogramBucket
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -62,27 +59,21 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) (iter.Se
 				// The remote resumes at the coordinator's cursor, which its own
 				// engine applies ahead of the page limit; its positions are
 				// never carried across pages, so the token getter is dropped.
-				recCh, _, eCh, _, getHist := s.remoteSearcher.SearchStream(ctx, nodeID, &apiv1.ForwardSearchRequest{
+				recCh, _, eCh, _ := s.remoteSearcher.SearchStream(ctx, nodeID, &apiv1.ForwardSearchRequest{
 					VaultId:     vid.ToProto(),
 					Query:       queryExpr,
 					ResumeToken: resumeToken,
 				})
 				mu.Lock()
-				streams = append(streams, vaultStream{records: recCh, errCh: eCh, getHistogram: getHist, vaultID: vid})
+				streams = append(streams, vaultStream{records: recCh, errCh: eCh, vaultID: vid})
 				mu.Unlock()
 			})
 		}
 	}
 	wg.Wait()
 
-	for _, vs := range streams {
-		if vs.getHistogram != nil {
-			allHist = mergeHistogramBuckets(allHist, vs.getHistogram())
-		}
-	}
-
 	if len(streams) == 0 {
-		return nil, allHist, nil
+		return nil, nil
 	}
 
 	// The vaults this search fanned out to — the contributor set under the
@@ -103,19 +94,74 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) (iter.Se
 
 	// If only one remote vault, return its iterator directly.
 	if len(iters) == 1 {
-		return iters[0], allHist, contributingVaults
+		return iters[0], contributingVaults
 	}
 
 	// K-way merge of N iterators using a heap.
 	merged := kWayMerge(iters, q.OrderBy, q.Reverse())
-	return merged, allHist, contributingVaults
+	return merged, contributingVaults
+}
+
+// collectRemoteHistogram asks the leader of every remote vault in q's scope
+// for that vault's page histogram and sums them. Each request runs beside the
+// vault's record stream, never inside it, so no record waits on a histogram's
+// scan of the window.
+//
+// ok is false when any remote vault fails to answer: a histogram missing a
+// vault's share would understate volume while looking authoritative, so the
+// caller shows none rather than a partial one.
+func (s *QueryServer) collectRemoteHistogram(ctx context.Context, q query.Query) (buckets []*apiv1.HistogramBucket, ok bool) {
+	if s.remoteSearcher == nil || s.cfgStore == nil {
+		return nil, true
+	}
+	selectedVaults, _ := query.ExtractVaultFilter(q.Normalize().BoolExpr, nil)
+	byNode := s.remoteVaultsByNode(ctx, selectedVaults)
+	if len(byNode) == 0 {
+		return nil, true
+	}
+
+	queryExpr := forwardedQueryExpression(q)
+	type vaultHistogram struct {
+		nodeID  string
+		vaultID glid.GLID
+		buckets []*apiv1.HistogramBucket
+		err     error
+	}
+	var fetches []*vaultHistogram
+	for nodeID, vaultIDs := range byNode {
+		for _, vid := range vaultIDs {
+			fetches = append(fetches, &vaultHistogram{nodeID: nodeID, vaultID: vid})
+		}
+	}
+	var wg sync.WaitGroup
+	for _, f := range fetches {
+		wg.Go(func() {
+			resp, err := s.remoteSearcher.Search(ctx, f.nodeID, &apiv1.ForwardSearchRequest{
+				VaultId:       f.vaultID.ToProto(),
+				Query:         queryExpr,
+				HistogramOnly: true,
+			})
+			f.buckets, f.err = resp.GetHistogram(), err
+		})
+	}
+	wg.Wait()
+
+	for _, f := range fetches {
+		if f.err != nil {
+			s.logger.Warn("search histogram omitted: a remote vault did not answer",
+				"vault", f.vaultID, "node", f.nodeID, "error", f.err)
+			return nil, false
+		}
+		buckets = mergeHistogramBuckets(buckets, f.buckets)
+	}
+	return buckets, true
 }
 
 // collectRemoteForPipeline gathers the remote records a pipeline running on
 // this node consumes. Each peer scans under the pipeline's own scan limit, as
 // the local scan does, never under the page size the pipeline's output is
 // capped at.
-func (s *QueryServer) collectRemoteForPipeline(ctx context.Context, q query.Query, pipeline *querylang.Pipeline) (iter.Seq2[chunk.Record, error], []*apiv1.HistogramBucket, []glid.GLID) {
+func (s *QueryServer) collectRemoteForPipeline(ctx context.Context, q query.Query, pipeline *querylang.Pipeline) (iter.Seq2[chunk.Record, error], []glid.GLID) {
 	q.Limit = query.PipelineScanLimit(pipeline)
 	return s.collectRemote(ctx, q)
 }

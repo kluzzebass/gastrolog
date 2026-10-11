@@ -86,7 +86,7 @@ func TestSealResumeBudgetResetsWhenTheChunkLeavesSealing(t *testing.T) {
 	spent := len(*scheduled)
 
 	// The chunk settles: promote it out of Sealing in the FSM.
-	promoteToSealed(t, rec.fsm, idSealing)
+	promoteToSealed(t, rec.fsm.Load(), idSealing)
 	rec.ReconcileTick()
 
 	if got := countPrefixed(sink.clears, "seal-stranded|"+idSealing.String()); got == 0 {
@@ -109,7 +109,7 @@ func TestSnapshotResumeIsNotSubjectToTheRetryBudget(t *testing.T) {
 
 	const restores = maxSealResumeAttempts + 4
 	for range restores {
-		rec.ReconcileFromSnapshot(rec.fsm)
+		rec.ReconcileFromSnapshot(rec.fsm.Load())
 	}
 
 	if len(*scheduled) != restores {

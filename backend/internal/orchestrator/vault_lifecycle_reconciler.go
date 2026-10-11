@@ -27,6 +27,10 @@ package orchestrator
 //     presence as positive proof that a finalize applied — a
 //     freshly-created chunk with its announce in flight has no tombstone
 //     and is left alone.
+//   - Missing local bytes never retire a manifest entry. Every vault's
+//     chunks are built by the pipeline on each of its homes, so one node
+//     lacking a chunk says nothing about the others; a home short of bytes
+//     pulls them from a peer (GLCB catch-up) instead.
 //   - onSeal and ReconcileFromSnapshot project FSM-sealed state onto the
 //     local chunk Manager via chunk.SealEnsurer.EnsureSealed, so
 //     sealed-state divergence (local manager still appending to a chunk
@@ -117,8 +121,10 @@ type VaultLifecycleReconciler struct {
 
 	// fsm is the instance sub-FSM this reconciler is bound to. Stored on
 	// Wire() so onAckDelete can read remaining ExpectedFrom without
-	// having to re-resolve the FSM through the Raft group.
-	fsm *vaultctlfsm.FSM
+	// having to re-resolve the FSM through the Raft group. Atomic because
+	// a snapshot restore or a deferred group's creation rebinds a reconciler
+	// whose sweeps are already running.
+	fsm atomic.Pointer[vaultctlfsm.FSM]
 
 	mu sync.Mutex
 
@@ -203,7 +209,7 @@ func (r *VaultLifecycleReconciler) Wire(fsm *vaultctlfsm.FSM) {
 	if fsm == nil {
 		return
 	}
-	r.fsm = fsm
+	r.fsm.Store(fsm)
 	fsm.SetOnSeal(r.onSeal)
 	fsm.SetOnRetentionPending(r.onRetentionPending)
 	fsm.SetOnRequestDelete(r.onRequestDelete)
@@ -399,8 +405,7 @@ func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *vaultctlfsm.FSM) {
 //   - On a steady-state pass the same two shapes are ordinary transients. An
 //     entry is Sealing for the whole normal duration of PostSealProcess, and a
 //     tick landing inside that window would otherwise warn about healthy work
-//     in flight, every tick, forever. The stale-fsm sweep already owns the
-//     genuinely stranded no-local-chunk case on its own grace period.
+//     in flight, every tick, forever.
 func (r *VaultLifecycleReconciler) resumeSealingEntries(
 	entries []vaultctlfsm.ManifestEntry,
 	localMetas []chunk.ChunkMeta,
@@ -465,10 +470,9 @@ func (r *VaultLifecycleReconciler) resumeSealingEntries(
 //
 // The Sealing → Sealed transition rides a scheduled one-time job. A post-seal
 // that failed, or never got scheduled, strands its manifest entry: the chunk is
-// then neither writable nor durable-complete, and nothing else looks at it —
-// the stale-fsm sweep skips any chunk the leader holds locally, which is
-// precisely the case here. Without this category the only recovery is the
-// snapshot-restore pass, i.e. a node restart.
+// then neither writable nor durable-complete, and nothing else looks at it.
+// Without this category the only recovery is the snapshot-restore pass, i.e. a
+// node restart.
 //
 // Rescheduling is idempotent by construction — schedulePostSealProcessing
 // claims the job name with RunOnceIfAbsent — so a pass that fires while a
@@ -515,7 +519,8 @@ func (r *VaultLifecycleReconciler) reconcileSealingResume(v *reconcileView) {
 // its GLCB rather than a chunk-manager chunk stranded mid-seal. Nil-safe so a
 // reconciler without an FSM behaves as it did before the distinction existed.
 func (r *VaultLifecycleReconciler) awaitingBuild(id chunk.ChunkID) bool {
-	return r.fsm != nil && r.fsm.AwaitingBuild(id)
+	fsm := r.fsm.Load()
+	return fsm != nil && fsm.AwaitingBuild(id)
 }
 
 // maxSealResumeAttempts bounds how many times the steady-state pass re-drives
@@ -952,13 +957,14 @@ type reconcileView struct {
 // gatherReconcileView snapshots the tick's shared inputs. Returns nil
 // when there is no FSM to reconcile against.
 func (r *VaultLifecycleReconciler) gatherReconcileView() *reconcileView {
-	if r.fsm == nil {
+	fsm := r.fsm.Load()
+	if fsm == nil {
 		return nil
 	}
 	v := &reconcileView{
-		ready:   r.fsm.Ready(),
-		entries: r.fsm.List(),
-		pending: r.fsm.PendingDeletes(),
+		ready:   fsm.Ready(),
+		entries: fsm.List(),
+		pending: fsm.PendingDeletes(),
 	}
 	v.entryByID = make(map[chunk.ChunkID]*vaultctlfsm.ManifestEntry, len(v.entries))
 	for i := range v.entries {
@@ -1008,9 +1014,6 @@ func (r *VaultLifecycleReconciler) gatherReconcileView() *reconcileView {
 //     per-chunk edge (the leader's seal-time push has
 //     no retry queue), so the tick stays as the
 //     recovery backstop.
-//   - staleLeaderFSM      periodic-by-nature: a 1h grace-period GC of
-//     FSM entries no reachable node can serve. The
-//     "event" is absence of bytes past a timeout.
 //   - outsidePlacement    event: leadership change (lead-gained) AND
 //     placement move under a stable leader
 //     (wakeOutsidePlacementPrune on the
@@ -1036,7 +1039,6 @@ func (r *VaultLifecycleReconciler) ReconcileTick() {
 	r.reconcileLocalOrphans(v)
 	r.reconcileStagingOrphans(v)
 	r.reconcileMissingReplicas(v)
-	r.reconcileStaleLeaderFSMEntries(v)
 	r.reconcileNodesOutsidePlacement(v)
 	r.reconcileIdleActiveChunks(v)
 	r.reconcileAbandonedTransferAnnounces(v)
@@ -1054,16 +1056,13 @@ func (r *VaultLifecycleReconciler) ReconcileTick() {
 //   - reconcileMissingReplicas: a leader that joined the placement set
 //     late holds the FSM manifest but not the historical bytes, and must
 //     pull them from a peer instead of waiting a tick.
-//   - reconcileStaleLeaderFSMEntries: retire sealed entries no reachable
-//     node can serve now that this node owns the leader-side decision.
 //   - reconcileNodesOutsidePlacement: prune nodes dropped from placement
 //     before this leader took over out of ExpectedFrom (unsticking deletes)
 //     and out of the chunk and segment holder sets.
 //   - reconcileAbandonedTransferAnnounces: retract transfer announces the
 //     source abandoned.
 //   - reconcileSealingResume: a chunk stranded mid-seal is invisible to
-//     every other category (the stale-fsm sweep skips chunks the leader
-//     holds locally), so the new leader must re-drive its post-seal
+//     every other category, so the new leader must re-drive its post-seal
 //     rather than leave it parked in Sealing.
 //
 // Every category is internally role-gated (IsFollower / HasRaftLeader /
@@ -1078,7 +1077,7 @@ func (r *VaultLifecycleReconciler) ReconcileTick() {
 // A placement move under a STABLE leader gets its own, narrower wake:
 // wakeOutsidePlacementPrune fires only reconcileNodesOutsidePlacement,
 // because ExpectedFrom and the holder sets are what a FollowerTargets
-// reassignment directly invalidates. The other three categories here stay on
+// reassignment directly invalidates. The other categories here stay on
 // lead-gained + the backstop.
 func (r *VaultLifecycleReconciler) ReconcileMembershipCatchup() {
 	v := r.gatherReconcileView()
@@ -1086,7 +1085,6 @@ func (r *VaultLifecycleReconciler) ReconcileMembershipCatchup() {
 		return
 	}
 	r.reconcileMissingReplicas(v)
-	r.reconcileStaleLeaderFSMEntries(v)
 	r.reconcileNodesOutsidePlacement(v)
 	r.reconcileAbandonedTransferAnnounces(v)
 	r.reconcileSealingResume(v)
@@ -1209,7 +1207,7 @@ func (r *VaultLifecycleReconciler) reconcileLocalOrphans(v *reconcileView) {
 		// invariant (docs/disk-authority-audit.md).
 		// Auto-deleting them removes the recovery surface for FSM-glitch
 		// scenarios.
-		tombstoned := r.fsm.IsTombstoned(meta.ID)
+		tombstoned := r.fsm.Load().IsTombstoned(meta.ID)
 		ghost := !tombstoned && meta.Sealed && !meta.WriteEnd.IsZero() &&
 			meta.RecordCount == 0 &&
 			now.Sub(meta.WriteEnd) > ghostAgeThreshold
@@ -1355,7 +1353,7 @@ func (r *VaultLifecycleReconciler) sweepTombstonedChunkStaging(v *reconcileView)
 		if v.entryByID[id] != nil || v.pendingByID[id] != nil {
 			continue
 		}
-		if !r.fsm.IsTombstoned(id) {
+		if !r.fsm.Load().IsTombstoned(id) {
 			continue
 		}
 		r.deletePipelineChunkDir(id)
@@ -1388,8 +1386,7 @@ func (r *VaultLifecycleReconciler) sweepTombstonedChunkStaging(v *reconcileView)
 //     after some chunks were written. The new leader's FSM has the
 //     manifest entry (replicated via vault-ctl Raft) but its local
 //     chunk manager never received the bytes. The old chunks live on
-//     the prior replica set; the new leader must pull them from a peer
-//     instead of declaring them lost to the stale-fsm sweep.
+//     the prior replica set; the new leader must pull them from a peer.
 //
 // Both roles run this sweep. The peer set is asymmetric by role:
 // followers ask the leader (FollowerTargets is empty on followers,
@@ -1610,15 +1607,6 @@ func (r *VaultLifecycleReconciler) replicationPeers() []string {
 	return peers
 }
 
-// staleLeaderFSMGracePeriod is how long a sealed-but-not-on-disk-locally
-// FSM entry stays around before SweepStaleLeaderFSMEntries proposes
-// CmdRequestDelete to remove it. The grace lets followers replicate or
-// leadership transfer to a node that DOES have the chunk before we
-// declare it unrecoverable. One hour is well past every transient
-// failure mode (gRPC retry, leader election, warm-cache fault) and
-// matches the cluster's coarse-grained reconciliation cadence.
-const staleLeaderFSMGracePeriod = 1 * time.Hour
-
 // abandonedTransferAnnounceGCAge bounds how long a transfer-introduced
 // manifest entry (TransferSourceVaultID set) may sit with ZERO confirmed
 // holders before this destination gives up and retracts the announce.
@@ -1648,7 +1636,7 @@ const abandonedTransferAnnounceGCAge = 24 * time.Hour
 // in this file uses (single-node fallback included) — rather than a
 // parallel removal mechanism. Leader-only: only the destination's config
 // placement leader proposes deletes, matching every other write path
-// here (reconcileStaleLeaderFSMEntries, reconcileNodesOutsidePlacement).
+// here (reconcileNodesOutsidePlacement).
 func (r *VaultLifecycleReconciler) reconcileAbandonedTransferAnnounces(v *reconcileView) {
 	if r.vaultInst == nil || r.vaultInst.IsFollower {
 		return
@@ -1690,126 +1678,6 @@ func (r *VaultLifecycleReconciler) SweepAbandonedTransferAnnounces() {
 	}
 }
 
-// SweepStaleLeaderFSMEntries walks the FSM manifest on the leader of a
-// non-cloud instance and proposes CmdRequestDelete for any sealed entry
-// missing from the leader's local chunk manager AND past the grace
-// period. The leader is the source of truth for non-cloud vaults
-// (per SweepMissingReplicas's invariant); if the leader doesn't have
-// the chunk and the chunk isn't recoverable from peers (the
-// missing-replica catchup mechanism only works leader→follower, so a
-// leader hole is unrecoverable in the current architecture), the FSM
-// should reflect that the chunk is gone instead of letting search
-// fan-out hit ErrChunkNotFound forever.
-//
-// Skips cloud-backed chunks: those live in shared object storage and
-// have separate health logic (cloud_health.go). Skips chunks fresher
-// than the grace period: a transient disk fault or in-flight seal
-// shouldn't trigger delete. Skips chunks already in pendingDeletes:
-// the receipt protocol is already running.
-//
-// Skips pipeline ingest vaults entirely: every home builds GLCB under
-// segments/<vault>/chunks locally. This sweep assumes the placement
-// leader is the sole byte authority and fans deletes cluster-wide via
-// the receipt protocol — that races GLCB builds on other homes during
-// vault-ctl leadership churn and backlog catch-up.
-func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
-	if v := r.gatherReconcileView(); v != nil {
-		r.reconcileStaleLeaderFSMEntries(v)
-	}
-}
-
-//nolint:gocognit // compares FSM entries against local chunk manager per idle-active rule
-func (r *VaultLifecycleReconciler) reconcileStaleLeaderFSMEntries(v *reconcileView) {
-	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
-		return
-	}
-	if r.vaultInst.IsFollower {
-		return // followers use the missing-replicas pass to pull from leader
-	}
-	if r.vaultInst.ApplyRaftRequestDelete == nil {
-		return // single-node / no Raft; no receipt protocol
-	}
-	if r.orch != nil && r.orch.isPipelineIngestVault(r.vaultID) {
-		return
-	}
-	if r.vaultInst.HasRaftLeader != nil && !r.vaultInst.HasRaftLeader() {
-		return
-	}
-	if v.localListErr != nil {
-		return
-	}
-
-	now := time.Now()
-	expectedFrom := r.placementMembership()
-	stale := 0
-	for _, e := range v.entries {
-		// Sealed and Sealing chunks are both candidates here. A Sealing
-		// entry whose chunk this leader doesn't have locally is the
-		// classic "leader transferred mid-PostSealProcess and the new
-		// leader never had the active-form files" case: no recovery
-		// path in 1:1:1 placement, so the entry must be retired after
-		// the grace period or it stays in Sealing forever.
-		// Active entries are skipped — they're too transient to confuse
-		// with stranded state, and a missing Active is properly handled
-		// by other paths (vault readiness, ingest reroute).
-		if e.State != chunk.ChunkStateSealed && e.State != chunk.ChunkStateSealing {
-			continue
-		}
-		if e.CloudBacked {
-			continue
-		}
-		if v.have[e.ID] {
-			continue
-		}
-		if pending := r.fsm.SealedManifest(); pending != nil && pending.ChunkID == e.ID {
-			continue
-		}
-		// Pipeline GLCB builds materialize under segments/<vault>/chunks/<id>/
-		// before the chunk registers locally. Do not delete while that work is
-		// in flight — stale-fsm would remove the directory mid-GLCB write.
-		if r.orch != nil {
-			if chunkRoot, ok := r.orch.pipelineVaultChunkRoot(r.vaultID); ok {
-				if _, err := os.Stat(filepath.Join(chunkRoot, e.ID.String())); err == nil {
-					continue
-				}
-			}
-		}
-		// Grace period anchored on SealedAt (wall-clock seal completion) when
-		// present. WriteEnd reflects record span and can predate the seal by
-		// hours during backlog catch-up. Sealing entries without WriteEnd fall
-		// back to WriteStart.
-		anchor := e.SealedAt
-		if anchor.IsZero() {
-			anchor = e.WriteEnd
-		}
-		if anchor.IsZero() {
-			anchor = e.WriteStart
-		}
-		if !anchor.IsZero() && now.Sub(anchor) < staleLeaderFSMGracePeriod {
-			continue
-		}
-		// PendingDelete check inside deleteChunk dedups but logs each
-		// proposal; check up front to keep the log quiet for the
-		// already-in-flight case.
-		if r.fsm.PendingDelete(e.ID) != nil {
-			continue
-		}
-		r.logger.Warn("stale-fsm sweep: proposing delete for unrecoverable chunk",
-			"chunk", e.ID, "vault", r.vaultID,
-			"state", e.State, "anchor", anchor, "age", now.Sub(anchor))
-		if err := r.deleteChunk(e.ID, "stale-fsm-leader-missing", expectedFrom); err != nil {
-			r.logger.Warn("stale-fsm sweep: deleteChunk failed",
-				"chunk", e.ID, "error", err)
-			continue
-		}
-		stale++
-	}
-	if stale > 0 {
-		r.logger.Info("stale-fsm sweep: deletes proposed",
-			"vault", r.vaultID, "count", stale)
-	}
-}
-
 // SweepNodesOutsidePlacement proposes CmdPruneNode for every node the vault
 // FSM still names — in a pendingDelete's ExpectedFrom, a chunk's holder set,
 // or a completed segment's holder set — that is no longer in the vault's
@@ -1831,9 +1699,8 @@ func (r *VaultLifecycleReconciler) reconcileStaleLeaderFSMEntries(v *reconcileVi
 // membership was only flapping re-earns its chunk receipts from disk on its
 // next reconcile tick and re-pulls the segments it lacks.
 //
-// Leader-only (the same gate as SweepStaleLeaderFSMEntries): only one
-// node should propose, and the vault-ctl leader is the natural single
-// point because retention itself is leader-only.
+// Leader-only: only one node should propose, and the vault-ctl leader is
+// the natural single point because retention itself is leader-only.
 func (r *VaultLifecycleReconciler) SweepNodesOutsidePlacement() {
 	if v := r.gatherReconcileView(); v != nil {
 		r.reconcileNodesOutsidePlacement(v)
@@ -1879,8 +1746,8 @@ func (r *VaultLifecycleReconciler) reconcileNodesOutsidePlacement(v *reconcileVi
 			note(nodeID)
 		}
 	}
-	if r.fsm != nil {
-		for _, seg := range r.fsm.ListCompletedSegments() {
+	if fsm := r.fsm.Load(); fsm != nil {
+		for _, seg := range fsm.ListCompletedSegments() {
 			for _, nodeID := range seg.Holders {
 				note(nodeID)
 			}
@@ -2298,7 +2165,7 @@ func (r *VaultLifecycleReconciler) deleteChunk(chunkID chunk.ChunkID, reason str
 			"chunk", chunkID, "reason", reason)
 		return r.deleteLocalCopy(chunkID, reason)
 	}
-	if r.fsm != nil && r.fsm.PendingDelete(chunkID) != nil {
+	if fsm := r.fsm.Load(); fsm != nil && fsm.PendingDelete(chunkID) != nil {
 		r.logger.Debug("deleteChunk: pendingDelete entry already exists, skipping propose",
 			"chunk", chunkID, "reason", reason)
 		return nil
