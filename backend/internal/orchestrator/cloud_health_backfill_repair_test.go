@@ -745,8 +745,8 @@ func TestEvaluateCloudHealth_PurgesBackfillFailuresForNonLeaderVault(t *testing.
 
 // TestTeardownVaultPurgesBackfillFailures pins the reviewer's Minor: vault
 // teardown must cancel pending cloud-backfill jobs and purge that vault's
-// failure entries immediately, the same as it already does for
-// post-seal/compress/index-build jobs — not wait for the next
+// failure entries immediately, the same as it does for post-seal and index
+// jobs — not wait for the next
 // evaluateCloudHealth sweep.
 func TestTeardownVaultPurgesBackfillFailures(t *testing.T) {
 	t.Parallel()
