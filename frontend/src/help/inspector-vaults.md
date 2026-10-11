@@ -21,7 +21,7 @@ A **refusing** badge appears on the header when the vault is currently refusing 
 
 ## Chunks
 
-Each chunk shows its ID, time range, per-node seal pips, record count, and size. The Size column is the chunk's on-disk size; a value marked **cloud** is the cloud object's size for a cloud-backed chunk with no local copy, and one marked **logical** is the record bytes of a chunk that records no on-disk size. The active chunk is the one currently accepting writes — all others are sealed and immutable. Chunks are sealed according to the vault's [rotation policy](help:policy-rotation). The chunk list is collected from every node hosting the vault, so **No chunks in this vault yet.** is a cluster-wide fact; **No chunks reported — N nodes unreached.** means the merge missed those nodes and the list is uncertain.
+Each chunk shows its ID, time range, per-node seal pips, record count, and size. The Size column is the chunk's disk claim — the figure the header sums and a retention size bound counts: its file size where the node reports one, its record bytes where it does not. A value marked **cloud** is the cloud object's size for a cloud-backed chunk with no local copy, whose disk claim is zero. The active chunk is the one currently accepting writes — all others are sealed and immutable. Chunks are sealed according to the vault's [rotation policy](help:policy-rotation). The chunk list is collected from every node hosting the vault, so **No chunks in this vault yet.** is a cluster-wide fact; **No chunks reported — N nodes unreached.** means the merge missed those nodes and the list is uncertain.
 
 Beside the pips, a chunk row can carry:
 

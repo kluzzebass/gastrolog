@@ -135,9 +135,9 @@ describe("chunkDiskClaimBytes", () => {
   });
 });
 
-// The chunk list's Size column shows one of three quantities per row and
-// names the two that are not an on-disk size, so a cloud object's size or a
-// logical record count never passes for bytes on disk.
+// The chunk list's Size column shows the disk claim the header sums, and
+// labels the one row kind that is not a disk claim: a cloud-backed chunk with
+// no local copy, which shows its cloud object's size.
 describe("chunkSizeCell", () => {
   test("a chunk with an on-disk size shows it, unlabeled", () => {
     const cell = chunkSizeCell(new ChunkMeta({ bytes: BigInt(4000), diskBytes: BigInt(900) }));
@@ -154,9 +154,22 @@ describe("chunkSizeCell", () => {
     expect(cell).toEqual({ bytes: 1200, kind: "disk" });
   });
 
-  test("a chunk with no recorded on-disk size shows logical bytes, labeled logical", () => {
+  test("a chunk reporting no file size shows its record bytes as its disk claim, unlabeled", () => {
     const cell = chunkSizeCell(new ChunkMeta({ bytes: BigInt(4000), diskBytes: BigInt(0) }));
-    expect(cell).toEqual({ bytes: 4000, kind: "logical" });
+    expect(cell).toEqual({ bytes: 4000, kind: "disk" });
+  });
+
+  test("every row's size sums to the header's on-disk figure, cloud-only rows excepted", () => {
+    const chunks = [
+      new ChunkMeta({ bytes: BigInt(4000), diskBytes: BigInt(0) }),
+      new ChunkMeta({ bytes: BigInt(4000), diskBytes: BigInt(900) }),
+      new ChunkMeta({ bytes: BigInt(4000), cloudBacked: true, diskBytes: BigInt(0), cloudBytes: BigInt(300) }),
+    ];
+    const rowDiskSum = chunks
+      .map(chunkSizeCell)
+      .filter((cell) => cell.kind === "disk")
+      .reduce((sum, cell) => sum + cell.bytes, 0);
+    expect(rowDiskSum).toBe(chunks.reduce((sum, c) => sum + chunkDiskClaimBytes(c), 0));
   });
 });
 

@@ -98,26 +98,21 @@ function chunkSizeCellTitle(chunk: ChunkMeta): string | undefined {
   if (diskBytes > 0) {
     return `${formatBytes(Number(chunk.bytes))} → ${formatBytes(diskBytes)} on disk`;
   }
-  return "logical record bytes — no on-disk size recorded for this chunk";
+  return "record bytes — this chunk reports no file size, so its disk claim is the record bytes";
 }
 
 /** Which quantity the chunk list's Size column shows for one row. */
-export type ChunkSizeKind = "disk" | "cloud" | "logical";
+export type ChunkSizeKind = "disk" | "cloud";
 
-// chunkSizeCell names the currency of the number it returns: the local
-// on-disk claim when there is one; the cloud object's size for a
-// cloud-backed chunk with no local copy; the logical record bytes when the
-// chunk records no on-disk size at all. The column labels the two
-// non-disk kinds so three currencies never share one unmarked number.
+// chunkSizeCell shows the chunk's disk claim — the figure the header sums and
+// retention's size bound counts — except for a cloud-backed chunk with no
+// local copy, whose claim is zero; that row shows the cloud object's size and
+// is labeled cloud so the two currencies never share one unmarked number.
 export function chunkSizeCell(chunk: ChunkMeta): { bytes: number; kind: ChunkSizeKind } {
-  const diskBytes = Number(chunk.diskBytes);
-  if (chunk.cloudBacked && diskBytes === 0) {
+  if (chunk.cloudBacked && Number(chunk.diskBytes) === 0) {
     return { bytes: Number(chunk.cloudBytes), kind: "cloud" };
   }
-  if (diskBytes > 0) {
-    return { bytes: diskBytes, kind: "disk" };
-  }
-  return { bytes: Number(chunk.bytes), kind: "logical" };
+  return { bytes: chunkDiskClaimBytes(chunk), kind: "disk" };
 }
 
 // VaultHoldingsBadges is the card header's chunk / record / size summary.
