@@ -38,6 +38,7 @@ import { ExpandableCard } from "../settings/ExpandableCard";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { CrossLinkBadge } from "./CrossLinkBadge";
 import { PipelineBacklogView } from "./PipelineBacklogView";
+import { appendIdleNote, collectIdleNote, sealIdleNote, type IdleNote } from "./throughputNotes";
 import { VaultStageCountersSection } from "./VaultStageCounters";
 import { useReadOnly } from "../../hooks/useReadOnly";
 
@@ -275,20 +276,12 @@ interface StageRow {
   extra?: { depth: number; cap: number; durablePerSec: number };
 }
 
-// idleNote explains WHY an idle node is idle — "caught up" is fine,
-// "behind" while idle is a stall and warns. Absence of an explanation is
-// how support cases are born.
-interface IdleNote {
-  text: string;
-  warn: boolean;
-}
-
 // VaultThroughputSection is the three-stage pipeline readout for one vault,
-// aggregated across every node's gossip-broadcast NodeStats: append (origin
-// ingress), collected (segments arriving in head/ at the home), and sealed
-// (records materialized into GLCBs). A downstream stage's rate falling away
-// from its upstream is a pipeline stall in progress; the backlog panel below
-// shows where the inventory stacks.
+// aggregated across every node's gossip-broadcast NodeStats: append (on the
+// origins), collected (into head on the homes), and sealed (into chunks on
+// the homes). A downstream stage's rate falling away from its upstream is a
+// pipeline stall in progress; the backlog panel below shows where the
+// inventory stacks.
 function VaultThroughputSection({
   vaultId,
   dark,
@@ -348,28 +341,9 @@ function VaultThroughputSection({
   for (const ns of backlog?.nodeSegments ?? []) {
     headByNode.set(encode(ns.nodeId), ns.headSegments);
   }
-  const collectIdleNote = (r: StageRow): IdleNote => {
-    const head = headByNode.get(r.nodeId);
-    if (head === undefined || published === 0) return { text: "idle", warn: false };
-    if (head >= published) return { text: "caught up", warn: false };
-    return { text: `behind ${(published - head).toLocaleString()} segments`, warn: true };
-  };
-  const appendIdleNote = (): IdleNote => ({ text: "no ingest", warn: false });
-  const eligible = backlog?.eligibleSegments ?? 0;
-  const sealIdleNote = (): IdleNote => {
-    if (eligible > 0) {
-      return {
-        text: `backlog: ${eligible.toLocaleString()} segments eligible`,
-        warn: true,
-      };
-    }
-    // A sealed manifest pending build with nothing else eligible reads as
-    // "backlog: 0" — say what is actually happening instead.
-    if (backlog?.sealedManifestPending) {
-      return { text: "manifest awaiting build", warn: true };
-    }
-    return { text: "up to date", warn: false };
-  };
+  const collectNote = (r: StageRow): IdleNote => collectIdleNote(headByNode.get(r.nodeId), published);
+  const sealNote = (): IdleNote =>
+    sealIdleNote(backlog?.eligibleSegments ?? 0, backlog?.sealedManifestPending ?? false);
 
   // Answers "why is COLLECTED 4x APPEND?" inline instead of via tooltip:
   // replicated stages count each record once PER HOME, so their Σ runs at
@@ -421,7 +395,7 @@ function VaultThroughputSection({
         </div>
         <StageRows
           label="Append"
-          title="Origin ingress: records/s appended to this vault's working segments, per writing node"
+          title="Records/s written into the working segment on each origin node"
           rows={append}
           gridCols={gridCols}
           dark={dark}
@@ -429,22 +403,22 @@ function VaultThroughputSection({
         />
         <StageRows
           label="Collected"
-          title="Home ingress: records/s arriving in head/ per home node. Every placement member collects its own copy, so the sum counts each record once PER HOME — with RF=4, one appended record is collected up to four times. This measures replication work, not record throughput."
+          title="Records/s collected into head on each home; every home collects its own copy, so the sum counts each record once per home"
           rows={collected}
           gridCols={gridCols}
           dark={dark}
           replicated
-          idleNote={collectIdleNote}
+          idleNote={collectNote}
           totalsNote={replicationNote(collected)}
         />
         <StageRows
           label="Sealed"
-          title="Records/s materialized into sealed GLCB chunks per home node. Every home builds its own GLCB, so the sum counts each record once PER HOME — replication work, not record throughput."
+          title="Records/s sealed into chunks on each home; every home builds its own copy, so the sum counts each record once per home"
           rows={sealed}
           gridCols={gridCols}
           dark={dark}
           replicated
-          idleNote={sealIdleNote}
+          idleNote={sealNote}
           totalsNote={replicationNote(sealed)}
         />
       </div>
@@ -495,7 +469,14 @@ function StageRows({
       {sorted.length > 1 && (
         <div className={rowClass} title={title}>
           <span className={stageClass}>{label}</span>
-          <span className={`font-mono whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}>
+          <span
+            className={`font-mono whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+            title={
+              replicated
+                ? `Sum over the ${sorted.length} homes — the placement nodes that each collect and seal their own copy`
+                : "Sum over every node reporting this stage"
+            }
+          >
             {replicated ? `Σ ${sorted.length} homes` : "all nodes"}
           </span>
           <span />
@@ -536,7 +517,7 @@ function StageRows({
               {note && (
                 <span
                   className={`font-mono ${note.warn ? "text-severity-warn" : c("text-text-muted", "text-light-text-muted")}`}
-                  title="Why this node is quiet on this stage. 'Caught up' / 'up to date' is healthy; 'behind' while idle means this node's stage has stalled."
+                  title="Why this node is quiet on this stage; a warning-toned note is a stall"
                 >
                   {note.text}
                 </span>
