@@ -86,6 +86,7 @@ type reconcilerHost interface {
 	noteRegisterSkip(vaultID glid.GLID, id chunk.ChunkID, reason string)
 	pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.ManifestEntry)
 	homeHoldsGLCB(vaultID glid.GLID, id chunk.ChunkID) bool
+	landedGLCBAgrees(vaultID glid.GLID, e vaultctlfsm.ManifestEntry) bool
 	onGLCBLanded(vaultID glid.GLID, ti *VaultInstance, e vaultctlfsm.ManifestEntry)
 
 	// Watch-subscriber and event-journal notifications.
@@ -1554,6 +1555,16 @@ func (r *VaultLifecycleReconciler) syncPipelineSealedGLCBs(v *reconcileView) {
 		if chunkOnItsWayOut(e, v.pendingByID[e.ID]) {
 			continue
 		}
+		if !hasRoot {
+			continue
+		}
+		_, statErr := os.Stat(chunking.ChunkGLCBPath(chunkRoot, e.ID))
+		holds := slices.Contains(e.Holders, r.localNodeID)
+		// A copy this home has not claimed yet is claimed only as the copy
+		// agreed at seal; the check quarantines a divergent one, which the
+		// pull below then replaces.
+		claimable := statErr == nil && !holds && r.orch.landedGLCBAgrees(r.vaultID, e)
+
 		// Replica catch-up: a home missing this sealed chunk's bytes
 		// (missed the build while wedged/down; segments since released)
 		// pulls the GLCB from a peer home. Without this there is NO
@@ -1568,13 +1579,8 @@ func (r *VaultLifecycleReconciler) syncPipelineSealedGLCBs(v *reconcileView) {
 		// bytes truth instead of the placement assumption, and a home that
 		// lost its copy stops being counted the same sweep that schedules
 		// its recovery pull.
-		if !hasRoot {
-			continue
-		}
-		_, statErr := os.Stat(chunking.ChunkGLCBPath(chunkRoot, e.ID))
-		holds := slices.Contains(e.Holders, r.localNodeID)
 		switch {
-		case statErr == nil && !holds:
+		case claimable:
 			ack = append(ack, e.ID)
 		case os.IsNotExist(statErr) && holds:
 			revoke = append(revoke, e.ID)

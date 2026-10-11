@@ -121,7 +121,7 @@ func TestSourceManifestEntryForTransferPreservesFidelityFields(t *testing.T) {
 	}
 	apply(vaultctlfsm.MarshalCreateChunk(id, now, now, now))
 	// ingestTSMonotonic=true: the field chunkMetaToManifestEntry drops.
-	apply(vaultctlfsm.MarshalSealChunk(id, now, 5, 500, now, now, now, true, now))
+	apply(vaultctlfsm.MarshalSealChunk(id, now, 5, 500, now, now, now, true, now, [32]byte{}))
 	var hash [32]byte
 	hash[0], hash[31] = 0xAB, 0xCD
 	cloudSvc := glid.New()

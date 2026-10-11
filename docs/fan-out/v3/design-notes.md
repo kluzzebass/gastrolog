@@ -158,7 +158,10 @@ contrast with any earlier design. It states only what V3 *is*, never what it
     must exist anyway for RF changes, node loss, decommission, and placement changes.
 31. Determinism (single origin per segment + shared build state + merge walk) makes
     replicas identical by construction — no merge, read-repair, vector clocks, or
-    anti-entropy. Verification is a chunk-ID/hash equality check.
+    anti-entropy. Verification is a chunk-ID/hash equality check: the sealing
+    leader's `CmdSealChunk` records its build's blob digest, and every home's copy
+    must carry it before the home indexes or claims it — a copy that does not is
+    quarantined and replaced by a peer copy whose bytes hash to that digest.
 32. Checksums are mandatory, not optional: they guard against physical faults and
     gate transfer acceptance (the head invariant verifies a pulled segment before
     admitting it). Per-record CRC in the frame, per-segment checksum at completion in

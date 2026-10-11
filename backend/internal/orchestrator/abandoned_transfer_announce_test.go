@@ -57,7 +57,7 @@ func TestSweepAbandonedTransferAnnouncesRetractsOnlyTheStalePhantom(t *testing.T
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idNotTransfer, old, old, old)}); err != nil {
 		t.Fatalf("create idNotTransfer: %v", err)
 	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idNotTransfer, old, 1, 1, old, old, old, false, old)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idNotTransfer, old, 1, 1, old, old, old, false, old, [32]byte{})}); err != nil {
 		t.Fatalf("seal idNotTransfer: %v", err)
 	}
 

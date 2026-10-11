@@ -27,7 +27,7 @@ func buildChunkedSegment(t *testing.T, f *FSM) (glid.GLID, chunk.ChunkID) {
 	}))
 	sealedAt := now.Add(time.Minute)
 	applyCmd(t, f, MarshalSealOpenChunkManifest(chunkID, sealedAt))
-	applyCmd(t, f, MarshalSealChunk(chunkID, sealedAt, 1, 1, now, now, now, true, sealedAt))
+	applyCmd(t, f, MarshalSealChunk(chunkID, sealedAt, 1, 1, now, now, now, true, sealedAt, [32]byte{}))
 	return segID, chunkID
 }
 

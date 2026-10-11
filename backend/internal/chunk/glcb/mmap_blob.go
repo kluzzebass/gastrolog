@@ -137,6 +137,9 @@ func (b *MappedBlob) Path() string { return b.path }
 // Meta returns parsed blob metadata.
 func (b *MappedBlob) Meta() BlobMeta { return b.meta }
 
+// BlobDigest returns the whole-blob digest the TOC footer records.
+func (b *MappedBlob) BlobDigest() [32]byte { return b.toc.BlobDigest }
+
 // Section returns the TOC entry and a sub-slice of the mapping for a TOC
 // section type. The entry carries the section's recorded version so decode
 // dispatch (Registry.NewView) can honor it. The slice aliases b.data and is

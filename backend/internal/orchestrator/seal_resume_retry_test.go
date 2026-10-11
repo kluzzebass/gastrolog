@@ -137,7 +137,7 @@ func countPrefixed(entries []string, prefix string) int {
 func promoteToSealed(t *testing.T, fsm *vaultctlfsm.FSM, id chunk.ChunkID) {
 	t.Helper()
 	now := time.Now()
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 1, 1, now, now, now, false, now)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 1, 1, now, now, now, false, now, [32]byte{})}); err != nil {
 		t.Fatalf("promote %s to sealed: %v", id, err)
 	}
 }

@@ -289,14 +289,45 @@ func (o *Orchestrator) onPipelineChunkBuilt(vaultID glid.GLID, fsm *vaultctlfsm.
 // that serves searches — and its holder receipt. Every path that puts a GLCB
 // on a home calls it: a local build, a replica catch-up pull, a
 // retention-transfer copy, and the seal apply for a copy the home already
-// holds.
+// holds. Both are owed only for the copy the cluster agreed on at seal; a copy
+// that is not is quarantined by the check, and its agreed copy pulled.
 func (o *Orchestrator) onGLCBLanded(vaultID glid.GLID, ti *VaultInstance, e vaultctlfsm.ManifestEntry) {
+	if !o.landedGLCBAgrees(vaultID, e) {
+		if e.IsSealed() {
+			// Off the caller's goroutine: the seal apply runs this on the Raft
+			// apply pump, and the pull's guards take locks the pump must not
+			// wait on. The catch-up sweep retries a pull this one misses.
+			go o.pullMissingGLCB(vaultID, e)
+		}
+		return
+	}
 	if ti.Indexes != nil {
 		o.scheduleIndexRebuildIfNeeded(context.Background(), vaultID, ti, manifestEntryToChunkMeta(e, true))
 	}
 	if ti.Reconciler != nil {
 		ti.Reconciler.ackOwnHolderReceipt(e)
 	}
+}
+
+// landedGLCBAgrees reports whether this home's GLCB for e is the copy the
+// cluster agreed on at seal: e is sealed and the copy's digest is the one the
+// seal recorded. Where chunking runs the vault, its check also quarantines a
+// divergent copy and raises the alarm (chunking.Manager.CheckLandedGLCB).
+func (o *Orchestrator) landedGLCBAgrees(vaultID glid.GLID, e vaultctlfsm.ManifestEntry) bool {
+	if !e.IsSealed() {
+		return false
+	}
+	if o.pipeline != nil {
+		if agrees, ok := o.pipeline.CheckLandedGLCB(vaultID, e); ok {
+			return agrees
+		}
+	}
+	root, ok := o.pipelineVaultChunkRoot(vaultID)
+	if !ok {
+		return false
+	}
+	_, agrees, err := chunking.GLCBAgreesWithSeal(chunking.ChunkGLCBPath(root, e.ID), e)
+	return err == nil && agrees
 }
 
 // homeHoldsGLCB reports whether this node is a pipeline home of the vault and

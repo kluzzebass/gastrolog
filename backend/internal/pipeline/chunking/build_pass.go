@@ -252,6 +252,7 @@ func (v *vaultChunking) proposeSealOnce(ctx context.Context, pending *vaultctlfs
 		result.SourceEnd,
 		result.IngestTSMonotonic,
 		v.now(),
+		result.BlobDigest,
 	)); err != nil {
 		return false, err
 	}

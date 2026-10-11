@@ -18,11 +18,15 @@ import (
 // What this home has built is what is in its chunk root.
 
 // sealedChunkNeedsLocalBuild reports whether a chunk whose seal committed is
-// still to be built on this home: Sealed, not cloud-backed, and without a
-// GLCB in this home's chunk root.
+// still to be built on this home: Sealed, not cloud-backed, without a GLCB in
+// this home's chunk root, and not one whose build here diverged from the
+// sealed digest — that chunk's agreed copy is pulled from a peer instead.
 func (v *vaultChunking) sealedChunkNeedsLocalBuild(id chunk.ChunkID) bool {
 	entry := v.fsm().Get(id)
 	if entry == nil || entry.State != chunk.ChunkStateSealed || entry.CloudBacked {
+		return false
+	}
+	if v.glcbDivergent(id) {
 		return false
 	}
 	_, err := os.Stat(ChunkGLCBPath(v.cfg.ChunkRoot, id))

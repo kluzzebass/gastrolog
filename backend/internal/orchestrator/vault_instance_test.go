@@ -200,7 +200,7 @@ func TestListAllChunkMetasOverlaysFromFSM(t *testing.T) {
 		}
 	}
 	apply(vaultctlfsm.MarshalCreateChunk(chunkID, now, now, now))
-	apply(vaultctlfsm.MarshalSealChunk(chunkID, now, 1, 100, now, now, now, true, now))
+	apply(vaultctlfsm.MarshalSealChunk(chunkID, now, 1, 100, now, now, now, true, now, [32]byte{}))
 	// Some other node uploaded the blob: the replicated FSM now says
 	// CloudBacked=true.
 	apply(vaultctlfsm.MarshalUploadChunk(chunkID, 1234, 0, 0, 0, 0, [32]byte{}, glid.GLID{}, 0))

@@ -298,10 +298,11 @@ Open chunk (manifest on vault-ctl FSM):
 
 Build at seal:
   Leader: SealOpenChunkManifest(chunkID) — the manifest joins the FIFO seal queue
-  Leader: builds the seal-queue head → GLCB → SealChunk; the manifest moves from
-          the seal queue to the sealed-chunk manifests
+  Leader: builds the seal-queue head → GLCB → SealChunk(blob digest); the
+          manifest moves from the seal queue to the sealed-chunk manifests
   Each home: builds every sealed chunk whose GLCB is not in its chunk root
-  Verify: blob digest equality across builders
+  Verify: each home's copy carries the digest SealChunk recorded, or it is
+          quarantined and replaced by a verified peer pull
 
 Release:
   When chunk replicated per holder-set / RF rules
@@ -333,6 +334,27 @@ A home therefore builds every chunk it did not have when the leader sealed it,
 however many seals the leader ran ahead, and a restart rebuilds the same work from
 the restored FSM. Sealed-chunk manifests are part of the vault-ctl snapshot.
 
+**Verifying a home's copy.** Builds are byte-identical, so the sealing leader's
+`CmdSealChunk` carries its build's whole-blob digest (the GLCB TOC footer's
+`blobDigest`, the SHA-256 of every byte before the footer) and the FSM records it
+as the chunk's sealed digest (`ManifestEntry.Hash`, carried in the snapshot). It
+is write-once: a later `CmdSealChunk` for the chunk carrying a different digest —
+a new leader proposing its own build — is refused whole. Every GLCB that lands on a home — its own build, a peer pull, a
+retention-transfer copy, or a copy it already holds when the seal applies — is
+checked against the sealed digest before the home indexes it or commits a holder
+receipt for it; a chunk that is not yet sealed has no digest to check against, so a
+build that finishes before the seal lands when the seal applies. A copy whose
+digest differs is divergent: it is renamed to `data.glcb.divergent` so the
+canonical path reads as missing, the build pass does not rebuild it (the same
+manifest over the same local segments builds the same bytes), the
+`chunking-build-diverged` alarm stands for the vault on that node, and the GLCB
+catch-up pull fetches the leader-agreed copy from a peer home. A pulled copy is
+promoted only when its bytes hash to the sealed digest — the footer alone is not
+trusted, since an altered copy keeps its original footer. The sealed digest is
+also what a cloud re-fetch is verified against; the FSM refuses a
+`CmdUploadChunk` whose digest differs from it, and an upload that carries no
+digest leaves it in place.
+
 **Failure:**
 
 - Leader dies: new leader continues manifest from FSM.
@@ -354,7 +376,7 @@ wires, does not own phase logic”).
 |---------|---------|----------------|
 | **Decisions (planner)** | `backend/internal/pipeline/chunking` | Pure functions: open manifest + resume record numbers + eligible segments + rotation policy → next `AddSegmentRef` (segmentID, first/last record number, byte total) or rotate. No Raft, no segment I/O — unit-testable. Lives beside existing `merge.go` / `glcb.go` (same span/budget semantics, different phase of the pipeline). |
 | **Leader loop** | `backend/internal/pipeline/chunking` (`ChunkingManager`) | Vault-leader-only goroutine: read FSM + segment registry, call planner, **propose** commands through a vault-ctl `Applier`. Gated on vault leadership (same class of check as other leader-only work, not on every home). |
-| **Execution (followers + leader)** | `backend/internal/pipeline/chunking` (`ChunkingManager`) | Every home: build every sealed chunk missing from its chunk root (see *What a home builds* above), build at seal (`BuildSealedChunk` / `MergeSpanRefs` + `BuildGLCB`), nudge Collection for missing segments, report chunk identity/digest back to vault-ctl. Does **not** invent membership. |
+| **Execution (followers + leader)** | `backend/internal/pipeline/chunking` (`ChunkingManager`) | Every home: build every sealed chunk missing from its chunk root (see *What a home builds* above), build at seal (`BuildSealedChunk` / `MergeSpanRefs` + `BuildGLCB`), nudge Collection for missing segments; the leader reports the chunk's blob digest in `CmdSealChunk`, and every home checks its copy against it (see *Verifying a home's copy* above). Does **not** invent membership. |
 | **Durable state** | `backend/internal/vaultraft/vaultctlfsm` | Command types and `Apply` handlers only — open manifest refs, running totals, `manifest_opened_at`, resume map, seal/release. **No** segment scans, merge simulation, or pick-order policy. |
 | **Harness integration** | `backend/internal/pipeline/flow_test.go` | Wire `ChunkingManager` into the in-process pipeline harness with test doubles (`gastrolog-5x29i`). Proves leader loop + build-at-seal + collection nudge **before** production wiring. |
 | **Wiring (Rubicon)** | `backend/internal/orchestrator` | Start/stop `ChunkingManager` per vault home; inject real vault-ctl `Applier`, FSM callbacks, Collection nudge (`gastrolog-214bz` **only** — not before). |

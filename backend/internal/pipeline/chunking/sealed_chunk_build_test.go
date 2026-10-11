@@ -80,7 +80,7 @@ func planAndSealManifest(t *testing.T, apply func([]byte), f chunkFixture) {
 // own home commits.
 func commitSeal(apply func([]byte), f chunkFixture) {
 	ts := f.at.Add(time.Second)
-	apply(vaultctlfsm.MarshalSealChunk(f.id, ts, 1, 100, f.at, f.at, f.at, true, ts))
+	apply(vaultctlfsm.MarshalSealChunk(f.id, ts, 1, 100, f.at, f.at, f.at, true, ts, [32]byte{}))
 }
 
 func fsmApply(t *testing.T, fsm *vaultctlfsm.FSM) func([]byte) {
@@ -210,7 +210,7 @@ func TestFollowerBuildsEverySealedChunkWhenLeaderRunsAhead(t *testing.T) {
 				// Leader built N on its own home and commits CmdSealChunk(N),
 				// popping N from the sealed-manifest queue.
 				ts := base.Add(time.Minute)
-				applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkN, ts, 1, 100, base, base, base, true, ts))
+				applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkN, ts, 1, 100, base, base, base, true, ts, [32]byte{}))
 			}
 			sealN1Manifest := func() {
 				applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkN1, base.Add(2*time.Minute)))

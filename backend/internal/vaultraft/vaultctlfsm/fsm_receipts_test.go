@@ -377,7 +377,7 @@ func TestChunkResidencyBeforeReceiptsIsEmptyNotPlacement(t *testing.T) {
 	if err := f.Apply(&hraft.Log{Data: MarshalCreateChunk(id, now, now, now)}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := f.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now, now, false, now)}); err != nil {
+	if err := f.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now, now, false, now, [32]byte{})}); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
 
@@ -416,7 +416,7 @@ func TestChunkResidencyForPendingDeleteReturnsExpectedFrom(t *testing.T) {
 	if err := f.Apply(&hraft.Log{Data: MarshalCreateChunk(id, now, now, now)}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := f.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now, now, false, now)}); err != nil {
+	if err := f.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now, now, false, now, [32]byte{})}); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
 	if err := f.Apply(&hraft.Log{Data: MarshalRequestDelete(id, now, "retention-ttl", []string{"node-A", "node-B", "node-C"})}); err != nil {
@@ -501,7 +501,7 @@ func TestAckDeleteAutoFinalizesOnEmptyExpectedFrom(t *testing.T) {
 
 	// Create + seal so the chunk is in f.chunks at finalize time.
 	f.Apply(&hraft.Log{Data: MarshalCreateChunk(id, now, now, now)})
-	f.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now, now, false, now)})
+	f.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now, now, false, now, [32]byte{})})
 	f.Apply(&hraft.Log{Data: MarshalRequestDelete(id, now, "retention-ttl", []string{"node-A", "node-B"})})
 
 	// Pre-conditions: entry exists, expects two nodes, manifest has chunk.
@@ -562,7 +562,7 @@ func TestPruneNodeAutoFinalizesDrainedChunks(t *testing.T) {
 	id3 := chunk.NewChunkID()
 	for _, id := range []chunk.ChunkID{id1, id2, id3} {
 		f.Apply(&hraft.Log{Data: MarshalCreateChunk(id, now, now, now)})
-		f.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now, now, false, now)})
+		f.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now, now, false, now, [32]byte{})})
 	}
 	f.Apply(&hraft.Log{Data: MarshalRequestDelete(id1, now, "test", []string{"node-A", "node-B"})})
 	f.Apply(&hraft.Log{Data: MarshalRequestDelete(id2, now, "test", []string{"node-A"})})

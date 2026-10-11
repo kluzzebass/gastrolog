@@ -215,8 +215,7 @@ func TestSweepTTLAnchorsOnOverlaySealedAt(t *testing.T) {
 		t.Fatalf("create: %v", result)
 	}
 	if result := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(
-		chunkID, writeEnd, 1000, 100, opened, writeEnd, writeEnd, true, sealedAt,
-	)}); result != nil {
+		chunkID, writeEnd, 1000, 100, opened, writeEnd, writeEnd, true, sealedAt, [32]byte{})}); result != nil {
 		t.Fatalf("seal: %v", result)
 	}
 

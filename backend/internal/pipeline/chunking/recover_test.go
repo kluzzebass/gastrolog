@@ -197,7 +197,7 @@ func TestRecoverOnceSkipsSealedEntries(t *testing.T) {
 		t.Fatalf("BuildSealedChunk: %v", err)
 	}
 	// Seal cluster-wide BEFORE the restart-simulating manager exists.
-	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt, 2, 4096, base, base.Add(time.Second), base, true, sealedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt, 2, 4096, base, base.Add(time.Second), base, true, sealedAt, [32]byte{}))
 
 	var rebuilt []chunk.ChunkID
 	var mu sync.Mutex

@@ -869,9 +869,10 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 
 - **Seal** — finalize an active chunk. The vault-ctl leader's planner seals
   the open manifest when the rotation policy fires; every home builds the
-  chunk's GLCB (timestamp indexes embedded) from its local segments, then
-  schedules its own secondary-index build and commits a holder receipt; the
-  leader commits `CmdSealChunk` after its own build. See
+  chunk's GLCB (timestamp indexes embedded) from its local segments; the
+  leader commits `CmdSealChunk`, carrying its build's sealed digest, after its
+  own build; and each home whose copy carries the sealed digest schedules its
+  own secondary-index build and commits a holder receipt. See
   [States a chunk passes through](#states-a-chunk-passes-through).
 
 - **Rotate** — seal the open manifest and let the planner open the next one.
@@ -954,8 +955,9 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 
 - **GLCB catch-up** — a home missing a sealed chunk's GLCB (it missed the
   build and the source segments are released) pulls the blob from a peer
-  home, verifies its seal metadata against the manifest entry, renames it
-  into place and commits a holder receipt (`glcb_catchup.go`,
+  home, verifies its record count against the manifest entry and its bytes
+  against the sealed digest, renames it into place and commits a holder
+  receipt (`glcb_catchup.go`,
   `ChunkGLCBPuller`). Each pull is a one-shot scheduler job, scheduled by
   the reconciler's missing-replica sweep. The same pull, addressed at the
   source vault, is the destination half of a retention transfer.
@@ -1560,6 +1562,21 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
   sweep. A per-vault operator alert stays up until every quarantined chunk
   heals; healing removes the quarantine file
   (`chunking/glcb_corrupt.go`, gastrolog-687m11).
+
+- **Sealed digest** — the whole-blob digest (GLCB TOC footer `blobDigest`) of
+  the copy the sealing leader built, recorded by `CmdSealChunk` as
+  `ManifestEntry.Hash`. Write-once: a later seal or a cloud upload carrying a
+  different digest is refused, and a cloud re-fetch is verified against it.
+  A home's copy that carries it is the **agreed copy** — the only copy a home
+  indexes or claims a holder receipt for, and the only copy a peer pull
+  promotes (its bytes hashed, not its footer read).
+
+- **Divergent copy** — a home's copy of a sealed chunk whose digest differs
+  from the sealed digest. Renamed aside to a `data.glcb.divergent` sibling so
+  the canonical path reads as missing, never rebuilt (the same manifest over
+  the same local segments builds the same bytes), and replaced by the agreed
+  copy through GLCB catch-up. Raises the latched `chunking-build-diverged`
+  software-fault alarm, one per vault (`chunking/glcb_divergent.go`).
 
 ### Stage counters
 

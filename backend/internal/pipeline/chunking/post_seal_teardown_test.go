@@ -146,7 +146,7 @@ func TestPostSealGoroutineEndsWithTeardown(t *testing.T) {
 			}
 			assertHeadPresent(t, home, segID)
 
-			applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt.Add(time.Second), 1, 100, base, base, base, true, sealedAt.Add(time.Second)))
+			applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt.Add(time.Second), 1, 100, base, base, base, true, sealedAt.Add(time.Second), [32]byte{}))
 			waittest.Recv(t, "post-seal goroutine parked", held.entered, nil)
 
 			stopRun := func() {}
