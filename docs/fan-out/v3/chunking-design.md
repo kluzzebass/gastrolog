@@ -316,15 +316,24 @@ Release:
 
 **Who purges on release.** Every node holds every vault's vault-ctl FSM, so every
 node that originates segments for a vault consumes its releases — home or not. An
-origin retires each released segment from distribution and deletes its
-`completed/` copy; every staging root on the node drops its `head/` and `pre-head/`
-copies. Release recorded in the FSM is the only trigger: a segment the FSM has not
-released stays in `completed/`, because a home may still need to pull it. A release
-this node never saw as an event — applied while it was down, before the vault
-registered, or carried in by a snapshot install that replaced the FSM — is
-reclaimed when the pipeline binds to the FSM: at vault registration and at the
-post-restore rebind, the node purges every staging copy the FSM records as
-released.
+origin retires each released segment from distribution, and every staging root on
+the node drops its `completed/`, `head/` and `pre-head/` copies. Release recorded in
+the FSM is the only trigger: a segment the FSM has not released stays in
+`completed/`, because a home may still need to pull it. A release this node never
+saw as an event — applied while it was down, before the vault registered, or
+carried in by a snapshot install that replaced the FSM — is reclaimed when the
+pipeline binds to the FSM: at vault registration and at the post-restore rebind,
+the node purges every staging copy the FSM records as released.
+
+One purge serves every trigger (`purgeReleased` in the pipeline's release
+consumer): the release event, the bind-time catch-up, and the released-segment
+sweep (`Orchestrator.sweepReleasedSegments`), which runs the same catch-up
+(`pipeline.PurgeReleasedStaging`) on every node for every vault on the
+vault-catchup cadence — including vaults the pipeline does not run on the node.
+Only the sweep confirms: it reads the release sequence before listing the staging
+directories and sends `ConfirmSegmentPurge` only when every listing and delete
+succeeded, so a delete the event could not make holds the tombstones until a later
+sweep makes it.
 
 **What a home builds.** Each build pass derives its work from vault-ctl FSM state
 and the home's own chunk root — never from a local queue of manifests it happened

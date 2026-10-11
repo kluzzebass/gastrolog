@@ -14,8 +14,8 @@ import (
 // the release (offline, or caught up by snapshot install) still has the
 // segment in completed/ and republishes it on restart, and only the tombstone
 // stops that publish from re-registering records that already live in a
-// chunk. Each node's staging sweep purges every tombstoned segment it finds
-// and then confirms the release sequence the sweep covered
+// chunk. Each node's released-segment sweep purges every tombstoned segment it
+// finds and then confirms the release sequence the sweep covered
 // (ConfirmSegmentPurge). The vault-ctl leader prunes the tombstones every
 // member of its Raft configuration has confirmed (PruneReleasedSegments), so
 // the tombstone set is bounded by the releases some member has not swept yet.

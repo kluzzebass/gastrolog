@@ -1480,8 +1480,9 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
   with the **release sequence** it was released at (`releaseSeq`, counting
   the `ReleaseSegments` applies that tombstoned a segment). A
   `PublishCompletedSegment` naming one is ignored — the restart republish of
-  a node that missed the release — and the staging sweeps purge its bytes on
-  sight (`FSM.SegmentReleased`).
+  a node that missed the release — and the release consumer's catch-up and
+  the released-segment sweep purge its bytes on sight
+  (`FSM.SegmentReleased`).
 
 - **Purge confirmation** (vault-ctl) — a node's `ConfirmSegmentPurgeCommand`:
   it holds no staging copy of any segment released at or before the named
@@ -1497,10 +1498,10 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
   Node-local bookkeeping, downstream of release.
 
 - **Purge** (paths / disk) — delete the segment's bytes from staging areas
-  (`paths.PurgeCompleted` on the origin after release, whether or not the
-  origin is a home; `paths.PurgeHeadStaging`
-  after a home materializes the sealed GLCB; `paths.PurgeSegmentStaging` for
-  all three areas). The physical end of a segment's life, ordered strictly
+  (`paths.PurgeSegmentStaging` for all three areas once the segment is
+  released, on every node whether or not it is a home;
+  `paths.PurgeHeadStaging` after a home materializes the sealed GLCB). The
+  physical end of a segment's life, ordered strictly
   after its records survive in a replicated chunk — a returning node gets
   those records via chunk replication, never a segment re-pull.
 

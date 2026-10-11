@@ -357,7 +357,7 @@ type FSM struct {
 	segmentChunks map[glid.GLID][]chunk.ChunkID
 	// releasedSegments holds the released-segment tombstones: segment ID →
 	// the release sequence it was released at. A PublishCompletedSegment
-	// naming one is ignored, and the staging sweeps purge its bytes on sight.
+	// naming one is ignored, and the released-segment purge deletes its bytes on sight.
 	// See released_segments.go for how tombstones are pruned.
 	releasedSegments map[glid.GLID]uint64
 	// releaseSeq counts the ReleaseSegments applies that tombstoned a segment.

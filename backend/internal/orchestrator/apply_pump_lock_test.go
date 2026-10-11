@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"gastrolog/internal/glid"
-	"gastrolog/internal/vaultraft/vaultctlfsm"
 	"gastrolog/internal/waittest"
 )
 
@@ -47,11 +46,6 @@ func TestPipelineReadersDoNotBlockOnOrchestratorWriteLock(t *testing.T) {
 	mustAnswerWhileLocked(t, "pipelineVaultChunkRoot", func() {
 		if _, ok := o.pipelineVaultChunkRoot(vaultID); !ok {
 			t.Errorf("pipelineVaultChunkRoot: registered home vault reported absent")
-		}
-	})
-	mustAnswerWhileLocked(t, "purgeReleasedSegmentStaging", func() {
-		if _, _, err := o.purgeReleasedSegmentStaging(vaultID, vaultctlfsm.New()); err != nil {
-			t.Errorf("purgeReleasedSegmentStaging: %v", err)
 		}
 	})
 	mustAnswerWhileLocked(t, "isPipelineIngestVault", func() {

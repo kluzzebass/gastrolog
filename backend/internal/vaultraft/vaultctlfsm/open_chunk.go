@@ -671,9 +671,8 @@ func (f *FSM) SegmentReferencedInManifest(segmentID glid.GLID) bool {
 
 // SegmentReleased reports whether segmentID was dropped from the registry
 // by a ReleaseSegments apply. This is positive, replicated, snapshot-
-// persisted evidence of release — the staging-orphan sweep uses it to
-// delete local segment files whose release effect this node missed while
-// offline. Registry absence alone is NOT evidence: a completed segment
+// persisted evidence of release — the released-segment catch-up uses it to
+// delete local segment files whose release event this node did not consume. Registry absence alone is NOT evidence: a completed segment
 // awaiting its distribution publish is also registry-absent, and deleting
 // it would lose ingested records. The tombstone is pruned only after every
 // vault-ctl member has confirmed purging it, so no node is left holding bytes

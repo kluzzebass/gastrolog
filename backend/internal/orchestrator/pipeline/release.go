@@ -1,7 +1,10 @@
 package pipeline
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 
 	"gastrolog/internal/glid"
@@ -10,20 +13,77 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
+// PurgeReleasedStaging deletes the staging copies under roots of every segment
+// fsm records as released: the on-disk catch-up for releases whose event this
+// node did not consume. covered is the release sequence read before the
+// listing, so when err is nil no segment released at or before covered has a
+// staging copy under roots. purged is every released segment the listing
+// found. err joins every listing and delete that failed; the pass then
+// accounts for nothing.
+func PurgeReleasedStaging(fsm *vaultctlfsm.FSM, roots []string) (covered uint64, purged []glid.GLID, err error) {
+	covered = fsm.ReleaseSeq()
+	purged, listErr := releasedOnDisk(fsm, roots)
+	return covered, purged, errors.Join(listErr, purgeReleased(roots, purged))
+}
+
+// purgeReleased deletes the staging copies (completed/, head/, pre-head/) of
+// ids under every root. It is the only deletion of released segments' staging
+// copies; ids must be released in the vault-ctl FSM. Registry absence is not
+// release: a completed segment awaiting its publish is registry-absent too,
+// and deleting it loses ingested records.
+func purgeReleased(roots []string, ids []glid.GLID) error {
+	var errs []error
+	for _, id := range ids {
+		for _, root := range roots {
+			if err := paths.PurgeSegmentStaging(root, id); err != nil {
+				errs = append(errs, fmt.Errorf("purge segment %s under %s: %w", id, root, err))
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// releasedOnDisk lists the segments with a staging copy under roots that fsm
+// records as released. A staging directory that does not exist holds nothing.
+func releasedOnDisk(fsm *vaultctlfsm.FSM, roots []string) ([]glid.GLID, error) {
+	seen := make(map[glid.GLID]struct{})
+	var released []glid.GLID
+	var errs []error
+	for _, root := range roots {
+		for _, dir := range []string{paths.CompletedDir(root), paths.HeadDir(root), paths.PreHeadDir(root)} {
+			ids, err := paths.ListSegmentIDs(dir)
+			if err != nil {
+				if !os.IsNotExist(err) {
+					errs = append(errs, fmt.Errorf("list %s: %w", dir, err))
+				}
+				continue
+			}
+			for id := range ids {
+				if _, dup := seen[id]; dup {
+					continue
+				}
+				seen[id] = struct{}{}
+				if fsm.SegmentReleased(id) {
+					released = append(released, id)
+				}
+			}
+		}
+	}
+	return released, errors.Join(errs...)
+}
+
 // releaseConsumer applies vault-ctl segment release to this node's staging
-// copies of one vault's segments. An origin retires the released segments from
-// distribution and deletes their completed/ copies; every staging root drops
-// its head/ and pre-head/ copies. A release applied in the vault-ctl FSM is the
-// only trigger: a segment the FSM has not released is never touched, because
-// until then a home may still need to pull it from this origin.
+// copies of one vault's segments: an origin retires the released segments
+// from distribution, and every staging root drops its copies. A release
+// applied in the vault-ctl FSM is the only trigger: a segment the FSM has not
+// released is never touched, because until then a home may still need to pull
+// it from this origin.
 type releaseConsumer struct {
 	vaultID glid.GLID
-	dist    *distribution.Manager
-	logger  *slog.Logger
-	// completedRoot is the origin staging root whose completed/ copies are
-	// purged; empty when this node does not originate segments for the vault.
-	completedRoot string
-	headRoots     []string
+	// dist is nil when this node does not originate segments for the vault.
+	dist   *distribution.Manager
+	logger *slog.Logger
+	roots  []string
 
 	mu    sync.Mutex
 	fsm   *vaultctlfsm.FSM
@@ -48,7 +108,12 @@ func (c *releaseConsumer) bind(fsm *vaultctlfsm.FSM) {
 	c.fsm = fsm
 	c.unsub = fsm.AddOnReleaseSegments(c.consume)
 	c.mu.Unlock()
-	c.consume(c.releasedOnDisk(fsm))
+	released, err := releasedOnDisk(fsm, c.roots)
+	if err != nil {
+		c.logger.Warn("released segment catch-up: staging listing incomplete",
+			"vault", c.vaultID, "error", err)
+	}
+	c.consume(released)
 }
 
 // unbindIfSet drops the release subscription; a nil consumer is a no-op.
@@ -65,57 +130,18 @@ func (c *releaseConsumer) unbindIfSet() {
 	c.fsm = nil
 }
 
+// consume retires ids from distribution, so its completed/ rescan does not
+// republish them, and then purges them. A failed delete stays on disk for the
+// released-segment sweep, which confirms nothing until the copy is gone.
 func (c *releaseConsumer) consume(ids []glid.GLID) {
 	if len(ids) == 0 {
 		return
 	}
-	if c.completedRoot != "" {
+	if c.dist != nil {
 		c.dist.RetireSegments(c.vaultID, ids)
-		for _, id := range ids {
-			if err := paths.PurgeCompleted(c.completedRoot, id); err != nil {
-				c.logger.Warn("released segment: completed/ purge failed",
-					"vault", c.vaultID, "segment", id, "error", err)
-			}
-		}
 	}
-	for _, id := range ids {
-		for _, root := range c.headRoots {
-			if err := paths.PurgeHeadStaging(root, id); err != nil {
-				c.logger.Warn("released segment: head/ purge failed",
-					"vault", c.vaultID, "segment", id, "error", err)
-			}
-		}
+	if err := purgeReleased(c.roots, ids); err != nil {
+		c.logger.Warn("released segment: staging purge failed",
+			"vault", c.vaultID, "error", err)
 	}
-}
-
-// releasedOnDisk lists the segments with a staging copy in a directory this
-// consumer purges that fsm records as released.
-func (c *releaseConsumer) releasedOnDisk(fsm *vaultctlfsm.FSM) []glid.GLID {
-	var dirs []string
-	if c.completedRoot != "" {
-		dirs = append(dirs, paths.CompletedDir(c.completedRoot))
-	}
-	for _, root := range c.headRoots {
-		dirs = append(dirs, paths.HeadDir(root), paths.PreHeadDir(root))
-	}
-	seen := make(map[glid.GLID]struct{})
-	var released []glid.GLID
-	for _, dir := range dirs {
-		ids, err := paths.ListSegmentIDs(dir)
-		if err != nil {
-			c.logger.Warn("released segment catch-up: list staging dir failed",
-				"vault", c.vaultID, "dir", dir, "error", err)
-			continue
-		}
-		for id := range ids {
-			if _, dup := seen[id]; dup {
-				continue
-			}
-			seen[id] = struct{}{}
-			if fsm.SegmentReleased(id) {
-				released = append(released, id)
-			}
-		}
-	}
-	return released
 }
