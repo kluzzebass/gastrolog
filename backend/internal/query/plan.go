@@ -124,12 +124,9 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 		RuntimeFilter: "none",
 	}
 
-	// Unsealed chunks use sequential scan but may benefit from B+ tree time seeks.
 	if !meta.Sealed {
-		currentPositions := cp.RecordCount
-		currentPositions = e.buildActiveChunkTSSeekSteps(&cp, q, meta, cm, currentPositions)
 		cp.ScanMode = "buffer-sort (" + q.OrderBy.String() + ")"
-		cp.EstimatedScan = currentPositions
+		cp.EstimatedScan = cp.RecordCount
 		cp.RuntimeFilter = e.buildRuntimeFilterDesc(q)
 		return cp
 	}
@@ -138,7 +135,7 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 	currentPositions := cp.RecordCount
 
 	// 1. IngestTS seek - binary search on sealed ingest index.
-	currentPositions = e.buildIngestTSSeekStep(&cp, q, meta, im, currentPositions)
+	currentPositions = e.buildIngestTSSeekStep(&cp, q, meta, cm, im, currentPositions)
 
 	// 2. Process boolean expression.
 	if q.BoolExpr != nil {
@@ -167,83 +164,26 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 	return cp
 }
 
-// buildIngestTSSeekStep builds the IngestTS seek pipeline step for sealed chunks using the flat index.
-func (e *Engine) buildIngestTSSeekStep(cp *ChunkPlan, q Query, meta chunk.ChunkMeta, im index.IndexManager, currentPositions int) int {
-	lower, _ := q.TimeBounds()
-	if lower.IsZero() {
+// buildIngestTSSeekStep records the position narrowing the scanner derives
+// from the ingest lower bound. Chunks where the bound does not narrow by
+// position get no step; the bound is applied per record instead.
+func (e *Engine) buildIngestTSSeekStep(cp *ChunkPlan, q Query, meta chunk.ChunkMeta, cm chunk.ChunkManager, im index.IndexManager, currentPositions int) int {
+	pos, ok := ingestBoundMinPosition(q, meta, cm, im)
+	if !ok {
 		return currentPositions
 	}
-
-	step := PipelineStep{
+	lower, _ := q.TimeBounds()
+	skipped := int(pos) //nolint:gosec // G115: pos is a record position, always fits in int on 64-bit
+	cp.Pipeline = append(cp.Pipeline, PipelineStep{
 		Index:           "ingest_ts",
 		Predicate:       "ingest >= " + lower.Format("15:04:05"),
 		PositionsBefore: currentPositions,
+		PositionsAfter:  cp.RecordCount - skipped,
 		Action:          "seek",
 		Reason:          "index",
-	}
-
-	if pos, found, err := im.FindIngestStartPosition(meta.ID, lower); err == nil && found {
-		skipped := int(pos) //nolint:gosec // G115: pos is a record position, always fits in int on 64-bit
-		currentPositions = cp.RecordCount - skipped
-		step.PositionsAfter = currentPositions
-		step.Details = fmt.Sprintf("skip %d via ingest index", skipped)
-	} else {
-		step.PositionsAfter = currentPositions
-		step.Details = "start before chunk"
-	}
-	cp.Pipeline = append(cp.Pipeline, step)
-	return currentPositions
-}
-
-// buildActiveChunkTSSeekSteps adds pipeline steps for B+ tree IngestTS/SourceTS seeks on active chunks.
-func (e *Engine) buildActiveChunkTSSeekSteps(cp *ChunkPlan, q Query, meta chunk.ChunkMeta, cm chunk.ChunkManager, currentPositions int) int {
-	if !q.Start.IsZero() {
-		step := PipelineStep{
-			Index:           "ingest_ts",
-			Predicate:       "ingest >= " + q.Start.Format("15:04:05"),
-			PositionsBefore: currentPositions,
-			Action:          "seek",
-			Reason:          "btree",
-		}
-		if pos, found, err := cm.FindIngestStartPosition(meta.ID, q.Start); err == nil && found {
-			skipped := int(pos) //nolint:gosec // G115: pos is a record position
-			remaining := cp.RecordCount - skipped
-			if remaining < currentPositions {
-				currentPositions = remaining
-			}
-			step.PositionsAfter = currentPositions
-			step.Details = fmt.Sprintf("skip %d via btree", skipped)
-		} else {
-			step.PositionsAfter = currentPositions
-			step.Details = "start before chunk"
-		}
-		cp.Pipeline = append(cp.Pipeline, step)
-	}
-
-	if !q.SourceStart.IsZero() {
-		step := PipelineStep{
-			Index:           "source_ts",
-			Predicate:       "source >= " + q.SourceStart.Format("15:04:05"),
-			PositionsBefore: currentPositions,
-			Action:          "seek",
-			Reason:          "btree",
-		}
-		if pos, found, err := cm.FindSourceStartPosition(meta.ID, q.SourceStart); err == nil && found {
-			skipped := int(pos) //nolint:gosec // G115: pos is a record position
-			remaining := cp.RecordCount - skipped
-			if remaining < currentPositions {
-				currentPositions = remaining
-			}
-			step.PositionsAfter = currentPositions
-			step.Details = fmt.Sprintf("skip %d via btree", skipped)
-		} else {
-			step.PositionsAfter = currentPositions
-			step.Details = "start before chunk"
-		}
-		cp.Pipeline = append(cp.Pipeline, step)
-	}
-
-	return currentPositions
+		Details:         fmt.Sprintf("skip %d via ingest index", skipped),
+	})
+	return cp.RecordCount - skipped
 }
 
 // buildBoolExprPlan processes the boolean expression for a chunk plan.

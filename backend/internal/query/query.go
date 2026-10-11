@@ -761,7 +761,7 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 	b := newScannerBuilder(meta.ID)
 	b.vaultID = vaultID
 
-	setMinPositionsFromBounds(b, q, meta, cm, im)
+	setMinPositionFromIngestBound(b, q, meta, cm, im)
 
 	// Resume position takes precedence over time-based start. Direction
 	// decides which bound it is: forward has already returned everything
@@ -846,53 +846,34 @@ func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordC
 	return scan, nil
 }
 
-// setMinPositionsFromBounds sets the scanner builder's minimum position from time bounds
-// using IngestTS and SourceTS indexes (sealed flat index or active chunk B+ tree).
-func setMinPositionsFromBounds(b *scannerBuilder, q Query, meta chunk.ChunkMeta, cm chunk.ChunkManager, im index.IndexManager) {
-	// IngestTS: use sealed flat index or active chunk B+ tree.
+// setMinPositionFromIngestBound narrows the scan to the positions the ingest
+// lower bound can admit, where that set is a position suffix.
+func setMinPositionFromIngestBound(b *scannerBuilder, q Query, meta chunk.ChunkMeta, cm chunk.ChunkManager, im index.IndexManager) {
+	if pos, ok := ingestBoundMinPosition(q, meta, cm, im); ok {
+		b.setMinPosition(pos)
+	}
+}
+
+// ingestBoundMinPosition returns the lowest physical position whose record
+// the ingest lower bound admits, when every record below it is excluded.
+// That holds only on a sealed chunk whose IngestTS never decreases in
+// physical order: the records under the bound are exactly the first
+// rank-many positions. On any other chunk an admitted record can sit at any
+// position, and SourceTS carries no such order at all, so those bounds stay
+// rank ranges and per-record checks.
+func ingestBoundMinPosition(q Query, meta chunk.ChunkMeta, cm chunk.ChunkManager, im index.IndexManager) (uint64, bool) {
 	lower, _ := q.TimeBounds()
-	seekIngestTS(b, lower, meta, cm, im)
-	seekSourceTS(b, q.SourceStart, meta, cm, im)
-}
-
-func seekIngestTS(b *scannerBuilder, lower time.Time, meta chunk.ChunkMeta, cm chunk.ChunkManager, im index.IndexManager) {
-	if lower.IsZero() {
-		return
+	if lower.IsZero() || !meta.Sealed || !meta.IngestTSMonotonic {
+		return 0, false
 	}
-	if meta.Sealed {
-		if pos, found, err := im.FindIngestStartPosition(meta.ID, lower); err == nil && found {
-			b.setMinPosition(pos)
-			return
-		}
-		// Fallback: chunk manager handles cloud-backed chunks with locally-cached TS index.
-		if pos, found, err := cm.FindIngestStartPosition(meta.ID, lower); err == nil && found {
-			b.setMinPosition(pos)
-		}
-		return
+	if rank, found, err := im.FindIngestEntryIndex(meta.ID, lower); err == nil && found {
+		return rank, true
 	}
-	if pos, found, err := cm.FindIngestStartPosition(meta.ID, lower); err == nil && found {
-		b.setMinPosition(pos)
+	// Cold cloud-backed chunks resolve their rank through the chunk manager.
+	if rank, found, err := cm.FindIngestEntryIndex(meta.ID, lower); err == nil && found {
+		return rank, true
 	}
-}
-
-func seekSourceTS(b *scannerBuilder, sourceStart time.Time, meta chunk.ChunkMeta, cm chunk.ChunkManager, im index.IndexManager) {
-	if sourceStart.IsZero() {
-		return
-	}
-	if meta.Sealed {
-		if pos, found, err := im.FindSourceStartPosition(meta.ID, sourceStart); err == nil && found {
-			b.setMinPosition(pos)
-			return
-		}
-		// Fallback: chunk manager handles cloud-backed chunks with locally-cached TS index.
-		if pos, found, err := cm.FindSourceStartPosition(meta.ID, sourceStart); err == nil && found {
-			b.setMinPosition(pos)
-		}
-		return
-	}
-	if pos, found, err := cm.FindSourceStartPosition(meta.ID, sourceStart); err == nil && found {
-		b.setMinPosition(pos)
-	}
+	return 0, false
 }
 
 // applyBoolExpr converts a BoolExpr to DNF and applies index acceleration and runtime filters
