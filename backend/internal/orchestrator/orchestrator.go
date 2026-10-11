@@ -814,9 +814,8 @@ type Config struct {
 
 // Production segment complete defaults: a segment completes once it reaches
 // 8 MiB or 10 seconds of age, whichever comes first. MaxAge bounds the
-// ingest→queryable latency on low-throughput vaults (age is evaluated on
-// each commit, so a trickle still completes its segment on the next record
-// after the window); MaxBytes bounds segment size under load.
+// ingest→queryable latency on low-throughput vaults, including a vault
+// whose input has stopped; MaxBytes bounds segment size under load.
 const (
 	defaultSegmentCompleteMaxBytes = uint64(8 << 20)
 	defaultSegmentCompleteMaxAge   = 10 * time.Second

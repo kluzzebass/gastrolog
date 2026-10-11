@@ -87,6 +87,10 @@ type vaultWriter struct {
 	seg                segmentFile
 	workingPath        string
 
+	// age wakes the record loop when the open segment reaches
+	// CompletePolicy.MaxAge; owned by the recordLoop goroutine.
+	age ageDeadline
+
 	// Degraded-writer state, owned by the recordLoop goroutine.
 	degraded      bool
 	reopenDelay   time.Duration
@@ -258,6 +262,8 @@ func (w *vaultWriter) stop() {
 func (w *vaultWriter) recordLoop(ctx context.Context) {
 	b := newCommitBatch(w)
 	defer b.timer.Stop()
+	w.age = ageDeadline{timer: w.cfg.ageTimer()}
+	defer w.age.timer.Stop()
 
 	for {
 		select {
@@ -277,7 +283,83 @@ func (w *vaultWriter) recordLoop(ctx context.Context) {
 			} else if err := b.commit(); err != nil {
 				w.enterDegraded(b, err)
 			}
+		case <-w.age.timer.C():
+			w.age.armed = false
+			w.completeAgedSegment(b)
 		}
+	}
+}
+
+// ageDeadline wakes the record loop when the open segment reaches MaxAge, so a
+// segment whose input has gone quiet still completes. It is armed only for a
+// segment that records are destined for, and a wake for a segment that has
+// since been rotated away is ignored.
+type ageDeadline struct {
+	timer   deadlineTimer
+	armed   bool
+	segment glid.GLID
+}
+
+// deadlineTimer is the timer behind the age deadline. Tests substitute a
+// manual one so the deadline fires without waiting out MaxAge.
+type deadlineTimer interface {
+	C() <-chan time.Time
+	Reset(d time.Duration)
+	Stop()
+}
+
+type wallDeadlineTimer struct{ t *time.Timer }
+
+func newWallDeadlineTimer() deadlineTimer {
+	t := time.NewTimer(syncTimerPark)
+	t.Stop()
+	return wallDeadlineTimer{t: t}
+}
+
+func (d wallDeadlineTimer) C() <-chan time.Time { return d.t.C }
+
+func (d wallDeadlineTimer) Reset(after time.Duration) { resetSyncTimer(d.t, after) }
+
+func (d wallDeadlineTimer) Stop() { d.t.Stop() }
+
+// armSegmentAge arms the age deadline for the open segment once records are
+// destined for it. A segment already armed keeps its deadline: age counts
+// from when the segment was opened, not from its latest record.
+func (w *vaultWriter) armSegmentAge() {
+	maxAge := w.cfg.CompletePolicy.MaxAge
+	if maxAge <= 0 || (w.age.armed && w.age.segment == w.segmentID) {
+		return
+	}
+	remaining := w.openedAt.Add(maxAge).Sub(w.cfg.now())
+	if remaining <= 0 {
+		remaining = syncTimerArmFloor
+	}
+	w.age.segment = w.segmentID
+	w.age.armed = true
+	w.age.timer.Reset(remaining)
+}
+
+// completeAgedSegment completes the open segment when its age deadline fires.
+// Pending records commit first so they land in the segment being completed,
+// and their acks still release only after that commit's fsync. A wake ahead
+// of the writer's clock (the wall clock stepped back) re-arms for the
+// remainder.
+func (w *vaultWriter) completeAgedSegment(b *commitBatch) {
+	if w.age.segment != w.segmentID {
+		return
+	}
+	if !w.ageExpired() {
+		w.armSegmentAge()
+		return
+	}
+	var err error
+	if b.pendingSync > 0 {
+		err = b.commit()
+	} else {
+		err = w.maybeComplete()
+	}
+	if err != nil {
+		w.enterDegraded(b, err)
 	}
 }
 
@@ -312,6 +394,7 @@ func (w *vaultWriter) handleInput(b *commitBatch, in Input) {
 
 // afterAppend applies the commit policy once a frame has been added to the batch.
 func (w *vaultWriter) afterAppend(b *commitBatch) {
+	w.armSegmentAge()
 	switch {
 	case b.pendingSync >= w.syncEvery:
 		// Size cap: hard flush regardless of regime.
@@ -522,7 +605,7 @@ func (b *commitBatch) commit() error {
 		b.w.recordsAppended.Add(uint64(b.pendingSync)) //nolint:gosec // pendingSync >= 0
 		b.w.bytesAppended.Add(b.frameBytes)
 		if b.w.disableFsync {
-			err = b.w.maybeCompleteNoSync()
+			err = b.w.maybeComplete()
 		} else {
 			err = b.w.syncAndMaybeComplete()
 		}
@@ -605,9 +688,10 @@ func (w *vaultWriter) syncAndMaybeComplete() error {
 	return w.maybeCompleteLocked()
 }
 
-// maybeCompleteNoSync rotates the segment on the complete policy without any fsync
-// (DisableFsync vaults).
-func (w *vaultWriter) maybeCompleteNoSync() error {
+// maybeComplete rotates the segment on the complete policy without fsyncing
+// its appended frames first: DisableFsync vaults, and age completion with no
+// batch pending.
+func (w *vaultWriter) maybeComplete() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.seg == nil {
@@ -629,10 +713,12 @@ func (w *vaultWriter) shouldComplete(size int64) bool {
 	if policy.MaxBytes > 0 && size >= 0 && uint64(size) >= policy.MaxBytes {
 		return true
 	}
-	if policy.MaxAge > 0 && w.cfg.now().Sub(w.openedAt) >= policy.MaxAge {
-		return true
-	}
-	return false
+	return w.ageExpired()
+}
+
+func (w *vaultWriter) ageExpired() bool {
+	maxAge := w.cfg.CompletePolicy.MaxAge
+	return maxAge > 0 && w.cfg.now().Sub(w.openedAt) >= maxAge
 }
 
 func (w *vaultWriter) rotateSegmentLocked() error {

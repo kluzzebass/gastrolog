@@ -258,6 +258,50 @@ func TestSupervisorOriginIngestToPublish(t *testing.T) {
 	waittest.For(t, "published segment", func() bool { return pub.count() >= 1 })
 }
 
+// TestSupervisorQuietVaultPublishesOnAge: a burst far below the size bound,
+// then no further input. The segment holding it is still completed and
+// published once its age expires.
+func TestSupervisorQuietVaultPublishesOnAge(t *testing.T) {
+	nodeID := glid.New()
+	vaultID := glid.New()
+
+	sup := New(Config{
+		NodeID:                nodeID,
+		Table:                 allRoute(t, vaultID),
+		SegmentCompletePolicy: segmentation.CompletePolicy{MaxBytes: 1 << 30, MaxAge: time.Second},
+	})
+	if err := sup.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = sup.Stop() })
+
+	pub := &recordingPublisher{}
+	if err := sup.RegisterVault(VaultSpec{
+		VaultID:    vaultID,
+		Origin:     true,
+		OriginRoot: t.TempDir(),
+		Publisher:  pub,
+	}); err != nil {
+		t.Fatalf("RegisterVault: %v", err)
+	}
+
+	if err := sup.ReconcileIngesters([]ingestion.IngesterSpec{
+		{ID: glid.New(), Ingester: &emitIngester{msgs: batch(3, "quiet vault line")}, Name: "t", Type: "mock"},
+	}); err != nil {
+		t.Fatalf("ReconcileIngesters: %v", err)
+	}
+
+	waittest.For(t, "every record published in an aged segment", func() bool {
+		pub.mu.Lock()
+		defer pub.mu.Unlock()
+		var records uint32
+		for _, meta := range pub.published {
+			records += meta.RecordCount
+		}
+		return records == 3
+	})
+}
+
 // TestSupervisorFullVaultHome registers a vault as both Origin and Home on one
 // node and drives the full graph: published segments are collected back through
 // the supervisor's pull seam, exercising all seven managers.

@@ -110,6 +110,10 @@ contrast with any earlier design. It states only what V3 *is*, never what it
     segments interleave under the budget. Segment bodies move lazily, only once a home
     is ready to build.
 24. A segment closes on size or age, whichever comes first (both configurable).
+    Size is checked as records commit; age runs from the segment's open and is a
+    deadline the writer arms once the segment holds records, so a segment whose
+    input has gone quiet still closes when its age expires — it never waits for a
+    next record. An empty segment never closes.
     Closure is the working→completed rename, at which point its metadata is published;
     a still-growing segment's header is provisional and not yet eligible.
 25. A chunk is the records yielded by a **budget-limited k-way merge** starting from

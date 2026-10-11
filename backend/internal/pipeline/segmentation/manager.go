@@ -31,7 +31,9 @@ var ErrUnknownVault = errors.New("unknown vault")
 type CompletePolicy struct {
 	// MaxBytes completes the segment once the on-disk file reaches this size.
 	MaxBytes uint64
-	// MaxAge completes the segment once this long has elapsed since it was opened.
+	// MaxAge completes the segment once this long has elapsed since it was
+	// opened, whether or not further records arrive. An empty segment never
+	// completes.
 	MaxAge time.Duration
 }
 
@@ -86,6 +88,9 @@ type Config struct {
 	// newSegmentFile overrides working-segment creation for fault-injection
 	// tests. Nil uses segment.Create.
 	newSegmentFile func(path string, meta segment.Meta) (segmentFile, error)
+	// newAgeTimer overrides the segment age-deadline timer for tests. Nil
+	// uses a wall-clock timer.
+	newAgeTimer func() deadlineTimer
 }
 
 // VaultConfig overrides per-vault commit/fsync tuning at RegisterVault time.
@@ -116,6 +121,13 @@ func (c Config) now() time.Time {
 		return c.Now()
 	}
 	return time.Now().UTC()
+}
+
+func (c Config) ageTimer() deadlineTimer {
+	if c.newAgeTimer != nil {
+		return c.newAgeTimer()
+	}
+	return newWallDeadlineTimer()
 }
 
 func (c Config) syncBatchSize() int {
