@@ -107,7 +107,7 @@ flowchart TD
     AllChunks["Matching chunks in planner order"] --> Lazy["lazyOpenCompeting()"]
     Lazy --> HeapEmpty{"Heap empty?"}
     HeapEmpty -->|Yes| Open["openAndPrimeScanner(next chunk)"]
-    HeapEmpty -->|No| Overlap{"Next chunk's upper bound reaches heap top?"}
+    HeapEmpty -->|No| Overlap{"Next chunk can hold a record at or ahead of the heap top?"}
     Overlap -->|Yes| Open
     Overlap -->|No| MergeLoop["runMergeLoop()"]
     Open --> Heap["Push first record onto heap"]
@@ -115,9 +115,16 @@ flowchart TD
     MergeLoop -->|"after each pop"| Lazy
 ```
 
-For chunks whose time ranges do not overlap, only one scanner is open at a
-time; for overlapping ranges, every chunk whose upper bound can still beat the
-current heap top is opened. `runMergeLoop()` calls `lazyOpenCompeting()` again
+A pending chunk competes when its range on the ordering axis can hold a record
+at or ahead of the heap top: forward, its range starts at or before the top;
+reverse, its range ends at or after it. A timestamp equal to the top competes,
+because records sharing a timestamp across chunks are ordered by EventID. The
+chunk's own range is what counts, never the query bounds clipped to it — a
+resumed page bounds every chunk at the cursor, and a chunk whose range ends
+before a neighbour's first surviving record can still hold records past the
+cursor. Planner order makes the first chunk that cannot compete the last one
+considered, so for chunks whose ranges do not overlap only one scanner is open
+at a time. `runMergeLoop()` calls `lazyOpenCompeting()` again
 as the heap advances, so a chunk is opened only when the merge reaches it. A
 `last=5m limit=10` query that fills its limit from the newest chunks never opens
 older ones — local or cloud-backed alike. There is no separate local/cloud
@@ -423,7 +430,12 @@ the ordering axis and its EventID. Remote vaults are not resumed by their own
 tokens; the next page bounds every source at the cursor's timestamp
 (inclusively) and the merge skips whatever sits at or before the cursor in
 canonical order, so a page boundary inside a group of records sharing a
-timestamp neither repeats nor drops any of them, from any node. Local positions
+timestamp neither repeats nor drops any of them, from any node, in either
+direction. A record without an ingester identity has no rank within its tie
+group — every identity-less record at one timestamp compares equal — so the
+cursor skips all of them along with the one it names; ingest mints an identity
+for every record, and only records appended straight to a chunk manager, as
+test fixtures are, lack one. Local positions
 advance only past records the page displayed: the merge reads one local record
 ahead to compare against the remote stream, so a page filled entirely by remote
 records hands on the local positions it received, and a page that displayed a
@@ -431,7 +443,9 @@ local record pins them to the last one shown. Positions are
 kept only for chunks scanned in physical order. A chunk scanned through its
 timestamp index (every sealed chunk, and any ordering other than the default)
 yields in index order, so no physical position can resume it; it carries none,
-and the next page restarts it under the cursor, which the narrowed time bound
+the engine ignores any position a token names for it (the coordinator pins the
+last displayed local record's position whatever chunk it came from), and the
+next page restarts it under the cursor, which the narrowed time bound
 lets the rank scan seek to directly. An open pipeline chunk has no source
 index yet; under `order=source_ts` it is put in canonical order in memory —
 one pass collects each surviving record's ordering key and position, charged
