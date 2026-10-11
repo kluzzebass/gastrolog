@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useVaults, useStorages, useIngesters, useNodeRegistry } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
+import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useConfig } from "../../api/hooks/useSystem";
 import { useSettings } from "../../api/hooks/useSettings";
@@ -41,7 +42,10 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
   const { data: allVaults } = useVaults();
   const { data: allStorages } = useStorages();
   const allIngesters = useIngesters();
-  const { jobs } = useWatchJobs({ onError: toastError });
+  const { jobs, connected, reconnecting } = useWatchJobs({ onError: toastError });
+  // Until the job stream delivers its first snapshot an empty list means
+  // "not yet known", not "none" — the same condition the Jobs view waits on.
+  const jobsLoading = !connected && !reconnecting && jobs.length === 0;
 
   const nscs = config?.nodeStorageConfigs ?? [];
   const vaults = allVaults.filter((v) => v.isOn(nodeIdTyped, nscs, registry.localNodeId));
@@ -156,18 +160,22 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
 
       {/* Scheduled jobs section */}
       <Section title="Scheduled" dark={dark} helpRef="inspector-jobs#scheduled-jobs">
-        {scheduled.length === 0 ? (
-          <EmptyMessage dark={dark}>No scheduled jobs on this node.</EmptyMessage>
-        ) : (
+        <JobsSectionBody
+          loading={jobsLoading}
+          empty={scheduled.length === 0 ? "No scheduled jobs on this node." : null}
+          dark={dark}
+        >
           <ScheduledJobsTable jobs={scheduled} dark={dark} showNodeBadge={false} />
-        )}
+        </JobsSectionBody>
       </Section>
 
       {/* Tasks section */}
       <Section title="Tasks" dark={dark} helpRef="inspector-jobs#tasks">
-        {tasks.length === 0 ? (
-          <EmptyMessage dark={dark}>No tasks on this node.</EmptyMessage>
-        ) : (
+        <JobsSectionBody
+          loading={jobsLoading}
+          empty={tasks.length === 0 ? "No tasks on this node." : null}
+          dark={dark}
+        >
           <div className="flex flex-col gap-2">
             {tasks.map((job) => (
               <JobCard
@@ -180,7 +188,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
               />
             ))}
           </div>
-        )}
+        </JobsSectionBody>
       </Section>
     </div>
   );
@@ -221,6 +229,17 @@ function Section({
       {children}
     </section>
   );
+}
+
+function JobsSectionBody({
+  loading,
+  empty,
+  dark,
+  children,
+}: Readonly<{ loading: boolean; empty: string | null; dark: boolean; children: React.ReactNode }>) {
+  if (loading) return <LoadingPlaceholder dark={dark} />;
+  if (empty) return <EmptyMessage dark={dark}>{empty}</EmptyMessage>;
+  return <>{children}</>;
 }
 
 function EmptyMessage({
