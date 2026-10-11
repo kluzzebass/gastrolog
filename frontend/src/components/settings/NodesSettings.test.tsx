@@ -75,6 +75,38 @@ function seedQueries(qc: ReturnType<typeof createTestQueryClient>, overrides?: {
   qc.setQueryData(["clusterStatus"], overrides?.cluster ?? sampleCluster);
 }
 
+describe("join cluster card gating", () => {
+  function renderWithHelp(cluster: object) {
+    const qc = createTestQueryClient();
+    seedQueries(qc, { cluster });
+    const openHelp = mock((_helpRef?: string) => {});
+    const result = renderWritable(
+      <HelpProvider onOpen={openHelp}>
+        <NodesSettings dark />
+      </HelpProvider>,
+      { wrapper: settingsWrapper(qc) },
+    );
+    return { ...result, openHelp };
+  }
+
+  test("on a multi-node cluster the card stays on screen, disabled, naming the cause and linking the rule", () => {
+    const { getByText, getByLabelText, getByRole, openHelp } = renderWithHelp(sampleCluster);
+    expect(getByText("Join Cluster", { selector: "h3" })).toBeTruthy();
+    expect(getByRole("note").textContent).toContain("already one of 2 members");
+    expect((getByLabelText("Member Address") as HTMLInputElement).disabled).toBe(true);
+    expect((getByLabelText("Join Token") as HTMLInputElement).disabled).toBe(true);
+    expect((getByText("Join Cluster", { selector: "button" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(getByText("Joining a cluster"));
+    expect(openHelp).toHaveBeenCalledWith("clustering-nodes#joining-a-cluster");
+  });
+
+  test("on a single-node cluster the card is open for input", () => {
+    const { getByLabelText, queryByRole } = renderWithHelp({ ...sampleCluster, nodes: [sampleCluster.nodes[0]] });
+    expect(queryByRole("note")).toBeNull();
+    expect((getByLabelText("Member Address") as HTMLInputElement).disabled).toBe(false);
+  });
+});
+
 describe("NodesSettings", () => {
   test("renders single node in non-cluster mode", () => {
     const qc = createTestQueryClient();

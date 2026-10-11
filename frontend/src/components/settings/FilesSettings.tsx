@@ -57,12 +57,6 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { addToast } = useToast();
 
   const savedMaxmind = settings?.maxmind;
-  const [maxmindVisible, setMaxmindVisible] = useState(false);
-  const [maxmindInit, setMaxmindInit] = useState(false);
-  if (savedMaxmind && !maxmindInit) {
-    setMaxmindVisible(savedMaxmind.autoDownload || savedMaxmind.licenseConfigured);
-    setMaxmindInit(true);
-  }
 
   const files = data?.managedFiles ?? [];
   const groups = groupByName(files);
@@ -156,26 +150,11 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
 
       <MaxMindCard
         dark={dark}
-        visible={maxmindVisible}
-        setVisible={setMaxmindVisible}
         savedMaxmind={savedMaxmind}
         addToast={addToast}
       />
 
-      {!maxmindVisible && (
-        <button
-          disabled={readOnly}
-          onClick={() => setMaxmindVisible(true)}
-          className={`w-full rounded-lg border border-dashed px-4 py-3 text-[0.8em] transition-colors ${c(
-            "border-ink-border text-text-muted hover:border-copper-dim hover:text-text-muted",
-            "border-light-border text-light-text-muted hover:border-copper hover:text-light-text-muted",
-          )}`}
-        >
-          Enable MaxMind Auto-Download
-        </button>
-      )}
-
-      {groups.length === 0 && !maxmindVisible && (
+      {groups.length === 0 && (
         <p className={`text-[0.8em] text-center py-4 ${c("text-text-muted", "text-light-text-muted")}`}>
           No managed files. Upload a file above to get started.
         </p>

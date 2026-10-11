@@ -13,6 +13,8 @@ import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput, SpinnerInput } from "./FormField";
 import { Checkbox } from "./Checkbox";
+import { HelpLink } from "../HelpLink";
+import { useThemeClass } from "../../hooks/useThemeClass";
 import { EligibilitySelect, type EligibilityOption } from "./EligibilitySelect";
 import { TRANSFER_HELP_REF, transferSourceIneligibility, transferTargetOptions } from "./transferEligibility";
 import { sortByName } from "../../lib/sort";
@@ -89,15 +91,10 @@ export function vaultTypeEnum(t: VaultTypeLabel): VaultType {
   }
 }
 
-function cloudBindingDescription(locked: boolean, hasCloudServices: boolean): string {
-  if (locked) {
-    return "Cloud binding is fixed at vault creation. To change it, create a new vault and migrate data via retention routing.";
-  }
-  if (!hasCloudServices) {
-    return "No cloud services configured — leave empty for local-only";
-  }
-  return "Optional — select to make this vault cloud-backed";
-}
+const CLOUD_STORAGE_HELP_REF = "storage-config#cloud-storage";
+const FILE_STORAGE_HELP_REF = "storage-config#file-storage";
+const POLICIES_HELP_REF = "vaults-config#rotation-and-retention-policies";
+const CACHE_HELP_REF = "storage-cloud#settings";
 
 function extractErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
@@ -190,10 +187,10 @@ export function VaultStorageForm({
 }: Readonly<{
   storage: StorageEntry;
   dark: boolean;
-  storageClassOptions: { value: string; label: string }[];
-  cloudServiceOptions: { value: string; label: string }[];
-  rotationPolicyOptions: { value: string; label: string }[];
-  retentionPolicyOptions: { value: string; label: string }[];
+  storageClassOptions: EligibilityOption[];
+  cloudServiceOptions: EligibilityOption[];
+  rotationPolicyOptions: EligibilityOption[];
+  retentionPolicyOptions: EligibilityOption[];
   transferTargetOptions: EligibilityOption[];
   nodeOptions: { value: string; label: string }[];
   vaultName: string;
@@ -206,6 +203,11 @@ export function VaultStorageForm({
   onTypeChange?: (t: VaultTypeLabel) => void;
   onUpdate: (patch: Partial<StorageEntry>) => void;
 }>) {
+  const cacheReason = storage.cloudServiceId === "" ? "Only a cloud-backed vault has a warm cache." : undefined;
+  let cacheTtlReason = cacheReason;
+  if (cacheTtlReason === undefined && storage.cacheEviction !== "ttl") {
+    cacheTtlReason = "Applies to TTL eviction only.";
+  }
   return (
     <div className="flex flex-col gap-2">
       {onTypeChange && (
@@ -244,82 +246,64 @@ export function VaultStorageForm({
           <FormField
             label="Cloud Storage"
             dark={dark}
-            description={cloudBindingDescription(!!cloudLocked, cloudServiceOptions.length > 0)}
-            helpRef="storage-config#cloud-storage"
+            description="Optional — select to make this vault cloud-backed"
+            disabledReason={cloudLocked ? "Fixed at vault creation — to change it, create a new vault and migrate data via retention routing." : undefined}
+            helpRef={CLOUD_STORAGE_HELP_REF}
           >
-            <SelectInput
+            <EligibilitySelect
               value={storage.cloudServiceId}
               onChange={(v) => onUpdate({ cloudServiceId: v })}
-              options={[
-                { value: "", label: "Local-only" },
-                ...cloudServiceOptions,
-              ]}
+              options={cloudServiceOptions}
+              placeholder="Local-only"
+              emptyMessage={cloudLocked ? undefined : "No cloud storage configured — add one under Storage; until then the vault is local-only."}
+              helpRef={CLOUD_STORAGE_HELP_REF}
               dark={dark}
-              disabled={cloudLocked}
             />
           </FormField>
 
-          <FormField label="Storage Class" helpRef="storage-config#file-storage" dark={dark}>
-            {storageClassOptions.length > 0 ? (
-              <SelectInput
-                value={storage.storageClass}
-                onChange={(v) => onUpdate({ storageClass: v })}
-                options={[
-                  { value: "", label: "Select storage class..." },
-                  ...storageClassOptions,
-                ]}
-                dark={dark}
-              />
-            ) : (
-              <SpinnerInput
-                value={storage.storageClass}
-                onChange={(v) => onUpdate({ storageClass: v })}
-                dark={dark}
-                min={0}
-              />
-            )}
+          <FormField label="Storage Class" helpRef={FILE_STORAGE_HELP_REF} dark={dark}>
+            <EligibilitySelect
+              value={storage.storageClass}
+              onChange={(v) => onUpdate({ storageClass: v })}
+              options={storageClassOptions}
+              placeholder="Select storage class..."
+              emptyMessage="No file storage configured — add one under Storage; a file vault needs a storage class to be placed."
+              helpRef={FILE_STORAGE_HELP_REF}
+              dark={dark}
+            />
           </FormField>
 
-          {/* Cache eviction tuning is only meaningful on cloud-backed
-              vaults — local-only vaults have nothing to evict (sealed
-              chunks ARE the data, not a cache). */}
-          {storage.cloudServiceId !== "" && (
-            <>
-              <FormField label="Cache Eviction" helpRef="storage-cloud#settings" dark={dark}>
-                <SelectInput
-                  value={storage.cacheEviction || "lru"}
-                  onChange={(v) => onUpdate({ cacheEviction: v })}
-                  options={[
-                    { value: "lru", label: "LRU — evict oldest when over budget" },
-                    { value: "ttl", label: "TTL — evict after max age" },
-                  ]}
-                  dark={dark}
-                />
-              </FormField>
-              <FormField label="Cache Budget" dark={dark}>
-                <TextInput
-                  value={storage.cacheBudget}
-                  onChange={(v) => onUpdate({ cacheBudget: v })}
-                  placeholder="1GiB"
-                  dark={dark}
-                  mono
-                  examples={["500MB", "1GiB", "5GB", "10GB"]}
-                />
-              </FormField>
-              {(storage.cacheEviction === "ttl") && (
-                <FormField label="Cache TTL" dark={dark}>
-                  <TextInput
-                    value={storage.cacheTTL}
-                    onChange={(v) => onUpdate({ cacheTTL: v })}
-                    placeholder=""
-                    dark={dark}
-                    mono
-                    examples={["1h", "12h", "1d", "7d"]}
-                  />
-                </FormField>
-              )}
-            </>
-          )}
+          <FormField label="Cache Eviction" helpRef={CACHE_HELP_REF} disabledReason={cacheReason} dark={dark}>
+            <SelectInput
+              value={storage.cacheEviction || "lru"}
+              onChange={(v) => onUpdate({ cacheEviction: v })}
+              options={[
+                { value: "lru", label: "LRU — evict oldest when over budget" },
+                { value: "ttl", label: "TTL — evict after max age" },
+              ]}
+              dark={dark}
+            />
+          </FormField>
+          <FormField label="Cache Budget" helpRef={CACHE_HELP_REF} disabledReason={cacheReason} dark={dark}>
+            <TextInput
+              value={storage.cacheBudget}
+              onChange={(v) => onUpdate({ cacheBudget: v })}
+              placeholder="1GiB"
+              dark={dark}
+              mono
+              examples={["500MB", "1GiB", "5GB", "10GB"]}
+            />
+          </FormField>
+          <FormField label="Cache TTL" helpRef={CACHE_HELP_REF} disabledReason={cacheTtlReason} dark={dark}>
+            <TextInput
+              value={storage.cacheTTL}
+              onChange={(v) => onUpdate({ cacheTTL: v })}
+              placeholder=""
+              dark={dark}
+              mono
+              examples={["1h", "12h", "1d", "7d"]}
+            />
+          </FormField>
         </>
       )}
 
@@ -348,21 +332,21 @@ export function VaultStorageForm({
         </>
       )}
 
-      {storage.type !== "jsonl" && rotationPolicyOptions.length > 0 && (
-        <FormField label="Rotation Policy" helpRef="vaults-config#rotation-and-retention-policies" dark={dark}>
-          <SelectInput
+      {storage.type !== "jsonl" && (
+        <FormField label="Rotation Policy" helpRef={POLICIES_HELP_REF} dark={dark}>
+          <EligibilitySelect
             value={storage.rotationPolicyId}
             onChange={(v) => onUpdate({ rotationPolicyId: v })}
-            options={[
-              { value: "", label: "None" },
-              ...rotationPolicyOptions,
-            ]}
+            options={rotationPolicyOptions}
+            placeholder="None"
+            emptyMessage="No rotation policies configured — create one under Rotation Policies; without one the active chunk is not rotated automatically."
+            helpRef={POLICIES_HELP_REF}
             dark={dark}
           />
         </FormField>
       )}
 
-      {storage.type !== "jsonl" && retentionPolicyOptions.length > 0 && (
+      {storage.type !== "jsonl" && (
         <RetentionPoliciesEditor
           attached={storage.retentionPolicyIds}
           onChange={(ids) => onUpdate({ retentionPolicyIds: ids })}
@@ -453,10 +437,21 @@ function RetentionPoliciesEditor({
   const description = n === 0
     ? "None attached: sealed chunks stay until the default size floor drains them."
     : `${String(n)} ${noun} attached. Every attached policy is evaluated on each sweep; the tightest bound wins.`;
+  const c = useThemeClass(dark);
+  if (options.length === 0) {
+    return (
+      <FormField label="Retention Policies" helpRef={POLICIES_HELP_REF} dark={dark}>
+        <div role="note" className={`text-[0.85em] leading-relaxed ${c("text-text-normal", "text-light-text-normal")}`}>
+          No retention policies configured — create one under Retention Policies; without one only the default size floor applies.{" "}
+          <HelpLink helpRef={POLICIES_HELP_REF} className="text-copper">Eligibility rules</HelpLink>
+        </div>
+      </FormField>
+    );
+  }
   return (
     <FormField
       label="Retention Policies"
-      helpRef="vaults-config#rotation-and-retention-policies"
+      helpRef={POLICIES_HELP_REF}
       dark={dark}
       description={description}
     >

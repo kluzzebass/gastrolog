@@ -10,16 +10,16 @@ import { SettingsCard } from "../SettingsCard";
 import { PasswordInput } from "./FormHelpers";
 import type { MaxMindSettings } from "../../../api/gen/gastrolog/v1/system_pb";
 
+/**
+ * The MaxMind auto-download settings, always on screen: its status badge
+ * says whether downloads run, so there is no hidden "not set up yet" state.
+ */
 export function MaxMindCard({
   dark,
-  visible,
-  setVisible,
   savedMaxmind,
   addToast,
 }: Readonly<{
   dark: boolean;
-  visible: boolean;
-  setVisible: (v: boolean) => void;
   savedMaxmind?: MaxMindSettings;
   addToast: (msg: string, type: "info" | "error") => void;
 }>) {
@@ -62,10 +62,9 @@ export function MaxMindCard({
     }
   };
 
-  const handleDelete = async () => {
+  const handleDisable = async () => {
     try {
       await putConfig.mutateAsync({ maxmind: { autoDownload: false } });
-      setVisible(false);
       setAutoDownload(false);
       setAccountId("");
       setLicenseKey("");
@@ -75,7 +74,7 @@ export function MaxMindCard({
     }
   };
 
-  if (!visible) return null;
+  const savedEnabled = savedMaxmind?.autoDownload ?? false;
 
   return (
     <SettingsCard
@@ -85,12 +84,12 @@ export function MaxMindCard({
       dark={dark}
       expanded={isExpanded("maxmind")}
       onToggle={() => toggle("maxmind")}
-      onDelete={handleDelete}
+      onDelete={savedEnabled ? handleDisable : undefined}
       deleteLabel="Disable"
       status={
-        autoDownload ? (
-          <span className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>enabled</span>
-        ) : undefined
+        <span className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>
+          {savedEnabled ? "enabled" : "disabled"}
+        </span>
       }
       footer={
         <>

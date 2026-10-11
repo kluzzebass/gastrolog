@@ -4,11 +4,12 @@ import { useThemeClass } from "../../../hooks/useThemeClass";
 import { usePutLookupSettings, usePreviewJSONLookup, usePreviewYAMLLookup, type PutLookupWire } from "../../../api/hooks/useSettings";
 import { useExpandedCards } from "../../../hooks/useExpandedCards";
 import { useLookupCrud } from "./useLookupCrud";
-import { FormField, TextInput, SelectInput } from "../FormField";
+import { FormField, TextInput } from "../FormField";
 import { Button } from "../Buttons";
 import { SettingsCard } from "../SettingsCard";
 import { AddFormCard } from "../AddFormCard";
 import { FileDropZone } from "../FileDropZone";
+import { ColumnPickers } from "./ColumnPickers";
 import { type JSONFileLookupDraft, type LookupSectionProps, emptyJsonDraft } from "./types";
 import type { JSONFileLookupEntry, YAMLFileLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 import { PreviewTable, parseTabularResult } from "./PreviewTable";
@@ -193,30 +194,11 @@ export function FileLookupAddForm({
   namePlaceholder: string;
   spec: FormatSpec;
 }) {
-  const readOnly = useReadOnly();
-  const c = useThemeClass(dark);
   const putConfig = usePutLookupSettings();
   const [draft, setDraft] = useState<JSONFileLookupDraft>(() => emptyJsonDraft());
   const [tableColumns, setTableColumns] = useState<string[]>([]);
 
   const resolvedKey = draft.keyColumn || (tableColumns.length > 0 ? tableColumns[0]! : "");
-  const nonKeyColumns = tableColumns.filter((col) => col !== resolvedKey);
-  const effectiveValues = draft.valueColumns.length > 0 ? draft.valueColumns : nonKeyColumns;
-
-  const toggleValueColumn = (col: string) => {
-    const isChecked = effectiveValues.includes(col);
-    if (isChecked) {
-      const base = draft.valueColumns.length > 0 ? draft.valueColumns : nonKeyColumns;
-      setDraft((d) => ({ ...d, valueColumns: base.filter((v) => v !== col) }));
-    } else {
-      const next = [...draft.valueColumns, col];
-      if (nonKeyColumns.every((c) => next.includes(c))) {
-        setDraft((d) => ({ ...d, valueColumns: [] }));
-      } else {
-        setDraft((d) => ({ ...d, valueColumns: next }));
-      }
-    }
-  };
 
   const handleCreate = async () => {
     const final = { ...draft, name: draft.name.trim() || namePlaceholder };
@@ -262,47 +244,25 @@ export function FileLookupAddForm({
       </FormField>
       <FilePreviewPanel dark={dark} fileId={draft.fileId} query={draft.query} keyColumn={resolvedKey} onColumnsAvailable={setTableColumns} spec={spec} />
 
-      {/* Column pickers — only shown when the jq expression produces a valid table */}
-      {tableColumns.length > 0 && (
-        <>
-          <FormField label="Key Column" description="Column used as the lookup key." helpRef={spec.helpRef} dark={dark}>
-            <SelectInput
-              value={draft.keyColumn}
-              onChange={(v) => setDraft((d) => ({ ...d, keyColumn: v }))}
-              options={[
-                { value: "", label: `${tableColumns[0]} (first column)` },
-                ...tableColumns.slice(1).map((col) => ({ value: col, label: col })),
-              ]}
-              dark={dark}
-            />
-          </FormField>
-
-          <FormField label="Value Columns" description="Columns included in lookup results. Uncheck columns you don't need." helpRef={spec.helpRef} dark={dark}>
-            <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-              {nonKeyColumns.map((col) => {
-                const checked = effectiveValues.includes(col);
-                return (
-                  <label
-                    key={col}
-                    className={`flex items-center gap-1.5 text-[0.85em] font-mono cursor-pointer select-none ${c("text-text-bright", "text-light-text-bright")}`}
-                  >
-                    <input
-                      type="checkbox"
-                      disabled={readOnly}
-                      checked={checked}
-                      onChange={() => toggleValueColumn(col)}
-                      className="accent-copper"
-                    />
-                    {col}
-                  </label>
-                );
-              })}
-            </div>
-          </FormField>
-        </>
-      )}
+      <ColumnPickers
+        columns={tableColumns}
+        keyColumn={draft.keyColumn}
+        valueColumns={draft.valueColumns}
+        onKeyColumnChange={(v) => setDraft((d) => ({ ...d, keyColumn: v }))}
+        onValueColumnsChange={(v) => setDraft((d) => ({ ...d, valueColumns: v }))}
+        unavailableReason={tableColumnsUnavailable(draft.fileId, tableColumns)}
+        helpRef={spec.helpRef}
+        dark={dark}
+      />
     </AddFormCard>
   );
+}
+
+/** Why the column pickers have nothing to offer yet, or undefined once the query yields a table. */
+export function tableColumnsUnavailable(fileId: string, tableColumns: string[]): string | undefined {
+  if (!fileId) return "Select a file first — the columns come from the query result.";
+  if (tableColumns.length === 0) return "The query must produce an array of objects to pick columns from.";
+  return undefined;
 }
 
 function FileLookupCardBody({
@@ -324,29 +284,10 @@ function FileLookupCardBody({
   onUpdate: (i: number, patch: Partial<JSONFileLookupDraft>) => void;
   spec: FormatSpec;
 }>) {
-  const readOnly = useReadOnly();
-  const c = useThemeClass(dark);
   const [tableColumns, setTableColumns] = useState<string[]>([]);
 
   const resolvedFile = managedFiles.find((f) => encode(f.id) === draft.fileId);
   const resolvedKey = draft.keyColumn || (tableColumns.length > 0 ? tableColumns[0]! : "");
-  const nonKeyColumns = tableColumns.filter((col) => col !== resolvedKey);
-  const effectiveValues = draft.valueColumns.length > 0 ? draft.valueColumns : nonKeyColumns;
-
-  const toggleValueColumn = (col: string) => {
-    const isChecked = effectiveValues.includes(col);
-    if (isChecked) {
-      const base = draft.valueColumns.length > 0 ? draft.valueColumns : nonKeyColumns;
-      onUpdate(index, { valueColumns: base.filter((v) => v !== col) });
-    } else {
-      const next = [...draft.valueColumns, col];
-      if (nonKeyColumns.every((c) => next.includes(c))) {
-        onUpdate(index, { valueColumns: [] });
-      } else {
-        onUpdate(index, { valueColumns: next });
-      }
-    }
-  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -372,45 +313,16 @@ function FileLookupCardBody({
       </FormField>
       <FilePreviewPanel dark={dark} fileId={draft.fileId} query={draft.query} keyColumn={resolvedKey} onColumnsAvailable={setTableColumns} spec={spec} />
 
-      {/* Column pickers — only shown when the jq expression produces a valid table */}
-      {tableColumns.length > 0 && (
-        <>
-          <FormField label="Key Column" description="Column used as the lookup key." helpRef={spec.helpRef} dark={dark}>
-            <SelectInput
-              value={draft.keyColumn}
-              onChange={(v) => onUpdate(index, { keyColumn: v })}
-              options={[
-                { value: "", label: `${tableColumns[0]} (first column)` },
-                ...tableColumns.slice(1).map((col) => ({ value: col, label: col })),
-              ]}
-              dark={dark}
-            />
-          </FormField>
-
-          <FormField label="Value Columns" description="Columns included in lookup results. Uncheck columns you don't need." helpRef={spec.helpRef} dark={dark}>
-            <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-              {nonKeyColumns.map((col) => {
-                const checked = effectiveValues.includes(col);
-                return (
-                  <label
-                    key={col}
-                    className={`flex items-center gap-1.5 text-[0.85em] font-mono cursor-pointer select-none ${c("text-text-bright", "text-light-text-bright")}`}
-                  >
-                    <input
-                      type="checkbox"
-                      disabled={readOnly}
-                      checked={checked}
-                      onChange={() => toggleValueColumn(col)}
-                      className="accent-copper"
-                    />
-                    {col}
-                  </label>
-                );
-              })}
-            </div>
-          </FormField>
-        </>
-      )}
+      <ColumnPickers
+        columns={tableColumns}
+        keyColumn={draft.keyColumn}
+        valueColumns={draft.valueColumns}
+        onKeyColumnChange={(v) => onUpdate(index, { keyColumn: v })}
+        onValueColumnsChange={(v) => onUpdate(index, { valueColumns: v })}
+        unavailableReason={tableColumnsUnavailable(draft.fileId, tableColumns)}
+        helpRef={spec.helpRef}
+        dark={dark}
+      />
     </div>
   );
 }

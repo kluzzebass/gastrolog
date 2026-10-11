@@ -3,11 +3,16 @@ import { useReadOnly } from "../../hooks/useReadOnly";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { HelpButton } from "../HelpButton";
 
-const FormFieldIdContext = createContext<string | undefined>(undefined);
+const FormFieldContext = createContext<{ id: string; disabled: boolean } | undefined>(undefined);
 
 /** Returns the auto-generated id from the enclosing FormField, if any. */
 function useFormFieldId() {
-  return useContext(FormFieldIdContext);
+  return useContext(FormFieldContext)?.id;
+}
+
+/** True when the enclosing FormField is gated off by a disabledReason. */
+export function useFormFieldDisabled(): boolean {
+  return useContext(FormFieldContext)?.disabled ?? false;
 }
 
 interface FormFieldProps {
@@ -15,6 +20,12 @@ interface FormFieldProps {
   description?: React.ReactNode;
   /** Help reference — a topic ID, optionally with a "#section" anchor — opened from a button beside the label. */
   helpRef?: string;
+  /**
+   * One line naming why the field cannot be used right now. Every input
+   * inside the field is disabled while it is set, so a gated field stays
+   * on screen with its cause instead of appearing and disappearing.
+   */
+  disabledReason?: string;
   dark: boolean;
   children: React.ReactNode;
 }
@@ -23,13 +34,14 @@ export function FormField({
   label,
   description,
   helpRef,
+  disabledReason,
   dark,
   children,
 }: Readonly<FormFieldProps>) {
   const id = useId();
   const c = useThemeClass(dark);
   return (
-    <FormFieldIdContext.Provider value={id}>
+    <FormFieldContext.Provider value={{ id, disabled: disabledReason !== undefined }}>
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-1.5">
           <label
@@ -41,6 +53,14 @@ export function FormField({
           {helpRef && <HelpButton helpRef={helpRef} />}
         </div>
         {children}
+        {disabledReason && (
+          <div
+            role="note"
+            className={`text-[0.85em] leading-relaxed ${c("text-text-normal", "text-light-text-normal")}`}
+          >
+            {disabledReason}
+          </div>
+        )}
         {description && (
           <div
             className={`text-[0.85em] leading-relaxed ${c("text-text-muted", "text-light-text-muted")}`}
@@ -49,7 +69,7 @@ export function FormField({
           </div>
         )}
       </div>
-    </FormFieldIdContext.Provider>
+    </FormFieldContext.Provider>
   );
 }
 
@@ -120,7 +140,7 @@ export function TextInput({
   onChange,
   placeholder,
   dark,
-  disabled,
+  disabled: disabledProp,
   mono,
   examples,
   error,
@@ -128,6 +148,8 @@ export function TextInput({
   highlighted,
 }: Readonly<TextInputProps>) {
   const id = useFormFieldId();
+  const fieldDisabled = useFormFieldDisabled();
+  const disabled = disabledProp || fieldDisabled;
   const c = useThemeClass(dark);
   const readOnly = useReadOnly();
   let stateClasses: string;
@@ -182,10 +204,12 @@ export function SelectInput({
   onChange,
   options,
   dark,
-  disabled,
+  disabled: disabledProp,
   highlighted,
 }: Readonly<SelectInputProps>) {
   const id = useFormFieldId();
+  const fieldDisabled = useFormFieldDisabled();
+  const disabled = disabledProp || fieldDisabled;
   const c = useThemeClass(dark);
   const readOnly = useReadOnly();
   const stateClasses = highlighted
@@ -229,11 +253,13 @@ export function NumberInput({
   onChange,
   placeholder,
   dark,
-  disabled,
+  disabled: disabledProp,
   min,
   examples,
 }: Readonly<NumberInputProps>) {
   const id = useFormFieldId();
+  const fieldDisabled = useFormFieldDisabled();
+  const disabled = disabledProp || fieldDisabled;
   const c = useThemeClass(dark);
   const readOnly = useReadOnly();
   return (
@@ -277,12 +303,14 @@ export function SpinnerInput({
   value,
   onChange,
   dark,
-  disabled,
+  disabled: disabledProp,
   min = 1,
   max,
   skip = [],
 }: Readonly<SpinnerInputProps>) {
   const id = useFormFieldId();
+  const fieldDisabled = useFormFieldDisabled();
+  const disabled = disabledProp || fieldDisabled;
   const c = useThemeClass(dark);
   const readOnly = useReadOnly();
   const n = parseInt(value, 10) || min;
@@ -361,11 +389,13 @@ export function TextArea({
   onChange,
   placeholder,
   dark,
-  disabled,
+  disabled: disabledProp,
   rows = 4,
   className,
 }: Readonly<TextAreaProps>) {
   const id = useFormFieldId();
+  const fieldDisabled = useFormFieldDisabled();
+  const disabled = disabledProp || fieldDisabled;
   const c = useThemeClass(dark);
   const readOnly = useReadOnly();
   return (
