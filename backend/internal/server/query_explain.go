@@ -112,7 +112,7 @@ func (s *QueryServer) collectRemoteExplain(ctx context.Context, q query.Query, r
 	if len(byNode) == 0 {
 		return
 	}
-	queryExpr := q.String()
+	queryExpr := forwardedQueryExpression(q)
 
 	// Flatten byNode into parallel slices so peerFanOut can fan out by
 	// node-index. The vaultsByNode lookup is captured per-call by closing

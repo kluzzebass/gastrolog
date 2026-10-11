@@ -41,7 +41,7 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) (iter.Se
 		return nil, nil, nil
 	}
 
-	queryExpr := q.String()
+	queryExpr := forwardedQueryExpression(q)
 	resumeToken := remoteCursorToken(q)
 
 	// Fan out streaming RPCs concurrently — one per remote vault.
@@ -109,6 +109,15 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) (iter.Se
 	// K-way merge of N iterators using a heap.
 	merged := kWayMerge(iters, q.OrderBy, q.Reverse())
 	return merged, allHist, contributingVaults
+}
+
+// collectRemoteForPipeline gathers the remote records a pipeline running on
+// this node consumes. Each peer scans under the pipeline's own scan limit, as
+// the local scan does, never under the page size the pipeline's output is
+// capped at.
+func (s *QueryServer) collectRemoteForPipeline(ctx context.Context, q query.Query, pipeline *querylang.Pipeline) (iter.Seq2[chunk.Record, error], []*apiv1.HistogramBucket, []glid.GLID) {
+	q.Limit = query.PipelineScanLimit(pipeline)
+	return s.collectRemote(ctx, q)
 }
 
 // remoteVaultsByNode groups remote vault IDs by their owning node.
@@ -352,7 +361,7 @@ func forwardedPipelineExpression(q query.Query, pipeline *querylang.Pipeline) st
 	}
 	_, q.BoolExpr = query.ExtractVaultFilter(q.BoolExpr, nil)
 	parts := make([]string, 0, len(pipeline.Pipes)+1)
-	parts = append(parts, q.String())
+	parts = append(parts, forwardedQueryExpression(q))
 	for _, op := range pipeline.Pipes {
 		parts = append(parts, op.String())
 	}
