@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -88,7 +87,7 @@ func TestOrchPipeline_FailedLeaderReregistrationRetiresNoChunks(t *testing.T) {
 		return fmt.Sprintf("%v", views), all
 	}, nil)
 
-	working := paths.WorkingDir(filepath.Join(placementLeader.home, "segments", v.id.String()))
+	working := paths.WorkingDir(h.pipelineVaultRoot(placementLeader.id, v))
 	if err := os.RemoveAll(working); err != nil {
 		t.Fatal(err)
 	}

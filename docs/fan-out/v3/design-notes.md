@@ -392,9 +392,25 @@ a periodic “read FSM and maybe propose” tick. See [`chunking-design.md`](./c
 
 **Storage areas are roles bound to storage.** The phases own on-disk areas —
 Segmentation's `working/` and `completed/`, Collection's **pre-head**, and the
-**head** and chunk store. Each area's location resolves either explicitly
-(operator-pinned) or automatically from the vault's storage class matched against
-the node's available storages (default). Two constraints:
+**head** and chunk store (`chunks/`). All of a vault's areas on a node live under
+one **pipeline root**, resolved from the vault's placement: placement matches the
+vault's storage class against the node's FileStorages, and on a node with a
+placement for the vault the root is `<storage>/segments/<vault-id>` on the
+FileStorage that placement chose — so the class decides which volume the vault's
+segments and GLCBs fill, and that storage's disk guard watches them. A node
+without such a placement only originates segments for the vault; its root is the
+node home's `segments/<vault-id>`, guarded by the node's home-volume guard. A
+placement change moves the root (another storage on the same node, or the node
+becoming or ceasing to be a home), and the next registration gathers the vault's
+files from every other root the node could hold them under into the new one
+before the managers start: a home takes every area, an origin-only node takes
+`working/` and `completed/` (a former home's `head/` and `chunks/` stay where
+they are; the released-segment sweep purges staging copies under every such
+root). Within one filesystem a file moves by rename; across filesystems it is
+copied, synced and renamed into place before the old copy is removed, so an
+interrupted gather leaves every file whole somewhere and the next registration
+finishes it. A gather that cannot finish still registers the vault on its new
+root and retries on the next reload. Two constraints:
 - *Head invariant.* A segment enters the head only when complete and
   checksum-verified; in-flight transfers sit in pre-head, invisible to queries and
   Chunking. A failed or corrupt transfer is discarded and re-fetched from another
@@ -405,7 +421,8 @@ the node's available storages (default). Two constraints:
 - *Rename-paired areas co-locate.* Promotion is an atomic `rename(2)`, so paired
   areas must share storage: `working`↔`completed` on the origin, pre-head↔head on
   the collector. A locally written segment needs no transfer — Segmentation's
-  `completed/` promotes straight into the head.
+  `completed/` promotes straight into the head. One root per vault per node
+  satisfies this by construction.
 
 ## Pipeline at a glance
 

@@ -13,7 +13,7 @@ Persists chunks to local disk. Sealed chunks are compressed automatically for ef
 
 ## What You Should Know
 
-- The vault's data directory is derived from its assigned file storage path — you don't set it manually.
+- The vault's data directory is derived from its assigned file storage path — you don't set it manually. Its ingest segments and built chunks live on that same storage.
 - Only one process can open a chunk directory at a time (enforced by a lock file).
 - Sealed chunks are automatically compressed — no configuration needed.
 - If GastroLog crashes, it recovers on restart — at most the last partially-written record is lost.

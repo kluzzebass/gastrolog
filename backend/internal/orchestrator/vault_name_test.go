@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"gastrolog/internal/glid"
-	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/system"
 )
 
@@ -103,7 +102,7 @@ func TestPipelineVaultSpecCarriesTheNameResolver(t *testing.T) {
 	vaultID := glid.New()
 	orch := orchWithVaults(t, system.VaultConfig{ID: vaultID, Name: "app-logs"})
 
-	spec, err := orch.buildPipelineVaultSpec(vaultID, false, nil, nil, nil, false, chunking.ManifestRotationPolicy{})
+	spec, err := orch.buildPipelineVaultSpec(vaultID, pipelineVaultReg{}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildPipelineVaultSpec: %v", err)
 	}

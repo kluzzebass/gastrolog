@@ -3569,15 +3569,25 @@ func (m *Manager) GLCBBlobPath(id chunk.ChunkID) (string, bool) {
 // vault ChunkRoot rather than this manager's Dir) it returns that path;
 // otherwise the canonical <chunkDir>/data.glcb — unless that file is absent
 // and this node's pipeline-built copy exists, which is how an unregistered
-// cloud-backed chunk's pipeline GLCB serves as its warm cache. Safe to call
-// without mu held — it briefly takes mu to read the externalGLCB map and is
-// never invoked from a code path that already holds it.
+// cloud-backed chunk's pipeline GLCB serves as its warm cache. A registered
+// path whose file is gone defers to the locator: a placement change moves the
+// vault's pipeline root, and the locator names where the copy lives now. Safe
+// to call without mu held — it briefly takes mu to read the externalGLCB map
+// and is never invoked from a code path that already holds it.
 func (m *Manager) glcbPath(id chunk.ChunkID) string {
 	m.mu.Lock()
 	p, ok := m.externalGLCB[id]
 	locate := m.externalLocator
 	m.mu.Unlock()
 	if ok {
+		if _, err := os.Stat(p); err == nil || locate == nil {
+			return p
+		}
+		if located, found := locate(id); found {
+			if _, err := os.Stat(located); err == nil {
+				return located
+			}
+		}
 		return p
 	}
 	local := filepath.Join(m.chunkDir(id), dataGLCBFileName)

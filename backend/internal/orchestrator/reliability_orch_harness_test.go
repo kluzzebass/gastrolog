@@ -64,6 +64,9 @@ type orchRelNode struct {
 	groupMgr      *raftgroup.GroupManager
 	orch          *orchestrator.Orchestrator
 	peerConns     *cluster.PeerConnManager // non-nil only with withPipelineCluster
+	// classStorageIDs holds the node's additional file storages, one per
+	// class registered with withStorageClassVault, each in its own directory.
+	classStorageIDs map[uint32]glid.GLID
 	// factories is the node's component-factory set as built by startNode,
 	// kept so tests can drive dispatcher-equivalent calls (AddVaultInstance)
 	// after config changes.
@@ -117,6 +120,9 @@ type orchRelHarness struct {
 	// group creation defers until resolveVaultCtlPeers. Such nodes are left
 	// out of the boot-time readiness wait.
 	vaultCtlHiddenPeer map[int]int
+	// extraStorageClasses lists the classes of the additional file storage
+	// every node gets (withStorageClassVault).
+	extraStorageClasses []uint32
 	// rotationPolicyID is the shared pipeline rotation policy written by
 	// seedSharedConfig (nil without withPipelineCluster); vaults added
 	// mid-test (addRuntimeVault) reference it too.
@@ -142,6 +148,17 @@ type vaultSpec struct {
 	label    string    // human label for test output ("A", "B", ...)
 	id       glid.GLID // vault GLID
 	nodeIdxs []int     // indexes into h.nodeIDs; first is vault leader
+	// storageClass is the vault's storage class; zero means
+	// harnessStorageClass, the class of every node's default file storage.
+	storageClass uint32
+}
+
+// class is the vault's storage class.
+func (v vaultSpec) class() uint32 {
+	if v.storageClass == 0 {
+		return harnessStorageClass
+	}
+	return v.storageClass
 }
 
 // orchRelOption configures a harness before it boots. Applied between
@@ -165,6 +182,40 @@ func withExtraVault(nodeIdxs []int) orchRelOption {
 			nodeIdxs: nodeIdxs,
 		})
 	}
+}
+
+// withStorageClassVault gives every node an additional file storage of the
+// given class, in its own directory (<home>/class-<N>), and registers a vault
+// of that class placed on those storages of the given node indexes (first is
+// the vault leader). Labeled like withExtraVault.
+func withStorageClassVault(class uint32, nodeIdxs []int) orchRelOption {
+	return func(h *orchRelHarness) {
+		label := string(rune('B' + len(h.vaults) - 1))
+		h.vaults = append(h.vaults, vaultSpec{
+			label:        label,
+			id:           glid.New(),
+			nodeIdxs:     nodeIdxs,
+			storageClass: class,
+		})
+		if !slices.Contains(h.extraStorageClasses, class) {
+			h.extraStorageClasses = append(h.extraStorageClasses, class)
+		}
+	}
+}
+
+// classStoragePath is the directory of a node's additional file storage of a
+// class (withStorageClassVault).
+func classStoragePath(n *orchRelNode, class uint32) string {
+	return filepath.Join(n.home, fmt.Sprintf("class-%d", class))
+}
+
+// storageFor is the node's file storage of the vault's class: its ID and
+// directory.
+func (h *orchRelHarness) storageFor(n *orchRelNode, v vaultSpec) (glid.GLID, string) {
+	if v.class() == harnessStorageClass {
+		return n.fileStorageID, filepath.Join(n.home, "chunks")
+	}
+	return n.classStorageIDs[v.class()], classStoragePath(n, v.class())
 }
 
 // withNilConfigBoot marks the node at nodeIdx to boot the fresh-joiner way:
@@ -593,16 +644,28 @@ func (h *orchRelHarness) seedSharedConfig() {
 		}
 		storageID := glid.New()
 		n.fileStorageID = storageID
-		if err := h.cfgStore.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
-			NodeID: id,
-			FileStorages: []system.FileStorage{
-				{
-					ID:           storageID,
-					StorageClass: harnessStorageClass,
-					Name:         n.label + "-fs",
-					Path:         filepath.Join(n.home, "chunks"),
-				},
+		storages := []system.FileStorage{
+			{
+				ID:           storageID,
+				StorageClass: harnessStorageClass,
+				Name:         n.label + "-fs",
+				Path:         filepath.Join(n.home, "chunks"),
 			},
+		}
+		n.classStorageIDs = make(map[uint32]glid.GLID, len(h.extraStorageClasses))
+		for _, class := range h.extraStorageClasses {
+			classID := glid.New()
+			n.classStorageIDs[class] = classID
+			storages = append(storages, system.FileStorage{
+				ID:           classID,
+				StorageClass: class,
+				Name:         fmt.Sprintf("%s-class-%d", n.label, class),
+				Path:         classStoragePath(n, class),
+			})
+		}
+		if err := h.cfgStore.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
+			NodeID:       id,
+			FileStorages: storages,
 		}); err != nil {
 			h.t.Fatalf("PutNodeStorageConfig %s: %v", n.label, err)
 		}
@@ -635,7 +698,7 @@ func (h *orchRelHarness) seedSharedConfig() {
 			ID:               v.id,
 			Name:             "orch-rel-vault-" + v.label,
 			Type:             system.VaultTypeFile,
-			StorageClass:     harnessStorageClass,
+			StorageClass:     v.class(),
 			RotationPolicyID: rotationPolicyID,
 		}); err != nil {
 			h.t.Fatalf("PutVault %s: %v", v.label, err)
@@ -647,8 +710,9 @@ func (h *orchRelHarness) seedSharedConfig() {
 				h.t.Fatalf("vault %s: invalid node index %d (have %d nodes)", v.label, idx, len(h.nodeIDs))
 			}
 			n := h.nodes[h.nodeIDs[idx]]
+			storageID, _ := h.storageFor(n, v)
 			placements = append(placements, system.VaultPlacement{
-				StorageID: n.fileStorageID.String(),
+				StorageID: storageID.String(),
 				Leader:    pos == 0,
 			})
 		}
@@ -826,8 +890,9 @@ func (h *orchRelHarness) setVaultPlacements(v vaultSpec, nodeIdxs []int) {
 	placements := make([]system.VaultPlacement, 0, len(nodeIdxs))
 	for pos, idx := range nodeIdxs {
 		n := h.nodes[h.nodeIDs[idx]]
+		storageID, _ := h.storageFor(n, v)
 		placements = append(placements, system.VaultPlacement{
-			StorageID: n.fileStorageID.String(),
+			StorageID: storageID.String(),
 			Leader:    pos == 0,
 		})
 	}

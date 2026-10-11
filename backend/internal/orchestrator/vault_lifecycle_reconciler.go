@@ -1295,12 +1295,11 @@ func (r *VaultLifecycleReconciler) alertUnknownOrphan(meta chunk.ChunkMeta) {
 
 // SweepStagingOrphans is the chunk-staging counterpart of
 // SweepLocalOrphans. SweepLocalOrphans covers the chunk Manager's store,
-// but V3 builds chunks under the pipeline staging root
-// (<segmentsDir>/<vaultID>/chunks), which the Manager only learns about
-// lazily via FSM activity — a dir whose delete this node missed while
-// offline is invisible to it forever. This sweep enumerates chunks/ on
-// DISK and removes a dir iff the FSM has no manifest entry, no
-// pendingDeletes obligation, AND a tombstone — positive proof a
+// but V3 builds chunks in the chunks/ area of the vault's pipeline root,
+// which the Manager only learns about lazily via FSM activity — a dir whose
+// delete this node missed while offline is invisible to it forever. This
+// sweep enumerates chunks/ on DISK and removes a dir iff the FSM has no
+// manifest entry, no pendingDeletes obligation, AND a tombstone — positive proof a
 // finalize-delete applied while this node was offline. Unknown dirs are
 // preserved per the no-auto-delete-of-unknown-orphans invariant, so a
 // not-yet-caught-up FSM can only DELAY cleanup, never delete live data.
