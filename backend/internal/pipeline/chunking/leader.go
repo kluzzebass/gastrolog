@@ -574,7 +574,8 @@ func (v *vaultChunking) eligibleRegistrySegments() []vaultctlfsm.CompletedSegmen
 // eligibleRegistrySegments so a pass can filter its single snapshot without a
 // second ListCompletedSegments scan.
 func (v *vaultChunking) eligibleFromEntries(entries []vaultctlfsm.CompletedSegmentEntry) []vaultctlfsm.CompletedSegmentEntry {
-	minHolders := v.plannerMinHolders()
+	placement := quorumPlacement(v.requiredHolders())
+	minHolders := vaultctlfsm.HolderQuorum(placement)
 	now := v.now()
 	out := make([]vaultctlfsm.CompletedSegmentEntry, 0, len(entries))
 	var gated int
@@ -584,14 +585,14 @@ func (v *vaultChunking) eligibleFromEntries(entries []vaultctlfsm.CompletedSegme
 			continue
 		}
 		// Replication-window gate: never plan a segment whose bytes exist
-		// on fewer than minHolders nodes. Registry publish
+		// on fewer than minHolders placement members. Registry publish
 		// precedes replication, and a manifest referencing a single-copy
 		// segment wedges the vault's entire serial seal queue if that copy's
 		// node dies (builds require real bytes on every home; skipping would
 		// be record loss). Release/purge already respect holder receipts;
 		// this makes planning respect the same window. Cost: chunking lags
 		// ingestion by replication lag — seconds in steady state.
-		if minHolders > 0 && len(entry.Holders) < minHolders {
+		if minHolders > 0 && vaultctlfsm.PlacedHolderCount(entry.Holders, placement) < minHolders {
 			gated++
 			if age := now.Sub(entry.PublishedAt); age > oldestGated {
 				oldestGated = age
@@ -604,19 +605,18 @@ func (v *vaultChunking) eligibleFromEntries(entries []vaultctlfsm.CompletedSegme
 	return out
 }
 
-// plannerMinHolders returns the minimum holder count for a segment to be
-// plannable: min(2, placement size), from the same live RequiredHolders
-// source release/purge gating trusts. Zero disables the gate — for the
-// explicit NoRequiredHolders opt-out (no placements to replicate to) and for
-// an unresolved placement lookup: planning is not release, chunks build from
-// local bytes that remain on disk, and the release/purge gates fail closed
-// on unresolved lookups independently.
-func (v *vaultChunking) plannerMinHolders() int {
-	required, resolved := v.cfg.RequiredHolders()
-	if !resolved || len(required) == 0 {
-		return 0
+// quorumPlacement is the placement the replication-quorum gates count holders
+// against (vaultctlfsm.HolderQuorum, vaultctlfsm.PlacedHolderCount): the live
+// RequiredHolders set, the same source release/purge gating trusts. Nil
+// disables those gates — for the explicit NoRequiredHolders opt-out (no
+// placements to replicate to) and for an unresolved placement lookup: planning
+// is not release, chunks build from local bytes that remain on disk, and the
+// release/purge gates fail closed on unresolved lookups independently.
+func quorumPlacement(required []string, resolved bool) []string {
+	if !resolved {
+		return nil
 	}
-	return min(2, len(required))
+	return required
 }
 
 // underReplicatedAlertAfter is the grace period before gated segments raise

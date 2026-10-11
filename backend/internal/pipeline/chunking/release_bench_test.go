@@ -67,7 +67,7 @@ func BenchmarkReleasePassScan(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				scan := fsm.SnapshotReleaseScan(2)
+				scan := fsm.SnapshotReleaseScan(required)
 				ready := 0
 				for i := range scan.Entries {
 					if scanMayRelease(scan, &scan.Entries[i], required, true, 0, time.Time{}) {
@@ -106,7 +106,7 @@ func BenchmarkReleasePassPerSegment(b *testing.B) {
 					if n, ok := fsm.ResumeRecordNumber(e.SegmentID); !ok || n < e.RecordCount {
 						continue
 					}
-					if fsm.SegmentSuperseded(e.SegmentID, 2) || holdersCover(e.Holders, required) {
+					if fsm.SegmentSuperseded(e.SegmentID, required) || holdersCover(e.Holders, required) {
 						ready++
 					}
 				}

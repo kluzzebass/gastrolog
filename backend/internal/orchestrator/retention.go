@@ -319,7 +319,7 @@ func (o *Orchestrator) retentionSweepAll() {
 // consolidated ReconcileTick: one shared FSM/disk gather per tick, then
 // every reconcile category diffs against it (pending obligations, local
 // orphans, staging orphans, missing replicas, stale leader FSM entries,
-// stale pending-delete acks, idle actives). See
+// nodes outside the placement, idle actives). See
 // VaultLifecycleReconciler.ReconcileTick for the category catalogue and
 // per-category ownership docs.
 //
@@ -327,8 +327,8 @@ func (o *Orchestrator) retentionSweepAll() {
 // that drives its primary convergence — delete obligations on
 // CmdRequestDelete apply, local/staging orphans on snapshot install
 // (ReconcileFromSnapshot), and the leader-only categories on lead-gained
-// (ReconcileMembershipCatchup), and stale pending-delete acks additionally
-// on a placement move under a stable leader (wakeStalePendingAckReconcile).
+// (ReconcileMembershipCatchup), and the outside-placement prune additionally
+// on a placement move under a stable leader (wakeOutsidePlacementPrune).
 // This tick catches the residual: dropped/raced events, and the two
 // categories that are periodic-by-nature (idle-active wall-clock
 // inactivity, and the grace-period GCs for stale-leader-FSM and

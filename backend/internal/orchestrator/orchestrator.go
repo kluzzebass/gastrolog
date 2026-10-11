@@ -928,11 +928,10 @@ func New(cfg Config) (*Orchestrator, error) {
 	o.cachedReplicationReady.Store(true)
 
 	// When the vault-ctl Raft leader removes a node from the voter set,
-	// propose CmdPruneNode on every instance sub-FSM in that vault so
-	// pendingDeletes ExpectedFrom obligations from the decommissioned node
-	// don't block finalization. The reconciler's onPruneNode handler will
-	// then propose CmdFinalizeDelete for any chunk whose ExpectedFrom
-	// became empty.
+	// propose CmdPruneNode on that vault's chunk FSM so the departed node's
+	// pendingDeletes ExpectedFrom obligations don't block finalization and
+	// its chunk and segment holder claims stop reporting copies it no
+	// longer serves.
 	o.vaultCtlLeaders.SetOnMemberRemoved(o.proposePruneNodeForVault)
 	o.vaultCtlLeaders.AddOnLeadGained(o.onVaultCtlLeadGained)
 

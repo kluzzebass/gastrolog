@@ -283,9 +283,10 @@ func (s *ReleaseScan) Entry(id glid.GLID) *CompletedSegmentEntry {
 }
 
 // SnapshotReleaseScan builds a ReleaseScan under a single read lock.
-// minChunkHolders parameterizes the supersession precompute; <= 0 disables it
-// (placement wiring absent), leaving Superseded empty.
-func (f *FSM) SnapshotReleaseScan(minChunkHolders int) *ReleaseScan {
+// placement is the vault's current placement node set and parameterizes the
+// supersession precompute; an empty placement disables it (placement wiring
+// absent or unresolved), leaving Superseded empty.
+func (f *FSM) SnapshotReleaseScan(placement []string) *ReleaseScan {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
@@ -307,11 +308,11 @@ func (f *FSM) SnapshotReleaseScan(minChunkHolders int) *ReleaseScan {
 		}
 	}
 	maps.Copy(scan.Resume, f.segmentResume)
-	if minChunkHolders > 0 {
+	if len(placement) > 0 {
 		scan.Superseded = make(map[glid.GLID]struct{})
 		for i := range scan.Entries {
 			id := scan.Entries[i].SegmentID
-			if f.segmentSupersededLocked(id, minChunkHolders) {
+			if f.segmentSupersededLocked(id, placement) {
 				scan.Superseded[id] = struct{}{}
 			}
 		}
@@ -320,31 +321,31 @@ func (f *FSM) SnapshotReleaseScan(minChunkHolders int) *ReleaseScan {
 }
 
 // SegmentSuperseded reports whether segID's records now live in chunks
-// replicated to at least minChunkHolders nodes — the release/purge signal that
-// supersedes the raw segment (design-notes 39, refined R3: RF, not home-set, so
-// a dead home never pins the segment; the dead home catches up at the chunk
-// level). True only when the segment has been chunked (≥1 containing chunk) and
-// every containing chunk is sealed and held by ≥ minChunkHolders nodes, or has
-// already aged out (tombstoned/expired — the records are gone by retention, so
-// the segment is equally free to drop). minChunkHolders ≤ 0 means placement
-// wiring is absent (single-node/test); return false so release falls back to
-// the holders⊇homes fast path.
-func (f *FSM) SegmentSuperseded(segID glid.GLID, minChunkHolders int) bool {
-	if minChunkHolders <= 0 {
+// replicated to HolderQuorum(placement) placed holders — the release/purge
+// signal that supersedes the raw segment (design-notes 39, refined R3: RF, not
+// home-set, so a dead home never pins the segment; the dead home catches up at
+// the chunk level). True only when the segment has been chunked (≥1 containing
+// chunk) and every containing chunk is sealed and held by enough members of
+// placement, or has already aged out (tombstoned/expired — the records are gone
+// by retention, so the segment is equally free to drop). An empty placement
+// means placement wiring is absent or unresolved (single-node/test); return
+// false so release falls back to the holders⊇homes fast path.
+func (f *FSM) SegmentSuperseded(segID glid.GLID, placement []string) bool {
+	if len(placement) == 0 {
 		return false
 	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.segmentSupersededLocked(segID, minChunkHolders)
+	return f.segmentSupersededLocked(segID, placement)
 }
 
-func (f *FSM) segmentSupersededLocked(segID glid.GLID, minChunkHolders int) bool {
+func (f *FSM) segmentSupersededLocked(segID glid.GLID, placement []string) bool {
 	chunkIDs := f.segmentChunks[segID]
 	if len(chunkIDs) == 0 {
 		return false
 	}
 	for _, id := range chunkIDs {
-		if !f.chunkReplicatedLocked(id, minChunkHolders) {
+		if !f.chunkReplicatedLocked(id, placement) {
 			return false
 		}
 	}
@@ -352,9 +353,10 @@ func (f *FSM) segmentSupersededLocked(segID glid.GLID, minChunkHolders int) bool
 }
 
 // chunkReplicatedLocked reports whether chunk id is durable enough to supersede
-// a segment: sealed and held by ≥ minChunkHolders nodes, or already gone (its
-// records aged out under retention, which only deletes sealed chunks).
-func (f *FSM) chunkReplicatedLocked(id chunk.ChunkID, minChunkHolders int) bool {
+// a segment: sealed and held by HolderQuorum(placement) members of placement,
+// or already gone (its records aged out under retention, which only deletes
+// sealed chunks).
+func (f *FSM) chunkReplicatedLocked(id chunk.ChunkID, placement []string) bool {
 	entry := f.chunks[id]
 	if entry == nil {
 		return true
@@ -362,7 +364,7 @@ func (f *FSM) chunkReplicatedLocked(id chunk.ChunkID, minChunkHolders int) bool 
 	if entry.State != chunk.ChunkStateSealed {
 		return false
 	}
-	return len(entry.Holders) >= minChunkHolders
+	return PlacedHolderCount(entry.Holders, placement) >= HolderQuorum(placement)
 }
 
 func copyOpenChunkManifest(m *OpenChunkManifest) *OpenChunkManifest {

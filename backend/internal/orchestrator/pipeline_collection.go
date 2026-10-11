@@ -54,18 +54,15 @@ func (r *segmentLogReader) fsm() *vaultctlfsm.FSM {
 	return nil
 }
 
-// supersessionThreshold is the chunk-holder count that supersedes a segment:
-// RF = min(2, placement size), the same floor the chunking planner uses. Zero
-// disables the differential skip (no placement wiring — single-node/tests).
-func (r *segmentLogReader) supersessionThreshold() int {
+// supersessionPlacement is the placement whose members must hold a segment's
+// containing chunks (vaultctlfsm.HolderQuorum of them) for the segment to be
+// superseded — the same quorum the chunking planner uses. Nil disables the
+// differential skip (no placement wiring — single-node/tests).
+func (r *segmentLogReader) supersessionPlacement() []string {
 	if r.placement == nil {
-		return 0
+		return nil
 	}
-	n := len(r.placement())
-	if n <= 0 {
-		return 0
-	}
-	return min(2, n)
+	return r.placement()
 }
 
 func (r *segmentLogReader) Roll(_ context.Context, vaultID glid.GLID) ([]collection.AssignedSegment, error) {
@@ -74,7 +71,7 @@ func (r *segmentLogReader) Roll(_ context.Context, vaultID glid.GLID) ([]collect
 		return nil, errors.New("vault-ctl FSM required")
 	}
 	entries := fsm.ListCompletedSegments()
-	minChunkHolders := r.supersessionThreshold()
+	placement := r.supersessionPlacement()
 	var out []collection.AssignedSegment
 	for i := range entries {
 		e := &entries[i]
@@ -82,7 +79,7 @@ func (r *segmentLogReader) Roll(_ context.Context, vaultID glid.GLID) ([]collect
 		// RF-replicated chunk is superseded — do not pull the raw transport; the
 		// chunk arrives via chunk replication. Skips regardless of local holder
 		// state, so a waking node never chases a purged segment.
-		if minChunkHolders > 0 && fsm.SegmentSuperseded(e.SegmentID, minChunkHolders) {
+		if fsm.SegmentSuperseded(e.SegmentID, placement) {
 			continue
 		}
 		held := slices.Contains(e.Holders, r.localNodeID)

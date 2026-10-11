@@ -419,7 +419,8 @@ gRPC transport:
 - **Pending delete** (`vaultctlfsm.PendingDelete`) — a chunk delete
   committed in the vault FSM (`CmdRequestDelete`) and awaiting a
   `CmdAckDelete` from every node in its `ExpectedFrom` set; the manifest
-  entry goes when the last ack commits (or a node prune drains the set).
+  entry goes when the last ack commits (or a node prune — see **Holder** —
+  drains the set).
   The chunk has already left the retained set: retention sweeps and the
   age/count bound re-check skip it, while the manifest and residency keep
   reporting it until the acks land.
@@ -1157,7 +1158,7 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   an operator mid-incident, which makes it a different register from code and
   logs even when it names the same concepts. Three rules: name entities the
   way the operator knows them (a vault by name, never a bare GLID); never
-  print source notation (`min(2, placement)` is `plannerMinHolders` spelled
+  print source notation (`min(2, placement)` is `HolderQuorum` spelled
   as Go — say "a second node must hold a copy"), and never
   `time.Duration.String()` (use `system.FormatDuration`, which drops the zero
   components that make "3m0s"); and lead a Critical alarm with the
@@ -1386,6 +1387,12 @@ describes what the code does today.
   segment registry entry and on chunk state). Placement says who *should*
   hold; the holder set says who *does*. `holders ⊇ homes` is a release fast
   path, never the sole gate (a dead home must not pin a segment forever).
+  A holder outside the vault's current placement runs no vault instance, so
+  nothing of its own maintains its claim: every gate that destroys another
+  copy counts only **placed holders** (`vaultctlfsm.PlacedHolderCount`), and
+  **node prune** (`CmdPruneNode`) removes the node's claims — proposed by the
+  placement leader's outside-placement prune when the node leaves the
+  placement, and by the vault-ctl leader when it leaves the cluster.
 
 - **Holder receipt** — the vault-ctl commit a node makes after it has pulled
   and verified bytes (`AckSegmentHolderCommand` for segments,
@@ -1399,8 +1406,9 @@ describes what the code does today.
   from the supervisor's `ChunkRequiredHolders`). Mandatory at registration;
   an unresolved lookup fails the release/purge gates closed, and
   `chunking.NoRequiredHolders` is the explicit no-holder-gate opt-out for
-  single-node vaults. The planner floor for chunk-holder eligibility is
-  `min(2, placement size)` (`plannerMinHolders`).
+  single-node vaults. The replication quorum — the placed-holder count the
+  planner's segment eligibility, segment supersession, and head purge all
+  require — is `min(2, placement size)` (`vaultctlfsm.HolderQuorum`).
 
 ### Staging areas
 

@@ -133,7 +133,7 @@ func TestDiscardUnbuildableManifests(t *testing.T) {
 		t.Fatal("survivor registry entry must remain")
 	}
 	// Discarded chunks must not count toward supersession.
-	if wedged.SegmentSuperseded(survivor, 1) {
+	if wedged.SegmentSuperseded(survivor, []string{"home-a"}) {
 		t.Fatal("discarded chunks must be scrubbed from the supersession mapping")
 	}
 	// Chunk entries gone.

@@ -616,6 +616,17 @@ func TestPipelineSegmentLogReaderSkipsSupersededSegment(t *testing.T) {
 	if len(assigned) != 1 || assigned[0].SegmentID != segID {
 		t.Fatalf("Roll (no placement) = %+v, want the segment assigned", assigned)
 	}
+
+	// chunk-holder-b leaves the placement: one placed chunk holder is below
+	// RF, so the segment is no longer superseded and this home pulls it.
+	reader.placement = func() []string { return []string{"chunk-holder-a", testHomeNode} }
+	assigned, err = reader.Roll(context.Background(), vaultID)
+	if err != nil {
+		t.Fatalf("Roll (re-placed): %v", err)
+	}
+	if len(assigned) != 1 || assigned[0].SegmentID != segID {
+		t.Fatalf("Roll (re-placed) = %+v, want the segment assigned — a chunk holder outside the placement does not supersede it", assigned)
+	}
 }
 
 // TestPipelineSegmentLogReaderReassignsWhenSealedManifestNeedsBytes: when the

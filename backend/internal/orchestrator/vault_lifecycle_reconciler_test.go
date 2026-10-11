@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1668,7 +1669,7 @@ func TestSweepStaleLeaderFSMEntriesRespectsSealedAtGrace(t *testing.T) {
 	}
 }
 
-// TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes pins the
+// TestSweepNodesOutsidePlacementPrunesNonPlacementNodes pins the
 // self-healing receipt-protocol-unstick path: after a vault placement
 // change (kubectl scale, vault rebalance), pendingDelete entries can
 // carry stale ExpectedFrom node IDs for nodes no longer in the
@@ -1680,7 +1681,7 @@ func TestSweepStaleLeaderFSMEntriesRespectsSealedAtGrace(t *testing.T) {
 // Setup mirrors the live K8s incident: first-vault has chunks stuck
 // retention-pending with ExpectedFrom containing only stale-node, while
 // current placement is {leader-node + follower-node}.
-func TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes(t *testing.T) {
+func TestSweepNodesOutsidePlacementPrunesNonPlacementNodes(t *testing.T) {
 	t.Parallel()
 
 	fsm := vaultctlfsm.New()
@@ -1713,7 +1714,7 @@ func TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes(t *testing.T) {
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "leader-node", slog.Default())
 	rec.fsm = fsm
 
-	rec.SweepStalePendingDeleteAcks()
+	rec.SweepNodesOutsidePlacement()
 
 	if len(prunedNodes) != 1 {
 		t.Fatalf("expected 1 prune proposal for stale-node, got %d (%v)", len(prunedNodes), prunedNodes)
@@ -1723,12 +1724,12 @@ func TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes(t *testing.T) {
 	}
 }
 
-// TestSweepStalePendingDeleteAcksSkipsCurrentPlacementMembers pins the
+// TestSweepNodesOutsidePlacementSkipsCurrentPlacementMembers pins the
 // negative case: nodes in the current placement (leader + followers)
 // MUST NOT be pruned, even if they haven't acked yet. Live deletes
 // in-flight to current placement members are the receipt protocol's
 // normal operation, not stale references.
-func TestSweepStalePendingDeleteAcksSkipsCurrentPlacementMembers(t *testing.T) {
+func TestSweepNodesOutsidePlacementSkipsCurrentPlacementMembers(t *testing.T) {
 	t.Parallel()
 
 	fsm := vaultctlfsm.New()
@@ -1761,18 +1762,83 @@ func TestSweepStalePendingDeleteAcksSkipsCurrentPlacementMembers(t *testing.T) {
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "leader-node", slog.Default())
 	rec.fsm = fsm
 
-	rec.SweepStalePendingDeleteAcks()
+	rec.SweepNodesOutsidePlacement()
 
 	if len(prunedNodes) != 0 {
 		t.Errorf("MUST NOT prune current placement members; got %v", prunedNodes)
 	}
 }
 
-// TestSweepStalePendingDeleteAcksFollowersAreNoOp pins the leader-only
+// TestSweepNodesOutsidePlacementPrunesHolderClaims: a node that left the
+// vault's placement keeps its chunk and segment holder claims forever — no
+// reconciler of its own runs to revoke them. With no pending delete naming
+// it, the sweep still prunes it; the claims of current placement members
+// stay, and once pruned the sweep has nothing left to propose.
+func TestSweepNodesOutsidePlacementPrunesHolderClaims(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	apply := func(data []byte) {
+		t.Helper()
+		if err, ok := fsm.Apply(&hraft.Log{Data: data}).(error); ok && err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+	}
+	chunkID := chunk.NewChunkID()
+	apply(vaultctlfsm.MarshalCreateChunk(chunkID, time.Now(), time.Now(), time.Now()))
+	for _, node := range []string{"leader-node", "chunk-departed"} {
+		data, err := vaultctlfsm.MarshalAckChunkHolders([]chunk.ChunkID{chunkID}, node)
+		if err != nil {
+			t.Fatal(err)
+		}
+		apply(data)
+	}
+	segID := glid.New()
+	apply(vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID: segID, RecordCount: 1,
+	}))
+	apply(vaultctlfsm.MarshalAckSegmentHolders([]glid.GLID{segID}, "follower-node"))
+	apply(vaultctlfsm.MarshalAckSegmentHolders([]glid.GLID{segID}, "segment-departed"))
+
+	var prunedNodes []string
+	vaultInst := &VaultInstance{
+		VaultID:         glid.New(),
+		FollowerTargets: []system.ReplicationTarget{{NodeID: "follower-node"}},
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftPruneNode: func(nodeID string) error {
+				prunedNodes = append(prunedNodes, nodeID)
+				apply(vaultctlfsm.MarshalPruneNode(nodeID))
+				return nil
+			},
+		},
+	}
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "leader-node", slog.Default())
+	rec.fsm = fsm
+
+	rec.SweepNodesOutsidePlacement()
+
+	if want := []string{"chunk-departed", "segment-departed"}; !slices.Equal(prunedNodes, want) {
+		t.Fatalf("pruned %v, want %v", prunedNodes, want)
+	}
+	if got := fsm.Get(chunkID).Holders; !slices.Equal(got, []string{"leader-node"}) {
+		t.Errorf("chunk holders = %v, want [leader-node]", got)
+	}
+	if got := fsm.GetCompletedSegment(segID).Holders; !slices.Equal(got, []string{"follower-node"}) {
+		t.Errorf("segment holders = %v, want [follower-node]", got)
+	}
+
+	prunedNodes = nil
+	rec.SweepNodesOutsidePlacement()
+	if len(prunedNodes) != 0 {
+		t.Fatalf("converged sweep proposed %v, want nothing", prunedNodes)
+	}
+}
+
+// TestSweepNodesOutsidePlacementFollowersAreNoOp pins the leader-only
 // gate: only the vault-ctl leader should propose CmdPruneNode, mirroring
 // SweepStaleLeaderFSMEntries' leader-only design. Without this, every
 // node would race to propose the same prune on every sweep tick.
-func TestSweepStalePendingDeleteAcksFollowersAreNoOp(t *testing.T) {
+func TestSweepNodesOutsidePlacementFollowersAreNoOp(t *testing.T) {
 	t.Parallel()
 
 	fsm := vaultctlfsm.New()
@@ -1798,7 +1864,7 @@ func TestSweepStalePendingDeleteAcksFollowersAreNoOp(t *testing.T) {
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-X", slog.Default())
 	rec.fsm = fsm
 
-	rec.SweepStalePendingDeleteAcks()
+	rec.SweepNodesOutsidePlacement()
 
 	if len(prunedNodes) != 0 {
 		t.Errorf("followers MUST NOT propose CmdPruneNode; got %v", prunedNodes)
@@ -2200,7 +2266,7 @@ func TestReconcileFromSnapshotDeletesTombstonedLocalOrphan(t *testing.T) {
 }
 
 // TestReconcileMembershipCatchupPrunesStalePendingAcks pins the
-// stale-pending-ack category's event source: gaining vault-ctl leadership
+// outside-placement prune category's event source: gaining vault-ctl leadership
 // (ReconcileMembershipCatchup, wired to onVaultCtlLeadGained). A leader
 // that inherits a pendingDelete whose ExpectedFrom references a node
 // dropped from placement must prune it on the leadership edge, not wait

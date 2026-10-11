@@ -31,12 +31,13 @@ package orchestrator
 //     local chunk Manager via chunk.SealEnsurer.EnsureSealed, so
 //     sealed-state divergence (local manager still appending to a chunk
 //     the FSM has sealed) is resolved by replaying the FSM truth.
-//   - CmdPruneNode drops a decommissioned node from every pendingDeletes
-//     entry's ExpectedFrom and returns the chunkIDs whose ExpectedFrom
-//     became empty, finalizing them inside the same apply. The vault-ctl
-//     leader manager's onMemberRemoved hook fans it out across the
-//     vault's instance sub-FSMs after a successful RemoveServer call, so
-//     deletes don't pin pendingDeletes forever.
+//   - CmdPruneNode drops a node that left the vault's scope from every
+//     pendingDeletes entry's ExpectedFrom (finalizing the chunks whose
+//     ExpectedFrom became empty inside the same apply) and from every
+//     chunk and segment holder set. The vault-ctl leader manager's
+//     onMemberRemoved hook proposes it after a successful RemoveServer
+//     call (the node left the cluster); the outside-placement prune
+//     proposes it for a node that left the vault's placement.
 
 import (
 	"context"
@@ -1008,9 +1009,9 @@ func (r *VaultLifecycleReconciler) gatherReconcileView() *reconcileView {
 //   - staleLeaderFSM      periodic-by-nature: a 1h grace-period GC of
 //     FSM entries no reachable node can serve. The
 //     "event" is absence of bytes past a timeout.
-//   - stalePendingAcks    event: leadership change (lead-gained) AND
+//   - outsidePlacement    event: leadership change (lead-gained) AND
 //     placement move under a stable leader
-//     (wakeStalePendingAckReconcile on the
+//     (wakeOutsidePlacementPrune on the
 //     FollowerTargets / role reassignment) +
 //     CmdPruneNode. Tick = backstop.
 //   - idleActiveChunks    periodic-by-nature: wall-clock inactivity
@@ -1034,7 +1035,7 @@ func (r *VaultLifecycleReconciler) ReconcileTick() {
 	r.reconcileStagingOrphans(v)
 	r.reconcileMissingReplicas(v)
 	r.reconcileStaleLeaderFSMEntries(v)
-	r.reconcileStalePendingDeleteAcks(v)
+	r.reconcileNodesOutsidePlacement(v)
 	r.reconcileIdleActiveChunks(v)
 	r.reconcileAbandonedTransferAnnounces(v)
 	r.reconcileSealingResume(v)
@@ -1053,8 +1054,9 @@ func (r *VaultLifecycleReconciler) ReconcileTick() {
 //     pull them from a peer instead of waiting a tick.
 //   - reconcileStaleLeaderFSMEntries: retire sealed entries no reachable
 //     node can serve now that this node owns the leader-side decision.
-//   - reconcileStalePendingDeleteAcks: prune ExpectedFrom nodes dropped
-//     from placement before this leader took over, unsticking deletes.
+//   - reconcileNodesOutsidePlacement: prune nodes dropped from placement
+//     before this leader took over out of ExpectedFrom (unsticking deletes)
+//     and out of the chunk and segment holder sets.
 //   - reconcileAbandonedTransferAnnounces: retract transfer announces the
 //     source abandoned.
 //   - reconcileSealingResume: a chunk stranded mid-seal is invisible to
@@ -1072,9 +1074,9 @@ func (r *VaultLifecycleReconciler) ReconcileTick() {
 // build, an ApplyRaft* that failed once).
 //
 // A placement move under a STABLE leader gets its own, narrower wake:
-// wakeStalePendingAckReconcile fires only reconcileStalePendingDeleteAcks,
-// because ExpectedFrom is the one thing a FollowerTargets reassignment
-// directly invalidates. The other three categories here stay on
+// wakeOutsidePlacementPrune fires only reconcileNodesOutsidePlacement,
+// because ExpectedFrom and the holder sets are what a FollowerTargets
+// reassignment directly invalidates. The other three categories here stay on
 // lead-gained + the backstop.
 func (r *VaultLifecycleReconciler) ReconcileMembershipCatchup() {
 	v := r.gatherReconcileView()
@@ -1083,7 +1085,7 @@ func (r *VaultLifecycleReconciler) ReconcileMembershipCatchup() {
 	}
 	r.reconcileMissingReplicas(v)
 	r.reconcileStaleLeaderFSMEntries(v)
-	r.reconcileStalePendingDeleteAcks(v)
+	r.reconcileNodesOutsidePlacement(v)
 	r.reconcileAbandonedTransferAnnounces(v)
 	r.reconcileSealingResume(v)
 	r.reconcileSealAnnounceDivergence(v)
@@ -1673,7 +1675,7 @@ const abandonedTransferAnnounceGCAge = 24 * time.Hour
 // in this file uses (single-node fallback included) — rather than a
 // parallel removal mechanism. Leader-only: only the destination's config
 // placement leader proposes deletes, matching every other write path
-// here (reconcileStaleLeaderFSMEntries, reconcileStalePendingDeleteAcks).
+// here (reconcileStaleLeaderFSMEntries, reconcileNodesOutsidePlacement).
 func (r *VaultLifecycleReconciler) reconcileAbandonedTransferAnnounces(v *reconcileView) {
 	if r.vaultInst == nil || r.vaultInst.IsFollower {
 		return
@@ -1835,42 +1837,37 @@ func (r *VaultLifecycleReconciler) reconcileStaleLeaderFSMEntries(v *reconcileVi
 	}
 }
 
-// SweepStalePendingDeleteAcks walks every pendingDelete entry and proposes
-// CmdPruneNode for any node in ExpectedFrom that's no longer in the vault's
-// current placement set. This unsticks retention-deletes whose ExpectedFrom
-// references nodes removed from the vault's placement (e.g., after a
-// kubernetes-contract or vault rebalance): those nodes can never ack
-// because they have no vault instance running locally.
+// SweepNodesOutsidePlacement proposes CmdPruneNode for every node the vault
+// FSM still names — in a pendingDelete's ExpectedFrom, a chunk's holder set,
+// or a completed segment's holder set — that is no longer in the vault's
+// current placement (a kubernetes contract, a vault rebalance, a home whose
+// disk died and was re-placed). Such a node has no vault instance: it can
+// never ack a delete, and no reconciler of its own revokes a holder claim
+// when its bytes go.
 //
-// Without this sweep, the receipt protocol deadlocks: g-1 was in the
-// placement when CmdRequestDelete was proposed, the placement later
-// changed to exclude g-1, g-1 lost its vault instance, the ExpectedFrom
-// entry survives, and nothing can drive an ack. The retention-pending
-// chunks sit forever, the receipt-protocol's stuck observation surfaces
-// in the inspector as `pending-ack: gastrolog-1`, but no automatic
-// recovery fires.
+// Without the ExpectedFrom prune the receipt protocol deadlocks: the
+// retention-pending chunks sit forever behind an ack nothing can drive.
+// Without the holder prune the departed node's claims linger in residency
+// (ReplicaNodeIds) and in the holder-set fallback of replica repair; the
+// replication-quorum gates already exclude it by counting only placed
+// holders (vaultctlfsm.PlacedHolderCount).
 //
-// Why use CmdPruneNode (not CmdAckDelete) for the cleanup: CmdPruneNode
-// has the exact semantic we need — "node X is no longer in scope; drop
-// it from every entry's ExpectedFrom, finalize entries whose Expected
-// From drained as a result". CmdAckDelete would also work but requires
-// per-chunk proposals; CmdPruneNode batches the whole prune into one
-// apply per stale node.
+// CmdPruneNode carries exactly this semantic — "node X is out of this
+// vault's scope" — in one apply per node, finalizing pending deletes whose
+// ExpectedFrom drains as a result. A node pruned while its placement
+// membership was only flapping re-earns its chunk receipts from disk on its
+// next reconcile tick and re-pulls the segments it lacks.
 //
 // Leader-only (the same gate as SweepStaleLeaderFSMEntries): only one
 // node should propose, and the vault-ctl leader is the natural single
 // point because retention itself is leader-only.
-//
-// Observed on the live K8s cluster: 8 stuck chunks whose ExpectedFrom
-// contained only gastrolog-1 — a former placement member with no
-// current vault instance. This sweep is the self-healing path.
-func (r *VaultLifecycleReconciler) SweepStalePendingDeleteAcks() {
+func (r *VaultLifecycleReconciler) SweepNodesOutsidePlacement() {
 	if v := r.gatherReconcileView(); v != nil {
-		r.reconcileStalePendingDeleteAcks(v)
+		r.reconcileNodesOutsidePlacement(v)
 	}
 }
 
-func (r *VaultLifecycleReconciler) reconcileStalePendingDeleteAcks(v *reconcileView) {
+func (r *VaultLifecycleReconciler) reconcileNodesOutsidePlacement(v *reconcileView) {
 	if r.vaultInst == nil {
 		return
 	}
@@ -1881,10 +1878,8 @@ func (r *VaultLifecycleReconciler) reconcileStalePendingDeleteAcks(v *reconcileV
 		return
 	}
 
-	// Build the current-placement set: this node (always the leader
-	// for the sweep — see follower gate above) plus every follower
-	// target. Any nodeID in pendingDeletes ExpectedFrom that's NOT in
-	// this set is stale.
+	// The current placement: this node (always the leader for the sweep —
+	// see the follower gate above) plus every follower target.
 	placement := make(map[string]bool, 1+len(r.vaultInst.FollowerTargets))
 	if r.localNodeID != "" {
 		placement[r.localNodeID] = true
@@ -1895,30 +1890,52 @@ func (r *VaultLifecycleReconciler) reconcileStalePendingDeleteAcks(v *reconcileV
 		}
 	}
 
-	staleNodes := make(map[string]bool)
+	outside := make(map[string]bool)
+	note := func(nodeID string) {
+		if nodeID != "" && !placement[nodeID] {
+			outside[nodeID] = true
+		}
+	}
 	for _, p := range v.pending {
 		for nodeID := range p.ExpectedFrom {
-			if !placement[nodeID] {
-				staleNodes[nodeID] = true
+			note(nodeID)
+		}
+	}
+	for _, e := range v.entries {
+		for _, nodeID := range e.Holders {
+			note(nodeID)
+		}
+	}
+	if r.fsm != nil {
+		for _, seg := range r.fsm.ListCompletedSegments() {
+			for _, nodeID := range seg.Holders {
+				note(nodeID)
 			}
 		}
 	}
-	if len(staleNodes) == 0 {
+	if len(outside) == 0 {
 		return
 	}
 
-	for nodeID := range staleNodes {
-		r.logger.Warn("stale-pending-ack sweep: proposing CmdPruneNode for stale ExpectedFrom",
-			"vault", r.vaultID, "stale_node", nodeID,
+	nodes := make([]string, 0, len(outside))
+	for nodeID := range outside {
+		nodes = append(nodes, nodeID)
+	}
+	sort.Strings(nodes)
+	pruned := 0
+	for _, nodeID := range nodes {
+		r.logger.Warn("outside-placement prune: proposing CmdPruneNode",
+			"vault", r.vaultID, "node", nodeID,
 			"current_placement_size", len(placement))
 		if err := r.vaultInst.ApplyRaftPruneNode(nodeID); err != nil {
-			r.logger.Warn("stale-pending-ack sweep: CmdPruneNode apply failed",
-				"vault", r.vaultID, "stale_node", nodeID, "error", err)
+			r.logger.Warn("outside-placement prune: CmdPruneNode apply failed",
+				"vault", r.vaultID, "node", nodeID, "error", err)
 			continue
 		}
+		pruned++
 	}
-	r.logger.Info("stale-pending-ack sweep: pruned stale ExpectedFrom",
-		"vault", r.vaultID, "stale_count", len(staleNodes))
+	r.logger.Info("outside-placement prune: pruned nodes outside placement",
+		"vault", r.vaultID, "pruned", pruned, "outside", len(nodes))
 }
 
 // idleActiveThreshold is how long an FSM-Active chunk can sit without
