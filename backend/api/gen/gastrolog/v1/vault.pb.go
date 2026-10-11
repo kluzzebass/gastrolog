@@ -94,24 +94,20 @@ func (VaultAdmissionCause) EnumDescriptor() ([]byte, []int) {
 
 // ChunkState is the lifecycle stage of a chunk on the vault-ctl FSM.
 //
-// Active   — accepting appends; only the leader's bytes are authoritative;
+// Active   — the vault's open chunk manifest: segment slices the vault-ctl
 //
-//	followers maintain a best-effort active-form mirror via
-//	record streaming as a leadership-transfer safety net.
+//	leader's planner keeps adding. No GLCB exists; each home reads
+//	the records from the manifest's segments on its own disk.
 //
-// Sealing  — leader has stopped accepting appends and is assembling the
+// Sealing  — the leader sealed the manifest onto the FSM's sealed-manifest
 //
-//	sealed-form GLCB (writing data.glcb, building indexes,
-//	computing the integrity digest). Cluster reads are still
-//	served from the active-form layout — the sealed-form is in
-//	flight but not yet committed.
+//	queue; its segment list is frozen and every home is building
+//	its own GLCB from its local segments.
 //
-// Sealed   — the leader has committed the sealed-form GLCB and the FSM
+// Sealed   — the vault-ctl leader committed CmdSealChunk after its own
 //
-//	entry carries the integrity digest. Followers may now
-//	replicate the sealed form byte-for-byte from the leader.
-//
-// gastrolog-1huz5.
+//	build. A home that has not built the GLCB yet still builds it,
+//	or pulls it from a peer home once the segments are released.
 type ChunkState int32
 
 const (
