@@ -109,28 +109,22 @@ func (v *vaultChunking) recoverOnce(ctx context.Context) error {
 			// 30k-chunk registry target.
 			continue
 		}
-		glcbPath := ChunkGLCBPath(v.cfg.ChunkRoot, e.ID)
-		if _, err := os.Stat(glcbPath); err != nil {
+		// Only a seal-queue manifest's record set is final. The open
+		// manifest still grows, and after a restart this FSM can lag what
+		// this node built before it stopped, so a GLCB is judged once its
+		// chunk reaches the seal queue — by the build pass if not here.
+		queued := v.fsm().SealQueueManifest(e.ID)
+		if queued == nil {
 			continue
 		}
-		if err := v.recoverBuiltGLCB(ctx, v.unsealedChunkManifest(e.ID)); err != nil {
+		if _, err := os.Stat(ChunkGLCBPath(v.cfg.ChunkRoot, e.ID)); err != nil {
+			continue
+		}
+		if err := v.recoverBuiltGLCB(ctx, queued); err != nil {
 			lastErr = err
 		}
 	}
 	return lastErr
-}
-
-// unsealedChunkManifest returns the vault-ctl FSM's manifest for a chunk not
-// yet sealed: its seal-queue entry, else the open manifest when it is the open
-// chunk, else a manifest naming only the chunk.
-func (v *vaultChunking) unsealedChunkManifest(id chunk.ChunkID) *vaultctlfsm.OpenChunkManifest {
-	if m := v.fsm().SealQueueManifest(id); m != nil {
-		return m
-	}
-	if open := v.fsm().OpenChunk(); open != nil && open.ChunkID == id {
-		return open
-	}
-	return &vaultctlfsm.OpenChunkManifest{ChunkID: id}
 }
 
 // isGLCBBuildTmpName reports whether name matches BuildGLCBFile's exact
