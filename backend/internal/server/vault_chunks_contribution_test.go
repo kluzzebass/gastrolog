@@ -93,6 +93,10 @@ func (s *stubExplainSearcher) SearchStream(_ context.Context, _ string, _ *gastr
 	return nil, nil, nil, nil
 }
 
+func (s *stubExplainSearcher) ListChunks(_ context.Context, _ string, _ *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error) {
+	return &gastrologv1.ForwardListChunksResponse{}, nil
+}
+
 func (s *stubExplainSearcher) GetContext(_ context.Context, _ string, _ *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error) {
 	return nil, errors.New("not implemented")
 }
