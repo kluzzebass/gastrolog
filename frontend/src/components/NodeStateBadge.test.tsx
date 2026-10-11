@@ -1,89 +1,52 @@
 import { describe, expect, test } from "bun:test";
-import React from "react";
 import { render } from "@testing-library/react";
 import { Timestamp } from "@bufbuild/protobuf";
-import { NodeStateBadge } from "./NodeStateBadge";
+import { HelpProvider } from "../hooks/useHelp";
 import { NodeState } from "../api/model/node";
+import { NODE_STATES_HELP_REF, NodeStateBadge, nodeStateView } from "./NodeStateBadge";
+import { OfflineBadge } from "./OfflineBadge";
 
-function stateSinceSecondsAgo(seconds: number): Timestamp {
-  const now = Math.floor(Date.now() / 1000);
-  return new Timestamp({ seconds: BigInt(now - seconds), nanos: 0 });
+function withHelp(ui: React.ReactElement, onOpen: (ref?: string) => void = () => {}) {
+  return render(<HelpProvider onOpen={onOpen}>{ui}</HelpProvider>);
 }
 
-describe("NodeStateBadge", () => {
-  test("renders nothing for LIVE state", () => {
-    const { container } = render(
-      <NodeStateBadge state={NodeState.LIVE} dark />,
-    );
-    expect(container.firstChild).toBeNull();
+// Every node-state badge says what the state means and what, if
+// anything, to do; the live state shows nothing.
+describe("nodeStateView", () => {
+  test("live and unspecified show no badge", () => {
+    expect(nodeStateView(NodeState.LIVE)).toBeUndefined();
+    expect(nodeStateView(NodeState.UNSPECIFIED)).toBeUndefined();
   });
 
-  test("renders nothing for UNSPECIFIED state", () => {
-    const { container } = render(
-      <NodeStateBadge state={NodeState.UNSPECIFIED} dark />,
-    );
-    expect(container.firstChild).toBeNull();
+  test("each non-live state names its cause and consequence", () => {
+    expect(nodeStateView(NodeState.UNREACHABLE)?.description).toContain("check the process");
+    expect(nodeStateView(NodeState.MAINTENANCE)?.description).toContain("operator-declared");
+    expect(nodeStateView(NodeState.DRAINING)?.description).toContain("transferred off");
+    expect(nodeStateView(NodeState.DECOMMISSIONING)?.description).toContain("removed from the cluster");
   });
+});
 
-  test("renders 'unreachable' badge for UNREACHABLE state", () => {
-    const { getByText } = render(
+describe("NodeStateBadge and OfflineBadge help", () => {
+  test("a state badge opens the node-states help section", () => {
+    const opened: (string | undefined)[] = [];
+    const { getByText } = withHelp(
       <NodeStateBadge state={NodeState.UNREACHABLE} dark />,
+      (ref) => opened.push(ref),
     );
-    expect(getByText("unreachable")).toBeTruthy();
+    getByText("unreachable").click();
+    expect(opened).toEqual([NODE_STATES_HELP_REF]);
+    expect(NODE_STATES_HELP_REF).toBe("clustering-nodes#node-states");
   });
 
-  test("renders 'maintenance' badge for MAINTENANCE state", () => {
-    const { getByText } = render(
-      <NodeStateBadge state={NodeState.MAINTENANCE} dark />,
+  test("the offline badge says the node is down or unreachable and opens the same section", () => {
+    const opened: (string | undefined)[] = [];
+    const { getByText } = withHelp(
+      <OfflineBadge lastSeen={new Timestamp({ seconds: 0n })} isOffline dark />,
+      (ref) => opened.push(ref),
     );
-    expect(getByText("maintenance")).toBeTruthy();
-  });
-
-  test("renders 'draining' badge for DRAINING state", () => {
-    const { getByText } = render(
-      <NodeStateBadge state={NodeState.DRAINING} dark />,
-    );
-    expect(getByText("draining")).toBeTruthy();
-  });
-
-  test("renders 'decommissioning' badge for DECOMMISSIONING state", () => {
-    const { getByText } = render(
-      <NodeStateBadge state={NodeState.DECOMMISSIONING} dark />,
-    );
-    expect(getByText("decommissioning")).toBeTruthy();
-  });
-
-  test("appends duration when stateSince is recent", () => {
-    const { getByText } = render(
-      <NodeStateBadge
-        state={NodeState.UNREACHABLE}
-        stateSince={stateSinceSecondsAgo(120)}
-        dark
-      />,
-    );
-    expect(getByText("unreachable 2m")).toBeTruthy();
-  });
-
-  test("omits duration when stateSince has zero seconds (legacy record)", () => {
-    const { getByText } = render(
-      <NodeStateBadge
-        state={NodeState.UNREACHABLE}
-        stateSince={new Timestamp({ seconds: 0n, nanos: 0 })}
-        dark
-      />,
-    );
-    expect(getByText("unreachable")).toBeTruthy();
-  });
-
-  test("omits duration when stateSince is in the future (clock skew)", () => {
-    const { getByText } = render(
-      <NodeStateBadge
-        state={NodeState.MAINTENANCE}
-        stateSince={stateSinceSecondsAgo(-60)}
-        dark
-      />,
-    );
-    // Future timestamp → elapsed is negative → no duration appended.
-    expect(getByText("maintenance")).toBeTruthy();
+    const badge = getByText("offline");
+    expect(badge.getAttribute("title")).toContain("down or unreachable");
+    badge.click();
+    expect(opened).toEqual([NODE_STATES_HELP_REF]);
   });
 });

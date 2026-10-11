@@ -22,3 +22,20 @@ You can run multiple ingesters simultaneously, each feeding into the same pipeli
 | [**Scatterbox**](help:ingester-scatterbox) | Generates deterministic, traceable test records with sequence numbers |
 
 Select an ingester from the sidebar for protocol and configuration details.
+
+## Ingester Modes
+
+Every ingester card carries a mode badge:
+
+- **listener** — binds a port and accepts what clients push to it (Syslog, HTTP, RELP, OTLP, Fluent Forward)
+- **active** — pulls records from its upstream source itself (Kafka, MQTT, Tail, Docker, Metrics, the generators)
+
+## Node Eligibility
+
+The card's node badge is where the ingester may run, the same rule the dispatcher applies on every node:
+
+- **all nodes** — eligible on every cluster node, nodes that join later included; also shown when no node is pinned
+- a node name — pinned to that one node
+- **N nodes** — pinned to those nodes only
+
+A listener pinned to nodes binds its port only there. Whether it actually runs on each eligible node is on the [Ingesters inspector](help:inspector-ingesters).

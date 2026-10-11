@@ -4,7 +4,7 @@ The Storages tab shows each configured [file storage](help:storage-config) with 
 
 ## Storage Overview
 
-Each card's header shows the storage's name, its owning node, a **warn** or **protected** badge when the storage is below one of its thresholds (nothing when healthy), and the last-sampled free/total bytes.
+Each card's header shows the storage's name, its **class** (vaults of that storage class may be placed on it), its owning node, a **warn** or **protected** badge when the storage is below one of its thresholds (nothing when healthy), and **free of total** — the free bytes against the volume's total at the last disk-guard sample.
 
 - **warn** — free space has crossed below the warn threshold. The disk-space alarm is raised, naming this storage. Ingestion is unaffected.
 - **protected** — free space has crossed below the floor threshold. Every vault placed on this storage is refused admission, cluster-wide, until space frees. Vaults on other storages keep ingesting.

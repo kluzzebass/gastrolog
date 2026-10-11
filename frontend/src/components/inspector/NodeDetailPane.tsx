@@ -64,6 +64,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       <Section title="System" dark={dark} helpRef="inspector-system">
         <SystemStatsView
           nodeStats={nodeInfo?.stats ?? null}
+          lastSeen={nodeInfo?.lastSeen}
           dark={dark}
         />
       </Section>
@@ -71,7 +72,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       {/* Vaults section */}
       <Section title="Vaults" dark={dark} helpRef="inspector-vaults">
         {vaults.length === 0 ? (
-          <EmptyMessage dark={dark}>No vaults on this node.</EmptyMessage>
+          <EmptyMessage dark={dark}>No vaults placed on this node.</EmptyMessage>
         ) : (
           <div className="flex flex-col gap-2">
             {[...vaults]
@@ -93,7 +94,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       {/* Storages section */}
       <Section title="Storages" dark={dark} helpRef="inspector-storages">
         {storages.length === 0 ? (
-          <EmptyMessage dark={dark}>No storages on this node.</EmptyMessage>
+          <EmptyMessage dark={dark}>No file storages configured on this node.</EmptyMessage>
         ) : (
           <div className="flex flex-col gap-2">
             {[...storages]
@@ -116,7 +117,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       {/* Ingesters section */}
       <Section title="Ingesters" dark={dark} helpRef="inspector-ingesters">
         {ingesters.length === 0 ? (
-          <EmptyMessage dark={dark}>No ingesters on this node.</EmptyMessage>
+          <EmptyMessage dark={dark}>No ingesters eligible to run on this node.</EmptyMessage>
         ) : (
           <div className="flex flex-col gap-2">
             {ingesters.map((ing) => (

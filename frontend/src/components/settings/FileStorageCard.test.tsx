@@ -4,6 +4,13 @@ import { FileStorageCard } from "./FileStorageCard";
 import { FileStorage } from "../../api/gen/gastrolog/v1/storage_pb";
 import { encode } from "../../api/glid";
 import { renderWritable } from "../../testing/renderWritable";
+import { settingsWrapper } from "../../../test/render";
+
+// The card renders the owning node through NodeBadge and help-linked
+// badges, so it needs the query client and help provider the app gives it.
+function renderCard(ui: React.ReactElement) {
+  return renderWritable(ui, { wrapper: settingsWrapper() });
+}
 
 // Disk Free Warn/Floor are edited on the storage surface (FileStorageCard,
 // rendered from StorageSettings), not on the vault. Pins the round-trip:
@@ -25,10 +32,10 @@ describe("FileStorageCard", () => {
       path: "storage/nvme-fast",
       storageClass: 1,
     });
-    renderWritable(
+    renderCard(
       <FileStorageCard
         fs={fs}
-        nodeName="node-1"
+        nodeId="node-1"
         dark={true}
         expanded={true}
         onToggle={() => {}}
@@ -54,10 +61,10 @@ describe("FileStorageCard", () => {
       diskFreeWarn: "10%",
       diskFreeFloor: "3GB",
     });
-    const { getByDisplayValue } = renderWritable(
+    const { getByDisplayValue } = renderCard(
       <FileStorageCard
         fs={fs}
-        nodeName="node-1"
+        nodeId="node-1"
         dark={true}
         expanded={true}
         onToggle={() => {}}
@@ -83,10 +90,10 @@ describe("FileStorageCard", () => {
       storageClass: 2,
     });
     const onSave = mock(async (_storageId: string, _edit: { diskFreeFloor: string; diskFreeWarn: string }) => {});
-    const { getByText } = renderWritable(
+    const { getByText } = renderCard(
       <FileStorageCard
         fs={fs}
-        nodeName="node-1"
+        nodeId="node-1"
         dark={true}
         expanded={true}
         onToggle={() => {}}
@@ -125,10 +132,10 @@ describe("FileStorageCard", () => {
     });
 
     test("omitted when onOpenInspector is not provided", () => {
-      const { queryByTitle } = renderWritable(
+      const { queryByTitle } = renderCard(
         <FileStorageCard
           fs={fs}
-          nodeName="node-1"
+          nodeId="node-1"
           dark={true}
           expanded={true}
           onToggle={() => {}}
@@ -142,10 +149,10 @@ describe("FileStorageCard", () => {
 
     test("navigates to the storage's entity card, named the same way ID fallback does elsewhere", () => {
       const onOpenInspector = mock((_param: string) => {});
-      const { getByTitle } = renderWritable(
+      const { getByTitle } = renderCard(
         <FileStorageCard
           fs={fs}
-          nodeName="node-1"
+          nodeId="node-1"
           dark={true}
           expanded={true}
           onToggle={() => {}}
@@ -165,10 +172,10 @@ describe("FileStorageCard", () => {
     test("falls back to the encoded id when the storage has no name", () => {
       const unnamed = new FileStorage({ id: testId(5), path: "storage/unnamed", storageClass: 1 });
       const onOpenInspector = mock((_param: string) => {});
-      const { getByTitle } = renderWritable(
+      const { getByTitle } = renderCard(
         <FileStorageCard
           fs={unnamed}
-          nodeName="node-1"
+          nodeId="node-1"
           dark={true}
           expanded={true}
           onToggle={() => {}}

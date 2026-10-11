@@ -104,6 +104,20 @@ describe("NodesSettings", () => {
     expect(getByText("follower")).toBeTruthy();
   });
 
+  test("voters are marked as such, not only nonvoters", () => {
+    const qc = createTestQueryClient();
+    seedQueries(qc);
+
+    const { getAllByText, queryByText } = renderWritable(<NodesSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    const voters = getAllByText("voter");
+    expect(voters).toHaveLength(2);
+    expect(voters[0]?.getAttribute("title")).toContain("quorum");
+    expect(queryByText("nonvoter")).toBeNull();
+  });
+
   test("local node shows this node badge", () => {
     const qc = createTestQueryClient();
     seedQueries(qc);

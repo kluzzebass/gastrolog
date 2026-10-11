@@ -2,6 +2,7 @@ import type { Timestamp } from "../api/model/node";
 import { Badge } from "./Badge";
 import { formatDuration } from "../utils/units";
 import { useTick } from "./inspector/JobCard";
+import { NODE_STATES_HELP_REF } from "./NodeStateBadge";
 
 // How long a node has been silent is a cluster fact, so it comes from the
 // cluster: ClusterNode.last_seen, which the backend fills from
@@ -42,7 +43,12 @@ export function OfflineBadge({ lastSeen, isOffline, dark }: Readonly<OfflineBadg
   }
 
   return (
-    <Badge variant="error" dark={dark} title="cluster has not heard from this node">
+    <Badge
+      variant="error"
+      dark={dark}
+      title="no stats broadcast from this node — it is down or unreachable; it still counts toward quorum if it votes"
+      helpRef={NODE_STATES_HELP_REF}
+    >
       {text}
     </Badge>
   );

@@ -6,7 +6,7 @@ import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 
 const mocks = installMockClients();
 
-import { CertificatesSettings } from "./CertificatesSettings";
+import { CertificatesSettings, certSourceBadge } from "./CertificatesSettings";
 import { renderWritable } from "../../testing/renderWritable";
 
 /** Create a distinct 16-byte Uint8Array test ID from a small number. */
@@ -71,6 +71,19 @@ describe("CertificatesSettings", () => {
     });
 
     expect(getByText("default")).toBeTruthy();
+  });
+
+  test("every certificate carries a kind badge saying where its key material lives", () => {
+    expect(certSourceBadge({ fromFiles: true })).toEqual({
+      text: "files",
+      title: "loaded from files on disk — reloaded when they change",
+      helpRef: "certificates#hot-reload",
+    });
+    expect(certSourceBadge({ fromFiles: false })).toEqual({
+      text: "pem",
+      title: "PEM material stored in the cluster configuration",
+      helpRef: "certificates#adding-a-certificate",
+    });
   });
 
   test("shows add buttons for PEM and file modes", () => {

@@ -34,7 +34,8 @@ Two special forms exist alongside ordinary expressions:
 - **`*`** (catch-all): Matches every record. Place one at the lowest
   priority to guarantee nothing goes unmatched.
 - **empty**: Matches nothing. The route stays configured but never fires —
-  useful for temporarily muting a route without deleting it.
+  useful for temporarily muting a route without deleting it. Its card reads
+  **matches nothing — no match expression**.
 - **Expression**: A boolean expression like `level=error AND env=prod`.
 
 Expressions are evaluated after [digestion](help:digesters), so attributes

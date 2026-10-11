@@ -53,6 +53,11 @@ front door.
 ## Per-vault and per-route delivery
 
 Matched-record counters broken down by destination vault and by route, summed
-across nodes. Per-vault *rates* (append throughput, durability, queue
+across nodes. **No routes configured — every record goes unmatched.** stands
+in for the per-route table while the route table is empty; the per-vault
+table appears once a record has been delivered.
+
+The view says **No routing stats — no node has reported its routing counters
+yet.** until the first stats broadcast arrives after a start. Per-vault *rates* (append throughput, durability, queue
 pressure) live on each vault's card in the Vaults view and in the System
 view's Throughput section.

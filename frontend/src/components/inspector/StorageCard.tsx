@@ -46,6 +46,11 @@ export function thresholdLabel(expr: string, isDefault: boolean, effectiveBytes:
   return eff;
 }
 
+/** The header's space figure: free bytes against the volume's total, both from the last disk-guard sample. */
+export function freeOfTotalLabel(freeBytes: bigint, totalBytes: bigint): string {
+  return `${formatBytes(freeBytes)} free of ${formatBytes(totalBytes)}`;
+}
+
 interface StorageCardProps {
   storage: Storage;
   dark: boolean;
@@ -92,13 +97,24 @@ export function StorageCard({
             </Badge>
           )}
           {verdict === "warn" && (
-            <Badge variant="warn" dark={dark}>warn</Badge>
+            <Badge
+              variant="warn"
+              dark={dark}
+              title="below the disk-free warn threshold — the disk-space alarm stands; ingestion continues"
+              helpRef="inspector-storages#storage-overview"
+            >
+              warn
+            </Badge>
           )}
-          <Badge variant="muted" dark={dark}>
+          <Badge
+            variant="muted"
+            dark={dark}
+            title={`${freeOfTotalLabel(storage.freeBytes, storage.totalBytes)} at the last disk-guard sample`}
+          >
             <LiveValue dark={dark} tone="inherit" reserve={BYTES_MAX_CHARS}>
               {formatBytes(storage.freeBytes)}
             </LiveValue>
-            {" / "}
+            {" free of "}
             {formatBytes(storage.totalBytes)}
           </Badge>
           {onOpenSettings && (

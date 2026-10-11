@@ -10,7 +10,7 @@ import { usePipelineBacklog } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 // eslint-disable-next-line no-restricted-imports -- no Chunk model yet
-import { type ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
+import { type ChunkMeta, type ContributionReport, type GetIndexesResponse } from "../../api/gen/gastrolog/v1/vault_pb";
 import { VaultAdmissionCause, type Vault, type VaultAdmissionRefusal } from "../../api/model/vault";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
 import {
@@ -32,7 +32,7 @@ import { Badge } from "../Badge";
 import { HelpButton } from "../HelpButton";
 import { HelpLink } from "../HelpLink";
 import { BlobMark, SealPips } from "./SealPips";
-import { chunkLifecycleState, computeCloudPips, computePips } from "./sealPipState";
+import { chunkLifecycleState, computeCloudPips, computePips, rowIsCalm } from "./sealPipState";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
@@ -146,6 +146,44 @@ export function vaultRefusalDetails(refusals: readonly VaultAdmissionRefusal[]):
   return details;
 }
 
+/** The header badge for a vault refusing new records, naming every active cause. */
+export function refusingBadgeText(causes: readonly string[]): string {
+  return causes.length === 0 ? "refusing" : `refusing: ${causes.join(", ")}`;
+}
+
+function nodesUnreached(n: number): string {
+  return `${n} ${n === 1 ? "node" : "nodes"} unreached`;
+}
+
+/** The chunk table's empty state: ListChunks fans out to every node hosting the vault, so an empty list is a cluster-wide fact unless some host dropped out of the merge. */
+export function chunksEmptyText(report: ContributionReport | null | undefined): string {
+  const n = report?.degraded.length ?? 0;
+  return n > 0 ? `No chunks reported — ${nodesUnreached(n)}.` : "No chunks in this vault yet.";
+}
+
+/** The Indexes section's empty state for a sealed chunk that produced no index list. */
+export function indexesEmptyText(data?: GetIndexesResponse): string {
+  const n = data?.contributionReport?.degraded.length ?? 0;
+  return n > 0
+    ? `Indexes unknown — the chunk was not found on the nodes that answered, ${nodesUnreached(n)}.`
+    : "Indexes unavailable — no node answered for this chunk.";
+}
+
+export const INDEX_OK_TITLE = "opened on the node that answered — queries on that node use it";
+export const INDEX_MISSING_TITLE =
+  "could not be opened on the node that answered — its file is absent or unreadable there; reindex rebuilds it";
+
+/** The archived badge's hover text, naming the cloud storage class the chunk sits in when the backend reports one. */
+export function archivedBadgeTitle(cloudStorageClass: string): string {
+  return `archived to ${cloudStorageClass || "offline storage"} — restore it before it can be queried`;
+}
+
+export const CLOUD_BACKED_VAULT_BADGE = {
+  text: "cloud-backed",
+  title: "cloud-backed vault — sealed chunks are uploaded to its cloud service",
+  helpRef: "storage-cloud",
+};
+
 interface VaultCardProps {
   vault: Vault;
   dark: boolean;
@@ -182,28 +220,40 @@ export function VaultCard({
       key={vault.id}
       id={vault.displayLabel}
       typeBadge={vault.typeLabel}
-      secondaryBadge={vault.isCloudBacked ? { text: "cloud", title: "cloud-backed vault", helpRef: "storage-cloud" } : undefined}
+      secondaryBadge={vault.isCloudBacked ? CLOUD_BACKED_VAULT_BADGE : undefined}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}
       headerRight={
         <span className="flex items-center gap-1.5">
           {!vault.enabled && (
-            <Badge variant="warn" dark={dark}>disabled</Badge>
+            <Badge
+              variant="warn"
+              dark={dark}
+              title="disabled — the vault accepts no records; enable it in Settings"
+              helpRef="vaults-config#common-settings"
+            >
+              disabled
+            </Badge>
           )}
           {refusingCauses.length > 0 && (
-            <Badge variant="warn" dark={dark} title={refusingCauses.join("; ")} helpRef="inspector-vaults#refusal">
-              refusing
+            <Badge
+              variant="warn"
+              dark={dark}
+              title="refusing new records until the cause clears — expand the card for the backend's detail"
+              helpRef="inspector-vaults#refusal"
+            >
+              {refusingBadgeText(refusingCauses)}
             </Badge>
           )}
           <DegradedPeersBadge report={chunksContribution} dark={dark} />
-          <Badge variant="muted" dark={dark}>
+          <Badge variant="muted" dark={dark} title="chunks in this vault, cluster-wide">
             {chunkCount.toLocaleString()} chunks
           </Badge>
-          <Badge variant="muted" dark={dark}>
+          <Badge variant="muted" dark={dark} title="records across every chunk">
             {recordCount.toLocaleString()} records
           </Badge>
-          <Badge variant="muted" dark={dark}>
+          <Badge variant="muted" dark={dark} title="on disk — the local disk claim of every chunk, summed">
             <LiveValue dark={dark} tone="inherit" reserve={BYTES_MAX_CHARS}>
               {formatBytes(sizeBytes)}
             </LiveValue>
@@ -747,6 +797,7 @@ function VaultPlacementSummary({
 function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data: chunks, isLoading } = useChunks(vaultId);
+  const chunksContribution = useChunksContribution(vaultId);
   const { data: config } = useConfig();
   const registry = useNodeRegistry();
   const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
@@ -887,7 +938,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
         </div>
       ) : (
         <div className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}>
-          No chunks on this node yet.
+          {chunksEmptyText(chunksContribution)}
         </div>
       )}
     </div>
@@ -924,11 +975,12 @@ function ChunkReplicaPips({
   });
   const all = [...pips, ...ghosts.map((g) => ({ ...g, isGhost: true }))];
   if (all.length === 0) return null;
+  const calm = rowIsCalm(pips, ghosts);
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
       {all.map((p) => (
         <span key={p.node} className="inline-flex items-center gap-1.5" title={p.title}>
-          <SealPips pips={[p]} ghosts={[]} size={14} />
+          <SealPips pips={[p]} ghosts={[]} size={14} calm={calm} />
           <span className={`font-mono text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
             {p.node}
           </span>
@@ -1035,16 +1087,23 @@ function ChunkRow({
               })()
             )}
             {chunk.archived && (
-              <Badge variant="warn" dark={dark}>{chunk.cloudStorageClass || "archived"}</Badge>
+              <Badge
+                variant="warn"
+                dark={dark}
+                title={archivedBadgeTitle(chunk.cloudStorageClass)}
+                helpRef="inspector-vaults#chunks"
+              >
+                archived
+              </Badge>
             )}
             {chunk.retentionPending && (
               <Badge
                 variant="warn"
                 dark={dark}
-                title="Retention pending — chunk is queued for retention firing"
+                title="queued for retention — the chunk is deleted, or its records routed, when the retention event fires"
                 helpRef="policy-retention#hard-vs-soft-bounds"
               >
-                ret
+                retention pending
               </Badge>
             )}
           </span>
@@ -1176,7 +1235,7 @@ function ChunkDetail({
                 {formatBytes(Number(chunk.cloudBytes))}
               </span>
               <span className={c("text-text-muted", "text-light-text-muted")}>
-                GLCB (zstd-wrapped on transport)
+                sealed chunk object in the cloud store
               </span>
             </div>
             <div className={`flex items-center gap-3 text-[0.85em]`}>
@@ -1187,14 +1246,24 @@ function ChunkDetail({
             </div>
             <div className={`flex items-center gap-3 text-[0.85em]`}>
               <span className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}>ts-index</span>
-              <Badge variant="info" dark={dark}>embedded</Badge>
+              <Badge
+                variant="info"
+                dark={dark}
+                title="timestamp indexes travel inside the chunk object — no separate file to build or lose"
+                helpRef="inspector-vaults#chunks"
+              >
+                embedded
+              </Badge>
               <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
                 {Number(chunk.recordCount).toLocaleString()} entries
               </span>
             </div>
             <div className={`flex items-center gap-3 text-[0.85em]`}>
               <span className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}>class</span>
-              <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
+              <span
+                className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+                title="cloud storage class of the object; standard means readable without a restore"
+              >
                 {chunk.cloudStorageClass || "standard"}
               </span>
               {!chunk.archived && (
@@ -1228,7 +1297,7 @@ function ChunkDetail({
             <div
               className={`flex items-center gap-2 text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
             >
-              <span>{data?.contributionReport ? "Indexes unavailable." : "No indexes."}</span>
+              <span>{indexesEmptyText(data)}</span>
               <DegradedPeersBadge report={data?.contributionReport} dark={dark} />
             </div>
           )}
@@ -1246,7 +1315,7 @@ function ChunkDetail({
                   </span>
                   {idx.exists ? (
                     <>
-                      <Badge variant="info" dark={dark}>ok</Badge>
+                      <Badge variant="info" dark={dark} title={INDEX_OK_TITLE} helpRef="inspector-vaults#indexes">ok</Badge>
                       <span
                         className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
                       >
@@ -1259,7 +1328,7 @@ function ChunkDetail({
                       </span>
                     </>
                   ) : (
-                    <Badge variant="muted" dark={dark}>missing</Badge>
+                    <Badge variant="muted" dark={dark} title={INDEX_MISSING_TITLE} helpRef="inspector-vaults#indexes">missing</Badge>
                   )}
                 </div>
               ))}

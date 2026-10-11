@@ -4,7 +4,33 @@ import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 import { StorageState } from "../../api/gen/gastrolog/v1/storage_pb";
 import { NodeStats } from "../../api/gen/gastrolog/v1/cluster_pb";
 import { GetStatsResponse, VaultInfo, VaultStats } from "../../api/gen/gastrolog/v1/vault_pb";
-import { EntityListPane } from "./EntityListPane";
+import { Timestamp } from "@bufbuild/protobuf";
+import { GetRouteStatsResponse } from "../../api/gen/gastrolog/v1/system_pb";
+import { EntityListPane, jobCountText } from "./EntityListPane";
+import { NO_ROUTES_TEXT } from "./RouteStatsView";
+
+describe("EntityListPane routes empty states", () => {
+  test("an empty route table says so and what it means, instead of dropping the per-route table", () => {
+    const qc = createTestQueryClient();
+    seedCluster(qc);
+    qc.setQueryData(["route-stats"], new GetRouteStatsResponse({ routeTableActive: true }));
+    qc.setQueryData(["vaults"], []);
+
+    const { container } = render(<EntityListPane entityType="routes" dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expect(container.textContent).toContain(NO_ROUTES_TEXT);
+    expect(NO_ROUTES_TEXT).toBe("No routes configured — every record goes unmatched.");
+  });
+});
+
+describe("jobCountText", () => {
+  test("the per-node count names its noun", () => {
+    expect(jobCountText(1)).toBe("1 job");
+    expect(jobCountText(7)).toBe("7 jobs");
+  });
+});
 
 // The storages entity tab renders a FLAT list, exactly the VaultsList
 // shape — no node grouping, no group headers. The node is already a badge
@@ -172,6 +198,48 @@ describe("EntityListPane system cluster summary", () => {
     expect(statRow(container, "Records")).toBe("—");
     expect(statRow(container, "Chunks")).toBe("—");
     expect(statRow(container, "Data")).toBe("—");
+  });
+
+  test("a member without stats says how long the cluster has been without word from it, not 'waiting'", () => {
+    const qc = createTestQueryClient();
+    seedReplicatedCluster(qc, null);
+    // The connected node's own card is the one expanded by default, so the
+    // silent member is made the connected node here.
+    const silentId = testId(44);
+    const cluster = qc.getQueryData<{ clusterEnabled: boolean; nodes: object[] }>(["clusterStatus"])!;
+    qc.setQueryData(["clusterStatus"], {
+      ...cluster,
+      nodes: [
+        ...cluster.nodes,
+        {
+          id: silentId,
+          name: "node-5",
+          lastSeen: new Timestamp({ seconds: BigInt(Math.floor(Date.now() / 1000) - 7200) }),
+        },
+      ],
+    });
+    qc.setQueryData(["settings"], { nodeId: silentId });
+
+    const { container } = render(<EntityListPane entityType="system" dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expect(container.textContent).toContain("No stats — the cluster last heard from this node 2h ago.");
+    expect(container.textContent).not.toContain("Waiting for node stats");
+  });
+
+  test("a member the cluster has never heard from is waiting for its first broadcast", () => {
+    const qc = createTestQueryClient();
+    seedReplicatedCluster(qc, null);
+    const cluster = qc.getQueryData<{ clusterEnabled: boolean; nodes: object[] }>(["clusterStatus"])!;
+    qc.setQueryData(["clusterStatus"], { ...cluster, nodes: [...cluster.nodes, { id: testId(45), name: "node-6" }] });
+    qc.setQueryData(["settings"], { nodeId: testId(45) });
+
+    const { container } = render(<EntityListPane entityType="system" dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expect(container.textContent).toContain("No stats yet — waiting for this node's first broadcast.");
   });
 
   test("says which share of the vaults the totals cover when a vault has no figures", () => {

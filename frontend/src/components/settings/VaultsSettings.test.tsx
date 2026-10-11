@@ -88,6 +88,33 @@ describe("VaultsSettings", () => {
     expect(getByText("file")).toBeTruthy();
   });
 
+  test("a cloud-backed vault's badge carries the canonical term and the service name", () => {
+    const qc = createTestQueryClient();
+    const cloudId = testId(60);
+    qc.setQueryData(["system"], {
+      ...sampleConfig,
+      cloudServices: [{ id: cloudId, name: "minio" }],
+      vaults: [
+        new VaultConfig({
+          id: testId(3),
+          name: "vault-cloud",
+          enabled: true,
+          type: VaultType.FILE,
+          storageClass: 1,
+          replicationFactor: 1,
+          cloudServiceId: cloudId,
+        }),
+      ],
+    });
+
+    const { getByText } = renderWritable(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    const badge = getByText("cloud-backed: minio");
+    expect(badge.getAttribute("title")).toContain("sealed chunks upload to cloud service minio");
+  });
+
   test("shows disabled badge for disabled vaults", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);

@@ -193,7 +193,7 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
             dark={dark}
             expanded={isExpanded(group.name)}
             onToggle={() => toggle(group.name)}
-            typeBadge={formatBytes(Number(latest.size))}
+            typeBadge={{ text: formatBytes(Number(latest.size)), title: "size of the current version" }}
             monoTitle
             status={uses.length > 0 ? (
               <span className="flex items-center gap-1.5">

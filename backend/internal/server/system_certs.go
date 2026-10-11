@@ -24,7 +24,7 @@ func (s *SystemServer) ListCertificates(
 	}
 	infos := make([]*apiv1.CertificateInfo, len(certs))
 	for i, c := range certs {
-		infos[i] = &apiv1.CertificateInfo{Id: c.ID.ToProto(), Name: c.Name}
+		infos[i] = &apiv1.CertificateInfo{Id: c.ID.ToProto(), Name: c.Name, FromFiles: c.CertFile != ""}
 	}
 	return connect.NewResponse(&apiv1.ListCertificatesResponse{Certificates: infos}), nil
 }

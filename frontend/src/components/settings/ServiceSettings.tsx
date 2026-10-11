@@ -76,6 +76,11 @@ function fieldsFromData(data: GetSettingsResponse): ServiceFormState {
 }
 
 const noAuthBadge = { text: "disabled", title: "disabled by --no-auth", helpRef: "user-management#no-auth-mode" };
+export const TLS_ENABLED_BADGE = {
+  text: "enabled",
+  title: "the HTTPS listener is on, serving the default certificate",
+  helpRef: "service-settings#tls-configuration",
+};
 
 const INITIAL_STATE: ServiceFormState = {
   tokenDuration: "", minPwLen: "", maxJobs: "",
@@ -479,7 +484,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
             expanded={isExpanded("tls")}
             onToggle={() => toggle("tls")}
             monoTitle={false}
-            typeBadge={s.tlsEnabled ? "enabled" : undefined}
+            typeBadge={s.tlsEnabled ? TLS_ENABLED_BADGE : undefined}
             typeBadgeAccent={s.tlsEnabled}
           >
             <div className="flex flex-col gap-4">
