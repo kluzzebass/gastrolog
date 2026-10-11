@@ -104,7 +104,7 @@ func TestApplyDispositionHonoursCurrentConfig(t *testing.T) {
 
 	// r.orch has no pipeline wired, so if this took the route branch it would
 	// hit SubmitRetentionRecord and fail rather than return true.
-	if !r.applyRetentionDispositionToChunk(chunk.NewChunkID()) {
+	if !r.applyRetentionDispositionToChunk(chunk.NewChunkID(), "") {
 		t.Fatal("delete disposition must be a no-op returning true")
 	}
 	if loader.loads == 0 {

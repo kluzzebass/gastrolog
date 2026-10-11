@@ -397,7 +397,7 @@ func TestApplyRetentionDispositionToChunkDispatchesTransfer(t *testing.T) {
 		logger:      slog.Default(),
 		idleLog:     logging.Throttle{Interval: 10 * time.Minute},
 	}
-	if got := r.applyRetentionDispositionToChunk(chunk.NewChunkID()); got {
+	if got := r.applyRetentionDispositionToChunk(chunk.NewChunkID(), ""); got {
 		t.Fatal("want false: no transfer target configured, must defer")
 	}
 	r.mu.Lock()
@@ -418,7 +418,7 @@ func TestApplyRetentionDispositionToChunkDispatchesTransfer(t *testing.T) {
 func TestApplyRetentionDispositionToChunkDeleteIsNoOp(t *testing.T) {
 	t.Parallel()
 	r := &retentionRunner{disposition: system.RetentionDispositionDelete}
-	if !r.applyRetentionDispositionToChunk(chunk.NewChunkID()) {
+	if !r.applyRetentionDispositionToChunk(chunk.NewChunkID(), "") {
 		t.Fatal("delete disposition must always return true (no-op)")
 	}
 }

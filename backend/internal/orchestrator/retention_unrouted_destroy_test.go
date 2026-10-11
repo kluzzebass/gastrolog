@@ -31,7 +31,7 @@ func TestFireRetentionEventRetainsWhenVaultInstanceMissing(t *testing.T) {
 		logger:  slog.Default(),
 		idleLog: logging.Throttle{Interval: time.Minute},
 	}
-	if done := r.fireRetentionEvent(chunk.NewChunkID()); done {
+	if done := r.fireRetentionEvent(chunk.NewChunkID(), ""); done {
 		t.Fatal("fan-out with no vault instance must not report completion; the chunk would be destroyed with zero records routed")
 	}
 }
@@ -75,7 +75,7 @@ func TestFireRetentionEventRetainsAndFlagsUnreadableCursor(t *testing.T) {
 	}
 	id := chunk.NewChunkID()
 
-	if done := r.fireRetentionEvent(id); done {
+	if done := r.fireRetentionEvent(id, ""); done {
 		t.Fatal("fan-out with an unreadable cursor must not report completion; the chunk would be destroyed with zero records routed")
 	}
 
