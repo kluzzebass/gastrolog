@@ -77,7 +77,7 @@ export function MmdbAddForm({
       createDisabled={false}
       typeBadge="mmdb"
     >
-      <FormField label="Name" description="Registry name used in queries, e.g. | lookup geoip" dark={dark}>
+      <FormField label="Name" description="Table name used in queries, e.g. | lookup geoip" dark={dark}>
         <TextInput value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} placeholder={mmdbDefaultName[draft.dbType] || draft.dbType} dark={dark} mono />
       </FormField>
       <MmdbDbTypeRadio dark={dark} value={draft.dbType} onChange={(dbType) => setDraft((d) => ({ ...d, dbType }))} name="new-mmdb-db-type" />
@@ -165,7 +165,7 @@ export function MmdbCards({
             }
           >
             <div className="flex flex-col gap-3">
-              <FormField label="Name" description="Registry name used in queries, e.g. | lookup geoip" dark={dark}>
+              <FormField label="Name" description="Table name used in queries, e.g. | lookup geoip" dark={dark}>
                 <TextInput value={m.name} onChange={(v) => onUpdate(i, { name: v })} placeholder="" dark={dark} mono />
               </FormField>
               <MmdbDbTypeRadio dark={dark} value={m.dbType} onChange={(dbType) => onUpdate(i, { dbType })} name={`mmdb-db-type-${i}`} />

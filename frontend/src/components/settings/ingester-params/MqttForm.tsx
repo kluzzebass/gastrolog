@@ -52,7 +52,7 @@ export function MqttForm({
           <TextInput
             value={params["client_id"] ?? ""}
             onChange={(v) => set("client_id", v)}
-            placeholder={d["client_id"] ?? "gastrolog-<auto>"}
+            placeholder={d["client_id"] ?? ""}
             dark={dark}
             mono
           />

@@ -206,7 +206,7 @@ export function CsvAddForm({
       createDisabled={!draft.name.trim() && !namePlaceholder}
       typeBadge="csv"
     >
-      <FormField label="Name" description="Registry name used in queries, e.g. | lookup assets ip" dark={dark}>
+      <FormField label="Name" description="Table name used in queries, e.g. | lookup assets ip" dark={dark}>
         <TextInput value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} placeholder={namePlaceholder} dark={dark} mono />
       </FormField>
       <CsvFileFields
@@ -289,7 +289,7 @@ export function CsvCards({
             }
           >
             <div className="flex flex-col gap-3">
-              <FormField label="Name" description="Registry name used in queries, e.g. | lookup assets ip" dark={dark}>
+              <FormField label="Name" description="Table name used in queries, e.g. | lookup assets ip" dark={dark}>
                 <TextInput value={cv.name} onChange={(v) => onUpdate(i, { name: v })} placeholder="" dark={dark} mono />
               </FormField>
               <CsvFileFields

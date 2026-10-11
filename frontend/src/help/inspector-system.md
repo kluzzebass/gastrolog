@@ -57,7 +57,7 @@ Every row carries its meaning on hover.
 - **Raft liveness** rows, once the node has appended to its WAL —
   **WAL Append** average and max latency across every Raft group on the node,
   **Elections** total and per minute, **Leader Losses** (leaderships this node
-  held and lost), and **Failed HBs** (replication heartbeats a follower did
+  held and lost), and **Failed heartbeats** (replication heartbeats a follower did
   not answer). Elections sustained above about 3/min is an election storm; a
   WAL max latency near 1s means bulk I/O is starving consensus.
 

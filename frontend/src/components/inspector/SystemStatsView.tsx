@@ -284,7 +284,7 @@ function CompactView({
                 dark={dark}
               />
               <CompactStatRow
-                label="Failed HBs"
+                label="Failed heartbeats"
                 value={stats.raftFailedHeartbeatsTotal.toString()}
                 mono
                 title="replication heartbeats from this node that a follower did not answer"

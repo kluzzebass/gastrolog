@@ -35,11 +35,11 @@ Cloud storage endpoints are cluster-wide — not tied to any specific node. Clou
 
 **Restore Speed** and **Restore Days** are always shown; they are disabled, with the reason, for providers that have no restore step (GCS reads archived objects directly; Memory has nothing to restore) and Restore Days applies to S3 only, where a restored object expires after that many days.
 
-### Storage class transitions
+### Cloud storage class transitions
 
-With **Storage Class Transitions** set to *Managed by GastroLog*, sealed chunks move between the provider's cloud storage classes by age: each transition names an age (**After**) and the class a chunk older than that moves to. Transitions apply in order, so each **After** must be later than the one before it.
+With **Cloud storage class transitions** set to *Managed by GastroLog*, sealed chunks move between the provider's cloud storage classes by age: each transition names an age (**After**) and the **Cloud storage class** a chunk older than that moves to. Transitions apply in order, so each **After** must be later than the one before it. The cloud storage class is the provider's own (`GLACIER`, `cool`, …) and has nothing to do with the numeric [storage class](help:storage-config#how-vaults-use-file-storages) that places a vault on a disk.
 
-The **Delete** step is not a storage class and has its own row: a chunk older than its **After** is erased from the cloud store, and nothing restores it. Add it with **+ Delete After**; a service has at most one. Providers charge for deleting a chunk before its class's minimum storage duration, and the save reports that as a warning.
+The **Delete** step is not a cloud storage class and has its own row: a chunk older than its **After** is erased from the cloud store, and nothing restores it. Add it with **+ Delete After**; a service has at most one. Providers charge for deleting a chunk before its class's minimum storage duration, and the save reports that as a warning.
 
 With *Managed externally*, GastroLog never changes a chunk's class or deletes it; the provider's own lifecycle rules do.
 

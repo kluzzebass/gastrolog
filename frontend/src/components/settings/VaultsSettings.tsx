@@ -72,9 +72,8 @@ function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Memory budget parser — "4GB" -> bigint bytes
-// ---------------------------------------------------------------------------
+/** Mirrors the backend's DefaultVaultMemoryBudget: what an empty Budget resolves to. */
+export const DEFAULT_VAULT_MEMORY_BUDGET = "1GiB";
 
 // ---------------------------------------------------------------------------
 // VaultType label ↔ enum conversion
@@ -229,11 +228,11 @@ export function VaultStorageForm({
       )}
 
       {storage.type === "memory" && (
-        <FormField label="Budget" dark={dark} description="Leave empty for system default">
+        <FormField label="Budget" dark={dark} description="In-memory cap for the vault's records; empty uses the default">
           <TextInput
             value={storage.memoryBudget}
             onChange={(v) => onUpdate({ memoryBudget: v })}
-            placeholder="4GB"
+            placeholder={DEFAULT_VAULT_MEMORY_BUDGET}
             dark={dark}
             mono
           />

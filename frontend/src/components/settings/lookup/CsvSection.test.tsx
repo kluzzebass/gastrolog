@@ -57,6 +57,14 @@ function fieldHelpButton(label: HTMLElement): HTMLButtonElement {
   return button as HTMLButtonElement;
 }
 
+describe("CsvCards labels", () => {
+  test("the name field says it is the table name used in queries", async () => {
+    const { getByText } = renderCards();
+    fireEvent.click(getByText("assets"));
+    await waitFor(() => expect(getByText("Table name used in queries, e.g. | lookup assets ip")).toBeTruthy());
+  });
+});
+
 describe("CsvCards help", () => {
   test("the column pickers open the CSV lookups section", async () => {
     const { getByText, openHelp } = renderCards();

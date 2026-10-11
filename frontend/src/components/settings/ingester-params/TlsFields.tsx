@@ -27,6 +27,33 @@ interface TlsFieldsProps {
   dark: boolean;
 }
 
+export const TLS_VERIFY_LABEL =
+  "Verify server certificate (turning this off is unsafe — a stored CA certificate covers self-signed servers)";
+
+/** Whether `tls_verify` verifies: only the literal "false" turns verification off, as the ingesters read it. */
+export function tlsVerifies(params: Record<string, string>): boolean {
+  return params["tls_verify"] !== "false";
+}
+
+/**
+ * The one server-verification checkbox every dialing ingester shares, so the
+ * same `tls_verify` param never reads with opposite polarity on two forms.
+ */
+export function TlsVerifyCheckbox({
+  params,
+  onChange,
+  dark,
+}: Readonly<TlsFieldsProps>) {
+  return (
+    <Checkbox
+      checked={tlsVerifies(params)}
+      onChange={(v) => onChange({ ...params, tls_verify: v ? "" : "false" })}
+      label={TLS_VERIFY_LABEL}
+      dark={dark}
+    />
+  );
+}
+
 /**
  * TLS fields for listener ingesters (syslog TCP, RELP, HTTP, OTLP, Fluent
  * Forward): a serving certificate from the certificate store, an optional
@@ -106,7 +133,7 @@ export function TlsListenerFields({
 /**
  * TLS fields for client ingesters that dial out (Kafka, MQTT): a stored CA
  * pinning the server's trust root, an optional stored client certificate for
- * brokers that demand one, and the unsafe verification opt-out.
+ * brokers that demand one, and the shared server-verification checkbox.
  */
 export function TlsClientFields({
   params,
@@ -158,12 +185,7 @@ export function TlsClientFields({
               dark={dark}
             />
           </FormField>
-          <Checkbox
-            checked={params["tls_verify"] === "false"}
-            onChange={(v) => set("tls_verify", v ? "false" : "")}
-            label="Disable server verification (unsafe — a CA certificate covers self-signed servers safely)"
-            dark={dark}
-          />
+          <TlsVerifyCheckbox params={params} onChange={onChange} dark={dark} />
         </div>
       )}
     </>

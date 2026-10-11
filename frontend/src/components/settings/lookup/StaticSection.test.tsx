@@ -24,6 +24,14 @@ function renderCards(lookups: StaticLookupDraft[]) {
   );
 }
 
+describe("StaticSection labels", () => {
+  test("the name field says it is the table name used in queries", () => {
+    const { getByText } = renderCards([{ name: "teams", keyColumn: "team", valueColumns: ["owner"], rows: [] }]);
+    fireEvent.click(getByText("teams"));
+    expect(getByText("Table name used in queries, e.g. | lookup teams")).toBeTruthy();
+  });
+});
+
 describe("StaticSection save gates", () => {
   test("an empty column header disables Save with the reason", () => {
     const { getByText } = renderCards([{ name: "teams", keyColumn: "", valueColumns: ["owner"], rows: [] }]);

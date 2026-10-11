@@ -269,7 +269,7 @@ const memoryClassOptions = [
   { value: "deep-freeze", label: "Deep Freeze — offline, slow restore" },
 ];
 
-const DELETE_STEP_HELP_REF = "storage-config#storage-class-transitions";
+const DELETE_STEP_HELP_REF = "storage-config#cloud-storage-class-transitions";
 const deleteStepConsequence = "Chunks older than this are erased from the cloud store; nothing restores them.";
 
 const s3RestoreSpeedOptions = [
@@ -369,7 +369,7 @@ function ArchivalSection({
       <div className="flex flex-col gap-1">
         <div className="flex items-center justify-between">
           <span className={`text-[0.85em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}>
-            Storage Class Transitions
+            Cloud storage class transitions
           </span>
           <SelectInput
             value={values.archivalMode || "none"}
@@ -383,8 +383,8 @@ function ArchivalSection({
         </div>
         <p className={`text-[0.7em] leading-snug ${c("text-text-muted", "text-light-text-muted")}`}>
           {values.archivalMode === "active"
-            ? "GastroLog automatically transitions chunks between storage classes based on age."
-            : "Storage class transitions are handled outside GastroLog (e.g. S3 Lifecycle Rules, Azure Management Policies)."}
+            ? "GastroLog moves sealed chunks between cloud storage classes by age."
+            : "Cloud storage class transitions are handled outside GastroLog (e.g. S3 Lifecycle Rules, Azure Management Policies)."}
         </p>
       </div>
 
@@ -401,7 +401,7 @@ function ArchivalSection({
                   <TextInput
                     value={t.after}
                     onChange={(v) => setTransition(i, { after: v })}
-                    placeholder="e.g. 90d"
+                    placeholder=""
                     dark={dark}
                   />
                 </FormField>
@@ -418,7 +418,7 @@ function ArchivalSection({
                 </div>
               ) : (
                 <div className="flex-1">
-                  <FormField label={i === 0 ? "Storage Class" : ""} dark={dark}>
+                  <FormField label={i === 0 ? "Cloud storage class" : ""} dark={dark}>
                     <SelectInput
                       value={t.cloudStorageClass}
                       onChange={(v) => setTransition(i, { cloudStorageClass: v })}

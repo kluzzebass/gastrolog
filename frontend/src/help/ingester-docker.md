@@ -14,7 +14,7 @@ Streams container logs from a Docker daemon. Automatically discovers containers 
 | Enable TLS | Secure connection for TCP hosts | on |
 | CA Certificate | CA certificate name (from certificate store) | |
 | Client Certificate | Client certificate name | |
-| Verify server certificate | Verify server TLS certificate | on |
+| Verify server certificate | Check the daemon's TLS certificate against the CA; turning it off is unsafe (see below) | on |
 
 ## Filter expressions
 
@@ -59,4 +59,4 @@ See [Docker with mTLS](help:recipe-docker-mtls) for a complete walkthrough of se
 
 ## Disabling TLS verification
 
-`tls_verify=false` turns off verification of the Docker daemon's certificate. It is unsafe — anyone between this node and a TCP daemon endpoint can read and forge container logs — and the ingester logs a warning at startup when it is set. A stored CA certificate (`tls_ca`) covers the self-signed-daemon case without giving up verification.
+Turning **Verify server certificate** off (`tls_verify=false`) stops the daemon's certificate being checked. It is unsafe — anyone between this node and a TCP daemon endpoint can read and forge container logs — and the ingester logs a warning at startup when it is set. A stored CA certificate (`tls_ca`) covers the self-signed-daemon case without giving up verification.

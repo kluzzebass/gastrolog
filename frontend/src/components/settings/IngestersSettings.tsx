@@ -20,27 +20,12 @@ import { PulseIcon } from "../icons";
 import { CrossLinkBadge } from "../inspector/CrossLinkBadge";
 import { IngesterMode, type IngesterConfig } from "../../api/gen/gastrolog/v1/system_pb";
 import type { IngesterDefaults } from "../../api/hooks/useIngesterDefaults";
+import { ingesterHelpRef, ingesterTypeLabel } from "./ingesterTypeLabel";
 
 const ingesterTypes = [
-  { value: "chatterbox", label: "chatterbox" },
-  { value: "docker", label: "docker" },
-  { value: "fluentfwd", label: "fluentfwd" },
-  { value: "http", label: "http" },
-  { value: "kafka", label: "kafka" },
-  { value: "mqtt", label: "mqtt" },
-  { value: "metrics", label: "metrics" },
-  { value: "otlp", label: "otlp" },
-  { value: "relp", label: "relp" },
-  { value: "scatterbox", label: "scatterbox" },
-  { value: "self", label: "self" },
-  { value: "syslog", label: "syslog" },
-  { value: "tail", label: "tail" },
-];
-
-/** Every ingester type has a help topic named after it. */
-function ingesterHelpRef(type: string): string {
-  return `ingester-${type}`;
-}
+  "chatterbox", "docker", "fluentfwd", "http", "kafka", "mqtt", "metrics",
+  "otlp", "relp", "scatterbox", "self", "syslog", "tail",
+].map((value) => ({ value, label: ingesterTypeLabel(value) }));
 
 // -- Reducer for "Add ingester" form state --
 
@@ -214,7 +199,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
           isPending={putIngester.isPending}
           createDisabled={nameConflict || !!newListenError || !isIngesterParamsValid(newType, newParams)}
           createDisabledReason={createDisabledReason}
-          typeBadge={newType}
+          typeBadge={ingesterTypeLabel(newType)}
         >
           <IngesterCommonFields
             name={newName}
@@ -350,7 +335,7 @@ function IngesterCard({
   return (
     <SettingsCard
       id={ing.name || encode(ing.id)}
-      typeBadge={ing.type}
+      typeBadge={ingesterTypeLabel(ing.type)}
       helpRef={ingesterHelpRef(ing.type)}
       dark={dark}
       expanded={expanded}

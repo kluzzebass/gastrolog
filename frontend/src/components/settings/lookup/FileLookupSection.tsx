@@ -222,7 +222,7 @@ export function FileLookupAddForm({
       createDisabled={!draft.name.trim() && !namePlaceholder}
       typeBadge={spec.typeBadge}
     >
-      <FormField label="Name" description="Registry name used in queries, e.g. | lookup hosts" dark={dark}>
+      <FormField label="Name" description="Table name used in queries, e.g. | lookup hosts" dark={dark}>
         <TextInput value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} placeholder={namePlaceholder} dark={dark} mono />
       </FormField>
       <FormField label="File" dark={dark}>
@@ -291,7 +291,7 @@ function FileLookupCardBody({
 
   return (
     <div className="flex flex-col gap-3">
-      <FormField label="Name" description="Registry name used in queries, e.g. | lookup hosts" dark={dark}>
+      <FormField label="Name" description="Table name used in queries, e.g. | lookup hosts" dark={dark}>
         <TextInput value={draft.name} onChange={(v) => onUpdate(index, { name: v })} placeholder="" dark={dark} mono />
       </FormField>
       <FormField label="File" dark={dark}>

@@ -76,8 +76,8 @@ describe("CertificatesSettings", () => {
   test("every certificate carries a kind badge saying where its key material lives", () => {
     expect(certSourceBadge({ fromFiles: true })).toEqual({
       text: "files",
-      title: "loaded from files on disk — reloaded when they change",
-      helpRef: "certificates#hot-reload",
+      title: "file-path certificate — read from files on disk, reloaded when they change",
+      helpRef: "certificates#file-path-certificates",
     });
     expect(certSourceBadge({ fromFiles: false })).toEqual({
       text: "pem",
@@ -96,7 +96,8 @@ describe("CertificatesSettings", () => {
     });
 
     expect(getByText("Add pasted certificate")).toBeTruthy();
-    expect(getByText("Add monitored files")).toBeTruthy();
+    expect(getByText("Add file-path certificate")).toBeTruthy();
+    expect(getByText(/a file-path certificate reads files on the node/)).toBeTruthy();
   });
 
   test("hides add buttons when a cert is expanded", () => {
@@ -111,7 +112,7 @@ describe("CertificatesSettings", () => {
     // Expand a cert
     fireEvent.click(getByText("prod-cert"));
     expect(queryByText("Add pasted certificate")).toBeNull();
-    expect(queryByText("Add monitored files")).toBeNull();
+    expect(queryByText("Add file-path certificate")).toBeNull();
   });
 
   test("opens PEM add form with textarea fields", () => {
@@ -126,6 +127,7 @@ describe("CertificatesSettings", () => {
     fireEvent.click(getByText("Add pasted certificate"));
     expect(getByText("Certificate (PEM)")).toBeTruthy();
     expect(getByText("Private key (PEM)")).toBeTruthy();
+    expect(getByText("Use as the default HTTPS certificate")).toBeTruthy();
   });
 
   test("opens files add form with path fields", () => {
@@ -137,9 +139,10 @@ describe("CertificatesSettings", () => {
       wrapper: settingsWrapper(qc),
     });
 
-    fireEvent.click(getByText("Add monitored files"));
+    fireEvent.click(getByText("Add file-path certificate"));
     expect(getByText("Certificate file path")).toBeTruthy();
     expect(getByText("Key file path")).toBeTruthy();
+    expect(getByText("Use as the default HTTPS certificate")).toBeTruthy();
   });
 
   test("deletes certificate via confirm flow", async () => {
@@ -190,6 +193,6 @@ describe("CertificatesSettings", () => {
       wrapper: settingsWrapper(qc),
     });
 
-    expect(getByText(/TLS certificates for the server/)).toBeTruthy();
+    expect(getByText(/TLS certificates for HTTPS and ingester connections/)).toBeTruthy();
   });
 });

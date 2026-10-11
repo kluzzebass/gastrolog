@@ -41,6 +41,15 @@ function renderCards(initial: HTTPLookupDraft[] = [savedUsers]) {
   return result;
 }
 
+describe("HttpCards descriptions", () => {
+  test("the name is the table name, the paths are JSONPath run as jq, and the destinations note is one line", () => {
+    const { getByText } = renderCards();
+    expect(getByText("Table name used in queries, e.g. | lookup users")).toBeTruthy();
+    expect(getByText("JSONPath expressions selecting the objects to use; the server runs each as jq and merges the results.")).toBeTruthy();
+    expect(getByText("Lookups reach public addresses only unless this is on; Test uses the saved setting, so save first.")).toBeTruthy();
+  });
+});
+
 describe("HttpCards test gate", () => {
   test("Test is refused while the private-destinations flag is unsaved, and offered again once it matches", () => {
     const { getByText, queryByText } = renderCards();

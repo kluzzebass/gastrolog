@@ -7,7 +7,7 @@ import { HelpProvider } from "../../hooks/useHelp";
 
 const mocks = installMockClients();
 
-import { VaultsSettings } from "./VaultsSettings";
+import { DEFAULT_VAULT_MEMORY_BUDGET, VaultsSettings } from "./VaultsSettings";
 import { TRANSFER_HELP_REF, transferSourceIneligibility, transferTargetOptions } from "./transferEligibility";
 import { GetSystemResponse, RetentionRule, VaultConfig, VaultPlacement, VaultType } from "../../api/gen/gastrolog/v1/system_pb";
 import { renderWritable } from "../../testing/renderWritable";
@@ -286,6 +286,22 @@ describe("VaultsSettings", () => {
     await waitFor(() => {
       expect(m(mocks.systemClient, "putVault")).toHaveBeenCalledTimes(1);
     });
+  });
+
+  // The placeholder is the value an empty Budget resolves to on the server
+  // (system.DefaultVaultMemoryBudget), so it is something the operator could type.
+  test("the memory budget placeholder is the backend default", async () => {
+    m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], { ...sampleConfig, vaults: [] });
+    const { getByText, getByLabelText } = renderWritable(<VaultsSettings dark />, { wrapper: settingsWrapper(qc) });
+
+    fireEvent.click(getByText("Add Vault"));
+    await waitFor(() => expect(getByText("Create")).toBeTruthy());
+    fireEvent.change(getByLabelText("Storage Type"), { target: { value: "memory" } });
+
+    expect(DEFAULT_VAULT_MEMORY_BUDGET).toBe("1GiB");
+    expect((getByLabelText("Budget") as HTMLInputElement).placeholder).toBe(DEFAULT_VAULT_MEMORY_BUDGET);
   });
 
   test("transfer target field appears only when disposition is transfer, and is required to create", async () => {

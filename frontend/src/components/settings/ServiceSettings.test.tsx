@@ -243,6 +243,55 @@ describe("ServiceSettings", () => {
     expect(queryByText(/saved default certificate no longer exists/)).not.toBeNull();
   });
 
+  // The three query limits share one disable convention, stated as the
+  // server reads it: an empty duration or 0s is no timeout; an empty or 0
+  // count is no cap. The placeholders are empty because no typed default
+  // is what empty resolves to.
+  test("the query limits state the same disable convention and carry no placeholder", () => {
+    const { getByText, container } = renderWithHelp();
+    fireEvent.click(getByText("Query"));
+    expect(getByText("Longest a Search, Histogram or GetContext query may run; empty or 0s means no limit.")).toBeTruthy();
+    expect(getByText("Longest a Follow stream stays open before the server closes it; empty or 0s means no limit.")).toBeTruthy();
+    expect(getByText("Most records one Search request returns; empty or 0 means no limit.")).toBeTruthy();
+    for (const name of ["Query Timeout", "Max Follow Duration"]) {
+      const label = getByText(name) as HTMLLabelElement;
+      const input = container.querySelector(`#${CSS.escape(label.htmlFor)}`) as HTMLInputElement;
+      expect(input.placeholder).toBe("");
+    }
+  });
+
+  // A saved 0 is "no cap", and the form must show it as 0 — rewriting it to
+  // the bootstrap default would both lie and save the lie back.
+  test("a saved max result count of 0 shows as 0, not as the bootstrap default", () => {
+    const qc = createTestQueryClient();
+    qc.setQueryData(["settings"], { ...sampleSettings, query: { ...sampleSettings.query, maxResultCount: 0 } });
+    qc.setQueryData(["certificates"], { certificates: [] });
+    const { getByText, container } = renderWritable(<ServiceSettings dark />, { wrapper: settingsWrapper(qc) });
+    fireEvent.click(getByText("Query"));
+    const label = getByText("Max Result Count") as HTMLLabelElement;
+    const input = container.querySelector(`#${CSS.escape(label.htmlFor)}`) as HTMLInputElement;
+    expect(input.value).toBe("0");
+    expect((getByText("Save").closest("button") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  test("the animal-noise rule says what the server rejects", () => {
+    const { getByText } = renderWithHelp();
+    fireEvent.click(getByText("Password Policy"));
+    expect(getByText("Forbid animal noises")).toBeTruthy();
+    expect(getByText(/Rejects a password containing moo, woof, bark, meow/)).toBeTruthy();
+    expect(getByText(/caw or gobble \(case-insensitive\)/)).toBeTruthy();
+  });
+
+  test("the broadcast interval names alarms, and the backlog budget is one line with its anchor", () => {
+    const { getByText, openHelp } = renderWithHelp();
+    fireEvent.click(getByText("Broadcasting"));
+    expect(getByText(/\(vault stats, route stats, alarms\)/)).toBeTruthy();
+    fireEvent.click(getByText("Pipeline"));
+    expect(getByText("Per-vault bound on completed segments awaiting chunking; at it the vault refuses new records until chunking drains below it. Empty means unbounded.")).toBeTruthy();
+    fireEvent.click(fieldHelpButton(getByText("Backlog Budget")));
+    expect(openHelp).toHaveBeenCalledWith("service-settings#pipeline");
+  });
+
   test("broadcasting section shows broadcast interval", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["settings"], sampleSettings);
