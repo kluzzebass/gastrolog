@@ -628,14 +628,18 @@ func (o *Orchestrator) onVaultCtlLeadGained(vaultID glid.GLID) {
 }
 
 // reconcilePipelineAfterCtlRestore rebinds pipeline managers to the live vault-ctl
-// FSM after snapshot restore and runs chunk recover. Returns ErrUnknownVault when
-// pipeline has not registered the vault on this home yet — caller must defer.
+// FSM after snapshot restore and, on a chunking home, runs chunk recover. Returns
+// ErrUnknownVault when pipeline has not registered the vault on this node yet —
+// caller must defer.
 func (o *Orchestrator) reconcilePipelineAfterCtlRestore(vaultID glid.GLID) error {
 	if o.pipeline == nil || !o.isPipelineIngestVault(vaultID) {
 		return nil
 	}
 	if err := o.rewirePipelineAfterCtlRestore(vaultID); err != nil {
 		return err
+	}
+	if !o.pipeline.ChunkingRegistered(vaultID) {
+		return nil
 	}
 	if err := o.pipeline.RecoverVault(context.Background(), vaultID); err != nil {
 		return err
@@ -670,9 +674,10 @@ func (o *Orchestrator) finishPendingPipelineCtlRestore(vaultID glid.GLID) {
 	}()
 }
 
-// rewirePipelineAfterCtlRestore rebinds chunking/collection to the live vault-ctl
-// sub-FSM. vaultraft.FSM.Restore allocates fresh sub-FSMs; pipeline managers
-// otherwise keep reading the pre-restore object and the planner stalls.
+// rewirePipelineAfterCtlRestore rebinds release consumption, chunking, and
+// collection to the live vault-ctl sub-FSM. vaultraft.FSM.Restore allocates
+// fresh sub-FSMs; pipeline managers otherwise keep reading the pre-restore
+// object — the planner stalls and released segments are never purged.
 func (o *Orchestrator) rewirePipelineAfterCtlRestore(vaultID glid.GLID) error {
 	fsm, applier, _, ok := o.vaultCtlHandle(vaultID)
 	if !ok || fsm == nil {

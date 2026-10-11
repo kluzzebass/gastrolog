@@ -1480,7 +1480,8 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
   Node-local bookkeeping, downstream of release.
 
 - **Purge** (paths / disk) — delete the segment's bytes from staging areas
-  (`paths.PurgeCompleted` on the origin after release; `paths.PurgeHeadStaging`
+  (`paths.PurgeCompleted` on the origin after release, whether or not the
+  origin is a home; `paths.PurgeHeadStaging`
   after a home materializes the sealed GLCB; `paths.PurgeSegmentStaging` for
   all three areas). The physical end of a segment's life, ordered strictly
   after its records survive in a replicated chunk — a returning node gets

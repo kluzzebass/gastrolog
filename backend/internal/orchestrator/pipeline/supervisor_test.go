@@ -438,6 +438,7 @@ func TestSupervisorReleasePurgesOriginAndHomeHead(t *testing.T) {
 	if err := os.WriteFile(paths.HeadSegment(homeRoot, segID), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	writeCompleted(t, originRoot, segID)
 
 	sup := New(Config{NodeID: glid.New(), Table: allRoute(t, vaultID)})
 	if err := sup.Start(context.Background()); err != nil {
@@ -479,6 +480,7 @@ func TestSupervisorReleasePurgesOriginAndHomeHead(t *testing.T) {
 	if _, err := os.Stat(paths.HeadSegment(homeRoot, segID)); !os.IsNotExist(err) {
 		t.Fatalf("home head should be purged, stat err=%v", err)
 	}
+	assertCompleted(t, originRoot, segID, false)
 }
 
 func TestStagingHeadPurgeRootsDedupesSharedRoot(t *testing.T) {

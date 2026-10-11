@@ -309,6 +309,18 @@ Release:
           drops every sealed-chunk manifest that references a released segment
 ```
 
+**Who purges on release.** Every node holds every vault's vault-ctl FSM, so every
+node that originates segments for a vault consumes its releases — home or not. An
+origin retires each released segment from distribution and deletes its
+`completed/` copy; every staging root on the node drops its `head/` and `pre-head/`
+copies. Release recorded in the FSM is the only trigger: a segment the FSM has not
+released stays in `completed/`, because a home may still need to pull it. A release
+this node never saw as an event — applied while it was down, before the vault
+registered, or carried in by a snapshot install that replaced the FSM — is
+reclaimed when the pipeline binds to the FSM: at vault registration and at the
+post-restore rebind, the node purges every staging copy the FSM records as
+released.
+
 **What a home builds.** Each build pass derives its work from vault-ctl FSM state
 and the home's own chunk root — never from a local queue of manifests it happened
 to observe. First, in seal order, every sealed-chunk manifest (a sealed manifest
