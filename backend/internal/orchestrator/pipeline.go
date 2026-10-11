@@ -146,10 +146,16 @@ func (o *Orchestrator) SubmitToVault(ctx context.Context, vaultID glid.GLID, rec
 //
 // Leadership is deliberately NOT part of this key: the chunking planner reads
 // IsLeader() live on every tick, so leadership changes need no re-registration.
+//
+// failed marks a vault whose supervisor registration failed. The vault stays
+// published — configuration makes it a pipeline vault whether or not its
+// managers are running — and a failed registration never equals a wanted one,
+// so the next reload retries it.
 type pipelineVaultReg struct {
 	home      bool
 	hasHandle bool
 	policy    chunking.ManifestRotationPolicy
+	failed    bool
 }
 
 // buildPipelineVaultSpec builds the supervisor VaultSpec for a destination vault.
@@ -707,37 +713,56 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 	// Home role, vault-ctl handle availability, or chunk rotation policy
 	// changed, so unchanged vaults never flap their pipeline state. The cron
 	// rotation job is reconciled every pass regardless (its schedule may change
-	// independent of the registration key, and it is idempotent).
+	// independent of the registration key, and it is idempotent). One vault's
+	// failure does not hold back the others.
+	var errs []error
 	chunkHomes := make(map[glid.GLID]bool, len(desired))
 	for vid := range desired {
 		home := o.isVaultHome(sys, vid)
 		fsm, applier, isLeader, hasHandle := o.vaultCtlHandle(vid)
 		policy, cronExpr := o.resolveChunkPolicy(sys, vid)
-		chunkEnabled := home && hasHandle
-		chunkHomes[vid] = chunkEnabled
 		want := pipelineVaultReg{home: home, hasHandle: hasHandle, policy: policy}
-		if prev, ok := o.lookupPipelineVault(vid); ok {
-			if prev == want {
-				o.reconcileChunkCron(vid, chunkEnabled, cronExpr)
-				o.finishPendingPipelineCtlRestore(vid)
+		if prev, ok := o.lookupPipelineVault(vid); !ok || prev != want {
+			if err := o.registerPipelineVaultLocked(vid, want, fsm, applier, isLeader); err != nil {
+				errs = append(errs, err)
 				continue
 			}
-			o.pipeline.UnregisterVault(vid)
-			o.deletePipelineVaultLocked(vid)
 		}
-		spec, err := o.buildPipelineVaultSpec(vid, home, fsm, applier, isLeader, hasHandle, policy)
-		if err != nil {
-			return fmt.Errorf("build pipeline vault %s: %w", vid, err)
-		}
-		if err := o.pipeline.RegisterVault(spec); err != nil {
-			return fmt.Errorf("register vault %s: %w", vid, err)
-		}
-		o.setPipelineVaultLocked(vid, want)
+		chunkEnabled := home && hasHandle
+		chunkHomes[vid] = chunkEnabled
 		o.reconcileChunkCron(vid, chunkEnabled, cronExpr)
 		o.finishPendingPipelineCtlRestore(vid)
 	}
 
 	o.rewireChunkHomesAfterReload(chunkHomes)
+	return errors.Join(errs...)
+}
+
+// registerPipelineVaultLocked (re-)registers a vault with the pipeline
+// supervisor and publishes want as its registration. Caller holds o.mu.
+//
+// The vault is published as a pipeline vault at every instant, because the
+// lock-free readers of the registration decide from it whether the vault's
+// chunks are pipeline chunks: the previous registration stays published until
+// want replaces it in one store, and a failure publishes want marked failed
+// instead of dropping the vault.
+func (o *Orchestrator) registerPipelineVaultLocked(vid glid.GLID, want pipelineVaultReg, fsm *vaultctlfsm.FSM, applier vaultctlfsm.Applier, isLeader func() bool) error {
+	failed := want
+	failed.failed = true
+	spec, err := o.buildPipelineVaultSpec(vid, want.home, fsm, applier, isLeader, want.hasHandle, want.policy)
+	if err != nil {
+		o.setPipelineVaultLocked(vid, failed)
+		return fmt.Errorf("build pipeline vault %s: %w", vid, err)
+	}
+	o.pipeline.UnregisterVault(vid)
+	if o.pipelineReregisterHook != nil {
+		o.pipelineReregisterHook(vid)
+	}
+	if err := o.pipeline.RegisterVault(spec); err != nil {
+		o.setPipelineVaultLocked(vid, failed)
+		return fmt.Errorf("register vault %s: %w", vid, err)
+	}
+	o.setPipelineVaultLocked(vid, want)
 	return nil
 }
 

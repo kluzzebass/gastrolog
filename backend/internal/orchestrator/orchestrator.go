@@ -274,6 +274,14 @@ type Orchestrator struct {
 	// second copy can drift out of sync with it.
 	pipelineVaults atomic.Pointer[map[glid.GLID]pipelineVaultReg]
 
+	// pipelineReregisterHook, if non-nil, is invoked during a vault's
+	// (re-)registration after the supervisor has dropped its previous
+	// registration and before it registers the new one — the instant the
+	// supervisor holds no registration for the vault. Test-only: it lets a
+	// test run lock-free readers of the registration inside that window. Nil
+	// in production.
+	pipelineReregisterHook func(vaultID glid.GLID)
+
 	// segmentPuller streams completed segments from peer holders for
 	// collection. Set from factories during ApplyConfig (cluster mode only).
 	segmentPuller *cluster.SegmentPuller
