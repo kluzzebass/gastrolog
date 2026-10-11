@@ -94,7 +94,7 @@ func (s *Server) handleReplicationCommand(ctx context.Context, msg *gastrologv1.
 }
 
 // isTombstonedErr reports whether err indicates the target chunk has been
-// tombstoned (deleted and within the retention window). Such errors are
+// tombstoned (deleted, with its tombstone not yet pruned). Such errors are
 // translated into successful acks on the replication receive path — the
 // goal (chunk absent on this node) is already achieved.
 func isTombstonedErr(err error) bool {

@@ -432,6 +432,24 @@ gRPC transport:
   age/count bound re-check skip it, while the manifest and residency keep
   reporting it until the acks land.
 
+- **Chunk tombstone** (vault-ctl) — the FSM's record that a chunk was
+  deleted, kept after its manifest entry is gone and tagged with the
+  **delete sequence** it was deleted at (`deleteSeq`, counting the applies
+  that tombstoned a chunk — never a wall-clock time). A `CreateChunk`,
+  `OpenChunkManifest` or `RepatriateChunk` naming one is refused, a
+  retention-transfer announce naming one is deferred, and it is the only
+  evidence that lets a node delete local bytes the manifest no longer lists
+  (`FSM.IsTombstoned`).
+
+- **Chunk purge confirmation** (vault-ctl) — a node's
+  `ConfirmChunkPurgeCommand`: it holds no copy, in its chunk store or chunk
+  staging, of any chunk tombstoned at or before the named delete sequence.
+  Every node sends one after its chunk tombstone sweep
+  (`Orchestrator.sweepChunkTombstones`); the vault-ctl leader's
+  `PruneChunkTombstonesCommand` drops the tombstones every member of its Raft
+  configuration has confirmed, and the confirmations of nodes no longer in
+  it. Same rule as the released-segment **purge confirmation**.
+
 ### Raft primitives (hashicorp/raft vocabulary)
 
 - **Term** — logical clock; increments on every election.

@@ -72,6 +72,8 @@ message VaultCtlCommand {
     ArchiveChunkCommand archive_chunk = 25;
     ConfirmSegmentPurgeCommand confirm_segment_purge = 26;
     PruneReleasedSegmentsCommand prune_released_segments = 27;
+    ConfirmChunkPurgeCommand confirm_chunk_purge = 28;
+    PruneChunkTombstonesCommand prune_chunk_tombstones = 29;
   }
 }
 
@@ -134,6 +136,24 @@ message FinalizeDeleteCommand {
 
 message PruneNodeCommand {
   string node_id = 1;
+}
+
+// ConfirmChunkPurgeCommand is a node's chunk purge confirmation: node_id holds
+// no copy of any chunk tombstoned at or before delete_seq. A chunk tombstone
+// is pruned only once every vault-ctl member has confirmed past it, because a
+// node still holding a deleted chunk's bytes needs the tombstone to recognise
+// them as deleted rather than as an unknown orphan.
+message ConfirmChunkPurgeCommand {
+  string node_id = 1;
+  uint64 delete_seq = 2;
+}
+
+// PruneChunkTombstonesCommand drops the chunk tombstones every node in members
+// has confirmed purging, and the chunk purge confirmations of nodes no longer
+// in members. Proposed by the vault-ctl leader with its Raft configuration's
+// server IDs.
+message PruneChunkTombstonesCommand {
+  repeated string members = 1;
 }
 
 message AttachOffsetsCommand {
@@ -459,10 +479,11 @@ message ManifestEntry {
   string cloud_storage_class = 26;
 }
 
-// Tombstone records a deleted chunk ID and the apply time of the delete.
+// Tombstone records a deleted chunk ID and the delete sequence it was
+// tombstoned at.
 message Tombstone {
   bytes chunk_id = 1;
-  int64 deleted_at_nanos = 2;
+  uint64 delete_seq = 2;
 }
 
 // PendingDelete is one in-flight receipt-based deletion (gastrolog-51gme).
@@ -501,6 +522,10 @@ message VaultCtlSnapshot {
   // tombstone records the value it was released at.
   uint64 release_seq = 11;
   repeated SegmentPurgeConfirmation segment_purge_confirmations = 12;
+  // Count of applies that tombstoned a chunk; each tombstone records the
+  // value it was deleted at.
+  uint64 delete_seq = 13;
+  repeated ChunkPurgeConfirmation chunk_purge_confirmations = 14;
 }
 
 // ReleasedSegment is one released-segment tombstone.
@@ -514,6 +539,13 @@ message ReleasedSegment {
 message SegmentPurgeConfirmation {
   string node_id = 1;
   uint64 release_seq = 2;
+}
+
+// ChunkPurgeConfirmation is the highest delete_seq a node has confirmed
+// purging through (ConfirmChunkPurgeCommand).
+message ChunkPurgeConfirmation {
+  string node_id = 1;
+  uint64 delete_seq = 2;
 }
 
 // VaultGroupSnapshot is the snapshot of the whole vault-ctl Raft group: one

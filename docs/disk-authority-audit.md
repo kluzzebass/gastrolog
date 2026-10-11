@@ -18,7 +18,7 @@ Sites that pass (1) but fail (2) — purely local operations like file-handle ma
 A chunk on local disk falls into one of three categories against the vault-ctl FSM:
 
 - **Known** — present in `f.chunks[chunkID]`. Normal case.
-- **Tombstoned** — present in `f.tombstones`. FSM explicitly says delete. [`SweepLocalOrphans`](backend/internal/orchestrator/vault_lifecycle_reconciler.go#L580) handles this — auto-delete is safe because the FSM made the decision explicitly.
+- **Tombstoned** — present in `f.tombstones`. FSM explicitly says delete. [`SweepLocalOrphans`](backend/internal/orchestrator/vault_lifecycle_reconciler.go#L580) handles this — auto-delete is safe because the FSM made the decision explicitly. A chunk tombstone is pruned only after every vault-ctl member has confirmed it holds no copy (`ConfirmChunkPurge` / `PruneChunkTombstones`), so no node is left with bytes that slide from tombstoned to unknown.
 - **Unknown** — neither in `f.chunks` nor in `f.tombstones`. The FSM has no opinion.
 
 **No sweep, startup pass, or reconciliation loop introduced by this migration may delete an unknown orphan.** The default for unknown orphans is preserve-and-alert; operator-driven recovery via the repatriation feature ([gastrolog-32bf2](dcat://gastrolog-32bf2)) is the only path that converts an unknown orphan into either a re-known chunk or a deleted one. Only explicit FSM tombstones authorize deletion.

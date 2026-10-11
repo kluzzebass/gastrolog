@@ -311,6 +311,18 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
      */
     value: PruneReleasedSegmentsCommand;
     case: "pruneReleasedSegments";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.ConfirmChunkPurgeCommand confirm_chunk_purge = 28;
+     */
+    value: ConfirmChunkPurgeCommand;
+    case: "confirmChunkPurge";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.PruneChunkTombstonesCommand prune_chunk_tombstones = 29;
+     */
+    value: PruneChunkTombstonesCommand;
+    case: "pruneChunkTombstones";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<VaultCtlCommand>) {
@@ -348,6 +360,8 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
     { no: 25, name: "archive_chunk", kind: "message", T: ArchiveChunkCommand, oneof: "command" },
     { no: 26, name: "confirm_segment_purge", kind: "message", T: ConfirmSegmentPurgeCommand, oneof: "command" },
     { no: 27, name: "prune_released_segments", kind: "message", T: PruneReleasedSegmentsCommand, oneof: "command" },
+    { no: 28, name: "confirm_chunk_purge", kind: "message", T: ConfirmChunkPurgeCommand, oneof: "command" },
+    { no: 29, name: "prune_chunk_tombstones", kind: "message", T: PruneChunkTombstonesCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultCtlCommand {
@@ -807,6 +821,97 @@ export class PruneNodeCommand extends Message<PruneNodeCommand> {
 
   static equals(a: PruneNodeCommand | PlainMessage<PruneNodeCommand> | undefined, b: PruneNodeCommand | PlainMessage<PruneNodeCommand> | undefined): boolean {
     return proto3.util.equals(PruneNodeCommand, a, b);
+  }
+}
+
+/**
+ * ConfirmChunkPurgeCommand is a node's chunk purge confirmation: node_id holds
+ * no copy of any chunk tombstoned at or before delete_seq. A chunk tombstone
+ * is pruned only once every vault-ctl member has confirmed past it, because a
+ * node still holding a deleted chunk's bytes needs the tombstone to recognise
+ * them as deleted rather than as an unknown orphan.
+ *
+ * @generated from message gastrolog.v1.ConfirmChunkPurgeCommand
+ */
+export class ConfirmChunkPurgeCommand extends Message<ConfirmChunkPurgeCommand> {
+  /**
+   * @generated from field: string node_id = 1;
+   */
+  nodeId = "";
+
+  /**
+   * @generated from field: uint64 delete_seq = 2;
+   */
+  deleteSeq = protoInt64.zero;
+
+  constructor(data?: PartialMessage<ConfirmChunkPurgeCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ConfirmChunkPurgeCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "delete_seq", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ConfirmChunkPurgeCommand {
+    return new ConfirmChunkPurgeCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ConfirmChunkPurgeCommand {
+    return new ConfirmChunkPurgeCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ConfirmChunkPurgeCommand {
+    return new ConfirmChunkPurgeCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ConfirmChunkPurgeCommand | PlainMessage<ConfirmChunkPurgeCommand> | undefined, b: ConfirmChunkPurgeCommand | PlainMessage<ConfirmChunkPurgeCommand> | undefined): boolean {
+    return proto3.util.equals(ConfirmChunkPurgeCommand, a, b);
+  }
+}
+
+/**
+ * PruneChunkTombstonesCommand drops the chunk tombstones every node in members
+ * has confirmed purging, and the chunk purge confirmations of nodes no longer
+ * in members. Proposed by the vault-ctl leader with its Raft configuration's
+ * server IDs.
+ *
+ * @generated from message gastrolog.v1.PruneChunkTombstonesCommand
+ */
+export class PruneChunkTombstonesCommand extends Message<PruneChunkTombstonesCommand> {
+  /**
+   * @generated from field: repeated string members = 1;
+   */
+  members: string[] = [];
+
+  constructor(data?: PartialMessage<PruneChunkTombstonesCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PruneChunkTombstonesCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "members", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PruneChunkTombstonesCommand {
+    return new PruneChunkTombstonesCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PruneChunkTombstonesCommand {
+    return new PruneChunkTombstonesCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PruneChunkTombstonesCommand {
+    return new PruneChunkTombstonesCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PruneChunkTombstonesCommand | PlainMessage<PruneChunkTombstonesCommand> | undefined, b: PruneChunkTombstonesCommand | PlainMessage<PruneChunkTombstonesCommand> | undefined): boolean {
+    return proto3.util.equals(PruneChunkTombstonesCommand, a, b);
   }
 }
 
@@ -2475,7 +2580,8 @@ export class ManifestEntry extends Message<ManifestEntry> {
 }
 
 /**
- * Tombstone records a deleted chunk ID and the apply time of the delete.
+ * Tombstone records a deleted chunk ID and the delete sequence it was
+ * tombstoned at.
  *
  * @generated from message gastrolog.v1.Tombstone
  */
@@ -2486,9 +2592,9 @@ export class Tombstone extends Message<Tombstone> {
   chunkId = new Uint8Array(0);
 
   /**
-   * @generated from field: int64 deleted_at_nanos = 2;
+   * @generated from field: uint64 delete_seq = 2;
    */
-  deletedAtNanos = protoInt64.zero;
+  deleteSeq = protoInt64.zero;
 
   constructor(data?: PartialMessage<Tombstone>) {
     super();
@@ -2499,7 +2605,7 @@ export class Tombstone extends Message<Tombstone> {
   static readonly typeName = "gastrolog.v1.Tombstone";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "deleted_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 2, name: "delete_seq", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): Tombstone {
@@ -2661,6 +2767,19 @@ export class VaultCtlSnapshot extends Message<VaultCtlSnapshot> {
    */
   segmentPurgeConfirmations: SegmentPurgeConfirmation[] = [];
 
+  /**
+   * Count of applies that tombstoned a chunk; each tombstone records the
+   * value it was deleted at.
+   *
+   * @generated from field: uint64 delete_seq = 13;
+   */
+  deleteSeq = protoInt64.zero;
+
+  /**
+   * @generated from field: repeated gastrolog.v1.ChunkPurgeConfirmation chunk_purge_confirmations = 14;
+   */
+  chunkPurgeConfirmations: ChunkPurgeConfirmation[] = [];
+
   constructor(data?: PartialMessage<VaultCtlSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2681,6 +2800,8 @@ export class VaultCtlSnapshot extends Message<VaultCtlSnapshot> {
     { no: 10, name: "sealed_chunk_manifests", kind: "message", T: OpenChunkManifestState, repeated: true },
     { no: 11, name: "release_seq", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 12, name: "segment_purge_confirmations", kind: "message", T: SegmentPurgeConfirmation, repeated: true },
+    { no: 13, name: "delete_seq", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 14, name: "chunk_purge_confirmations", kind: "message", T: ChunkPurgeConfirmation, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultCtlSnapshot {
@@ -2788,6 +2909,52 @@ export class SegmentPurgeConfirmation extends Message<SegmentPurgeConfirmation> 
 
   static equals(a: SegmentPurgeConfirmation | PlainMessage<SegmentPurgeConfirmation> | undefined, b: SegmentPurgeConfirmation | PlainMessage<SegmentPurgeConfirmation> | undefined): boolean {
     return proto3.util.equals(SegmentPurgeConfirmation, a, b);
+  }
+}
+
+/**
+ * ChunkPurgeConfirmation is the highest delete_seq a node has confirmed
+ * purging through (ConfirmChunkPurgeCommand).
+ *
+ * @generated from message gastrolog.v1.ChunkPurgeConfirmation
+ */
+export class ChunkPurgeConfirmation extends Message<ChunkPurgeConfirmation> {
+  /**
+   * @generated from field: string node_id = 1;
+   */
+  nodeId = "";
+
+  /**
+   * @generated from field: uint64 delete_seq = 2;
+   */
+  deleteSeq = protoInt64.zero;
+
+  constructor(data?: PartialMessage<ChunkPurgeConfirmation>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ChunkPurgeConfirmation";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "delete_seq", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkPurgeConfirmation {
+    return new ChunkPurgeConfirmation().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkPurgeConfirmation {
+    return new ChunkPurgeConfirmation().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkPurgeConfirmation {
+    return new ChunkPurgeConfirmation().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ChunkPurgeConfirmation | PlainMessage<ChunkPurgeConfirmation> | undefined, b: ChunkPurgeConfirmation | PlainMessage<ChunkPurgeConfirmation> | undefined): boolean {
+    return proto3.util.equals(ChunkPurgeConfirmation, a, b);
   }
 }
 
