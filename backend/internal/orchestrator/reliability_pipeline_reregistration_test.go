@@ -39,7 +39,8 @@ func (h *orchRelHarness) applyOnVaultCtlLeader(v vaultSpec, chunkCmd []byte) {
 		if err == nil {
 			return
 		}
-		if !errors.Is(err, hraft.ErrNotLeader) && !errors.Is(err, hraft.ErrLeadershipLost) {
+		if !errors.Is(err, hraft.ErrNotLeader) && !errors.Is(err, hraft.ErrLeadershipLost) &&
+			!errors.Is(err, hraft.ErrLeadershipTransferInProgress) {
 			h.t.Fatalf("vault-ctl apply on %s: %v", leader.label, err)
 		}
 		lastErr = err
