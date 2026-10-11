@@ -522,13 +522,6 @@ message ForwardAnalyzeChunkResponse {
   repeated ChunkAnalysis analyses = 1;
 }
 
-// ForwardSealVaultRequest asks a remote node to seal the active chunk of a vault.
-message ForwardSealVaultRequest {
-  bytes vault_id = 1;
-}
-
-message ForwardSealVaultResponse {}
-
 // ForwardReindexVaultRequest asks a remote node to rebuild all indexes for a vault.
 message ForwardReindexVaultRequest {
   bytes vault_id = 1;

@@ -79,9 +79,6 @@ type GetChunkExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk
 // AnalyzeChunkExecutor runs index analysis on a local vault (or specific chunk).
 type AnalyzeChunkExecutor func(ctx context.Context, vaultID glid.GLID, chunkID string) ([]*gastrologv1.ChunkAnalysis, error)
 
-// SealVaultExecutor seals the active chunk of a local vault.
-type SealVaultExecutor func(ctx context.Context, vaultID glid.GLID) error
-
 // ReindexVaultExecutor rebuilds all indexes for a local vault.
 type ReindexVaultExecutor func(ctx context.Context, vaultID glid.GLID) (string, error)
 
@@ -209,11 +206,6 @@ func (s *Server) SetGetChunkExecutor(fn GetChunkExecutor) {
 // SetAnalyzeChunkExecutor injects the callback for handling remote AnalyzeChunk requests.
 func (s *Server) SetAnalyzeChunkExecutor(fn AnalyzeChunkExecutor) {
 	s.analyzeChunkExecutor = fn
-}
-
-// SetSealVaultExecutor injects the callback for handling remote SealVault requests.
-func (s *Server) SetSealVaultExecutor(fn SealVaultExecutor) {
-	s.sealVaultExecutor = fn
 }
 
 // SetReindexVaultExecutor injects the callback for handling remote ReindexVault requests.
@@ -728,22 +720,6 @@ func (s *Server) forwardAnalyzeChunk(ctx context.Context, req *gastrologv1.Forwa
 	return &gastrologv1.ForwardAnalyzeChunkResponse{Analyses: analyses}, nil
 }
 
-// forwardSealVault handles the ForwardSealVault RPC. Seals the active chunk
-// of a local vault.
-func (s *Server) forwardSealVault(ctx context.Context, req *gastrologv1.ForwardSealVaultRequest) (*gastrologv1.ForwardSealVaultResponse, error) {
-	if s.sealVaultExecutor == nil {
-		return nil, status.Error(codes.Unavailable, "seal vault executor not configured")
-	}
-	vaultID, err := parseVaultID(req.GetVaultId())
-	if err != nil {
-		return nil, err
-	}
-	if err := s.sealVaultExecutor(ctx, vaultID); err != nil {
-		return nil, status.Errorf(codes.Internal, "seal vault: %v", err)
-	}
-	return &gastrologv1.ForwardSealVaultResponse{}, nil
-}
-
 // forwardReindexVault handles the ForwardReindexVault RPC. Rebuilds all indexes
 // for a local vault.
 func (s *Server) forwardReindexVault(ctx context.Context, req *gastrologv1.ForwardReindexVaultRequest) (*gastrologv1.ForwardReindexVaultResponse, error) {
@@ -1226,10 +1202,6 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:    forwardAnalyzeChunkHandler,
 		},
 		{
-			MethodName: "ForwardSealVault",
-			Handler:    forwardSealVaultHandler,
-		},
-		{
 			MethodName: "ForwardReindexVault",
 			Handler:    forwardReindexVaultHandler,
 		},
@@ -1310,7 +1282,6 @@ type clusterServiceServer interface {
 	forwardExplain(context.Context, *gastrologv1.ForwardExplainRequest) (*gastrologv1.ForwardExplainResponse, error)
 	forwardGetChunk(context.Context, *gastrologv1.ForwardGetChunkRequest) (*gastrologv1.ForwardGetChunkResponse, error)
 	forwardAnalyzeChunk(context.Context, *gastrologv1.ForwardAnalyzeChunkRequest) (*gastrologv1.ForwardAnalyzeChunkResponse, error)
-	forwardSealVault(context.Context, *gastrologv1.ForwardSealVaultRequest) (*gastrologv1.ForwardSealVaultResponse, error)
 	forwardReindexVault(context.Context, *gastrologv1.ForwardReindexVaultRequest) (*gastrologv1.ForwardReindexVaultResponse, error)
 	forwardExportToVault(context.Context, *gastrologv1.ForwardExportToVaultRequest) (*gastrologv1.ForwardExportToVaultResponse, error)
 	listPeerManagedFiles(context.Context, *gastrologv1.ListPeerManagedFilesRequest) (*gastrologv1.ListPeerManagedFilesResponse, error)
@@ -1578,25 +1549,6 @@ func forwardAnalyzeChunkHandler(srv any, ctx context.Context, dec func(any) erro
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardAnalyzeChunk(ctx, req.(*gastrologv1.ForwardAnalyzeChunkRequest))
-	}
-	return interceptor(ctx, req, info, handler)
-}
-
-func forwardSealVaultHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	req := &gastrologv1.ForwardSealVaultRequest{}
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-	s := srv.(*Server)
-	if interceptor == nil {
-		return s.forwardSealVault(ctx, req)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/gastrolog.v1.ClusterService/ForwardSealVault",
-	}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return s.forwardSealVault(ctx, req.(*gastrologv1.ForwardSealVaultRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

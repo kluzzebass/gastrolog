@@ -3,6 +3,7 @@ package orchestrator_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -1177,10 +1178,13 @@ func (h *orchRelHarness) appendBurst(v vaultSpec, prefix string, count int) *orc
 }
 
 // sealActiveOn seals the chunk manager's active chunk for one vault on one node.
+// sealActiveOn seals n's chunk-manager active chunk. Off the chunking leader
+// the open manifest's half of the seal is refused alongside the count.
 func (h *orchRelHarness) sealActiveOn(n *orchRelNode, v vaultSpec) {
 	h.t.Helper()
-	if _, err := n.orch.SealActive(v.id); err != nil {
-		h.t.Fatalf("%s: SealActive vault %s: %v", n.label, v.label, err)
+	sealed, err := n.orch.SealActive(v.id)
+	if err != nil && (sealed == 0 || !errors.Is(err, orchestrator.ErrNotChunkingLeader)) {
+		h.t.Fatalf("%s: SealActive vault %s = (%d, %v)", n.label, v.label, sealed, err)
 	}
 }
 

@@ -238,14 +238,6 @@ func (sf *SearchForwarder) ValidateIngester(ctx context.Context, nodeID string, 
 	return resp, nil
 }
 
-func (sf *SearchForwarder) SealVault(ctx context.Context, nodeID string, req *gastrologv1.ForwardSealVaultRequest) (*gastrologv1.ForwardSealVaultResponse, error) {
-	resp := &gastrologv1.ForwardSealVaultResponse{}
-	if err := sf.invoke(ctx, nodeID, "/gastrolog.v1.ClusterService/ForwardSealVault", req, resp, "forward seal vault"); err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
 func (sf *SearchForwarder) ReindexVault(ctx context.Context, nodeID string, req *gastrologv1.ForwardReindexVaultRequest) (*gastrologv1.ForwardReindexVaultResponse, error) {
 	resp := &gastrologv1.ForwardReindexVaultResponse{}
 	if err := sf.invoke(ctx, nodeID, "/gastrolog.v1.ClusterService/ForwardReindexVault", req, resp, "forward reindex vault"); err != nil {
