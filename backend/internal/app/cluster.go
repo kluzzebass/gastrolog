@@ -1227,6 +1227,40 @@ func admitOnLeader(
 	return applySuffrageOp(clusterSrv, logger, resolveAdmissionOp(suffrage), targetNodeID, nodeAddr)
 }
 
+// changeMemberSuffrageOnLeader changes the suffrage of a node already in the
+// configuration. It takes the same gate and removal record as admission:
+// hashicorp/raft's AddVoter adds a server that is not in the configuration,
+// so a promotion that read the node's address before a removal committed
+// would otherwise put the removed node back. Leader only.
+func changeMemberSuffrageOnLeader(
+	ctx context.Context,
+	clusterSrv *cluster.Server,
+	cfgStore system.Store,
+	gate *membershipGate,
+	logger *slog.Logger,
+	targetNodeID string,
+	voter bool,
+) error {
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+
+	if err := cfgStore.Barrier(ctx); err != nil {
+		return fmt.Errorf("read removal record: %w", err)
+	}
+	removed, err := cfgStore.IsNodeRemoved(ctx, targetNodeID)
+	if err != nil {
+		return fmt.Errorf("read removal record: %w", err)
+	}
+	if removed {
+		return fmt.Errorf("%s: %w", targetNodeID, cluster.ErrNodeRemoved)
+	}
+	addr, err := lookupNodeAddr(clusterSrv, targetNodeID)
+	if err != nil {
+		return err
+	}
+	return applySuffrageOp(clusterSrv, logger, resolveSuffrageOp(voter), targetNodeID, addr)
+}
+
 // makeSetNodeSuffrageFunc creates the callback for the SetNodeSuffrage RPC,
 // and registers the two cluster-lane handlers that reach the same machinery
 // from elsewhere: a follower proxying a suffrage change here because this
@@ -1247,11 +1281,7 @@ func makeSetNodeSuffrageFunc(
 		if nodeAddr != "" {
 			return admitOnLeader(ctx, clusterSrv, cfgStore, gate, logger, targetNodeID, nodeAddr)
 		}
-		addr, err := lookupNodeAddr(clusterSrv, targetNodeID)
-		if err != nil {
-			return err
-		}
-		return applySuffrageOp(clusterSrv, logger, resolveSuffrageOp(voter), targetNodeID, addr)
+		return changeMemberSuffrageOnLeader(ctx, clusterSrv, cfgStore, gate, logger, targetNodeID, voter)
 	}
 
 	clusterSrv.SetNodeSuffrageFn(suffrageOnLeader)

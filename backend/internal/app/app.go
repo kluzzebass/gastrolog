@@ -398,6 +398,11 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return nil
 	}
 
+	// One gate for every cluster-ctl membership change this node makes as
+	// leader — admission, removal, operator suffrage and learner promotion —
+	// so none of them can interleave with a removal.
+	var membershipChanges membershipGate
+
 	groupMgr, vaultWAL, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger, alertCollector)
 
 	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, groupMgr, nodeAddrResolver, nodeID)
@@ -582,7 +587,9 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		// broadcast arrival — the "learner made progress" event — plus a
 		// leadership-gain observation for a node inheriting caught-up
 		// learners from a previous epoch. Leader-only inside evaluate().
-		ccPromoter := newClusterCtlLearnerPromoter(clusterSrv, peerState, compCluster.Apply(logger))
+		ccPromoter := newClusterCtlLearnerPromoter(clusterSrv, peerState, func(nodeID string) error {
+			return changeMemberSuffrageOnLeader(ctx, clusterSrv, cfgStore, &membershipChanges, logger, nodeID, true)
+		}, compCluster.Apply(logger))
 		go ccPromoter.Run(ctx)
 		clusterSrv.Subscribe(ccPromoter.onBroadcast)
 		observeLeadershipGain(ctx, clusterSrv, ccPromoter)
@@ -646,9 +653,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	advertisedAddr := cfg.advertisedClusterAddr()
 	if cfg.ConfigType == "raft" && clusterSrv != nil {
 		joinClusterFn = makeJoinClusterFunc(proxy, clusterSrv, clusterTLS, hd, nodeID, advertisedAddr, orch, disp, logger)
-		var gate membershipGate
-		removeNodeFn = makeRemoveNodeFunc(clusterSrv, cfgStore, &gate, nodeID, logger)
-		setNodeSuffrageFn = makeSetNodeSuffrageFunc(clusterSrv, cfgStore, &gate, nodeID, orch.Scheduler(), logger)
+		removeNodeFn = makeRemoveNodeFunc(clusterSrv, cfgStore, &membershipChanges, nodeID, logger)
+		setNodeSuffrageFn = makeSetNodeSuffrageFunc(clusterSrv, cfgStore, &membershipChanges, nodeID, orch.Scheduler(), logger)
 
 		// Register eviction handler: reinitialize as a fresh single-node cluster.
 		clusterSrv.SetEvictionHandler(makeEvictionHandler(proxy, clusterSrv, clusterTLS, hd, nodeID, orch, disp, logger))
