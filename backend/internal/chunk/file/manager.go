@@ -1323,7 +1323,7 @@ func (m *Manager) loadExisting() error {
 			if !errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("load chunk meta for %s: %w", id, err)
 			}
-			if recovered := m.recoverChunkWithoutIdxLog(id, entry.Name()); recovered != nil {
+			if recovered := m.recoverChunkWithoutIdxLog(id); recovered != nil {
 				m.metas[id] = recovered
 			}
 			continue
@@ -1399,9 +1399,13 @@ func (m *Manager) cleanOrphanTempFiles(chunkDir string) {
 // contracts the temp-file writers in this package produce. Kept as a
 // standalone predicate so the writer-sweeper contract test can call it
 // directly against every writer's actual output name.
+// isOrphanTempFileName matches only the temp files this package writes. The
+// chunk directory is shared with the index manager, whose in-flight build
+// temps (token.idx.tmp.*, …) are its own to clean; deleting them here would
+// destroy a build that is still running.
 func isOrphanTempFileName(name string) bool {
 	return strings.HasPrefix(name, ".compress-") ||
-		strings.Contains(name, ".tmp.") ||
+		strings.HasPrefix(name, dataGLCBFileName+".tmp.") ||
 		name == dataGLCBTmpFileName ||
 		strings.HasPrefix(name, glcb.RecordsStagingPrefix)
 }
@@ -1815,29 +1819,15 @@ func (m *Manager) loadChunkMetaFromGLCB(id chunk.ChunkID) (*chunkMeta, error) {
 }
 
 // recoverChunkWithoutIdxLog handles a chunk directory whose idx.log is
-// missing — three cases:
-//
-//   - data.glcb is present: GLCB-only layout (sealed chunk lives as a
-//     single GLCB blob); loadChunkMetaFromGLCB reconstructs the meta.
-//   - The directory has other files (e.g. an index sidecar): cloud-backed
-//     chunk where the cloud blob is the source of truth and only the
-//     locally-built TS index files survived. Skip — the cloud-index
-//     wiring will re-attach.
-//   - The directory is empty: leftover from an aborted seal or a delete
-//     race. Remove it.
-//
-// Returns the loaded chunkMeta (case 1) or nil (cases 2 and 3).
-func (m *Manager) recoverChunkWithoutIdxLog(id chunk.ChunkID, entryName string) *chunkMeta {
+// missing. When data.glcb is present the sealed chunk lives as a single GLCB
+// blob and its meta is reconstructed from it. Otherwise the directory holds no
+// chunk-manager artifact: it is the index manager's (a chunk's index files, or
+// a build that has created the directory and not yet its first file) and is
+// left as found — the index manager removes it when it deletes the indexes.
+func (m *Manager) recoverChunkWithoutIdxLog(id chunk.ChunkID) *chunkMeta {
 	if glcbMeta, err := m.loadChunkMetaFromGLCB(id); err == nil {
 		return glcbMeta
 	}
-	dir := filepath.Join(m.cfg.Dir, entryName)
-	if chunkDirHasFiles(dir) {
-		m.logger.Debug("skipping cloud-backed chunk index directory", "chunk", id)
-		return nil
-	}
-	m.logger.Info("removing empty leftover chunk directory", "chunk", id)
-	_ = os.RemoveAll(dir)
 	return nil
 }
 
@@ -2786,22 +2776,6 @@ func (m *Manager) ingestBTPath(id chunk.ChunkID) string {
 
 func (m *Manager) sourceBTPath(id chunk.ChunkID) string {
 	return filepath.Join(m.chunkDir(id), sourceBTFileName)
-}
-
-// chunkDirHasFiles reports whether a chunk directory contains any regular files.
-// Called after cleanOrphanTempFiles, so any remaining files are index files
-// belonging to a cloud-backed chunk.
-func chunkDirHasFiles(dir string) bool {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			return true
-		}
-	}
-	return false
 }
 
 // dataFileNames lists the chunk data files that are redundant once a chunk is

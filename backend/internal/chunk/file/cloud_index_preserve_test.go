@@ -232,18 +232,26 @@ func TestLoadExistingPreservesCloudIndexDirs(t *testing.T) {
 	}
 }
 
-// TestLoadExistingRemovesEmptyLeftoverDirs verifies that truly empty
-// chunk directories (no data files, no index files) are cleaned up
-// during loadExisting.
-func TestLoadExistingRemovesEmptyLeftoverDirs(t *testing.T) {
+// The chunk directory is shared with the index manager. A directory with no
+// chunk-manager artifact is an index directory — possibly one a build created
+// a moment ago, before its first file — and a manager constructed while that
+// build runs (a vault instance rebuilt mid-build) must leave it and the
+// build's temp file alone, or the build's rename into place fails.
+func TestLoadExistingLeavesIndexManagerDirectoriesAlone(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
 
-	// Simulate an empty leftover chunk directory.
-	id := chunk.NewChunkID()
-	chunkDir := filepath.Join(dir, id.String())
-	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
+	justCreated := filepath.Join(dir, chunk.NewChunkID().String())
+	if err := os.MkdirAll(justCreated, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	midBuild := filepath.Join(dir, chunk.NewChunkID().String())
+	if err := os.MkdirAll(midBuild, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	buildTemp := filepath.Join(midBuild, "token.idx.tmp.12345")
+	if err := os.WriteFile(buildTemp, []byte("partial"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -256,9 +264,11 @@ func TestLoadExistingRemovesEmptyLeftoverDirs(t *testing.T) {
 	}
 	defer func() { _ = cm.Close() }()
 
-	// The empty directory should be cleaned up.
-	if _, err := os.Stat(chunkDir); !os.IsNotExist(err) {
-		t.Fatal("loadExisting should remove empty leftover chunk directories")
+	if _, err := os.Stat(justCreated); err != nil {
+		t.Fatalf("an index directory created a moment before its first file was removed: %v", err)
+	}
+	if _, err := os.Stat(buildTemp); err != nil {
+		t.Fatalf("an in-flight index build's temp file was removed: %v", err)
 	}
 }
 
@@ -542,4 +552,18 @@ func TestChunkDirHasFiles(t *testing.T) {
 			t.Error("nonexistent directory should return false")
 		}
 	})
+}
+
+// chunkDirHasFiles reports whether a directory contains any regular files.
+func chunkDirHasFiles(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			return true
+		}
+	}
+	return false
 }

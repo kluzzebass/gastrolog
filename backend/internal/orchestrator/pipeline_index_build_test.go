@@ -73,6 +73,57 @@ func TestPipelineChunkBuiltSchedulesSecondaryIndexes(t *testing.T) {
 	awaitIndexes(t, orch, im, fx.sealed.ID)
 }
 
+// Every home builds its own copy of a sealed pipeline chunk, and searches move
+// to whichever home leads the vault next, so a follower indexes the chunk it
+// built exactly as the leader does.
+func TestPipelineChunkBuiltOnFollowerSchedulesSecondaryIndexes(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	orch, fx, _, im := pipelineVaultWithSealedGLCB(t, ctx, false)
+
+	vaultInst := orch.findLocalVaultInstance(fx.vaultID)
+	vaultInst.IsFollower = true
+	vaultInst.Reconciler = NewVaultLifecycleReconciler(orch, fx.vaultID, vaultInst, "node-home", slog.Default())
+	orch.onPipelineChunkBuilt(fx.vaultID, fx.fsm, fx.sealed.ID)
+	awaitIndexes(t, orch, im, fx.sealed.ID)
+}
+
+// A follower's index files go with its copy: the per-node delete that every
+// holder runs on retention removes them, so indexing followers leaks nothing.
+func TestFollowerLocalDeleteRemovesItsIndexes(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	orch, fx, _, im := pipelineVaultWithSealedGLCB(t, ctx, false)
+
+	vaultInst := orch.findLocalVaultInstance(fx.vaultID)
+	vaultInst.IsFollower = true
+	vaultInst.Reconciler = NewVaultLifecycleReconciler(orch, fx.vaultID, vaultInst, "node-home", slog.Default())
+	orch.onPipelineChunkBuilt(fx.vaultID, fx.fsm, fx.sealed.ID)
+	awaitIndexes(t, orch, im, fx.sealed.ID)
+
+	if err := vaultInst.Reconciler.deleteLocalCopy(fx.sealed.ID, "retention"); err != nil {
+		t.Fatalf("deleteLocalCopy: %v", err)
+	}
+	if sizes := im.IndexSizes(fx.sealed.ID); len(sizes) != 0 {
+		t.Fatalf("index files left behind after the follower's copy was deleted: %v", sizes)
+	}
+}
+
+// A follower whose local copy lacks indexes gets them from the startup sweep,
+// so copies built before every home indexed its own chunks catch up once.
+func TestMissingIndexSweepBuildsFollowerPipelineChunkIndexes(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	orch, fx, _, im := pipelineVaultWithSealedGLCB(t, ctx, true)
+
+	vaultInst := orch.findLocalVaultInstance(fx.vaultID)
+	vaultInst.IsFollower = true
+	if err := orch.rebuildVaultIndexes(ctx, fx.vaultID, vaultInst); err != nil {
+		t.Fatal(err)
+	}
+	awaitIndexes(t, orch, im, fx.sealed.ID)
+}
+
 // The startup sweep visits a vault only when its chunk manager carries index
 // builders, which every file vault instance now has; with them the sealed
 // pipeline chunk gets its indexes at startup.
