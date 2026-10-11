@@ -160,6 +160,8 @@ type pipelineVaultReg struct {
 // vault-ctl handle is available, the Origin publishes completed-segment metadata
 // to the registry via the leader-forwarding applier; otherwise it falls back to
 // the fail-closed noHandlePublisher (single-node/memory mode with no group).
+// With the handle the Origin also consumes segment release from the vault-ctl
+// FSM every node holds, home or not: released segments leave its completed/.
 //
 // When this node is also a placement member (Home) for the vault with a
 // vault-ctl handle, it registers the chunking side (Rubicon D): the leader
@@ -189,6 +191,7 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 			Applier:      applier,
 			OriginNodeID: o.localNodeID,
 		}
+		spec.FSM = fsm
 	}
 	if home && hasHandle {
 		// This node holds everything it originates locally (completed→head).
@@ -197,7 +200,6 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 		// the peer puller: the leader plans the manifest, all homes build the
 		// sealed GLCB. Locate resolves manifest refs under head/ then completed/.
 		spec.HomeRoot = root
-		spec.FSM = fsm
 		spec.LookupFSM = func() *vaultctlfsm.FSM {
 			f, _, _, ok := o.vaultCtlHandle(vaultID)
 			if ok && f != nil {
