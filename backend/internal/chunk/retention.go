@@ -35,6 +35,92 @@ type RetentionPolicy interface {
 	Apply(state VaultState) []ChunkID
 }
 
+// RetentionReason names the trigger that selected a chunk for a retention
+// event. A route disposition overlays it on every record it streams through
+// the routing engine as the `_reason` synthetic attribute.
+type RetentionReason string
+
+const (
+	RetentionReasonAge          RetentionReason = "age"
+	RetentionReasonSize         RetentionReason = "size"
+	RetentionReasonCount        RetentionReason = "count"
+	RetentionReasonMemoryBudget RetentionReason = "memory-budget"
+)
+
+// retentionReasonPrecedence decides the reason of a chunk that several
+// triggers select: the earliest listed wins. An unlisted reason, including
+// the empty one, ranks after every listed reason.
+var retentionReasonPrecedence = []RetentionReason{
+	RetentionReasonAge,
+	RetentionReasonSize,
+	RetentionReasonCount,
+	RetentionReasonMemoryBudget,
+}
+
+// PrecedingRetentionReason returns whichever of a and b ranks first in
+// retention reason precedence (age, size, count, memory-budget).
+func PrecedingRetentionReason(a, b RetentionReason) RetentionReason {
+	rank := func(r RetentionReason) int {
+		if i := slices.Index(retentionReasonPrecedence, r); i >= 0 {
+			return i
+		}
+		return len(retentionReasonPrecedence)
+	}
+	if rank(b) < rank(a) {
+		return b
+	}
+	return a
+}
+
+// RetentionMatch is a chunk a retention policy selected, with the trigger
+// that selected it.
+type RetentionMatch struct {
+	ID     ChunkID
+	Reason RetentionReason
+}
+
+// MatchRetention applies p and attributes every selected chunk to its
+// trigger. The chunks, and their order, are exactly p.Apply(state)'s. A chunk
+// that several sub-policies of a composite select carries the preceding
+// reason (PrecedingRetentionReason). A policy that is not a TTL, size or
+// count policy, or a composite of them, selects with an empty reason.
+func MatchRetention(p RetentionPolicy, state VaultState) []RetentionMatch {
+	if c, ok := p.(*CompositeRetentionPolicy); ok {
+		var result []RetentionMatch
+		at := make(map[ChunkID]int)
+		for _, sub := range c.policies {
+			for _, m := range MatchRetention(sub, state) {
+				if i, seen := at[m.ID]; seen {
+					result[i].Reason = PrecedingRetentionReason(result[i].Reason, m.Reason)
+					continue
+				}
+				at[m.ID] = len(result)
+				result = append(result, m)
+			}
+		}
+		return result
+	}
+	reason := triggerReason(p)
+	ids := p.Apply(state)
+	result := make([]RetentionMatch, len(ids))
+	for i, id := range ids {
+		result[i] = RetentionMatch{ID: id, Reason: reason}
+	}
+	return result
+}
+
+func triggerReason(p RetentionPolicy) RetentionReason {
+	switch p.(type) {
+	case *TTLRetentionPolicy:
+		return RetentionReasonAge
+	case *SizeRetentionPolicy:
+		return RetentionReasonSize
+	case *CountRetentionPolicy:
+		return RetentionReasonCount
+	}
+	return ""
+}
+
 // RetentionPolicyFunc is an adapter to allow ordinary functions to be used as RetentionPolicy.
 type RetentionPolicyFunc func(state VaultState) []ChunkID
 

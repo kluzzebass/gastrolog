@@ -34,7 +34,7 @@ func TestFanOutAbortWarnIsThrottledAcrossChunks(t *testing.T) {
 
 	// The sweep walking several chunks against the same full destination.
 	for range 5 {
-		if r.fireRetentionEvent(fx.sealedID) {
+		if r.fireRetentionEvent(fx.sealedID, "") {
 			t.Fatal("fireRetentionEvent must report non-completion against a capped destination")
 		}
 	}
@@ -47,7 +47,7 @@ func TestFanOutAbortWarnIsThrottledAcrossChunks(t *testing.T) {
 
 	// Past the interval the condition is named again, carrying what it hid.
 	now = now.Add(11 * time.Minute)
-	if r.fireRetentionEvent(fx.sealedID) {
+	if r.fireRetentionEvent(fx.sealedID, "") {
 		t.Fatal("fireRetentionEvent must still report non-completion")
 	}
 	logs = logSink.String()
@@ -77,7 +77,7 @@ func TestFanOutAbortAlwaysNotesTheDeferral(t *testing.T) {
 	}
 
 	for range 3 {
-		r.fireRetentionEvent(fx.sealedID)
+		r.fireRetentionEvent(fx.sealedID, "")
 		// Reset the per-sweep flag the way a real sweep boundary does, so each
 		// iteration stands for its own sweep.
 		r.mu.Lock()

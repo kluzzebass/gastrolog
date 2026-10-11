@@ -528,8 +528,8 @@ A record that matches multiple vaults is sent to each vault's in channel
 
 Each routing-queue item carries a `Source` tag used only at match time: digest
 hands off `Source = ingest` (ingester ID from EventID); retention eject hands off
-`Source = retention` with the source vault ID and optional reason (`age`, `size`,
-`count`). Both producers block on the same bounded channel, so eject backpressure
+`Source = retention` with the source vault ID and the retention reason (`age`,
+`size`, `count`, `memory-budget`). Both producers block on the same bounded channel, so eject backpressure
 is unified with live ingest — neither path drops when the queue or downstream
 writers are slow.
 

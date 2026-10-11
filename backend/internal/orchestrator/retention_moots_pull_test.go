@@ -107,7 +107,7 @@ func TestRetentionFanOutAbortsUnderDiskProtect(t *testing.T) {
 		logger:  slog.Default(),
 		idleLog: logging.Throttle{Interval: time.Minute},
 	}
-	if done := r.fireRetentionEvent(chunk.NewChunkID()); done {
+	if done := r.fireRetentionEvent(chunk.NewChunkID(), ""); done {
 		t.Fatal("fan-out under disk protect must abort so the chunk survives for a later sweep")
 	}
 }

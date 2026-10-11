@@ -165,7 +165,9 @@ ROUTES
   Routes are evaluated in priority order with first-match-wins. An empty or
   `*` expression accepts all records. Synthetic attributes are available
   for predicates: `_source` ("ingest" | "retention"), `_ingester` (id),
-  `_vault` (id, set on retention firing), `_reason` (retention reason).
+  `_vault` (id, set on retention firing), `_reason` (retention reason:
+  "age" | "size" | "count" | "memory-budget"; a chunk several triggers
+  select carries the first in that order).
 
 ═══════════════════════════════════════════════════
 MATCH EXPRESSIONS

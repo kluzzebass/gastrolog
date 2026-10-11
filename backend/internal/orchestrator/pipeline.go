@@ -79,15 +79,16 @@ func (o *Orchestrator) ServeChunkGLCBPull(vaultID glid.GLID, chunkID chunk.Chunk
 // SubmitRetentionRecord routes a single record ejected from a vault during a
 // retention event (disposition=route) through the pipeline routing stage with a
 // RetentionSource context, so routes matching _source="retention" / _vault=<id>
-// fan it out to their configured destinations. It carries the durability ack
-// and waits for it: a nil return means every matched destination durably
+// / _reason=<trigger> fan it out to their configured destinations. It carries
+// the durability ack and waits for it: a nil return means every matched
+// destination durably
 // committed the record (an unmatched record is a counted drop that also
 // returns nil). A per-destination admission rejection (ErrVaultMaxSize,
 // ErrStorageDiskProtect, ErrVaultBacklogBudget) surfaces here so the caller can
 // abort the whole chunk fan-out and retain the chunk — before the ack was
 // wired, the routing gate's whole-record nack went to a nil ack and the
 // record silently vanished.
-func (o *Orchestrator) SubmitRetentionRecord(ctx context.Context, sourceVaultID glid.GLID, rec chunk.Record, reason string) error {
+func (o *Orchestrator) SubmitRetentionRecord(ctx context.Context, sourceVaultID glid.GLID, rec chunk.Record, reason chunk.RetentionReason) error {
 	o.mu.RLock()
 	pl := o.pipeline
 	o.mu.RUnlock()
@@ -102,7 +103,7 @@ func (o *Orchestrator) SubmitRetentionRecord(ctx context.Context, sourceVaultID 
 	ack := make(chan error, 1)
 	if err := pl.SubmitDrain(ctx, routing.Input{
 		Record: &prec,
-		Source: routing.RetentionSource(sourceVaultID, reason),
+		Source: routing.RetentionSource(sourceVaultID, string(reason)),
 		Ack:    ack,
 	}); err != nil {
 		return err

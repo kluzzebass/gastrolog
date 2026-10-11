@@ -241,7 +241,8 @@ a vault's active chunk".
   per call and never mutates the record's persisted attrs. They
   unify source-predicate and content-filter into a single expression
   language. Routes match on `_source = "ingest"`,
-  `_source = "retention" AND _vault = "<id>"`, etc. User records
+  `_source = "retention" AND _vault = "<id>"`,
+  `_source = "retention" AND _reason = "age"`, etc. User records
   carrying `_`-prefixed attrs collide with this namespace and aren't
   supported.
 
@@ -822,6 +823,16 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   routing engine, transferred to another vault, or dropped before the
   chunk's local copy is destroyed.
 
+- **Retention reason** (`chunk.RetentionReason`) — the trigger that
+  selected a chunk for its retention event, overlaid as the `_reason`
+  synthetic attribute on every record a `route` disposition streams through
+  the routing engine. Values: `age` (TTL / `MaxAge`), `size` (`MaxSize`
+  drain), `count` (`MaxChunks`), `memory-budget` (a memory vault over its
+  memory budget). A chunk several triggers select — within one policy or
+  across the vault's attached policies — carries one reason, the first in
+  that order (`chunk.PrecedingRetentionReason`), so a route on
+  `_reason = "age"` receives every chunk that aged out.
+
 - **Retention disposition** (`VaultConfig.RetentionDisposition`,
   gastrolog-18du3, extended by gastrolog-2l918) — per-vault flag
   controlling what happens to records when a retention event fires.
@@ -832,7 +843,8 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
     requires a target vault, and a default must be a value the operator
     could type into the field.
   - **`route`**: records flow through the routing engine with synthetic
-    `_source = "retention"` and `_vault = "<id>"`, so operator-configured
+    `_source = "retention"`, `_vault = "<id>"` and `_reason` (the retention
+    reason), so operator-configured
     routes can forward them to archive vaults, cold storage, etc.
   - **`transfer`** (`VaultConfig.RetentionTransferTargetVaultID`,
     gastrolog-2l918): the sealed chunk is re-homed to the target vault
