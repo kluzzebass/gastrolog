@@ -298,6 +298,13 @@ Phases, in order; each name is also the manager (`<Phase>Manager`):
 6. **Collection** — fetch segments (remote or local) into the head (collector side).
 7. **Chunking** — build chunks from the head (deterministic-span merge → GLCB).
 
+A sealed chunk is complete on a home when its GLCB and its secondary indexes
+(token, attr, kv, json — built by the vault's index manager from the GLCB) are
+both on disk. Every home builds both for its own copy; the timestamp indexes
+live inside the GLCB. Searches read the vault leader's copy, and any home can
+become leader, so a copy without its secondary indexes is a scan waiting for a
+failover. The startup sweep builds whatever a home is missing.
+
 The **orchestrator** owns no phase. It is a supervisor: it wires the queues and
 reconciles the dynamic managers against control-plane state.
 

@@ -293,14 +293,11 @@ func (o *Orchestrator) rebuildVaultIndexes(ctx context.Context, vaultID glid.GLI
 }
 
 func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID glid.GLID, vaultInst *VaultInstance, meta chunk.ChunkMeta) {
+	// Every home indexes its own copy: any of them can become the vault leader
+	// that serves searches. Completeness is read from the index files on disk,
+	// so a copy indexed once is never rebuilt at the next startup.
 	complete, err := vaultInst.Indexes.IndexesComplete(meta.ID)
 	if err != nil || complete {
-		return
-	}
-	// Followers can host many replicated chunks; eagerly rebuilding every
-	// missing index on each follower at startup causes N-way rebuild storms.
-	// Keep bootstrap rebuilds on leaders only.
-	if vaultInst.IsFollower {
 		return
 	}
 	o.logger.Info("rebuilding missing indexes",
