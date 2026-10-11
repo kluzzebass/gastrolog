@@ -20,7 +20,9 @@ import {
 import { PurposeWindowText } from "./PurposeWindowText";
 import type { ReactNode } from "react";
 
-const CLUSTER_CTL_GROUP_ID = "cluster-ctl";
+// The multiraft group ID the cluster-ctl Raft group travels under on the wire
+// (multiraft.ClusterConfigGroupID); vault-ctl groups are "vault/<id>/ctl".
+const CLUSTER_CTL_GROUP_ID = "config";
 
 /** The lane column: `raft` for a Raft group's connection, `rpc pool N` for a pooled RPC slot. */
 export function laneLabel(lane: string, poolIndex: number): string {

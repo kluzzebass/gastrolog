@@ -80,9 +80,9 @@ describe("laneLabel", () => {
 
 describe("raftLaneDetail", () => {
   test("the cluster-ctl group reads cluster-ctl, with the group ID on hover", () => {
-    expect(raftLaneDetail(lane({ lane: "raft", groupId: "cluster-ctl" }))).toEqual({
+    expect(raftLaneDetail(lane({ lane: "raft", groupId: "config" }))).toEqual({
       label: "cluster-ctl",
-      title: "cluster-ctl",
+      title: "config",
     });
   });
 
@@ -140,7 +140,7 @@ describe("PeerBytesSection lanes", () => {
   test("renders cluster-ctl, vault-ctl and rpc pool lanes with their purposes from the stats", () => {
     const stats = new NodeStats({
       peerConnections: [
-        new PeerConnStat({ peer: "node-b", lane: "raft", groupId: "cluster-ctl", bytesSent: BigInt(10), bytesReceived: BigInt(5) }),
+        new PeerConnStat({ peer: "node-b", lane: "raft", groupId: "config", bytesSent: BigInt(10), bytesReceived: BigInt(5) }),
         new PeerConnStat({ peer: "node-b", lane: "raft", groupId: "vault/abc123/ctl", bytesSent: BigInt(10), bytesReceived: BigInt(5) }),
         new PeerConnStat({
           peer: "node-b",
