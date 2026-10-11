@@ -24,7 +24,7 @@ var ErrSegmentUnavailable = errors.New("segment unavailable")
 // expectedCollectErr reports whether a collect pass failure is an expected
 // catch-up race at high ingest: the registry still lists a segment but no peer
 // has bytes yet (no holder acks), a holder already purged head/ after seal, or
-// a pulled copy failed verification and must be re-pulled from another holder.
+// every copy the pass reached failed verification.
 // It decides only how loudly a failed pass is logged — every failed pass
 // retries on the manager's backoff wake. A pass aggregate (SummaryJoin) is
 // expected only when every failure it summarizes is, so one unexpected failure
@@ -50,9 +50,9 @@ func expectedCollectErr(err error) bool {
 // so rewording a message elsewhere cannot flip classification.
 func expectedCollectSuberr(err error) bool {
 	if errors.Is(err, ErrCorruptSegment) {
-		// Checksum verification failed: the serving holder has wrong bytes.
-		// The pre-head copy is already discarded and another holder can
-		// serve correct bytes on the retry.
+		// Checksum verification failed on every copy the pass could reach.
+		// The pre-head copies are already discarded and the retry offers
+		// every source again.
 		return true
 	}
 	if errors.Is(err, ErrSegmentUnavailable) {
