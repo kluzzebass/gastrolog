@@ -9,6 +9,8 @@ Each certificate has a **name** used for identification and SNI (Server Name Ind
 - **PEM content**: Paste certificate and private key PEM data directly. Supports drag-and-drop of `.pem`, `.crt`, `.key`, `.zip`, and `.tar.gz` files.
 - **File paths**: Point to certificate and key files on disk. File paths take precedence when both are provided.
 
+Every certificate picker in the system — the default certificate, an ingester's TLS certificate and client CA, the Docker ingester's CA and client certificate — lists what is stored here; when nothing is, the picker says so and links to this section.
+
 ## Hot Reload
 
 Certificates loaded from file paths are watched for changes. When a certificate file is updated on disk, GastroLog reloads it automatically without requiring a restart. This supports zero-downtime certificate rotation (e.g., from Let's Encrypt renewals).

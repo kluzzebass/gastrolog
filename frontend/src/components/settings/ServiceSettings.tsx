@@ -8,11 +8,12 @@ import { useToast } from "../Toast";
 import { FormField, TextInput, NumberInput } from "./FormField";
 import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
+import { EligibilitySelect } from "./EligibilitySelect";
 import { ExpandableCard } from "./ExpandableCard";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { extractMessage } from "../../utils/errors";
 import type { GetSettingsResponse } from "../../api/gen/gastrolog/v1/system_pb";
-import { useReadOnly } from "../../hooks/useReadOnly";
+import { ReadOnlyProvider, useReadOnly } from "../../hooks/useReadOnly";
 
 // ── Form reducer ─────────────────────────────────────────────────────
 
@@ -77,6 +78,8 @@ function fieldsFromData(data: GetSettingsResponse): ServiceFormState {
 
 const noAuthBadge = { text: "disabled", title: "disabled by --no-auth", helpRef: "user-management#no-auth-mode" };
 
+const DEFAULT_CERT_HELP_REF = "certificates#default-certificate";
+
 const INITIAL_STATE: ServiceFormState = {
   tokenDuration: "", minPwLen: "", maxJobs: "",
   tlsDefaultCert: "", tlsEnabled: false, httpToHttpsRedirect: false,
@@ -121,7 +124,6 @@ function parseDurationSeconds(s: string): number | null {
 
 // eslint-disable-next-line sonarjs/cognitive-complexity -- inherently complex settings form with many fields, cards, and dirty tracking
 export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: boolean }>) {
-  const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const { data, isLoading } = useSettings();
   const { data: certData } = useCertificates();
@@ -136,6 +138,23 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
 
   const certs = certData?.certificates ?? [];
   const certIdSet = new Set(certs.map((c) => encode(c.id)));
+  const hasCert = certIdSet.has(s.tlsDefaultCert);
+  let tlsGateReason: string | undefined;
+  if (!hasCert) tlsGateReason = "Requires a default certificate.";
+  else if (!s.tlsEnabled) tlsGateReason = "Requires TLS enabled.";
+
+  // The header badge reads what is saved, never the draft: a draft is a
+  // proposal until Save, and Save forces TLS off when the saved certificate
+  // is gone — that is said here, not discovered after the fact.
+  const savedTlsEnabled = data?.tls?.enabled ?? false;
+  const savedTlsCertMissing =
+    savedTlsEnabled && certData !== undefined && !certIdSet.has(data?.tls?.defaultCert ?? "");
+
+  // Under --no-auth the authentication and password-policy settings are
+  // not consulted; a form that accepts edits into them would be saving
+  // into a mode that ignores them.
+  const readOnly = useReadOnly();
+  const authReadOnly = readOnly || !!noAuth;
 
   if (data && !s.initialized) {
     dispatch({ type: "init", data });
@@ -167,7 +186,6 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
           : ""));
 
   const handleSave = async () => {
-    const hasCert = certIdSet.has(s.tlsDefaultCert);
     const effectiveTls = hasCert ? s.tlsEnabled : false;
     const effectiveRedirect = hasCert ? s.httpToHttpsRedirect : false;
     const effectiveMinPwLen = parseInt(s.minPwLen, 10) || 8;
@@ -245,6 +263,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
             monoTitle={false}
             typeBadge={noAuth ? noAuthBadge : undefined}
           >
+            <ReadOnlyProvider readOnly={authReadOnly}>
             <div className={`flex flex-col gap-4 ${noAuth ? "opacity-50" : ""}`} aria-disabled={noAuth || undefined}>
               <FormField
                 label="Token Duration"
@@ -342,6 +361,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                 )}
               </FormField>
             </div>
+            </ReadOnlyProvider>
           </ExpandableCard>
 
           <ExpandableCard
@@ -353,6 +373,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
             monoTitle={false}
             typeBadge={noAuth ? noAuthBadge : undefined}
           >
+            <ReadOnlyProvider readOnly={authReadOnly}>
             <div className={`flex flex-col gap-4 ${noAuth ? "opacity-50" : ""}`} aria-disabled={noAuth || undefined}>
               <div className="flex items-baseline gap-4">
                 <FormField
@@ -391,6 +412,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                 <Checkbox checked={s.forbidAnimalNoise} onChange={set("forbidAnimalNoise")} label="Forbid animal noises (moo, woof, meow, ...)" dark={dark} />
               </div>
             </div>
+            </ReadOnlyProvider>
           </ExpandableCard>
 
           <ExpandableCard
@@ -479,86 +501,71 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
             expanded={isExpanded("tls")}
             onToggle={() => toggle("tls")}
             monoTitle={false}
-            typeBadge={s.tlsEnabled ? "enabled" : undefined}
-            typeBadgeAccent={s.tlsEnabled}
+            typeBadge={savedTlsEnabled ? { text: "enabled", title: "saved configuration serves HTTPS", helpRef: "service-settings#tls-configuration" } : undefined}
+            typeBadgeAccent={savedTlsEnabled}
           >
             <div className="flex flex-col gap-4">
+              {savedTlsCertMissing && (
+                <p className="text-[0.8em] text-severity-warn">
+                  The saved default certificate no longer exists. HTTPS cannot be served from it, and the next save turns TLS off.
+                </p>
+              )}
               <FormField
                 label="Default certificate"
                 description="Certificate used for HTTPS. Set in Certificates tab."
-                helpRef="certificates#default-certificate"
+                helpRef={DEFAULT_CERT_HELP_REF}
                 dark={dark}
               >
-                <select
+                <EligibilitySelect
                   value={s.tlsDefaultCert}
-                  onChange={(e) => dispatch({ type: "set", field: "tlsDefaultCert", value: e.target.value })}
-                  className={`w-full px-2.5 py-1.5 text-[0.85em] border rounded focus:outline-none transition-colors ${c(
-                    "bg-ink-surface border-ink-border text-text-bright focus:border-copper-dim",
-                    "bg-light-surface border-light-border text-light-text-bright focus:border-copper",
-                  )}`}
-                >
-                  <option value="">-- none --</option>
-                  {certs
-                    .toSorted((a, b) => (a.name || encode(a.id)).localeCompare(b.name || encode(b.id)))
-                    .map((cert) => (
-                    <option key={encode(cert.id)} value={encode(cert.id)}>
-                      {cert.name || encode(cert.id)}
-                    </option>
-                  ))}
-                </select>
+                  onChange={set("tlsDefaultCert")}
+                  options={certs
+                    .map((cert) => ({ value: encode(cert.id), label: cert.name || encode(cert.id) }))
+                    .sort((a, b) => a.label.localeCompare(b.label))}
+                  placeholder="None"
+                  emptyMessage="No certificates stored — add one in the Certificates tab."
+                  helpRef={DEFAULT_CERT_HELP_REF}
+                  dark={dark}
+                />
               </FormField>
 
-              {s.tlsDefaultCert && (
-                <>
-                  <FormField
-                    label="Enable TLS (HTTPS)"
-                    description="Serve HTTPS when a default certificate is set"
-                   
-                    dark={dark}
-                  >
-                    <Checkbox
-                      checked={s.tlsEnabled}
-                      onChange={set("tlsEnabled")}
-                      dark={dark}
-                    />
-                  </FormField>
-                  {s.tlsEnabled && (
-                    <>
-                      <FormField
-                        label="HTTPS port"
-                        description="Port for the HTTPS listener. Leave empty for HTTP port + 1."
-                       
-                        dark={dark}
-                      >
-                        <input
-                          type="text"
-                          readOnly={readOnly}
-                          inputMode="numeric"
-                          value={s.httpsPort}
-                          onChange={(e) => dispatch({ type: "set", field: "httpsPort", value: e.target.value })}
-                          placeholder="auto"
-                          className={`w-full px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
-                            "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
-                            "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
-                          )}`}
-                        />
-                      </FormField>
-                      <FormField
-                        label="Redirect HTTP to HTTPS"
-                        description="Redirect plain HTTP requests to HTTPS"
-                       
-                        dark={dark}
-                      >
-                        <Checkbox
-                          checked={s.httpToHttpsRedirect}
-                          onChange={set("httpToHttpsRedirect")}
-                          dark={dark}
-                        />
-                      </FormField>
-                    </>
-                  )}
-                </>
-              )}
+              <FormField
+                label="Enable TLS (HTTPS)"
+                description="Serve HTTPS when a default certificate is set"
+                disabledReason={hasCert ? undefined : "Requires a default certificate."}
+                dark={dark}
+              >
+                <Checkbox
+                  checked={s.tlsEnabled}
+                  onChange={set("tlsEnabled")}
+                  dark={dark}
+                />
+              </FormField>
+              <FormField
+                label="HTTPS port"
+                description="Port for the HTTPS listener. Leave empty for HTTP port + 1."
+                disabledReason={tlsGateReason}
+                dark={dark}
+              >
+                <NumberInput
+                  value={s.httpsPort}
+                  onChange={set("httpsPort")}
+                  placeholder="auto"
+                  dark={dark}
+                />
+              </FormField>
+              <FormField
+                label="Redirect HTTP to HTTPS"
+                description="Redirect plain HTTP requests to HTTPS"
+                disabledReason={tlsGateReason}
+                dark={dark}
+              >
+                <Checkbox
+                  checked={s.httpToHttpsRedirect}
+                  onChange={set("httpToHttpsRedirect")}
+                  dark={dark}
+                />
+              </FormField>
             </div>
           </ExpandableCard>
 

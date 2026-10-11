@@ -31,11 +31,13 @@ GastroLog can automatically download and update the free MaxMind GeoLite2 databa
 3. Enter your **Account ID** and **License Key**
 4. Check **Enable Automatic Database Downloads**
 
-When enabled, databases are fetched twice weekly (Tuesday and Friday at 03:00). The last update timestamp is shown in the card.
+When enabled, databases are fetched twice weekly (Tuesday and Friday at 03:00). The last update timestamp is shown in the card. The card is always on the Files tab, with its status reading **enabled** or **disabled**; **Disable** is offered only while downloads are enabled.
 
 MMDB lookups with no uploaded file will automatically use the auto-downloaded database matching their type.
 
 ## Used By
+
+A file's card lists the lookups whose saved configuration references one of its versions — **used by: lookup geoip**. The filename plays no part: a City database no lookup has been pointed at shows no usage, and a lookup may read a file of any name.
 
 - **Lookups**: MMDB files for `| lookup geoip` and `| lookup asn` can be uploaded here or via the convenience drop zone in [Lookups settings](settings:lookups).
 - **JSON File Lookups**: JSON data files referenced by JSON file lookups.

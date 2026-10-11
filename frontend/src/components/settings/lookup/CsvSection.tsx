@@ -4,15 +4,18 @@ import { useThemeClass } from "../../../hooks/useThemeClass";
 import { usePutLookupSettings, usePreviewCSVLookup } from "../../../api/hooks/useSettings";
 import { useExpandedCards } from "../../../hooks/useExpandedCards";
 import { useLookupCrud } from "./useLookupCrud";
-import { FormField, TextInput, SelectInput } from "../FormField";
+import { FormField, TextInput } from "../FormField";
 import { Button } from "../Buttons";
 import { SettingsCard } from "../SettingsCard";
 import { AddFormCard } from "../AddFormCard";
 import { PreviewTable } from "./PreviewTable";
+import { ColumnPickers } from "./ColumnPickers";
 import { FileDropZone } from "../FileDropZone";
 import { type CSVLookupDraft, type LookupSectionProps, emptyCsvDraft, csvLookupEqual } from "./types";
 import type { CSVLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 import { useReadOnly } from "../../../hooks/useReadOnly";
+
+const CSV_HELP_REF = "lookups-settings#csv-file-lookups";
 
 function serializeCsvLookups(lookups: CSVLookupDraft[]) {
   return lookups
@@ -68,27 +71,6 @@ function CsvFileFields({
   const data = preview.data;
   const columns = data && !data.error ? data.columns : [];
   const resolvedKey = keyColumn || (columns.length > 0 ? columns[0]! : "");
-  const nonKeyColumns = columns.filter((col) => col !== resolvedKey);
-
-  // Empty valueColumns means "all non-key columns" — display as all checked.
-  const effectiveValues = valueColumns.length > 0 ? valueColumns : nonKeyColumns;
-
-  const toggleValueColumn = (col: string) => {
-    const isChecked = effectiveValues.includes(col);
-    if (isChecked) {
-      // Unchecking: if currently "all" (empty), expand to explicit list minus this one.
-      const base = valueColumns.length > 0 ? valueColumns : nonKeyColumns;
-      onValueColumnsChange(base.filter((v) => v !== col));
-    } else {
-      const next = [...valueColumns, col];
-      // If all are now checked, collapse back to empty (= all).
-      if (nonKeyColumns.every((c) => next.includes(c))) {
-        onValueColumnsChange([]);
-      } else {
-        onValueColumnsChange(next);
-      }
-    }
-  };
 
   return (
     <>
@@ -153,47 +135,31 @@ function CsvFileFields({
         </div>
       )}
 
-      {/* Column pickers — only shown when we have preview data */}
-      {columns.length > 0 && (
-        <>
-          <FormField label="Key Column" description="Column used as the lookup key." helpRef="lookups-settings#csv-file-lookups" dark={dark}>
-            <SelectInput
-              value={keyColumn}
-              onChange={onKeyColumnChange}
-              options={[
-                { value: "", label: `${columns[0]} (first column)` },
-                ...columns.slice(1).map((col) => ({ value: col, label: col })),
-              ]}
-              dark={dark}
-            />
-          </FormField>
-
-          <FormField label="Value Columns" description="Columns included in lookup results. Uncheck columns you don't need." helpRef="lookups-settings#csv-file-lookups" dark={dark}>
-            <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-              {nonKeyColumns.map((col) => {
-                const checked = effectiveValues.includes(col);
-                return (
-                  <label
-                    key={col}
-                    className={`flex items-center gap-1.5 text-[0.85em] font-mono cursor-pointer select-none ${c("text-text-bright", "text-light-text-bright")}`}
-                  >
-                    <input
-                      type="checkbox"
-                      disabled={readOnly}
-                      checked={checked}
-                      onChange={() => toggleValueColumn(col)}
-                      className="accent-copper"
-                    />
-                    {col}
-                  </label>
-                );
-              })}
-            </div>
-          </FormField>
-        </>
-      )}
+      <ColumnPickers
+        columns={columns}
+        keyColumn={keyColumn}
+        valueColumns={valueColumns}
+        onKeyColumnChange={onKeyColumnChange}
+        onValueColumnsChange={onValueColumnsChange}
+        unavailableReason={csvColumnsUnavailable(fileId, preview.isPending, data)}
+        helpRef={CSV_HELP_REF}
+        dark={dark}
+      />
     </>
   );
+}
+
+/** Why the column pickers have nothing to offer yet, or undefined once the preview has columns. */
+export function csvColumnsUnavailable(
+  fileId: string,
+  previewPending: boolean,
+  data?: { error?: string; columns: string[] },
+): string | undefined {
+  if (!fileId) return "Select a file first — the columns come from its preview.";
+  if (data?.error) return "The preview failed — fix the file to pick columns.";
+  if (previewPending || !data) return "Waiting for the preview.";
+  if (data.columns.length === 0) return "The preview found no columns.";
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

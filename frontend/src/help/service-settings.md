@@ -27,9 +27,13 @@ Controls how [cluster nodes](settings:nodes) [![icon:help]()](help:clustering-no
 
 ## TLS Configuration
 
-When a [certificate](help:certificates) is configured as the default, additional TLS options appear:
+The TLS options are always on screen; each is disabled, with the reason beside it, until what it depends on is in place:
 
-| Setting | Description |
-|---------|-------------|
-| **TLS Enabled** | Enable the HTTPS listener (defaults to API port + 1, e.g. `:4565`) |
-| **HTTP to HTTPS Redirect** | Redirect plain HTTP requests to the HTTPS port |
+| Setting | Description | Requires |
+|---------|-------------|----------|
+| **Default certificate** | The [certificate](help:certificates) the HTTPS listener serves. With none stored the picker says so and links here. | — |
+| **Enable TLS (HTTPS)** | Enable the HTTPS listener | A default certificate |
+| **HTTPS port** | Port for the HTTPS listener; empty means API port + 1, e.g. `:4565` | TLS enabled |
+| **Redirect HTTP to HTTPS** | Redirect plain HTTP requests to the HTTPS port | TLS enabled |
+
+The **enabled** badge on the TLS card reflects the saved configuration, not unsaved edits. If the saved default certificate has since been deleted, the card says so: HTTPS cannot be served from it, and the next save turns TLS off.

@@ -76,6 +76,38 @@ function seedQueries(qc: ReturnType<typeof createTestQueryClient>, overrides?: {
   qc.setQueryData(["clusterStatus"], overrides?.cluster ?? sampleCluster);
 }
 
+describe("join cluster card gating", () => {
+  function renderWithHelp(cluster: object) {
+    const qc = createTestQueryClient();
+    seedQueries(qc, { cluster });
+    const openHelp = mock((_helpRef?: string) => {});
+    const result = renderWritable(
+      <HelpProvider onOpen={openHelp}>
+        <NodesSettings dark />
+      </HelpProvider>,
+      { wrapper: settingsWrapper(qc) },
+    );
+    return { ...result, openHelp };
+  }
+
+  test("on a multi-node cluster the card stays on screen, disabled, naming the cause and linking the rule", () => {
+    const { getByText, getByLabelText, getByRole, openHelp } = renderWithHelp(sampleCluster);
+    expect(getByText("Join Cluster", { selector: "h3" })).toBeTruthy();
+    expect(getByRole("note").textContent).toContain("already one of 2 members");
+    expect((getByLabelText("Member Address") as HTMLInputElement).disabled).toBe(true);
+    expect((getByLabelText("Join Token") as HTMLInputElement).disabled).toBe(true);
+    expect((getByText("Join Cluster", { selector: "button" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(getByText("Joining a cluster"));
+    expect(openHelp).toHaveBeenCalledWith("clustering-nodes#joining-a-cluster");
+  });
+
+  test("on a single-node cluster the card is open for input", () => {
+    const { getByLabelText, queryByRole } = renderWithHelp({ ...sampleCluster, nodes: [sampleCluster.nodes[0]] });
+    expect(queryByRole("note")).toBeNull();
+    expect((getByLabelText("Member Address") as HTMLInputElement).disabled).toBe(false);
+  });
+});
+
 describe("NodesSettings", () => {
   test("renders single node in non-cluster mode", () => {
     const qc = createTestQueryClient();
@@ -244,6 +276,49 @@ describe("NodesSettings", () => {
     expect(getByText("Mint a join token")).toBeTruthy();
     expect(queryByText("Join Command")).toBeNull();
     expect(getByText("10.0.0.1:4575")).toBeTruthy();
+  });
+
+  // The join command sends the operator to the advertised cluster address
+  // with the minted token and nothing else: the joining node's own cluster
+  // listen address is its own choice, and the server default stands unless
+  // the operator says otherwise.
+  test("join command names the cluster address and token and dictates no listen address", async () => {
+    const qc = createTestQueryClient();
+    seedQueries(qc, {
+      cluster: { ...sampleCluster, clusterAddress: "10.0.0.1:4566" },
+    });
+    m(mocks.lifecycleClient, "createJoinToken").mockResolvedValueOnce({
+      joinToken: "tok-abcdef0123456789",
+      expiresAtUnix: 1_900_000_000n,
+    });
+
+    const { getByText, container } = renderWritable(<NodesSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+    fireEvent.click(getByText("Mint a join token"));
+    await waitFor(() => expect(getByText("Join Command")).toBeTruthy());
+
+    const cmd = [...container.querySelectorAll("code")]
+      .map((el) => el.textContent)
+      .find((t) => t.startsWith("gastrolog server"));
+    expect(cmd).toBe("gastrolog server --join-addr 10.0.0.1:4566 --join-token tok-abcdef0123456789");
+    expect(cmd).not.toContain("--cluster-addr");
+  });
+
+  // "this node" names the node that answered. When settings and cluster
+  // status were answered by different nodes, the answering node varies per
+  // request and no node is labeled; when they agree, the label is shown.
+  test("this node is withheld when the answering node varies between responses", () => {
+    const varying = createTestQueryClient();
+    seedQueries(varying, { cluster: { ...sampleCluster, localNodeId: remoteNodeId } });
+    const hidden = renderWritable(<NodesSettings dark />, { wrapper: settingsWrapper(varying) });
+    expect(hidden.queryByText("this node")).toBeNull();
+    hidden.unmount();
+
+    const stable = createTestQueryClient();
+    seedQueries(stable, { cluster: { ...sampleCluster, localNodeId } });
+    const shown = renderWritable(<NodesSettings dark />, { wrapper: settingsWrapper(stable) });
+    expect(shown.queryByText("this node")).not.toBeNull();
   });
 
   // A caller who cannot change anything cannot mint a credential either.

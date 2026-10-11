@@ -6,10 +6,12 @@ import { lifecycleClient, refreshAuth } from "../client";
 import type { WatchSystemStatusResponse } from "../gen/gastrolog/v1/lifecycle_pb";
 import { idFromBytes } from "../model/id";
 import { ingesterAliveListToMap } from "./useIngesterAlive";
+import { recordRespondingNode } from "./respondingNode";
 
 /** Apply a single WatchSystemStatus message to the query cache. */
 export function applyStatusMessage(qc: QueryClient, msg: WatchSystemStatusResponse) {
   if (msg.cluster) {
+    recordRespondingNode(idFromBytes(msg.cluster.localNodeId));
     qc.setQueryData(["clusterStatus"], msg.cluster);
   }
   if (msg.health) {

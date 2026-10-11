@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, mock } from "bun:test";
 import { fireEvent, waitFor, act } from "@testing-library/react";
 import { installMockClients, m } from "../../../test/api-mock";
 import { createTestQueryClient, settingsWrapper } from "../../../test/render";
@@ -6,7 +6,7 @@ import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 const mocks = installMockClients();
 
 import { RetentionPoliciesSettings } from "./RetentionPoliciesSettings";
-import { GetSystemResponse } from "../../api/gen/gastrolog/v1/system_pb";
+import { GetSystemResponse, RetentionPolicyConfig, VaultConfig, VaultType } from "../../api/gen/gastrolog/v1/system_pb";
 import { renderWritable } from "../../testing/renderWritable";
 
 function testId(n: number): Uint8Array<ArrayBuffer> {
@@ -52,12 +52,12 @@ describe("RetentionPoliciesSettings create gates", () => {
     expect(getByText('A retention policy named "default" already exists')).toBeTruthy();
     expect(getByText("Create").closest("button")!.disabled).toBe(true);
 
-    act(() => {
+    // The query cache notifies its observers on a macrotask; flush it.
+    await act(async () => {
       qc.setQueryData(["system"], sampleConfig);
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    await waitFor(() => {
-      expect(queryByText('A retention policy named "default" already exists')).toBeNull();
-    });
+    expect(queryByText('A retention policy named "default" already exists')).toBeNull();
   });
 
   test("no condition disables Create with the reason, until one is set", async () => {
@@ -90,5 +90,33 @@ describe("RetentionPoliciesSettings delete consequences", () => {
     expect(line.textContent).toContain("vault-alpha");
     expect(line.textContent).not.toContain("vault-beta");
     expect(getByText("Yes")).toBeTruthy();
+  });
+});
+
+const usedByConfig = {
+  rotationPolicies: [],
+  retentionPolicies: [new RetentionPolicyConfig({ id: testId(30), name: "30-day", maxAge: "720h" })],
+  vaults: [
+    new VaultConfig({ id: testId(1), name: "vault-alpha", type: VaultType.FILE, retentionRules: [{ retentionPolicyId: testId(30) }] }),
+    new VaultConfig({ id: testId(2), name: "vault-beta", type: VaultType.MEMORY }),
+  ],
+  routes: [],
+  ingesters: [],
+  nodeConfigs: [],
+};
+
+describe("RetentionPoliciesSettings used by", () => {
+  test("a vault named in used by opens that vault on the Vaults tab", () => {
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], usedByConfig);
+    const navigate = mock((_tab: string, _entity?: string) => {});
+
+    const { getByText, queryByText } = renderWritable(<RetentionPoliciesSettings dark onNavigateTo={navigate} />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expect(queryByText("vault-beta")).toBeNull();
+    fireEvent.click(getByText("vault-alpha"));
+    expect(navigate).toHaveBeenCalledWith("vaults", "vault-alpha");
   });
 });

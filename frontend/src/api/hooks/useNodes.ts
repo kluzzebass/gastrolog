@@ -3,6 +3,8 @@ import { useClusterStatus } from "./useClusterStatus";
 import { useSettings } from "./useSettings";
 import { Node } from "../model/node";
 import { type EntityID, idFromBytes, EMPTY_ID } from "../model/id";
+import { useRespondingNodeStable } from "./respondingNode";
+import { parseDurationNanos } from "../../utils/units";
 
 /**
  * Cluster-wide node registry. Joins durable NodeConfig (from GetSystem,
@@ -15,15 +17,31 @@ export interface NodeRegistry {
   /** Every known node — union of cluster members and config entries. */
   readonly all: Node[];
   readonly byId: ReadonlyMap<EntityID, Node>;
-  /** This API node's ID. EMPTY_ID until settings load. */
+  /**
+   * The node that answered the latest settings request. EMPTY_ID until
+   * settings load. A usable default for "some node", not an identity to
+   * label: see `respondingNodeStable`.
+   */
   readonly localNodeId: EntityID;
+  /**
+   * True while every response this session has seen came from one node.
+   * Behind a load balancer the answering node varies per request; then no
+   * node is "this node" and the label is withheld rather than guessed.
+   */
+  readonly respondingNodeStable: boolean;
+  /**
+   * How long a stats broadcast stays queryable on the responding node, in
+   * milliseconds; null until cluster status reports it. Stats older than
+   * this are a copy the cluster itself has let go of.
+   */
+  readonly statsTtlMs: number | null;
   /** Current cluster leader, or null when no leader info is available. */
   readonly leader: Node | null;
   /** True when the cluster is multi-node (raft cluster or multiple configs). */
   readonly multiNode: boolean;
   /** Convenience: display name for an ID, falling back to the ID itself. */
   nameOf(id: EntityID): string;
-  /** Convenience: is this the local API node. */
+  /** True only when id is the responding node AND that node has been stable this session. */
   isLocal(id: EntityID): boolean;
 }
 
@@ -33,6 +51,14 @@ export function useNodeRegistry(): NodeRegistry {
   const { data: settings } = useSettings();
 
   const localNodeId: EntityID = settings?.nodeId ? idFromBytes(settings.nodeId) : EMPTY_ID;
+  // Two responses in the cache naming different responding nodes is the
+  // same evidence as two observed over time: the answering node varies.
+  const clusterLocalId: EntityID = cluster?.localNodeId?.length ? idFromBytes(cluster.localNodeId) : EMPTY_ID;
+  const respondingNodeStable =
+    useRespondingNodeStable() &&
+    (clusterLocalId === EMPTY_ID || localNodeId === EMPTY_ID || clusterLocalId === localNodeId);
+  const statsTtlNanos = cluster?.statsTtl ? parseDurationNanos(cluster.statsTtl) : BigInt(0);
+  const statsTtlMs = statsTtlNanos > BigInt(0) ? Number(statsTtlNanos / BigInt(1_000_000)) : null;
 
   const byId = new Map<EntityID, Node>();
 
@@ -60,13 +86,15 @@ export function useNodeRegistry(): NodeRegistry {
     all,
     byId,
     localNodeId,
+    respondingNodeStable,
+    statsTtlMs,
     leader,
     multiNode,
     nameOf(id: EntityID): string {
       return byId.get(id)?.name ?? id;
     },
     isLocal(id: EntityID): boolean {
-      return id === localNodeId && id !== EMPTY_ID;
+      return respondingNodeStable && id === localNodeId && id !== EMPTY_ID;
     },
   };
 }

@@ -15,7 +15,7 @@ import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput, SpinnerInput } from "./FormField";
 import { sortByName } from "../../lib/sort";
-import { CloudServiceCard } from "./CloudServiceCard";
+import { CloudServiceCard, providerOptions } from "./CloudServiceCard";
 import { FileStorageCard } from "./FileStorageCard";
 import { CloudServiceFields } from "./CloudServiceFields";
 import { Button } from "./Buttons";
@@ -301,7 +301,13 @@ export function StorageSettings({ dark, onOpenInspector }: Readonly<{ dark: bool
               createDisabled={!storageClass.trim() || isNaN(parseInt(storageClass, 10))}
               createDisabledReason="Storage class is required"
             >
-              <NodeSelect value={storageNodeId} onChange={setStorageNodeId} dark={dark} />
+              <NodeSelect
+                value={storageNodeId}
+                onChange={setStorageNodeId}
+                description="The node whose disk this storage is on — the path below is resolved there, and vaults placed on it live on that node."
+                helpRef="storage-config#file-storage"
+                dark={dark}
+              />
               <FormField label="Name" dark={dark}>
                 <TextInput
                   value={storageName}
@@ -452,12 +458,7 @@ export function StorageSettings({ dark, onOpenInspector }: Readonly<{ dark: bool
                 <SelectInput
                   value={addForm.provider}
                   onChange={(v) => dispatchAdd({ type: "set", patch: { provider: v } })}
-                  options={[
-                    { value: "s3", label: "S3" },
-                    { value: "gcs", label: "GCS" },
-                    { value: "azure", label: "Azure" },
-                    { value: "memory", label: "Memory" },
-                  ]}
+                  options={providerOptions}
                   dark={dark}
                 />
               </FormField>

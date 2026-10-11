@@ -84,6 +84,7 @@ function useNodeContext() {
   }
   return {
     localNodeId: registry.localNodeId,
+    isLocal: registry.isLocal,
     multiNode: registry.multiNode,
     nodeNames,
   };
@@ -234,7 +235,7 @@ function RouteStatsList({ dark }: Readonly<{ dark: boolean }>) {
 function JobsList({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const { jobs, connected, reconnecting } = useWatchJobs({ onError: toastError });
-  const { localNodeId, multiNode, nodeNames } = useNodeContext();
+  const { localNodeId, isLocal, multiNode, nodeNames } = useNodeContext();
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
 
   if (!connected && !reconnecting && jobs.length === 0) return <Loading dark={dark} />;
@@ -308,7 +309,7 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
             }
             headerRight={
               <span className="flex items-center gap-1.5">
-                {group.nodeId === localNodeId && <Badge variant="copper" dark={dark}>this node</Badge>}
+                {isLocal(group.nodeId) && <Badge variant="copper" dark={dark}>this node</Badge>}
                 <Badge variant="muted" dark={dark}>{group.items.length}</Badge>
               </span>
             }
@@ -430,11 +431,16 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
 
   // Single-node: show local stats directly.
   if (!multiNode) {
-    const localStats = registry.byId.get(localNodeId)?.stats ?? null;
+    const localNode = registry.byId.get(localNodeId);
     return (
       <div className="flex flex-col gap-3">
         <EntityHeader title="System" helpRef="inspector-system" dark={dark} />
-        <SystemStatsView nodeStats={localStats} dark={dark} />
+        <SystemStatsView
+          nodeStats={localNode?.stats ?? null}
+          receivedAt={localNode?.statsReceivedAt}
+          ttlMs={registry.statsTtlMs}
+          dark={dark}
+        />
       </div>
     );
   }
@@ -475,7 +481,7 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
       {nodes.length === 0 && <Empty dark={dark}>No cluster data available.</Empty>}
       {nodes.map((node) => {
         const nid = idFromBytes(node.id);
-        const isLocal = nid === localNodeId;
+        const isLocal = registry.isLocal(nid);
         return (
           <ExpandableCard
             key={nid}
@@ -494,7 +500,12 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
             }
           >
             <div className="p-3">
-              <SystemStatsView nodeStats={node.stats ?? null} dark={dark} />
+              <SystemStatsView
+                nodeStats={node.stats ?? null}
+                receivedAt={node.statsReceivedAt}
+                ttlMs={registry.statsTtlMs}
+                dark={dark}
+              />
             </div>
           </ExpandableCard>
         );

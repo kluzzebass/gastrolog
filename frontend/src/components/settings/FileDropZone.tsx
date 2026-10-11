@@ -7,6 +7,7 @@ import { handleDragOver, handleDragEnter, handleDragLeave } from "./CertificateF
 import type { ManagedFileInfo } from "../../api/gen/gastrolog/v1/system_pb";
 import type { useUploadManagedFile } from "../../api/hooks/useUploadManagedFile";
 import { useReadOnly } from "../../hooks/useReadOnly";
+import { HelpLink } from "../HelpLink";
 
 export function FileDropZone({
   dark,
@@ -15,6 +16,8 @@ export function FileDropZone({
   label,
   currentFile,
   pickableFiles,
+  ineligibleReason,
+  helpRef,
   uploadFile,
   addToast,
   onFileSelected,
@@ -25,6 +28,10 @@ export function FileDropZone({
   label: string;
   currentFile?: ManagedFileInfo;
   pickableFiles?: ManagedFileInfo[];
+  /** Why a pickable file does not qualify here; it stays listed, disabled, with the reason. */
+  ineligibleReason?: (f: ManagedFileInfo) => string | undefined;
+  /** Help section stating what qualifies — linked from the empty list and from ineligible entries. */
+  helpRef?: string;
   uploadFile: ReturnType<typeof useUploadManagedFile>;
   addToast: (msg: string, type: "info" | "error") => void;
   onFileSelected?: (fileId: string) => void;
@@ -144,23 +151,28 @@ export function FileDropZone({
             Existing files
           </span>
           {filteredPickable.length === 0 ? (
-            <span className={`text-[0.8em] italic ${c("text-text-muted", "text-light-text-muted")}`}>
-              No {accept} files uploaded yet
+            <span role="note" className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
+              No {accept} files uploaded yet — drop one above, or upload under Files.
+              {helpRef && <>{" "}<HelpLink helpRef={helpRef} className="text-copper">What qualifies</HelpLink></>}
             </span>
-          ) : (filteredPickable.map((f) => (
-              <button
-                disabled={readOnly}
-                key={encode(f.id)}
-                onClick={() => onFileSelected?.(encode(f.id))}
-                className={`flex items-center gap-2 px-2 py-1.5 rounded text-left text-[0.8em] transition-colors ${c(
-                  "hover:bg-ink-hover",
-                  "hover:bg-light-hover",
-                )}`}
-              >
-                <span className={`font-mono ${c("text-text-bright", "text-light-text-bright")}`}>{f.name}</span>
-                <span className={c("text-text-muted", "text-light-text-muted")}>{formatBytes(Number(f.size))}</span>
-              </button>
-            ))
+          ) : (filteredPickable.map((f) => {
+              const reason = ineligibleReason?.(f);
+              return (
+                <button
+                  disabled={readOnly || reason !== undefined}
+                  title={reason}
+                  key={encode(f.id)}
+                  onClick={() => onFileSelected?.(encode(f.id))}
+                  className={`flex items-center gap-2 px-2 py-1.5 rounded text-left text-[0.8em] transition-colors ${
+                    reason === undefined ? c("hover:bg-ink-hover", "hover:bg-light-hover") : "opacity-50 cursor-not-allowed"
+                  }`}
+                >
+                  <span className={`font-mono ${c("text-text-bright", "text-light-text-bright")}`}>{f.name}</span>
+                  <span className={c("text-text-muted", "text-light-text-muted")}>{formatBytes(Number(f.size))}</span>
+                  {reason && <span className={c("text-text-muted", "text-light-text-muted")}>— {reason}</span>}
+                </button>
+              );
+            })
           )}
         </div>
       )}

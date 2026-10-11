@@ -7,6 +7,46 @@ const mocks = installMockClients();
 
 import { RoutesSettings } from "./RoutesSettings";
 import { renderWritable } from "../../testing/renderWritable";
+import { HelpProvider } from "../../hooks/useHelp";
+import { VaultType } from "../../api/gen/gastrolog/v1/system_pb";
+import { mock } from "bun:test";
+
+describe("route destinations eligibility", () => {
+  function renderWithHelp(vaults: unknown[]) {
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], { ...sampleConfig, vaults });
+    const openHelp = mock((_helpRef?: string) => {});
+    const result = renderWritable(
+      <HelpProvider onOpen={openHelp}>
+        <RoutesSettings dark />
+      </HelpProvider>,
+      { wrapper: settingsWrapper(qc) },
+    );
+    return { ...result, openHelp };
+  }
+
+  test("a JSONL sink and a disabled vault are told apart from an ordinary vault, all selectable", () => {
+    const { getByText, container } = renderWithHelp([
+      { id: testId(20), name: "vault-alpha", type: VaultType.FILE, enabled: true },
+      { id: testId(21), name: "vault-sink", type: VaultType.JSONL, enabled: true },
+      { id: testId(22), name: "vault-off", type: VaultType.MEMORY, enabled: false },
+    ]);
+    fireEvent.click(getByText("default-route"));
+    expect(getByText("vault-alpha")).toBeTruthy();
+    expect(getByText("vault-sink — JSONL sink, write-only")).toBeTruthy();
+    expect(getByText("vault-off — disabled, not accepting records")).toBeTruthy();
+    const boxes = [...container.querySelectorAll('[role="checkbox"]')];
+    expect(boxes.some((b) => b.getAttribute("aria-disabled") === "true")).toBe(false);
+  });
+
+  test("with no vault the destinations list names the cause and links to route components", () => {
+    const { getByText, getByRole, openHelp } = renderWithHelp([]);
+    fireEvent.click(getByText("default-route"));
+    expect(getByRole("note").textContent).toContain("No vaults configured");
+    fireEvent.click(getByText("Route components"));
+    expect(openHelp).toHaveBeenCalledWith("routing#route-components");
+  });
+});
 
 /** Create a distinct 16-byte Uint8Array test ID from a small number. */
 function testId(n: number): Uint8Array<ArrayBuffer> {
@@ -253,7 +293,8 @@ describe("RoutesSettings create gates", () => {
     expect(getByText("Pick at least one destination")).toBeTruthy();
     expect(getByText("Create").closest("button")!.disabled).toBe(true);
 
-    fireEvent.click(getByText("vault-alpha"));
+    // The destination label carries the vault's state after a dash.
+    fireEvent.click(getByText(/^vault-alpha/));
     await waitFor(() => {
       expect(queryByText("Pick at least one destination")).toBeNull();
       expect(getByText("Create").closest("button")!.disabled).toBe(false);

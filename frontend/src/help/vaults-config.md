@@ -22,11 +22,11 @@ A **File** vault is local-only by default. Selecting a Cloud Storage on it makes
 
 ### Common Settings
 
-- **Rotation Policy** — when to seal the active chunk and start a new one. Select a policy from the dropdown, or leave empty for no automatic rotation.
-- **Retention Policy** — when sealed chunks become eligible for retention. Select a policy that defines the trigger (max age, max chunk count, etc.); leave empty for no retention.
+- **Rotation Policy** — when to seal the active chunk and start a new one. Select a policy from the dropdown, or leave empty for no automatic rotation. With no rotation policy configured the picker says so and links to [Rotation and Retention Policies](help:vaults-config#rotation-and-retention-policies).
+- **Retention Policies** — when sealed chunks become eligible for retention. Tick every policy to attach; each defines a trigger (max age, max size, max chunk count). Every attached policy is evaluated on each sweep, so a chunk is retained as soon as any of them matches it and the tightest bound wins. The field says how many are attached. With none attached, only the default size floor drains the vault; with no retention policy configured at all the field says so. The CLI spells it `--retention-policy`, repeated once per policy.
 - **Retention Disposition** — what happens to records when retention triggers. The default is **Delete records on retention**: records drop, storage frees, the routing engine is never invoked. **Send records to routing engine** (`route`) streams the records through the routing table with synthetic `_source = "retention"` and `_vault = "<vault-id>"`, so routes you configure can forward them to an archive vault, cold-storage vault, etc. — use this only when you have a specific archival or forwarding pipeline in mind, otherwise a misconfigured route can re-inject records into this vault and create a cascade; the original chunk is destroyed and its records re-ingested through routing. **Transfer records to another vault unchanged** (`transfer`) re-homes the sealed chunk itself to the **Transfer Target** vault — no record decode, no re-ingest, no routing table involvement — this is the common archive pattern (age old data into a cheaper vault without touching it). Both vaults must be non-cloud file vaults — see [Transfer Target](help:vaults-config#transfer-target) for the full eligibility rule. The chunk keeps its own record timestamps and identity, but its retention clock restarts at the destination (a fresh anchor), so a shorter destination TTL does not immediately re-fire retention on arrival. If the target is missing, disabled, or its transfer can't complete, the chunk is retained and the sweep records a `retention-deferred` alarm rather than losing data.
 - **Transfer Target** — shown only when Retention Disposition is set to Transfer. The destination vault sealed chunks re-home to when this vault's retention fires. See [Transfer Target](help:vaults-config#transfer-target) below for which vaults qualify.
-- **Replication Factor** — how many copies of each chunk to maintain. 1 = no replication. 2 = one extra copy (redundancy). 3+ = fault-tolerant quorum. The maximum depends on how many [file storages](help:storage-config) have the matching storage class.
+- **Replication Factor** — how many copies of each chunk to maintain. 1 = no replication. 2 = one extra copy (redundancy). 3+ = fault-tolerant quorum. The field states its cap and the cause: for a file vault, the number of [file storages](help:storage-config#how-vaults-use-file-storages) with the vault's storage class; for a memory vault, the number of nodes in the cluster. Add a file storage with that class to raise the cap.
 
 ### Transfer Target
 
@@ -45,16 +45,16 @@ When no vault qualifies, the Transfer Target picker says so. Create a non-cloud 
 
 ### File Vault Settings
 
-- **Cloud Storage** — optional. Select a [cloud service](help:storage-config) to make the vault cloud-backed; leave as "Local-only" to keep all data on disk. Fixed at vault creation — to change, create a new vault and migrate data.
-- **Storage Class** — which [file storages](help:storage-config) this vault uses. For local-only vaults this hosts all chunks; for cloud-backed vaults it hosts the active chunk and warm cache (sealed chunks live in the cloud). The placement manager assigns one file storage per replica.
+- **Cloud Storage** — optional. Select a [cloud service](help:storage-config) to make the vault cloud-backed; leave as "Local-only" to keep all data on disk. Fixed at vault creation — on an existing vault the picker is disabled with that reason; to change, create a new vault and migrate data. With no cloud storage configured the picker says so.
+- **Storage Class** — which [file storages](help:storage-config) this vault uses. For local-only vaults this hosts all chunks; for cloud-backed vaults it hosts the active chunk and warm cache (sealed chunks live in the cloud). The placement manager assigns one file storage per replica. Each option lists how many file storages have that class and on which nodes — that count is the replication factor cap. With no file storage configured anywhere the picker says so — a file vault cannot be placed until one exists.
 
 Disk-free warn/floor thresholds are no longer set per vault — they belong to the [file storage](help:storage-config) a vault's chunks are placed on, since multiple vaults commonly share one physical volume.
 
 There is no vault-level size cap here anymore — the disk-claim bound lives on the retention policy's **Max Size**, which drains oldest chunks past it, and — with that policy's **Refuse** flag on — also refuses admission while over it. See [**Max Size**](help:policy-retention) on the Retention Policies help for the combined mechanics, the min-wins resolution across a vault's attached policies, and the default floor that applies when no attached policy states a size.
 
-Cloud-backed vaults also have:
+The cache fields are always shown and apply to cloud-backed vaults only — on a local-only vault they are disabled with that reason, since sealed chunks on disk are the data, not a cache:
 
-- **Cache Eviction**, **Cache Budget**, **Cache TTL** — how the warm cache (the local copy of cloud-uploaded chunks) gets reclaimed when disk pressure or age limits are reached.
+- **Cache Eviction**, **Cache Budget**, **Cache TTL** — how the warm cache (the local copy of cloud-uploaded chunks) gets reclaimed when disk pressure or age limits are reached. **Cache TTL** is disabled unless eviction is TTL.
 
 ### Memory Vault Settings
 
@@ -68,6 +68,24 @@ Cloud-backed vaults also have:
 
 Expand a vault card to edit its name or enable/disable it. The storage shape is fixed once the vault has chunks.
 
+## Placement
+
+The **Placement** block on an expanded vault card states where the vault's data lives, read straight from the cluster configuration:
+
+- **leader** — the node whose storage holds the vault's leader placement; it accepts the vault's writes. **followers** — the nodes holding the other placements, one per extra replica.
+- **RF n · cap m (cause)** — the saved replication factor and the highest it can go. For a file vault the cap is the number of file storages with the vault's storage class (two storages on one node count as two); for a memory vault it is the number of nodes.
+- **short by k — action** — shown while the vault has fewer placements than its replication factor, with what raises the count: add file storages with the class when the cap is below RF, or wait for the placement manager when enough storages exist (`placement pending`). The same count appears in the card header while it is collapsed: `2 of 3 placements — add 1 file storage with class 1`.
+
+A vault is **unplaced** when it has no leader placement: no node accepts its writes. The block names the cause — `no file storage has class n` when nothing in the cluster can hold it (add a file storage with that class, on any node), `no storage class selected` when the vault has none, or `no leader assigned yet` when eligible storages exist and the placement manager has not placed the vault — it places on its next reconcile once a node with that storage is live. The cluster raises an alarm for each unplaced vault.
+
+## Actions
+
+Each action on an expanded vault card runs against the live vault; the line beside the button states its consequence:
+
+- **Rotate** — seals every active chunk that holds records; the next record opens a new one. See [Rotating now](help:policy-rotation#rotating-now).
+- **Reindex** — rebuilds every sealed chunk's indexes as a tracked job whose progress shows on the card; the records themselves are untouched.
+- **Retry Unreadable** — resets the retry backoff on every chunk retention has marked unreadable, so the next retention sweep retries them all at once instead of waiting out each chunk's backoff.
+
 ## Deleting a Vault
 
 **Delete** on a vault card removes the vault and every placement it has, on every node; the confirm step lists what goes. A vault that is a [route](help:routing) destination cannot be deleted — the Delete button stays disabled and names the route; remove the vault from the route's destinations first.
@@ -80,4 +98,4 @@ What happens to the data depends on the storage type:
 
 ## Rotation and Retention Policies
 
-Policies are shared resources created in the [Policies](settings:policies) tab and referenced by name in vault settings. This lets multiple vaults share the same rotation or retention schedule.
+Policies are shared resources created in the [Policies](settings:policies) tab and referenced by name in vault settings. This lets multiple vaults share the same rotation or retention schedule. A vault has one rotation policy and any number of retention policies; a policy card's "used by" list links back to each vault that attaches it.

@@ -4,6 +4,8 @@ import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { useConfig, usePutNodeConfig } from "../../api/hooks/useSystem";
 import { useSettings } from "../../api/hooks/useSettings";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
+import { useNodeRegistry } from "../../api/hooks/useNodes";
+import type { EntityID } from "../../api/model/id";
 import { useSetNodeSuffrage } from "../../api/hooks/useSetNodeSuffrage";
 import { useCreateJoinToken } from "../../api/hooks/useCreateJoinToken";
 import { useJoinCluster } from "../../api/hooks/useJoinCluster";
@@ -18,6 +20,7 @@ import { useEditState } from "../../hooks/useEditState";
 import { useToast } from "../Toast";
 import { Badge } from "../Badge";
 import { HelpButton } from "../HelpButton";
+import { HelpLink } from "../HelpLink";
 import { CopyButton } from "../CopyButton";
 import { EyeIcon, EyeOffIcon } from "../icons";
 import { SettingsCard } from "./SettingsCard";
@@ -68,6 +71,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { data: configData, isLoading: configLoading } = useConfig();
   const { data: settingsData, isLoading: settingsLoading } = useSettings();
   const { data: clusterData } = useClusterStatus();
+  const registry = useNodeRegistry();
   const putNodeConfig = usePutNodeConfig();
   const setNodeSuffrage = useSetNodeSuffrage();
   const removeNode = useRemoveNode();
@@ -178,7 +182,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                   {clusterEnabled && node.suffrage === ClusterNodeSuffrage.NONVOTER && (
                     <Badge variant="muted" dark={dark} title="Nonvoter — replicates the log but has no vote and cannot become leader" helpRef={NODE_ROLES_HELP_REF}>nonvoter</Badge>
                   )}
-                  {isLocal && (
+                  {registry.isLocal(node.id as EntityID) && (
                     <Badge variant="muted" dark={dark}>this node</Badge>
                   )}
                 </div>
@@ -302,14 +306,20 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
         <JoinInfoCard dark={dark} clusterAddress={clusterData?.clusterAddress ?? ""} />
       )}
 
-      {clusterEnabled && nodes.length === 1 && (
-        <JoinClusterCard dark={dark} />
+      {clusterEnabled && (
+        <JoinClusterCard dark={dark} memberCount={nodes.length} />
       )}
     </div>
   );
 }
 
-function JoinClusterCard({ dark }: Readonly<{ dark: boolean }>) {
+/** Why this node cannot join another cluster, or undefined when it can. */
+export function joinIneligibility(memberCount: number): string | undefined {
+  if (memberCount <= 1) return undefined;
+  return `Only a single-node cluster can join another — this node is already one of ${String(memberCount)} members.`;
+}
+
+function JoinClusterCard({ dark, memberCount }: Readonly<{ dark: boolean; memberCount: number }>) {
   const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   const { addToast } = useToast();
@@ -318,7 +328,9 @@ function JoinClusterCard({ dark }: Readonly<{ dark: boolean }>) {
   const [joinToken, setJoinToken] = useState("");
   const [confirmed, setConfirmed] = useState(false);
 
-  const canSubmit = memberAddress.trim() !== "" && joinToken.trim() !== "" && confirmed;
+  const ineligible = joinIneligibility(memberCount);
+  const locked = joinCluster.isPending || ineligible !== undefined;
+  const canSubmit = !locked && memberAddress.trim() !== "" && joinToken.trim() !== "" && confirmed;
 
   const handleJoin = async () => {
     try {
@@ -349,6 +361,12 @@ function JoinClusterCard({ dark }: Readonly<{ dark: boolean }>) {
       <p className={`text-[0.75em] mb-3 ${c("text-text-muted", "text-light-text-muted")}`}>
         Join an existing cluster at runtime, through the address of any node in it. This node's local configuration will be replaced by the cluster's configuration.
       </p>
+      {ineligible && (
+        <p role="note" className={`text-[0.85em] mb-3 ${c("text-text-normal", "text-light-text-normal")}`}>
+          {ineligible}{" "}
+          <HelpLink helpRef="clustering-nodes#joining-a-cluster" className="text-copper">Joining a cluster</HelpLink>
+        </p>
+      )}
       <div className="flex flex-col gap-2.5">
         <FormField label="Member Address" dark={dark}>
           <TextInput
@@ -357,7 +375,7 @@ function JoinClusterCard({ dark }: Readonly<{ dark: boolean }>) {
             placeholder="e.g. 10.0.0.1:4566"
             dark={dark}
             mono
-            disabled={joinCluster.isPending}
+            disabled={locked}
           />
         </FormField>
         <FormField label="Join Token" dark={dark}>
@@ -367,15 +385,15 @@ function JoinClusterCard({ dark }: Readonly<{ dark: boolean }>) {
             placeholder="Paste join token from the cluster"
             dark={dark}
             mono
-            disabled={joinCluster.isPending}
+            disabled={locked}
           />
         </FormField>
-        <label className={`flex items-start gap-2 text-[0.75em] cursor-pointer ${c("text-text-muted", "text-light-text-muted")}`}>
+        <label className={`flex items-start gap-2 text-[0.75em] ${locked ? "cursor-not-allowed opacity-50" : "cursor-pointer"} ${c("text-text-muted", "text-light-text-muted")}`}>
           <input
             type="checkbox"
             checked={confirmed}
             onChange={(e) => setConfirmed(e.target.checked)}
-            disabled={joinCluster.isPending || readOnly}
+            disabled={locked || readOnly}
             className="mt-0.5"
           />
           <span>
@@ -408,8 +426,10 @@ function JoinInfoCard({ dark, clusterAddress }: Readonly<{ dark: boolean; cluste
   const displayToken = minted
     ? (showToken ? minted.token : middleTruncate(minted.token, 13, 8, 4))
     : "";
+  // The new node's own cluster listen address is its own choice; the
+  // command leaves it at the server default rather than dictate a port.
   const joinCmd = minted
-    ? `gastrolog server --join-addr ${clusterAddress || "<cluster-addr>"} --join-token ${minted.token} --cluster-addr :4575`
+    ? `gastrolog server --join-addr ${clusterAddress || "<cluster-addr>"} --join-token ${minted.token}`
     : "";
 
   return (

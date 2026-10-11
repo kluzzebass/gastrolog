@@ -22,11 +22,14 @@ interface CloudServiceCardProps {
   onToggle: () => void;
 }
 
-const providerOptions = [
+// Memory is a real provider the server accepts: an in-process store whose
+// contents vanish with the node. Its label says so, since nothing else
+// about a "cloud" picker would.
+export const providerOptions = [
   { value: "s3", label: "S3" },
   { value: "gcs", label: "GCS" },
   { value: "azure", label: "Azure" },
-  { value: "memory", label: "Memory" },
+  { value: "memory", label: "Memory — in-process test store, lost on restart" },
 ];
 
 function providerLabel(provider: string): string {

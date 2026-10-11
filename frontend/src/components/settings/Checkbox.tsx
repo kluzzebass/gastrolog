@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useReadOnly } from "../../hooks/useReadOnly";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { HelpButton } from "../HelpButton";
+import { useFormFieldDisabled } from "./FormField";
 
 interface CheckboxProps {
   checked: boolean;
@@ -25,7 +26,8 @@ export function Checkbox({ checked, onChange, label, className, helpRef, disable
   // A checkbox cannot be read-only in HTML, so a caller who may not write
   // sees it in its real state and cannot toggle it.
   const readOnly = useReadOnly();
-  const disabled = disabledProp || readOnly;
+  const fieldDisabled = useFormFieldDisabled();
+  const disabled = disabledProp || readOnly || fieldDisabled;
   const c = useThemeClass(dark);
   const cursor = disabled ? "cursor-not-allowed" : "cursor-pointer";
   const opacity = disabled ? "opacity-40" : "";
