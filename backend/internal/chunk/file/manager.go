@@ -4391,17 +4391,21 @@ func (m *Manager) removeFromCloudIndex(id chunk.ChunkID) {
 }
 
 // rebuildCloudListCache scans the cloud B+ tree index and caches the result.
-// Must be called with m.mu held.
+// Must be called with m.mu held; it takes cloudIdxMu for the walk, since the
+// tree is not safe for concurrent use even while reading.
 func (m *Manager) rebuildCloudListCache() {
 	var cache []chunk.ChunkMeta
-	if err := m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
+	m.cloudIdxMu.Lock()
+	err := m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
 		if _, exists := m.metas[id]; !exists {
 			cm := meta.toChunkMeta()
 			cm.CloudStorageClass = m.storageClasses[id]
 			cache = append(cache, cm)
 		}
 		return true
-	}); err != nil {
+	})
+	m.cloudIdxMu.Unlock()
+	if err != nil {
 		m.logger.Warn("cloud index: ForEach failed during cache rebuild", "error", err)
 	}
 	m.cloudListCache = cache
