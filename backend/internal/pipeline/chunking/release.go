@@ -98,7 +98,7 @@ func scanSegmentExhausted(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.Comp
 // survive: "exhausted for planning" means fully assigned to manifests, not
 // fully built. Purging on exhaustion alone deletes segments that later queued
 // chunks still need, pinning those chunks in Sealing forever.
-func mayPurgeHeadAfterBuild(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string, resolved bool, minChunkHolders int) bool {
+func mayPurgeHeadAfterBuild(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string, resolved bool) bool {
 	if fsm != nil && fsm.SegmentReferencedInManifest(segmentID) {
 		return false
 	}
@@ -111,7 +111,7 @@ func mayPurgeHeadAfterBuild(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredH
 	}
 	// Superseded — records are durable in RF-replicated chunks; drop the local
 	// head copy without waiting on a possibly-dead home (design-notes 39/R3).
-	if fsm.SegmentSuperseded(segmentID, minChunkHolders) {
+	if fsm.SegmentSuperseded(segmentID, requiredHolders) {
 		return true
 	}
 	return holdersCover(entry.Holders, requiredHolders)
@@ -227,7 +227,7 @@ func (v *vaultChunking) enqueueRegistryReleaseCandidates() {
 	}
 	required, resolved := v.requiredHolders()
 	giveUpTTL, now := v.giveUpBound()
-	scan := v.fsm().SnapshotReleaseScan(v.plannerMinHolders())
+	scan := v.fsm().SnapshotReleaseScan(quorumPlacement(required, resolved))
 	var candidates []glid.GLID
 	gaveUp := 0
 	for i := range scan.Entries {

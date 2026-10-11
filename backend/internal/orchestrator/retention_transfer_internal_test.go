@@ -12,7 +12,9 @@ package orchestrator
 import (
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,6 +40,80 @@ func seedManifestEntry(fsm *vaultctlfsm.FSM, entry vaultctlfsm.ManifestEntry) {
 
 // ---------- waitForDestHolders ----------
 
+// destHomes is the destination placement the wait tests count holders
+// against; every holder those tests ack is a member.
+func destHomes() []string { return []string{"node-A", "node-B"} }
+
+// TestWaitForDestHoldersIgnoresHoldersOutsidePlacement: a destination
+// holder that left the destination's placement (its home re-placed after a
+// disk loss) must not count toward the destination RF that releases the
+// source's copies. Only once a placed home acks does the wait succeed.
+func TestWaitForDestHoldersIgnoresHoldersOutsidePlacement(t *testing.T) {
+	t.Parallel()
+	fsm := vaultctlfsm.New()
+	id := chunk.NewChunkID()
+	seedManifestEntry(fsm, vaultctlfsm.ManifestEntry{ID: id, RecordCount: 3})
+	ackHolder(fsm, id, "node-B")
+	ackHolder(fsm, id, "node-A")
+	placement := func() []string { return []string{"node-A", "node-C"} }
+
+	r := &retentionRunner{}
+	// Buffered so the sends never block: a wait that wrongly returns early
+	// must fail this test, not deadlock it.
+	tick := make(chan time.Time, transferReceiptsMaxStallTicks)
+	done := make(chan bool, 1)
+	go func() { done <- r.waitForDestHolders(fsm, id, 2, placement, tick) }()
+	for range cap(tick) {
+		tick <- time.Now()
+	}
+	if waittest.Recv(t, "waitForDestHolders returns after exhausting the stall ticks", done, nil) {
+		t.Fatal("a holder outside the destination placement counted toward the destination RF")
+	}
+
+	ackHolder(fsm, id, "node-C")
+	if !r.waitForDestHolders(fsm, id, 2, placement, make(chan time.Time)) {
+		t.Fatal("want immediate success once two placed homes hold the chunk")
+	}
+}
+
+// TestWaitForDestHoldersRereadsPlacement: a holder that leaves the
+// destination placement mid-wait stops counting on the next check.
+func TestWaitForDestHoldersRereadsPlacement(t *testing.T) {
+	t.Parallel()
+	fsm := vaultctlfsm.New()
+	id := chunk.NewChunkID()
+	seedManifestEntry(fsm, vaultctlfsm.ManifestEntry{ID: id, RecordCount: 3})
+	ackHolder(fsm, id, "node-A")
+
+	var mu sync.Mutex
+	homes := []string{"node-A", "node-B"}
+	placement := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(homes)
+	}
+
+	r := &retentionRunner{}
+	// Buffered past any stall-reset the two changes below can cause, so no
+	// send blocks however the waiter interleaves with them.
+	tick := make(chan time.Time, 3*transferReceiptsMaxStallTicks)
+	done := make(chan bool, 1)
+	go func() { done <- r.waitForDestHolders(fsm, id, 2, placement, tick) }()
+
+	// node-A is re-placed to node-C, then node-B acks: the raw holder set
+	// reaches two, but at no point do two placed homes hold the chunk.
+	mu.Lock()
+	homes = []string{"node-B", "node-C"}
+	mu.Unlock()
+	ackHolder(fsm, id, "node-B")
+	for range cap(tick) {
+		tick <- time.Now()
+	}
+	if waittest.Recv(t, "waitForDestHolders returns after exhausting the stall ticks", done, nil) {
+		t.Fatal("a holder re-placed out of the destination mid-wait still counted")
+	}
+}
+
 func TestWaitForDestHoldersSucceedsImmediatelyWhenAlreadyMet(t *testing.T) {
 	t.Parallel()
 	fsm := vaultctlfsm.New()
@@ -49,7 +125,7 @@ func TestWaitForDestHoldersSucceedsImmediatelyWhenAlreadyMet(t *testing.T) {
 	// A closed/never-read tick channel proves this path never blocks on a
 	// tick: if it did, this would deadlock the test.
 	tick := make(chan time.Time)
-	if !r.waitForDestHolders(fsm, id, 1, tick) {
+	if !r.waitForDestHolders(fsm, id, 1, destHomes, tick) {
 		t.Fatal("want immediate success when holders already meet need")
 	}
 }
@@ -71,7 +147,7 @@ func TestWaitForDestHoldersSucceedsAfterProgressTicks(t *testing.T) {
 	// that without any wall-clock sleep.
 	tick := make(chan time.Time, 8)
 	done := make(chan bool, 1)
-	go func() { done <- r.waitForDestHolders(fsm, id, 2, tick) }()
+	go func() { done <- r.waitForDestHolders(fsm, id, 2, destHomes, tick) }()
 
 	// First tick: still 0 holders — not yet satisfied.
 	tick <- time.Now()
@@ -102,7 +178,7 @@ func TestWaitForDestHoldersStallsAfterMaxTicksWithNoProgress(t *testing.T) {
 	r := &retentionRunner{}
 	tick := make(chan time.Time)
 	done := make(chan bool, 1)
-	go func() { done <- r.waitForDestHolders(fsm, id, 2, tick) }()
+	go func() { done <- r.waitForDestHolders(fsm, id, 2, destHomes, tick) }()
 
 	// Exactly transferReceiptsMaxStallTicks ticks with no new holder is what
 	// crosses the stall threshold (see waitForDestHolders); the tick

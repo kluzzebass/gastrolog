@@ -272,48 +272,66 @@ func (f *FSM) applyFinalizeDelete(c *gastrologv1.FinalizeDeleteCommand) (*chunk.
 	return &id, nil
 }
 
-// applyPruneNode removes nodeID from every pendingDeletes entry's
-// ExpectedFrom set. Returns the prunedNodeID and the slice of chunkIDs
-// whose ExpectedFrom became empty as a result of the prune — those
-// chunks are atomically finalized in the same apply.
+// pruneResult is what one CmdPruneNode apply changed: the pruned node, the
+// chunks whose ExpectedFrom drained and were finalized in the same apply, and
+// the surviving chunks whose holder set lost the node.
+type pruneResult struct {
+	nodeID         string
+	finalizable    []chunk.ChunkID
+	holdersChanged []chunk.ChunkID
+}
+
+// applyPruneNode takes nodeID out of every per-node obligation and claim in
+// this vault: each pendingDeletes entry's ExpectedFrom, each chunk's holder
+// set, and each completed segment's holder set. A pruned node is out of the
+// vault's scope (removed from the cluster, or from the vault's placement) — it
+// can neither ack a delete nor keep its claimed bytes, and nothing on that
+// node will ever revoke the claim itself. If it returns to the placement, its
+// reconcile sweep re-earns chunk receipts from the bytes it still holds and
+// collection re-pulls the segments it lacks.
 //
-// Idempotent: pruning a node that no entry expected from is a no-op.
-// Pruning twice yields the same final state (the second pass finds
-// nothing to remove and returns an empty finalizable list).
+// Chunks whose ExpectedFrom drains are finalized inside this apply rather
+// than via the leader's onPruneNode callback, so a leadership transfer between
+// the prune apply and the callback firing cannot strand pendingDeletes entries
+// with an empty ExpectedFrom: they are tombstoned, removed from pendingDeletes,
+// and removed from f.chunks atomically before this function returns.
 //
-// The finalize happens inside this apply rather than via the leader's
-// onPruneNode callback, so a leadership transfer between the prune apply
-// and the callback firing cannot strand pendingDeletes entries with an
-// empty ExpectedFrom: chunks with drained ExpectedFrom are tombstoned,
-// removed from pendingDeletes, and removed from f.chunks atomically
-// before this function returns. The `finalizable` slice is returned for
-// the onPruneNode callback's audit / observability use; subscribers
-// expecting onFinalizeDelete for each chunk receive it via the per-chunk
-// firing in fsm.go's applyLocked dispatch.
-func (f *FSM) applyPruneNode(c *gastrologv1.PruneNodeCommand) (string, []chunk.ChunkID, error) {
+// Idempotent: pruning a node that appears nowhere is a no-op. Holder sets are
+// copy-on-write, same contract as applyRevokeChunkHolder.
+func (f *FSM) applyPruneNode(c *gastrologv1.PruneNodeCommand) (pruneResult, error) {
 	nodeID := c.GetNodeId()
 	if nodeID == "" {
-		return "", nil, errors.New("prune node: empty node ID")
+		return pruneResult{}, errors.New("prune node: empty node ID")
 	}
-
-	var finalizable []chunk.ChunkID
+	out := pruneResult{nodeID: nodeID}
 	for chunkID, p := range f.pendingDeletes {
 		if !p.ExpectedFrom[nodeID] {
 			continue
 		}
 		delete(p.ExpectedFrom, nodeID)
 		if len(p.ExpectedFrom) == 0 {
-			finalizable = append(finalizable, chunkID)
+			out.finalizable = append(out.finalizable, chunkID)
 		}
 	}
 	now := time.Now()
-	for _, chunkID := range finalizable {
+	for _, chunkID := range out.finalizable {
 		f.tombstones[chunkID] = now
 		f.clearOpenManifestStateIfChunkIDLocked(chunkID)
 		delete(f.pendingDeletes, chunkID)
 		delete(f.chunks, chunkID)
 	}
-	return nodeID, finalizable, nil
+	for chunkID, entry := range f.chunks {
+		if holders, ok := withoutHolder(entry.Holders, nodeID); ok {
+			entry.Holders = holders
+			out.holdersChanged = append(out.holdersChanged, chunkID)
+		}
+	}
+	for _, entry := range f.completedSegments {
+		if holders, ok := withoutHolder(entry.Holders, nodeID); ok {
+			entry.Holders = holders
+		}
+	}
+	return out, nil
 }
 
 // ---------- Command builders (used by callers before Raft.Apply) ----------

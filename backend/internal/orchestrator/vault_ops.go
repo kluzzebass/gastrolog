@@ -536,12 +536,6 @@ func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActiv
 	return nil
 }
 
-// proposePruneNodeForVault fans CmdPruneNode out to every instance sub-FSM
-// in the vault after the vault-ctl Raft leader removed a node from the
-// voter set. Each instance's applier transparently routes the propose to
-// the leader, so this callback can fire from the leader's reconcile
-// pass without needing per-vault leadership checks.
-//
 // afterVaultCtlRestore is wired from vaultraft.FSM.SetOnAfterRestore and
 // must return immediately — GroupManager.CreateGroup holds groupMgr.mu
 // across NewRaft→fsm.Restore, and the deferred worker calls
@@ -597,11 +591,11 @@ func (o *Orchestrator) runAfterVaultCtlRestore(vaultID glid.GLID) {
 // Gaining vault-ctl leadership is also the upstream edge for the
 // reconciler's leader-only categories: fire
 // ReconcileMembershipCatchup so a late-joining leader pulls missing
-// replicas, retires unrecoverable FSM entries, prunes stale ExpectedFrom
-// nodes, and retracts abandoned transfer announces immediately instead of
+// replicas, retires unrecoverable FSM entries, prunes nodes outside the
+// placement, and retracts abandoned transfer announces immediately instead of
 // waiting for the periodic backstop tick. Applies to every vault with a
 // reconciler, not just pipeline ingest vaults — the replicated-vault
-// missing-replica and stale-pending-ack categories are exactly the ones a
+// missing-replica and outside-placement prune categories are exactly the ones a
 // new leader must run. Dispatched on auxWg: the categories propose Raft
 // applies that route to this new leader's apply queue, so they must not
 // run on the leadership-tracking goroutine.
@@ -723,24 +717,16 @@ func (o *Orchestrator) recoverPipelineVaultAfterRestore(vaultID glid.GLID) {
 	}
 }
 
-// Errors are logged at warn but do not abort: the next reconcile pass
-// will re-propose CmdPruneNode for any instance where the apply failed
-// (the FSM's applyPruneNode is idempotent — repeated prunes for the
-// same node are no-ops on entries where it's already gone).
+// proposePruneNodeForVault proposes CmdPruneNode on the vault's chunk FSM
+// after the vault-ctl Raft leader removed a node from the voter set: the
+// node left the cluster, so its delete obligations and holder claims go
+// with it. Proposed through the vault-ctl group itself rather than a local
+// vault instance — the vault-ctl leader need not be one of the vault's
+// homes. A failed propose is logged; the outside-placement prune on the
+// vault's placement leader removes the same node once placement drops it.
 func (o *Orchestrator) proposePruneNodeForVault(vaultID glid.GLID, removedNodeID string) {
-	o.mu.RLock()
-	vault := o.vaults[vaultID]
-	if vault == nil {
-		o.mu.RUnlock()
-		return
-	}
-	t := vault.Instance
-	o.mu.RUnlock()
-
-	if t == nil || t.ApplyRaftPruneNode == nil {
-		return
-	}
-	if err := t.ApplyRaftPruneNode(removedNodeID); err != nil {
+	data := vaultraft.MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalPruneNode(removedNodeID))
+	if err := o.ApplyVaultControlPlane(vaultID, data); err != nil {
 		o.vaultOpsLogger.Warn("prune-node propose failed",
 			"vault", vaultID,
 			"removed_node", removedNodeID, "error", err)

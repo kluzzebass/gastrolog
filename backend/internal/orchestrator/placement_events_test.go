@@ -383,7 +383,7 @@ func TestReconcileVaultPlacement_UnchangedPlacementDoesNotWakeCatchup(t *testing
 	}
 	// The reconcile itself still works when driven directly — proving the
 	// stale state is real and only the WAKE was gated.
-	inst.Reconciler.SweepStalePendingDeleteAcks()
+	inst.Reconciler.SweepNodesOutsidePlacement()
 	if got := pruned.list(); len(got) != 1 || got[0] != "ghost" {
 		t.Fatalf("backstop sweep pruned %v, want [ghost]", got)
 	}

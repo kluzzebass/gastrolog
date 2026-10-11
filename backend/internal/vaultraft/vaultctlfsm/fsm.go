@@ -1072,13 +1072,11 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 	case *gastrologv1.VaultCtlCommand_FinalizeDelete:
 		fx.finalizedDeleteID, result = f.applyFinalizeDelete(c.FinalizeDelete)
 	case *gastrologv1.VaultCtlCommand_PruneNode:
-		var (
-			node        string
-			finalizable []chunk.ChunkID
-		)
-		node, finalizable, result = f.applyPruneNode(c.PruneNode)
-		fx.prunedNode = node
-		fx.prunedFinalizable = finalizable
+		var pruned pruneResult
+		pruned, result = f.applyPruneNode(c.PruneNode)
+		fx.prunedNode = pruned.nodeID
+		fx.prunedFinalizable = pruned.finalizable
+		fx.holdersChangedEntries = f.captureEntries(result, pruned.holdersChanged)
 	case *gastrologv1.VaultCtlCommand_AttachOffsets:
 		result = f.applyAttachOffsets(c.AttachOffsets)
 	case *gastrologv1.VaultCtlCommand_BeginSeal:

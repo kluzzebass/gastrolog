@@ -257,8 +257,10 @@ R3. **The release predicate must use all three signals in 28, not just the first
     home, a dead home stalls it exactly as the segment gate does. The purge threshold
     is **RF, not home-set** — a segment is superseded once every chunk holding its
     records is sealed and replicated to `min(2, placement)` holders (the same
-    `plannerMinHolders` floor eligibility already uses), reached among the *live*
-    homes. The dead home then catches up at the **chunk** level, whose reconcile (30)
+    `HolderQuorum` floor eligibility already uses), reached among the *live*
+    homes — and only holders in the vault's *current* placement count: a node
+    re-placed away (its disk died) keeps a claim it can no longer maintain until
+    node prune removes it. The dead home then catches up at the **chunk** level, whose reconcile (30)
     tolerates a long absence, not the segment's seconds-to-minutes transport window.
     The chunk's *desired* holder set is still all homes; only the segment-purge
     *trigger* is the lower RF threshold. Mechanically this needs a small persistent
