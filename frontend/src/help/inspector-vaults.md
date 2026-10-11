@@ -4,7 +4,16 @@ The Vaults tab shows each configured [vault](help:storage) with its [chunks](hel
 
 ## Vault Overview
 
-Each vault lists its name, type, enabled/disabled status, chunk count, record count, and on-disk size. The counts come from the chunk list, collected from every node hosting the vault; until that collection returns, the header shows **loading chunks…** rather than a count. The size is the sum of each chunk's local on-disk claim as the hosting nodes report it — a cloud-backed chunk with no local copy counts 0, so a vault largely in the cloud reads small here by design. Expand a vault to see its chunk timeline. The list is flat and sorted by name, whichever [node](help:clustering-nodes) you are connected to; where a vault's copies live is in its **Topology** section.
+Each vault lists its name and type, then its header badges. The counts come from the chunk list, collected from every node hosting the vault; until that collection returns, the header shows **loading chunks…** rather than a count. Expand a vault to see its chunk timeline. The list is flat and sorted by name, whichever [node](help:clustering-nodes) you are connected to; where a vault's copies live is in its **Topology** section.
+
+| Badge | Meaning |
+|-------|---------|
+| **cloud-backed** | A [cloud-backed vault](help:storage-cloud): sealed chunks are uploaded to its cloud service |
+| **disabled** | The vault accepts no records; enable it in [Settings](settings:vaults) |
+| **refusing: _cause_, …** | The vault refuses new records; every active cause is named — see **Refusal** below |
+| **partial — N nodes unreached** | The chunk list and counts leave out what those nodes hold — see [Partial results](help:inspector#partial-results) |
+| **N chunks**, **N records** | Chunks in the vault cluster-wide, and records across them |
+| **size on disk** | The sum of each chunk's local on-disk claim as the hosting nodes report it — a cloud-backed chunk with no local copy counts 0, so a vault largely in the cloud reads small here by design |
 
 ## Refusal
 
@@ -12,7 +21,14 @@ A **refusing** badge appears on the header when the vault is currently refusing 
 
 ## Chunks
 
-Each chunk shows its ID, time range, per-node seal pips, record count, and size. The Size column is the chunk's on-disk size; a value marked **cloud** is the cloud object's size for a cloud-backed chunk with no local copy, and one marked **logical** is the record bytes of a chunk that records no on-disk size. The active chunk is the one currently accepting writes — all others are sealed and immutable. Chunks are sealed according to the vault's [rotation policy](help:policy-rotation).
+Each chunk shows its ID, time range, per-node seal pips, record count, and size. The Size column is the chunk's on-disk size; a value marked **cloud** is the cloud object's size for a cloud-backed chunk with no local copy, and one marked **logical** is the record bytes of a chunk that records no on-disk size. The active chunk is the one currently accepting writes — all others are sealed and immutable. Chunks are sealed according to the vault's [rotation policy](help:policy-rotation). The chunk list is collected from every node hosting the vault, so **No chunks in this vault yet.** is a cluster-wide fact; **No chunks reported — N nodes unreached.** means the merge missed those nodes and the list is uncertain.
+
+Beside the pips, a chunk row can carry:
+
+- **retention pending** — the chunk is queued for its [retention event](help:policy-retention): it is deleted, or its records routed, when the event fires
+- **archived** — the cloud object sits in an offline storage class (named on hover); restore it before it can be queried
+
+An expanded cloud-backed chunk lists its **Cloud Storage**: the **blob** row is the sealed chunk object in the cloud store and its size; **cached** is the local copy on the responding node, or `not cached`; **ts-index embedded** means the timestamp indexes travel inside the object, with no separate file to build or lose; **class** is the object's cloud storage class, `standard` when it is readable without a restore.
 
 ## Seal Pips
 
@@ -27,7 +43,7 @@ A **chunk seal** is the cluster-wide fact that a chunk's record membership is fr
 - Half-filled amber with a glow — copy lagging: the chunk is already sealed cluster-wide and this node is catching up
 - Calm green — copy sealed on this node
 
-Sealed pips are deliberately quiet everywhere. Anomalous pips — lagging, unreachable, stale — glow in their own color, so the node with the problem is the loudest thing in its row.
+A row with nothing wrong — every copy sealed, no stale copy trailing it — dims its green pips to a calm grey-green: the quiet default. Beside an anomaly the sealed pips stay full green, so the healthy copies read as the contrast to the sick one. Anomalous pips — lagging, unreachable, stale — glow in their own color, so the node with the problem is the loudest thing in its row.
 
 **Death drains red** (while a delete runs):
 
@@ -44,7 +60,12 @@ Expand a chunk row to see the same pips with node names beside them.
 
 ## Indexes
 
-Sealed chunks (cloud-backed ones aside) list their [indexes](help:indexers) by name. An index marked **ok** opened on the responding node and shows its entry count and size; one marked **missing** could not be opened there — its file is absent or unreadable — so the [query engine](help:query-engine) cannot use it for that chunk. A chunk with nothing to list says **No indexes.**; **Indexes unavailable.** means the chunk was not located and some peer hosting the vault could not be reached, so the answer is uncertain rather than empty.
+Sealed chunks (cloud-backed ones aside) list their [indexes](help:indexers) by name. The list is answered by the node you are connected to when it holds the chunk, otherwise by the first hosting node that does — so what it describes is one node's copy, the index files that node's query engine would open.
+
+- **ok** — the index opened on the node that answered; its entry count and size follow
+- **missing** — the node that answered could not open that index: its file is absent there (never built on that node, or removed) or unreadable, so the [query engine](help:query-engine) on that node cannot use it for the chunk. `gastrolog reindex` rebuilds a vault's indexes; the timestamp indexes are not listed because they live inside the chunk's GLCB object and cannot go missing on their own.
+- **Indexes unavailable — no node answered for this chunk.** — no hosting node reported holding the chunk
+- **Indexes unknown — … N nodes unreached.** — the nodes that answered do not hold the chunk and some hosting node could not be reached, so the answer is uncertain rather than empty
 
 ## Validate
 

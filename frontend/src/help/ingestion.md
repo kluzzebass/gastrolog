@@ -23,6 +23,13 @@ You can run multiple ingesters simultaneously, each feeding into the same pipeli
 
 Select an ingester from the sidebar for protocol and configuration details.
 
+## Ingester Modes
+
+Every ingester card carries a mode badge:
+
+- **listener** — binds a port and accepts what clients push to it (Syslog, HTTP, RELP, OTLP, Fluent Forward)
+- **active** — pulls records from its upstream source itself (Kafka, MQTT, Tail, Docker, Metrics, the generators)
+
 ## Node Assignment
 
 In a cluster, every ingester form carries a **Nodes** picker and a **Singleton** checkbox that together say where the ingester runs.
@@ -33,3 +40,5 @@ In a cluster, every ingester form carries a **Nodes** picker and a **Singleton**
 | **Ticked nodes** | The ingester runs on exactly those nodes. |
 | **No node selected** | With **All nodes** off and nothing ticked, the ingester runs on every node, the same as **All nodes**; the picker says so. |
 | **Singleton** | Of the assigned nodes, exactly one runs the ingester at a time, with automatic failover. Available for Kafka, MQTT, Chatterbox and Scatterbox. Listeners bind their port on every assigned node, and Docker, Tail, Metrics and Self read a node-local source, so for those types the checkbox is disabled with the reason. |
+
+The card's node badge reads the saved assignment the same way the dispatcher does, whatever the ingester's mode: **all nodes** (set, or nothing ticked), a node name (one node ticked), or **N nodes** (several). Whether the ingester actually runs on each assigned node is on the [Ingesters inspector](help:inspector-ingesters).

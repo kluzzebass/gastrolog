@@ -1,6 +1,77 @@
 import { describe, test, expect } from "bun:test";
-import { chunkDiskClaimBytes, chunkSizeCell, vaultRefusingCauseLabels, vaultRefusalDetails } from "./VaultCard";
-import { ChunkMeta, VaultAdmissionCause, VaultAdmissionRefusal } from "../../api/gen/gastrolog/v1/vault_pb";
+import {
+  CLOUD_BACKED_VAULT_BADGE,
+  INDEX_MISSING_TITLE,
+  INDEX_OK_TITLE,
+  archivedBadgeTitle,
+  chunkDiskClaimBytes,
+  chunkSizeCell,
+  chunksEmptyText,
+  indexesEmptyText,
+  refusingBadgeText,
+  vaultRefusingCauseLabels,
+  vaultRefusalDetails,
+} from "./VaultCard";
+import {
+  ChunkMeta,
+  ContributionReport,
+  DegradedPeer,
+  GetIndexesResponse,
+  VaultAdmissionCause,
+  VaultAdmissionRefusal,
+} from "../../api/gen/gastrolog/v1/vault_pb";
+
+function degraded(n: number): ContributionReport {
+  return new ContributionReport({
+    degraded: Array.from({ length: n }, (_, i) => new DegradedPeer({ nodeId: `node-${i}`, reason: "timeout" })),
+  });
+}
+
+// Every badge and empty state on the card says what its state means, in
+// the canonical term, for the data that produces it.
+describe("vault card labels", () => {
+  test("the cloud-backed badge uses the canonical term and names the consequence", () => {
+    expect(CLOUD_BACKED_VAULT_BADGE.text).toBe("cloud-backed");
+    expect(CLOUD_BACKED_VAULT_BADGE.title).toContain("sealed chunks are uploaded");
+    expect(CLOUD_BACKED_VAULT_BADGE.helpRef).toBe("storage-cloud");
+  });
+
+  test("the refusing badge carries every active cause in its text, not only on hover", () => {
+    expect(refusingBadgeText(["storage below floor"])).toBe("refusing: storage below floor");
+    expect(refusingBadgeText(["storage below floor", "at max-size bound"])).toBe(
+      "refusing: storage below floor, at max-size bound",
+    );
+    expect(refusingBadgeText([])).toBe("refusing");
+  });
+
+  test("an empty chunk list is a cluster-wide fact unless a host dropped out of the merge", () => {
+    expect(chunksEmptyText(null)).toBe("No chunks in this vault yet.");
+    expect(chunksEmptyText(degraded(0))).toBe("No chunks in this vault yet.");
+    expect(chunksEmptyText(degraded(1))).toBe("No chunks reported — 1 node unreached.");
+    expect(chunksEmptyText(degraded(3))).toBe("No chunks reported — 3 nodes unreached.");
+  });
+
+  test("an empty index list names whether no node answered or the answer is uncertain", () => {
+    expect(indexesEmptyText()).toBe("Indexes unavailable — no node answered for this chunk.");
+    expect(indexesEmptyText(new GetIndexesResponse({}))).toBe(
+      "Indexes unavailable — no node answered for this chunk.",
+    );
+    expect(indexesEmptyText(new GetIndexesResponse({ contributionReport: degraded(2) }))).toBe(
+      "Indexes unknown — the chunk was not found on the nodes that answered, 2 nodes unreached.",
+    );
+  });
+
+  test("index state titles say which node the verdict is about and what to do", () => {
+    expect(INDEX_OK_TITLE).toContain("node that answered");
+    expect(INDEX_MISSING_TITLE).toContain("node that answered");
+    expect(INDEX_MISSING_TITLE).toContain("reindex");
+  });
+
+  test("the archived badge names the storage class the chunk sits in and the action", () => {
+    expect(archivedBadgeTitle("GLACIER")).toBe("archived to GLACIER — restore it before it can be queried");
+    expect(archivedBadgeTitle("")).toBe("archived to offline storage — restore it before it can be queried");
+  });
+});
 
 // Test helper: refusals arrive on the wire as VaultAdmissionRefusal{cause,
 // detail} — build them tersely for cause-only assertions.

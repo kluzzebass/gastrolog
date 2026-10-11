@@ -4736,6 +4736,14 @@ export class CertificateInfo extends Message<CertificateInfo> {
    */
   name = "";
 
+  /**
+   * True when the key material is loaded from files on disk (and reloaded
+   * on change); false when PEM content is stored in the configuration.
+   *
+   * @generated from field: bool from_files = 3;
+   */
+  fromFiles = false;
+
   constructor(data?: PartialMessage<CertificateInfo>) {
     super();
     proto3.util.initPartial(data, this);
@@ -4746,6 +4754,7 @@ export class CertificateInfo extends Message<CertificateInfo> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "from_files", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CertificateInfo {

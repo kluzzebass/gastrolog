@@ -44,6 +44,21 @@ Removing a node evicts it from the cluster entirely. The removed node stops rece
 
 Removal is refused when it would cost data or redundancy: if the node holds the only copy of a vault, or if removing it would leave a vault below its replication factor with no other eligible node to re-place onto. The error names the affected vaults. Lower the replication factor, drain those vaults to other nodes, or add an eligible node — or use `gastrolog cluster remove-node <node> --force` to remove anyway and accept the loss.
 
+## Node States
+
+Each node card carries its role (**leader** or **follower**) and suffrage (**voter** or **nonvoter**) badges, and a state badge whenever the node is not simply live:
+
+| Badge | Meaning |
+|-------|---------|
+| _(none)_ | Live: a cluster member in Raft contact |
+| **unreachable** | The cluster has lost Raft contact with the node — check the process and its network; its placements wait for it |
+| **maintenance** | An operator declared the node absent; the cluster expects it back and keeps its placements |
+| **draining** | Chunks are being transferred off the node ahead of its removal |
+| **decommissioning** | The node is being removed from the cluster and stops receiving placements |
+| **offline** | A live node whose stats broadcast has stopped arriving — it is down or unreachable; the badge shows how long it has been silent |
+
+The duration after a state badge is how long the node has been in that state.
+
 ## Offline Nodes
 
 Nodes that haven't broadcast stats recently show an **offline** badge. This typically means the node is down or unreachable. Offline nodes still count toward quorum if they're voters — if too many voters go offline, the cluster loses write availability until quorum is restored.

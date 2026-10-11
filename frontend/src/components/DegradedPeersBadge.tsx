@@ -5,12 +5,19 @@ import { idFromBytes } from "../api/model/id";
 // eslint-disable-next-line no-restricted-imports -- no ContributionReport model yet
 import { type ContributionReport } from "../api/gen/gastrolog/v1/vault_pb";
 
+export const PARTIAL_HELP_REF = "inspector#partial-results";
+
+/** The badge text for a merge that `unreached` peers dropped out of. */
+export function partialBadgeText(unreached: number): string {
+  return `partial — ${unreached} ${unreached === 1 ? "node" : "nodes"} unreached`;
+}
+
 /**
  * DegradedPeersBadge surfaces a partial cross-node merge: when a fanned-out
  * inspector or query response could not reach every peer, the backend
  * attaches a ContributionReport naming the peers that dropped out. This
- * badge turns that into a single quiet "partial" pill whose tooltip names
- * each degraded node and why it fell out.
+ * badge turns that into a single quiet pill whose tooltip names each
+ * unreached node and why it fell out.
  *
  * Quiet-until-needed: renders nothing when the report is absent or empty
  * (every peer contributed).
@@ -36,8 +43,13 @@ export function DegradedPeersBadge({
     .join("\n");
 
   return (
-    <Badge variant="warn" dark={dark} title={`Partial result — did not reach:\n${title}`}>
-      partial ({degraded.length})
+    <Badge
+      variant="warn"
+      dark={dark}
+      title={`Partial result — the figures leave out what these nodes hold:\n${title}`}
+      helpRef={PARTIAL_HELP_REF}
+    >
+      {partialBadgeText(degraded.length)}
     </Badge>
   );
 }

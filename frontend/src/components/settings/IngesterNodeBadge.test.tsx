@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { render } from "@testing-library/react";
-import { createTestQueryClient, wrapper } from "../../../test/render";
+import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 import { IngesterNodeBadge } from "./IngestersSettings";
 
 // The node badge reads the ingester's saved eligibility config exactly as
@@ -24,14 +24,14 @@ describe("IngesterNodeBadge", () => {
   test("allNodes set: all nodes", () => {
     const qc = createTestQueryClient();
     seed(qc);
-    const { getByText } = render(<IngesterNodeBadge nodeIds={[testId(2)]} allNodes dark />, { wrapper: wrapper(qc) });
+    const { getByText } = render(<IngesterNodeBadge nodeIds={[testId(2)]} allNodes dark />, { wrapper: settingsWrapper(qc) });
     expect(getByText("all nodes")).toBeTruthy();
   });
 
   test("nothing pinned and allNodes unset: eligible everywhere, so all nodes", () => {
     const qc = createTestQueryClient();
     seed(qc);
-    const { getByText } = render(<IngesterNodeBadge nodeIds={[]} allNodes={false} dark />, { wrapper: wrapper(qc) });
+    const { getByText } = render(<IngesterNodeBadge nodeIds={[]} allNodes={false} dark />, { wrapper: settingsWrapper(qc) });
     expect(getByText("all nodes")).toBeTruthy();
   });
 
@@ -40,7 +40,7 @@ describe("IngesterNodeBadge", () => {
     seed(qc);
     const { getByText, queryByText } = render(
       <IngesterNodeBadge nodeIds={[testId(1), testId(2)]} allNodes={false} dark />,
-      { wrapper: wrapper(qc) },
+      { wrapper: settingsWrapper(qc) },
     );
     expect(getByText("2 nodes")).toBeTruthy();
     expect(queryByText("all nodes")).toBeNull();
@@ -51,7 +51,7 @@ describe("IngesterNodeBadge", () => {
     seed(qc);
     const { getByText, queryByText } = render(
       <IngesterNodeBadge nodeIds={[testId(2)]} allNodes={false} dark />,
-      { wrapper: wrapper(qc) },
+      { wrapper: settingsWrapper(qc) },
     );
     expect(getByText("node-2")).toBeTruthy();
     expect(queryByText("all nodes")).toBeNull();

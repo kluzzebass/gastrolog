@@ -16,7 +16,7 @@ When a file is uploaded, every node in the cluster receives it:
 
 ## Replacement
 
-Uploading a file with the same name as an existing file adds a new version: the card lists the newest upload as **current** and the earlier ones under **Previous versions**, each deletable on its own. Nothing is removed automatically — every version keeps its own ID, so a lookup bound to a version keeps using it, while resolution by name picks the newest version. An upload identical in name and content to an existing version is discarded and the existing entry kept.
+Uploading a file with the same name as an existing file adds a new version: the card's size badge is the current version's size, and the card lists the newest upload as **current** and the earlier ones under **Previous versions**, each deletable on its own. Nothing is removed automatically — every version keeps its own ID, so a lookup bound to a version keeps using it, while resolution by name picks the newest version. An upload identical in name and content to an existing version is discarded and the existing entry kept.
 
 ## Deleting
 

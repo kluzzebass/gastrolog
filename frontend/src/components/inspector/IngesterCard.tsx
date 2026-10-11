@@ -3,13 +3,56 @@ import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { useIngesterStatus, useIngesterAlive, useNodeRegistry } from "../../api/hooks";
 import { formatBytes } from "../../utils/units";
 import { Badge } from "../Badge";
+import { HelpButton } from "../HelpButton";
 import { LiveValue } from "../LiveValue";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { NodeBadge } from "../settings/NodeBadge";
 import { CrossLinkBadge } from "./CrossLinkBadge";
 import { type EntityID } from "../../api/model/id";
-import type { Ingester, NodeStatusMap } from "../../api/model/ingester";
+import type { Ingester, IngesterStatusVariant, NodeStatusMap } from "../../api/model/ingester";
+
+export const INGESTER_STATUS_HELP_REF = "inspector-ingesters#status";
+export const INGESTER_NODES_HELP_REF = "inspector-ingesters#nodes";
+
+export interface IngesterStatusBadgeSpec {
+  text: string;
+  title: string;
+}
+
+/** The header badge for an ingester: disabled, nowhere to run, or how many of its eligible nodes run it. */
+export function ingesterStatusBadge(args: {
+  enabled: boolean;
+  selected: number;
+  running: number;
+  variant: IngesterStatusVariant;
+}): IngesterStatusBadgeSpec {
+  if (!args.enabled) {
+    return { text: "disabled", title: "disabled — runs on no node; enable it in Settings" };
+  }
+  if (args.selected === 0) {
+    return {
+      text: "no eligible node",
+      title: "no live node may run this ingester — pin a live node or allow all nodes",
+    };
+  }
+  const text = `${String(args.running)}/${String(args.selected)} running`;
+  switch (args.variant) {
+    case "info":
+      return { text, title: "running on every eligible node (running / eligible)" };
+    case "error":
+      return { text, title: "an eligible pinned node is unreachable (running / eligible)" };
+    default:
+      return { text, title: "running on some eligible nodes only (running / eligible) — the rest have not started it" };
+  }
+}
+
+/** The hover text of one node chip in the Nodes section. */
+export function nodeChipTitle(name: string, status: { alive: boolean; dead: boolean }): string {
+  if (status.dead) return `${name}: unreachable — the cluster has not heard from it`;
+  if (!status.alive) return `${name}: eligible but not running the ingester`;
+  return `${name}: running the ingester`;
+}
 
 interface IngesterCardProps {
   ingester: Ingester;
@@ -31,11 +74,13 @@ export function IngesterCard({
   onOpenSettings,
 }: Readonly<IngesterCardProps>) {
   const aliveMap = useIngesterAlive();
+  const nodes = useNodeRegistry();
   const nodeStatus: NodeStatusMap = aliveMap.get(ingester.id) ?? {};
 
   const selected = ingester.selectedCount(liveNodeIds);
   const running = ingester.runningCount(aliveMap, liveNodeIds);
   const variant = ingester.statusVariant(aliveMap, liveNodeIds);
+  const pinned = ingester.allNodes ? [] : ingester.pinnedNodeIds;
 
   return (
     <ExpandableCard
@@ -46,10 +91,24 @@ export function IngesterCard({
       onToggle={onToggle}
       headerRight={
         <span className="flex items-center gap-1.5">
-          {showNodeBadge && !ingester.allNodes && ingester.pinnedNodeIds.length > 0 && (
-            <NodeBadge nodeId={ingester.pinnedNodeIds[0]!} dark={dark} />
+          {showNodeBadge && pinned.length === 1 && (
+            <NodeBadge nodeId={pinned[0]!} dark={dark} />
           )}
-          <IngesterStatusBadge selected={selected} running={running} variant={variant} dark={dark} />
+          {showNodeBadge && pinned.length > 1 && (
+            <Badge
+              variant="muted"
+              dark={dark}
+              title={`pinned to ${pinned.map((id) => nodes.nameOf(id)).join(", ")}`}
+              helpRef={INGESTER_NODES_HELP_REF}
+            >
+              {`${String(pinned.length)} nodes`}
+            </Badge>
+          )}
+          <IngesterStatusBadge
+            spec={ingesterStatusBadge({ enabled: ingester.enabled, selected, running, variant })}
+            variant={variant}
+            dark={dark}
+          />
           {onOpenSettings && (
             <CrossLinkBadge dark={dark} title="Open in Settings" onClick={onOpenSettings}>
               <CogIcon className="w-3 h-3" />
@@ -63,15 +122,12 @@ export function IngesterCard({
   );
 }
 
-function IngesterStatusBadge({ selected, running, variant, dark }: Readonly<{
-  selected: number; running: number; variant: "info" | "warn" | "error" | "muted"; dark: boolean;
+function IngesterStatusBadge({ spec, variant, dark }: Readonly<{
+  spec: IngesterStatusBadgeSpec; variant: IngesterStatusVariant; dark: boolean;
 }>) {
-  if (variant === "muted") {
-    return <Badge variant="muted" dark={dark} title="not running on any node" helpRef="inspector-ingesters">stopped</Badge>;
-  }
   return (
-    <Badge variant={variant} dark={dark} title="running / selected nodes" helpRef="inspector-ingesters">
-      {`${String(running)}/${String(selected)}`}
+    <Badge variant={variant} dark={dark} title={spec.title} helpRef={INGESTER_STATUS_HELP_REF}>
+      {spec.text}
     </Badge>
   );
 }
@@ -95,7 +151,7 @@ function IngesterDetail({ ingester, nodeStatus, liveNodeIds, dark }: Readonly<{
       <div
         className={`px-4 py-3 text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
       >
-        No status available.
+        No status — no node is reporting this ingester.
       </div>
     );
   }
@@ -150,9 +206,10 @@ function IngesterDetail({ ingester, nodeStatus, liveNodeIds, dark }: Readonly<{
       {nodesToShow.length > 0 && (
         <div className="mt-3">
           <div
-            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-muted", "text-light-text-muted")}`}
+            className={`flex items-center gap-1.5 text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-muted", "text-light-text-muted")}`}
           >
-            Nodes {ingester.allNodes && <span className="font-normal normal-case tracking-normal opacity-70">— all nodes</span>}
+            Nodes {ingester.allNodes && <span className="font-normal normal-case tracking-normal opacity-70">— eligible on every live node</span>}
+            <HelpButton helpRef={INGESTER_NODES_HELP_REF} />
           </div>
           <div className="flex flex-wrap gap-1.5">
             {nodesToShow.map((nodeId) => {
@@ -162,7 +219,11 @@ function IngesterDetail({ ingester, nodeStatus, liveNodeIds, dark }: Readonly<{
               let variant: "info" | "warn" | "error" = "info";
               if (dead) variant = "error";
               else if (!alive) variant = "warn";
-              return <Badge key={nodeId} variant={variant} dark={dark}>{label}</Badge>;
+              return (
+                <Badge key={nodeId} variant={variant} dark={dark} title={nodeChipTitle(label, { alive, dead })}>
+                  {label}
+                </Badge>
+              );
             })}
           </div>
         </div>

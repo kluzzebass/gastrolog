@@ -10,6 +10,7 @@ import { VaultsIcon, IngestersIcon, JobsIcon, MetricsIcon, ClusterIcon, RouteIco
 import { Badge } from "../Badge";
 import { HelpButton } from "../HelpButton";
 import { OfflineBadge } from "../OfflineBadge";
+import { NodeStateBadge } from "../NodeStateBadge";
 import { NodeState } from "../../api/model/node";
 import { ModeToggle } from "./ModeToggle";
 import type { InspectorMode } from "./ModeToggle";
@@ -89,6 +90,21 @@ const entityNavItems: EntityNavItem[] = [
   { id: "jobs", label: "Jobs", icon: JobsIcon },
   { id: "system", label: "System", icon: MetricsIcon },
 ];
+
+const entityCountNouns: Record<EntityType, [singular: string, plural: string]> = {
+  vaults: ["vault configured", "vaults configured"],
+  storages: ["file storage", "file storages"],
+  ingesters: ["ingester configured", "ingesters configured"],
+  routes: ["route configured", "routes configured"],
+  jobs: ["job active or scheduled", "jobs active or scheduled"],
+  system: ["live node", "live nodes"],
+};
+
+/** The hover text of a nav count: the number with the noun it counts. */
+export function entityCountTitle(entityType: EntityType, count: number): string {
+  const [one, many] = entityCountNouns[entityType];
+  return `${count} ${count === 1 ? one : many}`;
+}
 
 // ---- Dialog ----
 
@@ -210,6 +226,7 @@ export function InspectorDialog({
                     {node.name}
                   </span>
                   <span className="ml-auto flex items-center gap-1">
+                    <NodeStateBadge state={node.state} stateSince={node.stateSince} dark={dark} />
                     {!isLocal && node.state === NodeState.LIVE && (
                       <OfflineBadge lastSeen={node.lastSeen} isOffline={!node.isOnline} dark={dark} />
                     )}
@@ -253,6 +270,7 @@ export function InspectorDialog({
                           ? "text-copper/70"
                           : c("text-text-muted", "text-light-text-muted")
                       }`}
+                      title={entityCountTitle(id, count)}
                     >
                       {count}
                     </span>

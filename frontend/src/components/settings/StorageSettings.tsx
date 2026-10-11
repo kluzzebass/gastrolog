@@ -1,7 +1,6 @@
 import { encode } from "../../api/glid";
 import { useReducer, useState } from "react";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
-import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 import {
   useConfig,
   usePutCloudService,
@@ -115,7 +114,6 @@ export function StorageSettings({ dark, onOpenInspector }: Readonly<{ dark: bool
   const effectiveName = addForm.name.trim() || addForm.namePlaceholder || "cloud-service";
   const nameConflict = existingNames.has(effectiveName);
 
-  const nodeNameMap = buildNodeNameMap(nodeConfigs);
 
   const handleCreate = async () => {
     const name = addForm.name.trim() || addForm.namePlaceholder || "cloud-service";
@@ -367,10 +365,9 @@ export function StorageSettings({ dark, onOpenInspector }: Readonly<{ dark: bool
         {(() => {
           // Flatten all file storages across all nodes into a single sorted list.
           const allStorages = nodeStorageConfigs.flatMap((nsc) =>
-            nsc.fileStorages.map(( fs) => ({
+            nsc.fileStorages.map((fs) => ({
               fs,
               nodeId: encode(nsc.nodeId),
-              nodeName: resolveNodeName(nodeNameMap, encode(nsc.nodeId)),
             })),
           ).sort((a, b) => (a.fs.name || encode(a.fs.id)).localeCompare(b.fs.name || encode(b.fs.id)));
 
@@ -384,11 +381,11 @@ export function StorageSettings({ dark, onOpenInspector }: Readonly<{ dark: bool
 
           return (
             <div className="flex flex-col gap-2">
-              {allStorages.map(({ fs, nodeId, nodeName }) => (
+              {allStorages.map(({ fs, nodeId }) => (
                 <FileStorageCard
                   key={encode(fs.id)}
                   fs={fs}
-                  nodeName={nodeName}
+                  nodeId={nodeId}
                   dark={dark}
                   expanded={isExpanded(`storage-${encode(fs.id)}`)}
                   onToggle={() => toggleCard(`storage-${encode(fs.id)}`)}

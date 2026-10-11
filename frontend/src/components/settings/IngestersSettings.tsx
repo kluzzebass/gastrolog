@@ -14,6 +14,7 @@ import { IngesterCommonFields } from "./IngesterCommonFields";
 import { IngesterParamsForm, isIngesterParamsValid, listenAddrConflict } from "./ingester-params";
 import { Button } from "./Buttons";
 import { NodeBadge } from "./NodeBadge";
+import { NODE_ASSIGNMENT_HELP_REF } from "./NodeMultiSelect";
 import { sortByName } from "../../lib/sort";
 import { PulseIcon } from "../icons";
 import { CrossLinkBadge } from "../inspector/CrossLinkBadge";
@@ -264,14 +265,41 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
   );
 }
 
+export const INGESTER_MODES_HELP_REF = "ingestion#ingester-modes";
+
+/** The mode badge: a listener binds a port and waits for clients; an active ingester pulls from its source. */
+export function ingesterModeBadge(mode: IngesterMode): { text: string; title: string } {
+  return mode === IngesterMode.PASSIVE
+    ? { text: "listener", title: "listener — binds a port and accepts what clients push to it" }
+    : { text: "active", title: "active — pulls records from its upstream source itself" };
+}
+
 // IngesterNodeBadge reads the ingester's saved eligibility config, exactly
 // as the dispatcher evaluates it: all nodes when `allNodes` is set or no
 // node is pinned, otherwise the pin list. The ingester's mode plays no part.
 export function IngesterNodeBadge({ nodeIds, allNodes, dark }: Readonly<{ nodeIds: Uint8Array[]; allNodes: boolean; dark: boolean }>) {
-  if (allNodes || nodeIds.length === 0) return <Badge variant="info" dark={dark}>all nodes</Badge>;
-  if (nodeIds.length > 1) return <Badge variant="muted" dark={dark}>{String(nodeIds.length)} nodes</Badge>;
-  if (nodeIds.length === 1) return <NodeBadge nodeId={idFromBytes(nodeIds[0]!)} dark={dark} />; // NOSONAR — length check guards access
-  return null;
+  if (allNodes) {
+    return (
+      <Badge variant="info" dark={dark} title="runs on every cluster node, nodes that join later included" helpRef={NODE_ASSIGNMENT_HELP_REF}>
+        all nodes
+      </Badge>
+    );
+  }
+  if (nodeIds.length === 0) {
+    return (
+      <Badge variant="info" dark={dark} title="no node pinned — runs on every cluster node" helpRef={NODE_ASSIGNMENT_HELP_REF}>
+        all nodes
+      </Badge>
+    );
+  }
+  if (nodeIds.length > 1) {
+    return (
+      <Badge variant="muted" dark={dark} title={`runs on its ${String(nodeIds.length)} pinned nodes only`} helpRef={NODE_ASSIGNMENT_HELP_REF}>
+        {String(nodeIds.length)} nodes
+      </Badge>
+    );
+  }
+  return <NodeBadge nodeId={idFromBytes(nodeIds[0]!)} dark={dark} />; // NOSONAR — the branches above leave exactly one pin
 }
 
 function IngesterCard({
@@ -325,7 +353,9 @@ function IngesterCard({
       onDelete={onDelete}
       headerRight={
         <span className="flex items-center gap-2">
-          <Badge variant="muted" dark={dark}>{mode === IngesterMode.PASSIVE ? "listener" : "active"}</Badge>
+          <Badge variant="muted" dark={dark} title={ingesterModeBadge(mode).title} helpRef={INGESTER_MODES_HELP_REF}>
+            {ingesterModeBadge(mode).text}
+          </Badge>
           <IngesterNodeBadge nodeIds={ing.nodeIds} allNodes={ing.allNodes} dark={dark} />
           {!ing.enabled && (
             <Badge variant="muted" dark={dark}>disabled</Badge>

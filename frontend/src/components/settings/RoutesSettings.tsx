@@ -267,7 +267,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
               <span className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
                 {expr || (
                   <HelpLink helpRef={ROUTE_COMPONENTS_HELP_REF} title="Nothing is matched: a route without a match expression never fires">
-                    no match expression
+                    matches nothing — no match expression
                   </HelpLink>
                 )}
                 {destNames ? ` → ${destNames}` : ""}

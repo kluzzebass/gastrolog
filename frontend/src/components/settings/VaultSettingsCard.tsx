@@ -293,7 +293,14 @@ export function VaultSettingsCard({
             <Badge variant="muted" dark={dark}>disabled</Badge>
           )}
           {csName && (
-            <Badge variant="muted" dark={dark} title="Cloud-backed">{csName}</Badge>
+            <Badge
+              variant="muted"
+              dark={dark}
+              title={`cloud-backed — sealed chunks upload to cloud service ${csName}`}
+              helpRef="storage-cloud"
+            >
+              {`cloud-backed: ${csName}`}
+            </Badge>
           )}
           {shortfall && (
             <span className="text-[0.85em] text-severity-error">{shortfall}</span>

@@ -165,6 +165,9 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                       {roleName(node.role)}
                     </Badge>
                   )}
+                  {clusterEnabled && node.suffrage === ClusterNodeSuffrage.VOTER && (
+                    <Badge variant="muted" dark={dark} title="Voter — counts toward quorum and can be elected leader" helpRef={NODE_ROLES_HELP_REF}>voter</Badge>
+                  )}
                   {clusterEnabled && node.suffrage === ClusterNodeSuffrage.NONVOTER && (
                     <Badge variant="muted" dark={dark} title="Nonvoter — replicates the log but has no vote and cannot become leader" helpRef={NODE_ROLES_HELP_REF}>nonvoter</Badge>
                   )}

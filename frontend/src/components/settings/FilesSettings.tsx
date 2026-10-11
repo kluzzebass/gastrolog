@@ -185,7 +185,7 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
             dark={dark}
             expanded={isExpanded(group.name)}
             onToggle={() => toggle(group.name)}
-            typeBadge={formatBytes(Number(latest.size))}
+            typeBadge={{ text: formatBytes(Number(latest.size)), title: "size of the current version" }}
             monoTitle
             status={<UsedByStatus dark={dark} refs={uses} helpRef="managed-files#used-by" />}
           >
