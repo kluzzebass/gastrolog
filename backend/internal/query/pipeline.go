@@ -166,10 +166,10 @@ func (e *Engine) runStreamingAggregation(ctx context.Context, it iter.Seq2[chunk
 // Without stats, returns records; with stats, returns a table.
 // The raw operator forces all results into a flat table.
 func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.Pipeline) (*PipelineResult, error) {
-	// Every materializing path charges what it retains against this budget, so
-	// a pipeline whose working set outgrows the node fails with a named limit
-	// instead of allocating until the process dies.
-	return e.runPipeline(ctx, q, pipeline, nil, e.newBudget())
+	// Every materializing path charges what it retains against the query's
+	// budget, so a pipeline whose working set outgrows the node fails with a
+	// named limit instead of allocating until the process dies.
+	return e.runPipeline(ctx, q, pipeline, nil, e.budgetFor(q))
 }
 
 // RunPipelineWithRemote executes a pipeline over the union of this node's
@@ -184,7 +184,8 @@ func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.P
 //
 // The caller supplies the budget so its own share of the query and the
 // pipeline's stay on one ledger instead of two that each allow the full
-// ceiling.
+// ceiling. It replaces any budget q carries: the pipeline's scan, sort keys
+// included, charges it too.
 func (e *Engine) RunPipelineWithRemote(ctx context.Context, q Query, pipeline *querylang.Pipeline, remote iter.Seq2[chunk.Record, error], budget *Budget) (*PipelineResult, error) {
 	return e.runPipeline(ctx, q, pipeline, remote, budget)
 }
@@ -195,6 +196,7 @@ func (e *Engine) runPipeline(ctx context.Context, q Query, pipeline *querylang.P
 		return nil, err
 	}
 	ctx = lookup.EnsureOutboundBudget(ctx)
+	q.budget = budget
 
 	if ph.timechartOp != nil {
 		return e.runTimechartPipeline(ctx, q, ph, remote, budget)

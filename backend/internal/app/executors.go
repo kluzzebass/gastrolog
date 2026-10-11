@@ -249,6 +249,9 @@ func forwardSearchAfterParse(
 	// Search below. Skip the histogram pre-pass (timechartScanPath → Search)
 	// which would duplicate that work and spike RSS on scatterbox nodes.
 	// Unfiltered legacy full-vault forwards keep the fast binary-search path.
+	// One ledger for this node's share of the query: histogram, pipeline,
+	// and scan all charge it.
+	q = q.WithBudget(eng.NewBudget())
 	var histogram []*gastrologv1.HistogramBucket
 	if includeHistogram {
 		histogram = server.HistogramToProto(eng.ComputeSearchPageHistogram(ctx, q, 50))

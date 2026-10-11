@@ -635,6 +635,7 @@ func runMergeLoop(
 func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter.Seq2[chunk.Record, error], func() *ResumeToken) {
 	// Normalize query to ensure BoolExpr is set (converts legacy Tokens/KV if needed).
 	q = q.Normalize()
+	q.budget = e.budgetFor(q)
 
 	// Extract vault predicates and get remaining query expression.
 	allVaults := e.listVaults()
@@ -753,6 +754,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeToken) (iter.Seq2[chunk.Record, error], func() *ResumeToken) {
 	// Normalize query to ensure BoolExpr is set (converts legacy Tokens/KV if needed).
 	q = q.Normalize()
+	q.budget = e.budgetFor(q)
 
 	// Extract vault predicates and get remaining query expression.
 	allVaults := e.listVaults()
@@ -936,6 +938,7 @@ func (e *Engine) seekFollowPosition(
 func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, error] {
 	// Normalize query to ensure BoolExpr is set.
 	q = q.Normalize()
+	q.budget = e.budgetFor(q)
 
 	// Extract vault predicates once (the expression doesn't change).
 	// vaultFilter is nil when the query has no vault_id= predicate (follow all).
@@ -1176,6 +1179,7 @@ func (e *Engine) SearchWithContext(ctx context.Context, q Query) (iter.Seq2[chun
 
 	// Normalize query to ensure BoolExpr is set (converts legacy Tokens/KV if needed).
 	q = q.Normalize()
+	q.budget = e.budgetFor(q)
 
 	// Extract chunk predicates.
 	chunkIDs, remainingExpr := ExtractChunkFilter(q.BoolExpr)

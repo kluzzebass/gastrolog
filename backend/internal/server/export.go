@@ -142,7 +142,7 @@ func (s *QueryServer) runExportJob(
 	// them to the target, so it is bounded by the same per-query budget as any
 	// other materializing work. An export too large to hold at once fails with
 	// a named limit and can be re-run over narrower time ranges.
-	budget := query.NewBudget()
+	budget := eng.NewBudget()
 
 	hasMaterializingPipeline := pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline)
 	hasStreamingPipeline := pipeline != nil && len(pipeline.Pipes) > 0 && !hasMaterializingPipeline
@@ -232,7 +232,7 @@ func (s *QueryServer) exportClusterRecords(ctx context.Context, eng *query.Engin
 		return nil, fmt.Errorf("gather cluster records: %w", err)
 	}
 	var records []chunk.Record
-	localIter, _ := eng.Search(ctx, q, nil)
+	localIter, _ := eng.Search(ctx, q.WithBudget(budget), nil)
 	for rec, searchErr := range localIter {
 		if searchErr != nil {
 			return nil, fmt.Errorf("search: %w", searchErr)
