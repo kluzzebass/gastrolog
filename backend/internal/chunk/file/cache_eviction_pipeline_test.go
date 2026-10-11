@@ -391,3 +391,30 @@ func TestPipelineGLCB_ServesAndEvictsAfterRestart(t *testing.T) {
 		t.Fatalf("read after eviction served %d records, want 30", got)
 	}
 }
+
+// TestCloudIndexWalksDoNotRace: the cloud index's B+ tree is not safe for
+// concurrent use — even a read walk writes its page cache — so List's cache
+// rebuild and eviction's uploaded-chunk walk must share the index lock. Run
+// with -race; it reports the unguarded walk.
+func TestCloudIndexWalksDoNotRace(t *testing.T) {
+	t.Parallel()
+	h := newPipelineHome(t, blobstore.NewMemory(), glid.New(), "lru", 0, 0, time.Now)
+	uploadPipelineChunks(t, h, 8, 10)
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for range 50 {
+				h.cm.mu.Lock()
+				h.cm.rebuildCloudListCache()
+				h.cm.mu.Unlock()
+			}
+		})
+		wg.Go(func() {
+			for range 50 {
+				_ = h.cm.uploadedChunkIDs()
+			}
+		})
+	}
+	wg.Wait()
+}
