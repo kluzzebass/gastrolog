@@ -325,11 +325,12 @@ func (f *FSM) SnapshotReleaseScan(placement []string) *ReleaseScan {
 // signal that supersedes the raw segment (design-notes 39, refined R3: RF, not
 // home-set, so a dead home never pins the segment; the dead home catches up at
 // the chunk level). True only when the segment has been chunked (≥1 containing
-// chunk) and every containing chunk is sealed and held by enough members of
-// placement, or has already aged out (tombstoned/expired — the records are gone
-// by retention, so the segment is equally free to drop). An empty placement
-// means placement wiring is absent or unresolved (single-node/test); return
-// false so release falls back to the holders⊇homes fast path.
+// chunk) and every containing chunk is sealed and either held by enough members
+// of placement or cloud-backed, or has already aged out (tombstoned/expired —
+// the records are gone by retention, so the segment is equally free to drop).
+// An empty placement means placement wiring is absent or unresolved
+// (single-node/test); return false so release falls back to the holders⊇homes
+// fast path.
 func (f *FSM) SegmentSuperseded(segID glid.GLID, placement []string) bool {
 	if len(placement) == 0 {
 		return false
@@ -354,8 +355,10 @@ func (f *FSM) segmentSupersededLocked(segID glid.GLID, placement []string) bool 
 
 // chunkReplicatedLocked reports whether chunk id is durable enough to supersede
 // a segment: sealed and held by HolderQuorum(placement) members of placement,
-// or already gone (its records aged out under retention, which only deletes
-// sealed chunks).
+// sealed and cloud-backed, or already gone (its records aged out under
+// retention, which only deletes sealed chunks). A cloud-backed chunk's durable
+// copy is the uploaded object; its holders are warm caches that eviction
+// withdraws, and counting them would re-pin a segment every time a home evicts.
 func (f *FSM) chunkReplicatedLocked(id chunk.ChunkID, placement []string) bool {
 	entry := f.chunks[id]
 	if entry == nil {
@@ -363,6 +366,9 @@ func (f *FSM) chunkReplicatedLocked(id chunk.ChunkID, placement []string) bool {
 	}
 	if entry.State != chunk.ChunkStateSealed {
 		return false
+	}
+	if entry.CloudBacked {
+		return true
 	}
 	return PlacedHolderCount(entry.Holders, placement) >= HolderQuorum(placement)
 }

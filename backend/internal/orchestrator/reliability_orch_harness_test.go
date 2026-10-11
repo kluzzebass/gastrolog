@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/cluster"
@@ -120,6 +121,11 @@ type orchRelHarness struct {
 	// seedSharedConfig (nil without withPipelineCluster); vaults added
 	// mid-test (addRuntimeVault) reference it too.
 	rotationPolicyID *glid.GLID
+	// cloudStore, when non-nil, is the one bucket every node's "memory"
+	// cloud service resolves to (withSharedCloudStore), so an object the
+	// placement leader uploads is readable by every home, as with a real
+	// provider.
+	cloudStore blobstore.Store
 }
 
 // pipelineClusterOpts carries the pipeline tuning for withPipelineCluster.
@@ -198,6 +204,31 @@ func withPipelineCluster(completePolicy segmentation.CompletePolicy, chunkMaxRec
 			chunkMaxRecords: chunkMaxRecords,
 		}
 	}
+}
+
+// withSharedCloudStore makes every node's "memory" cloud service one shared
+// bucket. Without it each node's memory provider is a private store and a
+// follower can never read what the leader uploaded.
+func withSharedCloudStore(store blobstore.Store) orchRelOption {
+	return func(h *orchRelHarness) {
+		h.cloudStore = store
+	}
+}
+
+// chunkManagerFactory is the file chunk-manager factory every node uses: the
+// production one, with "memory" cloud services bound to the shared bucket when
+// withSharedCloudStore is set.
+func (h *orchRelHarness) chunkManagerFactory() chunk.ManagerFactory {
+	if h.cloudStore == nil {
+		return chunkfile.NewFactory()
+	}
+	shared := h.cloudStore
+	return chunkfile.NewFactoryWithStores(func(provider string, params map[string]string, log *slog.Logger) (blobstore.Store, error) {
+		if provider == "memory" {
+			return shared, nil
+		}
+		return blobstore.CreateStore(provider, params, log)
+	})
 }
 
 // withMatchAllRoute seeds an enabled match-all ("*") route targeting the
@@ -713,7 +744,7 @@ func (h *orchRelHarness) startNode(id string) {
 		GroupManager:        groupMgr,
 		NodeAddressResolver: resolver,
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			vaultTypeKey: chunkfile.NewFactory(),
+			vaultTypeKey: h.chunkManagerFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
 			vaultTypeKey: indexfile.NewFactory(),

@@ -1405,6 +1405,10 @@ describes what the code does today.
   **node prune** (`CmdPruneNode`) removes the node's claims — proposed by the
   placement leader's outside-placement prune when the node leaves the
   placement, and by the vault-ctl leader when it leaves the cluster.
+  For a cloud-backed chunk a holder's GLCB is a **warm-cache** copy: every
+  home's cache eviction may remove it, and the home's holder receipt is
+  withdrawn with it. The uploaded object, not the placed-holder count, is
+  what makes a cloud-backed chunk supersede its segments.
 
 - **Holder receipt** — the vault-ctl commit a node makes after it has pulled
   and verified bytes (`AckSegmentHolderCommand` for segments,

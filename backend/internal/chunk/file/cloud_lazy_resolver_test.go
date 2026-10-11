@@ -292,16 +292,22 @@ func TestLazyCloudBackedResolverEvictThenReread(t *testing.T) {
 	if !cm.hasLocalGLCB(id) {
 		t.Fatal("warm cache not populated by the first cloud read")
 	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("resolver calls after first read = %d, want 1", got)
+	}
 
-	// Evict the warm copy again — the resolved entry must survive.
+	// Evict the warm copy again — the resolved entry must survive. The
+	// eviction sweep itself consults the resolver to confirm the upload;
+	// only the read after it must not re-resolve.
 	if evicted, _ := cm.EvictCacheLRU(1); evicted != 1 {
 		t.Fatalf("EvictCacheLRU after lazy resolve: evicted = %d, want 1", evicted)
 	}
+	beforeRead := calls.Load()
 	if got := readAllCloudRecords(t, cm, id); got != records {
 		t.Errorf("post-eviction read served %d records, want %d", got, records)
 	}
-	if got := calls.Load(); got != 1 {
-		t.Errorf("resolver calls = %d, want 1 (eviction drops bytes, not the index entry)", got)
+	if got := calls.Load() - beforeRead; got != 0 {
+		t.Errorf("post-eviction read made %d resolver calls, want 0 (eviction drops bytes, not the index entry)", got)
 	}
 }
 

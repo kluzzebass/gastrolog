@@ -44,8 +44,20 @@ var (
 	ErrMissingDirParam = errors.New("missing required parameter: dir")
 )
 
+// StoreCreator builds the cloud store for a cloud-backed vault from its
+// sealed-backing provider and params. blobstore.CreateStore is the production
+// creator.
+type StoreCreator func(provider string, params map[string]string, log *slog.Logger) (blobstore.Store, error)
+
 // NewFactory returns a factory function that creates file-based ChunkManagers.
 func NewFactory() chunk.ManagerFactory {
+	return NewFactoryWithStores(blobstore.CreateStore)
+}
+
+// NewFactoryWithStores is NewFactory with the cloud store creator supplied by
+// the caller — how an in-process multi-node cluster gives every node's vault
+// one shared bucket.
+func NewFactoryWithStores(createStore StoreCreator) chunk.ManagerFactory {
 	return func(params map[string]string, logger *slog.Logger) (chunk.ChunkManager, error) {
 		dir, ok := params[ParamDir]
 		if !ok || dir == "" {
@@ -75,7 +87,7 @@ func NewFactory() chunk.ManagerFactory {
 
 		// Sealed backing: when set to a cloud provider, sealed chunks
 		// are uploaded to cloud storage after compression.
-		if err := configureSealedBacking(&cfg, params); err != nil {
+		if err := configureSealedBacking(&cfg, params, createStore); err != nil {
 			return nil, err
 		}
 		if params["_cloud_read_only"] == "true" {
@@ -123,7 +135,7 @@ func applyCloudAndCacheParams(cfg *Config, params map[string]string) error {
 
 // configureSealedBacking sets up cloud store configuration when a sealed
 // backing provider is specified.
-func configureSealedBacking(cfg *Config, params map[string]string) error {
+func configureSealedBacking(cfg *Config, params map[string]string, createStore StoreCreator) error {
 	backing := params[ParamSealedBacking]
 	if backing == "" || backing == "local" {
 		return nil
@@ -133,7 +145,7 @@ func configureSealedBacking(cfg *Config, params map[string]string) error {
 	// lock inside the FSM apply path, where a slow endpoint stalls ingest
 	// cluster-wide. The bucket is ensured lazily by the first store rescan
 	// (EnsureCloudIndex via the cloud-health sweep).
-	store, err := blobstore.CreateStore(backing, params, cfg.Logger)
+	store, err := createStore(backing, params, cfg.Logger)
 	if err != nil {
 		return fmt.Errorf("create %s store for sealed backing: %w", backing, err)
 	}
