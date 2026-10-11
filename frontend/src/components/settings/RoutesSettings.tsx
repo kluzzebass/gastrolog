@@ -16,6 +16,7 @@ import { HelpLink } from "../HelpLink";
 import type { SettingsTab } from "./SettingsDialog";
 import { sortByName } from "../../lib/sort";
 import type { RouteConfig } from "../../api/gen/gastrolog/v1/system_pb";
+import { destinationState, displayExpression, type DestinationVault } from "./routeDisplay";
 
 // The route's gating predicate is the inline expression on the first
 // MatchStage. Planned stage kinds (enrich, redact, sample, fork,
@@ -181,6 +182,11 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
           onCreate={handleCreate}
           isPending={putRoute.isPending}
           createDisabled={nameConflict || newDestinations.length === 0}
+          createDisabledReason={
+            nameConflict
+              ? `A route named "${effectiveName}" already exists`
+              : "Pick at least one destination"
+          }
         >
           <FormField label="Name" dark={dark}>
             <TextInput
@@ -209,7 +215,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
           </FormField>
           <FormField
             label="Match expression"
-            description='Match expression evaluated against each record. "*" matches everything. The lean editor with autocomplete and live validation lands later in this epic.'
+            description='Match expression evaluated against each record. "*" matches everything.'
             helpRef="routing#match-expressions"
             dark={dark}
           >
@@ -223,7 +229,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
           <DestinationsEditor
             destinations={newDestinations}
             onChange={setNewDestinations}
-            vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name }))}
+            vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name, type: v.type, enabled: v.enabled }))}
             dark={dark}
           />
           <FormField
@@ -253,7 +259,10 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
         const destNames = route.destinations
           .map((d) => vaults.find((v) => encode(v.id) === encode(d.vaultId))?.name || encode(d.vaultId))
           .join(", ");
-        const expr = routeExpression(route);
+        const expr = displayExpression(
+          routeExpression(route),
+          vaults.map((v) => ({ id: encode(v.id), name: v.name })),
+        );
         return (
           <SettingsCard
             key={id}
@@ -267,7 +276,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
               <span className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
                 {expr || (
                   <HelpLink helpRef={ROUTE_COMPONENTS_HELP_REF} title="Nothing is matched: a route without a match expression never fires">
-                    no match expression
+                    matches nothing — no match expression
                   </HelpLink>
                 )}
                 {destNames ? ` → ${destNames}` : ""}
@@ -310,7 +319,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
               </FormField>
               <FormField
                 label="Match expression"
-                description='Match expression evaluated against each record. "*" matches everything. The lean editor with autocomplete and live validation lands later in this epic.'
+                description='Match expression evaluated against each record. "*" matches everything.'
                 helpRef="routing#match-expressions"
                 dark={dark}
               >
@@ -324,7 +333,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
               <DestinationsEditor
                 destinations={edit.destinations}
                 onChange={(dests) => setEdit(id, { destinations: dests })}
-                vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name }))}
+                vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name, type: v.type, enabled: v.enabled }))}
                 dark={dark}
               />
               <FormField
@@ -364,7 +373,7 @@ function DestinationsEditor({
 }: Readonly<{
   destinations: DestinationEdit[];
   onChange: (dests: DestinationEdit[]) => void;
-  vaults: { id: string; name: string }[];
+  vaults: DestinationVault[];
   dark: boolean;
 }>) {
   const c = useThemeClass(dark);
@@ -383,19 +392,23 @@ function DestinationsEditor({
     <FormField label="Destinations" helpRef={ROUTE_COMPONENTS_HELP_REF} dark={dark}>
       <div className="flex flex-col gap-1.5">
         {sortedVaults.length === 0 && (
-          <p className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
-            No vaults available
+          <p role="note" className={`text-[0.85em] ${c("text-text-normal", "text-light-text-normal")}`}>
+            No vaults configured — create one under Vaults; a route with no destination drops what it matches.{" "}
+            <HelpLink helpRef={ROUTE_COMPONENTS_HELP_REF} className="text-copper">Route components</HelpLink>
           </p>
         )}
-        {sortedVaults.map((v) => (
-          <Checkbox
-            key={v.id}
-            checked={selected.has(v.id)}
-            onChange={() => toggle(v.id)}
-            label={v.name || v.id}
-            dark={dark}
-          />
-        ))}
+        {sortedVaults.map((v) => {
+          const state = destinationState(v);
+          return (
+            <Checkbox
+              key={v.id}
+              checked={selected.has(v.id)}
+              onChange={() => toggle(v.id)}
+              label={state ? `${v.name || v.id} — ${state}` : v.name || v.id}
+              dark={dark}
+            />
+          );
+        })}
       </div>
     </FormField>
   );

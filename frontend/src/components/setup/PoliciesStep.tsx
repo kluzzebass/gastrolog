@@ -4,7 +4,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 export interface RotationData {
   name: string;
   maxAge: string;
-  maxBytes: string;
+  maxSize: string;
   maxRecords: string;
   cron: string;
 }
@@ -13,7 +13,7 @@ export interface RetentionData {
   name: string;
   maxChunks: string;
   maxAge: string;
-  maxBytes: string;
+  maxSize: string;
 }
 
 interface RotationPolicyStepProps {
@@ -76,13 +76,13 @@ export function RotationPolicyStep({
           />
         </FormField>
         <FormField
-          label="Max Bytes"
+          label="Max Size"
           description="Seal chunk after reaching this size (optional)"
           dark={dark}
         >
           <TextInput
-            value={rotation.maxBytes}
-            onChange={(v) => onRotationChange({ ...rotation, maxBytes: v })}
+            value={rotation.maxSize}
+            onChange={(v) => onRotationChange({ ...rotation, maxSize: v })}
             dark={dark}
             mono
             examples={["256MB", "512MB", "1GB"]}
@@ -181,13 +181,13 @@ export function RetentionPolicyStep({
       </div>
 
       <FormField
-        label="Max Bytes"
+        label="Max Size"
         description="Maximum total size of retained chunks (optional)"
         dark={dark}
       >
         <TextInput
-          value={retention.maxBytes}
-          onChange={(v) => onRetentionChange({ ...retention, maxBytes: v })}
+          value={retention.maxSize}
+          onChange={(v) => onRetentionChange({ ...retention, maxSize: v })}
           dark={dark}
           mono
           examples={["1GB", "5GB", "10GB"]}

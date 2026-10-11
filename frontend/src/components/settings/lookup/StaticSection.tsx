@@ -43,6 +43,14 @@ function hasEmptyColumns(keyColumn: string, valueColumns: string[]): boolean {
   return valueColumns.some((c) => !c.trim());
 }
 
+/** Why a static lookup cannot be saved yet, or undefined when it can. */
+function staticLookupIncompleteReason(s: StaticLookupDraft, namePlaceholder = ""): string | undefined {
+  if (!s.name.trim() && !namePlaceholder) return "Name is required";
+  if (hasEmptyColumns(s.keyColumn, s.valueColumns)) return "Every column needs a header";
+  if (hasKeyErrors(s.rows, s.keyColumn)) return "Key column has empty or duplicate values";
+  return undefined;
+}
+
 // Helper: merge keyColumn + valueColumns into a single array for EditableGrid.
 function mergeColumns(key: string, values: string[]): string[] {
   return [key, ...values];
@@ -94,10 +102,11 @@ export function StaticAddForm({
       onCancel={onCancel}
       onCreate={handleCreate}
       isPending={putConfig.isPending}
-      createDisabled={(!draft.name.trim() && !namePlaceholder) || hasEmptyColumns(draft.keyColumn, draft.valueColumns) || hasKeyErrors(draft.rows, draft.keyColumn)}
+      createDisabled={staticLookupIncompleteReason(draft, namePlaceholder) !== undefined}
+      createDisabledReason={staticLookupIncompleteReason(draft, namePlaceholder)}
       typeBadge="static"
     >
-      <FormField label="Name" description="Registry name used in queries, e.g. | lookup teams" dark={dark}>
+      <FormField label="Name" description="Table name used in queries, e.g. | lookup teams" dark={dark}>
         <TextInput value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} placeholder={namePlaceholder} dark={dark} mono />
       </FormField>
       <EditableGrid
@@ -168,7 +177,8 @@ export function StaticCards({
               )}
               <Button
                 onClick={() => save(i)}
-                disabled={!isDirty(i) || !s.name || hasEmptyColumns(s.keyColumn, s.valueColumns) || putConfig.isPending || hasKeyErrors(s.rows, s.keyColumn)}
+                disabled={!isDirty(i) || putConfig.isPending || staticLookupIncompleteReason(s) !== undefined}
+                disabledReason={staticLookupIncompleteReason(s)}
               >
                 {putConfig.isPending ? "Saving..." : "Save"}
               </Button>
@@ -176,7 +186,7 @@ export function StaticCards({
           }
         >
           <div className="flex flex-col gap-3">
-            <FormField label="Name" description="Registry name used in queries, e.g. | lookup teams" dark={dark}>
+            <FormField label="Name" description="Table name used in queries, e.g. | lookup teams" dark={dark}>
               <TextInput value={s.name} onChange={(v) => onUpdate(i, { name: v })} placeholder="" dark={dark} mono />
             </FormField>
               <EditableGrid

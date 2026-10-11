@@ -1,27 +1,38 @@
-import { encode } from "../../../api/glid";
-import { FormField, SelectInput, TextInput } from "../FormField";
+import { FormField, TextInput } from "../FormField";
 import { Checkbox } from "../Checkbox";
-import { useCertificates } from "../../../api/hooks/useCertificates";
+import { EligibilitySelect } from "../EligibilitySelect";
+import { useCertOptions } from "./useCertOptions";
+import { tlsVerifies } from "./validation";
 
-/** useCertOptions lists stored certificates as select options. */
-function useCertOptions() {
-  const { data: certsData } = useCertificates();
-  const certs = certsData?.certificates ?? [];
-  return [
-    { value: "", label: "(none)" },
-    ...certs
-      .map((c) => ({
-        value: c.name || encode(c.id),
-        label: c.name || encode(c.id),
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label)),
-  ];
-}
+export const CERTIFICATES_HELP_REF = "certificates#adding-a-certificate";
+export const NO_CERTIFICATES_MESSAGE = "No certificates stored — add one in the Certificates tab.";
 
 interface TlsFieldsProps {
   params: Record<string, string>;
   onChange: (params: Record<string, string>) => void;
   dark: boolean;
+}
+
+export const TLS_VERIFY_LABEL =
+  "Verify server certificate (turning this off is unsafe — a stored CA certificate covers self-signed servers)";
+
+/**
+ * The one server-verification checkbox every dialing ingester shares, so the
+ * same `tls_verify` param never reads with opposite polarity on two forms.
+ */
+export function TlsVerifyCheckbox({
+  params,
+  onChange,
+  dark,
+}: Readonly<TlsFieldsProps>) {
+  return (
+    <Checkbox
+      checked={tlsVerifies(params)}
+      onChange={(v) => onChange({ ...params, tls_verify: v ? "" : "false" })}
+      label={TLS_VERIFY_LABEL}
+      dark={dark}
+    />
+  );
 }
 
 /**
@@ -39,6 +50,7 @@ export function TlsListenerFields({
     onChange({ ...params, [key]: value });
   const tlsEnabled = params["tls"] === "true";
   const certOptions = useCertOptions();
+  const hasClientCa = (params["tls_ca"] ?? "") !== "";
 
   return (
     <>
@@ -55,10 +67,13 @@ export function TlsListenerFields({
             description="Server certificate from the certificate store"
             dark={dark}
           >
-            <SelectInput
+            <EligibilitySelect
               value={params["tls_cert"] ?? ""}
               onChange={(v) => set("tls_cert", v)}
               options={certOptions}
+              placeholder="(none)"
+              emptyMessage={NO_CERTIFICATES_MESSAGE}
+              helpRef={CERTIFICATES_HELP_REF}
               dark={dark}
             />
           </FormField>
@@ -67,16 +82,20 @@ export function TlsListenerFields({
             description="Stored CA that client certificates must chain to (mutual TLS); empty accepts any client"
             dark={dark}
           >
-            <SelectInput
+            <EligibilitySelect
               value={params["tls_ca"] ?? ""}
               onChange={(v) => set("tls_ca", v)}
               options={certOptions}
+              placeholder="(none)"
+              emptyMessage={NO_CERTIFICATES_MESSAGE}
+              helpRef={CERTIFICATES_HELP_REF}
               dark={dark}
             />
           </FormField>
           <FormField
             label="Allowed Client CN"
             description="Wildcard pattern a client certificate's Common Name must match"
+            disabledReason={hasClientCa ? undefined : "Requires a client CA certificate — without one no client certificate is requested."}
             dark={dark}
           >
             <TextInput
@@ -95,7 +114,7 @@ export function TlsListenerFields({
 /**
  * TLS fields for client ingesters that dial out (Kafka, MQTT): a stored CA
  * pinning the server's trust root, an optional stored client certificate for
- * brokers that demand one, and the unsafe verification opt-out.
+ * brokers that demand one, and the shared server-verification checkbox.
  */
 export function TlsClientFields({
   params,
@@ -122,10 +141,13 @@ export function TlsClientFields({
             description="Stored CA the server certificate must chain to; empty uses the system roots"
             dark={dark}
           >
-            <SelectInput
+            <EligibilitySelect
               value={params["tls_ca"] ?? ""}
               onChange={(v) => set("tls_ca", v)}
               options={certOptions}
+              placeholder="(none)"
+              emptyMessage={NO_CERTIFICATES_MESSAGE}
+              helpRef={CERTIFICATES_HELP_REF}
               dark={dark}
             />
           </FormField>
@@ -134,19 +156,17 @@ export function TlsClientFields({
             description="Stored certificate presented to servers that demand one (mutual TLS)"
             dark={dark}
           >
-            <SelectInput
+            <EligibilitySelect
               value={params["tls_cert"] ?? ""}
               onChange={(v) => set("tls_cert", v)}
               options={certOptions}
+              placeholder="(none)"
+              emptyMessage={NO_CERTIFICATES_MESSAGE}
+              helpRef={CERTIFICATES_HELP_REF}
               dark={dark}
             />
           </FormField>
-          <Checkbox
-            checked={params["tls_verify"] === "false"}
-            onChange={(v) => set("tls_verify", v ? "false" : "")}
-            label="Disable server verification (unsafe — a CA certificate covers self-signed servers safely)"
-            dark={dark}
-          />
+          <TlsVerifyCheckbox params={params} onChange={onChange} dark={dark} />
         </div>
       )}
     </>

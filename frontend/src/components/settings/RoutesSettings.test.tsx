@@ -6,7 +6,49 @@ import { createTestQueryClient, settingsWrapper } from "../../../test/render";
 const mocks = installMockClients();
 
 import { RoutesSettings } from "./RoutesSettings";
+import { displayExpression } from "./routeDisplay";
+import { encode } from "../../api/glid";
 import { renderWritable } from "../../testing/renderWritable";
+import { HelpProvider } from "../../hooks/useHelp";
+import { VaultType } from "../../api/gen/gastrolog/v1/system_pb";
+import { mock } from "bun:test";
+
+describe("route destinations eligibility", () => {
+  function renderWithHelp(vaults: unknown[]) {
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], { ...sampleConfig, vaults });
+    const openHelp = mock((_helpRef?: string) => {});
+    const result = renderWritable(
+      <HelpProvider onOpen={openHelp}>
+        <RoutesSettings dark />
+      </HelpProvider>,
+      { wrapper: settingsWrapper(qc) },
+    );
+    return { ...result, openHelp };
+  }
+
+  test("a JSONL sink and a disabled vault are told apart from an ordinary vault, all selectable", () => {
+    const { getByText, container } = renderWithHelp([
+      { id: testId(20), name: "vault-alpha", type: VaultType.FILE, enabled: true },
+      { id: testId(21), name: "vault-sink", type: VaultType.JSONL, enabled: true },
+      { id: testId(22), name: "vault-off", type: VaultType.MEMORY, enabled: false },
+    ]);
+    fireEvent.click(getByText("default-route"));
+    expect(getByText("vault-alpha")).toBeTruthy();
+    expect(getByText("vault-sink — JSONL sink, write-only")).toBeTruthy();
+    expect(getByText("vault-off — disabled, not accepting records")).toBeTruthy();
+    const boxes = [...container.querySelectorAll('[role="checkbox"]')];
+    expect(boxes.some((b) => b.getAttribute("aria-disabled") === "true")).toBe(false);
+  });
+
+  test("with no vault the destinations list names the cause and links to route components", () => {
+    const { getByText, getByRole, openHelp } = renderWithHelp([]);
+    fireEvent.click(getByText("default-route"));
+    expect(getByRole("note").textContent).toContain("No vaults configured");
+    fireEvent.click(getByText("Route components"));
+    expect(openHelp).toHaveBeenCalledWith("routing#route-components");
+  });
+});
 
 /** Create a distinct 16-byte Uint8Array test ID from a small number. */
 function testId(n: number): Uint8Array<ArrayBuffer> {
@@ -216,6 +258,94 @@ describe("RoutesSettings", () => {
       expect(getByText("Create")).toBeTruthy();
       expect(getByText("Name")).toBeTruthy();
       expect(getByText("Distribution")).toBeTruthy();
+    });
+  });
+});
+
+describe("route header expression", () => {
+  const vaults = [{ id: "abc", name: "retention-source" }];
+
+  test("a _vault comparison against a configured vault shows the vault's name", () => {
+    expect(displayExpression('_source = "retention" AND _vault = "abc"', vaults)).toBe(
+      '_source = "retention" AND _vault = "retention-source"',
+    );
+    expect(displayExpression('_vault=="abc"', vaults)).toBe('_vault=="retention-source"');
+    expect(displayExpression('_vault != "abc"', vaults)).toBe('_vault != "retention-source"');
+  });
+
+  test("an ID no vault carries, and any other field, stay as written", () => {
+    expect(displayExpression('_vault = "zzz"', vaults)).toBe('_vault = "zzz"');
+    expect(displayExpression('_ingester = "abc"', vaults)).toBe('_ingester = "abc"');
+    expect(displayExpression("*", vaults)).toBe("*");
+  });
+
+  test("the card header renders the vault name; the editor keeps the ID", () => {
+    const vaultId = encode(testId(20));
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], {
+      ...sampleConfig,
+      routes: [{ ...sampleConfig.routes[0]!, stages: [matchStage(`_source = "retention" AND _vault = "${vaultId}"`)] }],
+    });
+    const { getByText, getByDisplayValue, queryByText } = renderWritable(<RoutesSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+    expect(getByText(/_vault = "vault-alpha"/)).toBeTruthy();
+    expect(queryByText(new RegExp(`_vault = "${vaultId}"`))).toBeNull();
+
+    fireEvent.click(getByText("default-route"));
+    expect(getByDisplayValue(`_source = "retention" AND _vault = "${vaultId}"`)).toBeTruthy();
+  });
+
+  test("an unknown vault ID in the header stays as written", () => {
+    const unknownId = encode(testId(99));
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], {
+      ...sampleConfig,
+      routes: [{ ...sampleConfig.routes[0]!, stages: [matchStage(`_vault = "${unknownId}"`)] }],
+    });
+    const { getByText } = renderWritable(<RoutesSettings dark />, { wrapper: settingsWrapper(qc) });
+    expect(getByText(new RegExp(`_vault = "${unknownId}"`))).toBeTruthy();
+  });
+});
+
+describe("RoutesSettings create gates", () => {
+  // With no generated name the form falls back to "route", which a route of
+  // that name takes.
+  test("a name conflict disables Create and says which name is taken", () => {
+    m(mocks.systemClient, "generateName").mockRejectedValueOnce(new Error("unavailable"));
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], {
+      ...sampleConfig,
+      routes: [{ ...sampleConfig.routes[0]!, name: "route" }],
+    });
+    const { getByText } = renderWritable(<RoutesSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    fireEvent.click(getByText("Add Route"));
+
+    expect(getByText('A route named "route" already exists')).toBeTruthy();
+    expect(getByText("Create").closest("button")!.disabled).toBe(true);
+  });
+
+  test("no destination disables Create with the reason, until one is picked", async () => {
+    m(mocks.systemClient, "generateName").mockRejectedValueOnce(new Error("unavailable"));
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], sampleConfig);
+    const { getByText, queryByText } = renderWritable(<RoutesSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    fireEvent.click(getByText("Add Route"));
+
+    expect(getByText("Pick at least one destination")).toBeTruthy();
+    expect(getByText("Create").closest("button")!.disabled).toBe(true);
+
+    // The destination label carries the vault's state after a dash.
+    fireEvent.click(getByText(/^vault-alpha/));
+    await waitFor(() => {
+      expect(queryByText("Pick at least one destination")).toBeNull();
+      expect(getByText("Create").closest("button")!.disabled).toBe(false);
     });
   });
 });

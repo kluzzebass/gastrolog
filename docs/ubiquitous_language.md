@@ -98,6 +98,13 @@ for append-heavy write patterns and time-ordered reads.
   until `Restore` completes. Tracked via `Archived = true`.
 - **Retention-pending** — marked in the vault FSM for deletion on the next sweep.
 
+- **Unreadable chunk** — a sealed chunk whose bytes a retention sweep could
+  not read on the responding node. The sweep keeps it and retries with
+  exponential backoff rather than destroying what it cannot verify
+  (`retention.go` `unreadableEntry`); the vault card's **Retry Unreadable**
+  resets the backoff so the next sweep retries every one at once. Held in
+  memory per retention runner — a restart clears the list.
+
 ### Physical storage
 
 - **FileStorage** — a directory on a node's disk, identified by a GLID, tagged
@@ -133,6 +140,12 @@ for append-heavy write patterns and time-ordered reads.
   a real FileStorage (memory-vault on a node without file storages). Format:
   `node:<nodeID>`.
 
+- **Unplaced** — a vault with no placement marked leader (an empty placement
+  list, `LeaderNodeID` empty): no node hosts its active chunk, so it accepts
+  nothing. The usual cause is that no node has a file storage of the vault's
+  storage class. The inspector's **Leader** row reads `unplaced`, and the
+  vault card's placement block says why.
+
 ---
 
 ## 2. Ingestion
@@ -158,6 +171,14 @@ a vault's active chunk".
 - **Parallel ingester** — runs on every node in `NodeIDs` simultaneously. Each
   instance maintains a per-ingester sequence counter so records don't
   collide.
+
+- **Ingester mode** — how an ingester type meets its input; the mode badge on
+  every ingester card. A type is a **listener** when its factory registers
+  listen addresses (`ListenAddrs`): it binds a port and accepts what clients
+  push to it (syslog, HTTP, RELP, OTLP, Fluent Forward), on every assigned
+  node — the API calls this `PASSIVE`. Every other type is **active**: it
+  pulls from its upstream source itself (Kafka, MQTT, Docker, tail, metrics,
+  self, the generators) — `ACTIVE` in the API.
 
 ### Domain events
 
@@ -276,6 +297,11 @@ Reading records back, filtering, aggregating, and rendering them.
 
 - **ResumeToken** — opaque pagination handle. Continue a search from a prior
   position without re-reading earlier chunks.
+
+- **Lookup table name** — the name a configured lookup is addressed by in
+  `| lookup <name> <field>`: the **Name** field of every lookup kind (CSV,
+  MMDB, HTTP, static, JSON/YAML file). The built-in `rdns` and `useragent`
+  tables are always present under their own names.
 
 ### Operations
 
@@ -415,6 +441,32 @@ one segmented file set, one batch-writer goroutine.
   `system.Runtime`. The placement manager picks an alive node per singleton
   ingester; failover is automatic.
 
+- **Node state** — the lifecycle state on `NodeConfig`, replicated in
+  cluster-ctl (`system.NodeState`); the node card shows a state badge
+  whenever the node is not simply live.
+  - **Live** — a member in Raft contact; the default, and what a record
+    minted before the field existed reads as.
+  - **Unreachable** — the unreachable sweep on the cluster-ctl leader found
+    the node's last-seen older than the unreachable threshold (five minutes
+    by default). Its placements wait for it; a warning alarm raises once it
+    stays unreachable past a second threshold. Fresh contact clears it back
+    to live on the broadcast fabric, not on a tick.
+  - **Maintenance** — an operator declared the node absent; the cluster
+    expects it back and keeps its placements.
+  - **Draining** — chunks are being transferred off the node ahead of its
+    removal; cancelling returns it to live.
+  - **Decommissioning** — the node is leaving: it receives no placements and
+    `DeleteNode` removes it. No state follows.
+
+  Legal transitions: live → unreachable | maintenance | draining;
+  unreachable → live | maintenance | draining; maintenance → live |
+  draining; draining → decommissioning | live.
+
+  **Offline** is not a node state. It is the stats surface's verdict on a
+  node whose broadcast is older than the stats TTL, shown with how long it
+  has been silent. A node can read offline on screen while still live in
+  the FSM, and the two converge only through the sweep above.
+
 - **Placement manager** — the subsystem that owns placement decisions. Runs
   on the cluster-ctl Raft leader, reacts to node join/leave, vault create/delete,
   and ingester changes.
@@ -466,6 +518,18 @@ one segmented file set, one batch-writer goroutine.
   by a failing probe. The unreachable sweep and the stale-voter reaper measure
   their multi-minute thresholds against this, not against peer liveness.
 
+- **Stats TTL** — how long a received stats broadcast stays queryable on the
+  node that received it (`PeerState.StatsTTL`, a multiple of the broadcast
+  interval). Past it, `Get` returns nil and the node reads as offline. Carried
+  to the UI as `GetClusterStatusResponse.stats_ttl` together with each
+  `ClusterNode.stats_received_at`, so every stats surface dates its figures
+  and marks a sample older than the TTL as **stale**.
+
+- **Responding node** — the node that answered a given RPC. The API has no
+  session affinity, so behind a load balancer each request may be answered by
+  a different node; the UI labels a node "this node" only while every
+  response in the session has come from the same one.
+
 ### Request routing
 
 How an operator-issued RPC finds the node that should execute it. See
@@ -496,6 +560,26 @@ How an operator-issued RPC finds the node that should execute it. See
 
 - **PeerConns** — the gRPC connection pool for cross-node RPCs (not Raft
   transport; for forward-apply, record-forward, chunk-transfer, etc.).
+
+- **Lane** — one connection between two nodes as the inspector's Network
+  panel lists it, both directions merged (`ConnLane`). A **raft** lane
+  carries one Raft group, and the detail names it; an **rpc pool** lane is
+  one slot of the PeerConns pool, numbered by its `PoolIndex`.
+
+- **Cluster-port purpose** — the label a subsystem gives when it acquires a
+  pooled connection (`AcquireOpts.Purpose`); a lane lists the purposes it
+  has carried, dimming any idle during the last stats interval. Canonical
+  order and meaning (`cluster.AllPurposes`): **search** (search fan-out),
+  **chunk apply** and **vault apply** (a follower forwarding a vault-ctl
+  chunk or vault command to that group's leader), **broadcast** (stats
+  push), **forward** (record forwarding to the vault leader), **forward
+  RPC** (a cluster-ctl config mutation forwarded to its leader),
+  **eviction** (asking a node to drop a chunk copy), **remove node**,
+  **suffrage** (voter/nonvoter changes), **chunk transfer** (streaming a
+  chunk to a new home), **chunk wait** (waiting for a vault to be ready on
+  a peer), **replicate** (chunk replication stream), **replicate catchup**
+  (GLCB catch-up pulls), **segment pull** (pipeline segment bytes),
+  **file transfer** (managed files), **raft**.
 
 ---
 
@@ -1132,8 +1216,15 @@ Live on `Config` directly (not as entities):
   public unicast; a stored lookup's `AllowPrivateDestinations` is the
   operator's opt-in for a service on their own network, and never reaches
   link-local or address-translation ranges.
-- **ClusterConfig** — broadcast interval override; other cluster tunables.
+- **ClusterConfig** — broadcast interval override and the backlog budget
+  (see [Pipeline](#9-pipeline)).
 - **MaxMindConfig** — GeoIP database location.
+- **Managed file** — an uploaded file (CSV, MMDB, JSON, YAML) the cluster
+  keeps for lookups: metadata in config (`ManagedFileConfig`), bytes under
+  each node's home. Uploading under an existing name adds a **version**;
+  every version keeps its own ID and nothing is removed automatically. The
+  newest version is **current** — what resolution by name picks — while a
+  lookup bound to a version's ID keeps using that version.
 
 ### Authentication
 
@@ -1172,6 +1263,14 @@ Live on `Config` directly (not as entities):
 - **Cluster TLS** — mTLS material (`CA`, `Node cert`, `Node key`)
   generated at cluster-init. Used exclusively for intra-cluster gRPC.
   Separate from external API TLS.
+
+- **Certificate** — operator-stored TLS material for HTTPS and ingester
+  TLS, kept under a name and picked by name or ID. Two kinds, by where the
+  key material lives: a **pasted certificate** (badge `pem`) holds PEM
+  content in the cluster configuration; a **file-path certificate** (badge
+  `files`) names certificate and key files on the node's disk, which are
+  watched and reloaded when they change. The **default certificate** is
+  the one the HTTPS listener serves.
 
 ### Commands & FSM
 
@@ -1251,6 +1350,16 @@ the collector.
   Where the recent, queryable records live (the role active chunks fill in
   the pre-pipeline architecture).
 
+- **Pipeline backlog** — a vault's published, unreleased completed segments:
+  the bytes in the vault-ctl registry that chunking has not yet consumed. It
+  grows while chunking is behind; the inspector's pipeline view shows it.
+
+- **Backlog budget** — the cluster-wide, per-vault bound on the pipeline
+  backlog (`ClusterConfig.PipelineBacklogMax`; Cluster › **Backlog Budget**).
+  At the budget, ingest admission for the vault refuses with a retryable
+  backpressure error until chunking drains below it — the operating bound
+  ahead of the disk-guard backstop. Empty means unbounded.
+
 ### Verbs
 
 - **Mint** — Ingestion assigns the EventID
@@ -1304,6 +1413,11 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
   artifact — local-only file vaults seal into GLCB, and the same blob is the
   cloud upload unit for cloud-backed vaults.
 
+- **Timestamp index** — the per-chunk ingest-TS and source-TS indexes. They
+  are sections inside the GLCB, located from its TOC tail, never separate
+  files: they cannot go missing on their own, the inspector lists them as
+  `ts-index embedded`, and `reindex` rebuilds only the other indexes.
+
 - **Assignment log** — the vault-ctl log view Collection rolls
   (`collection.LogReader.Roll` → `AssignedSegment`) to learn which published
   segments this home should hold; it then pulls the ones it lacks and
@@ -1331,6 +1445,11 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
 - **Sealed manifest** — after `SealOpenChunkManifest`, the frozen segment-ref list
   on vault-ctl awaiting per-home GLCB build (`sealed_manifest` in FSM snapshot).
   Not the same word as V2 sequenced-write **materialization** (spool → chunk).
+
+- **Eligible segment** — a registry segment the chunking planner can still
+  take: it has an index and prior chunks have not consumed all its records
+  (`segmentExhaustedForPlanning` is false). The inspector's **N segments
+  eligible to chunk** counts them; a growing count means chunking is behind.
 
 - **GLCB quarantine** — an existing-but-unreadable sealed GLCB is renamed
   aside to a `data.glcb.corrupt` sibling (never silently deleted or silently
@@ -1410,6 +1529,11 @@ Canonical milestone verbs (reuse these names; do not coin synonyms):
 | storage disk protect | vault disk protect | The disk-guard free-space thresholds moved from `VaultConfig` to `system.FileStorage` (gastrolog-9akebz): a below-floor storage protects every vault placed on it, not one vault's own threshold. Renamed through the stack: proto enum `VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT` → `..._STORAGE_DISK_PROTECT`, `orchestrator.ErrVaultDiskProtect` → `ErrStorageDiskProtect`, `VaultAdmissionCauseVaultDiskProtect` → `VaultAdmissionCauseStorageDiskProtect`, NodeStats `disk_protected_vault_ids` → `storage_protected_vault_ids`, `PeerState.VaultDiskProtected(Nodes)` → `VaultStorageProtected(Nodes)`. |
 | complete (segment lifecycle) | close | "Close" is overloaded: writer shutdown vs the segment lifecycle event (working/ → completed/). The rotation trigger is `segmentation.CompletePolicy` and a segment COMPLETES; reserve Close for genuine resource shutdown (`Close()` methods, closed writers) (gastrolog-34zx9y). |
 | routed (routing counter) | ingested (at routing) | The counter that was `Ingested` on routing stats counts records ENTERING ROUTING, not ingestion — counter provenance matters when proving loss. Whole chain renamed: `Routed` = entered routing, `Matched` = matched a route and fanned out (proto `total_routed`/`total_matched`, NodeStats `route_stats_*`, UI labels) (gastrolog-34zx9y). "Ingested" stays only on genuine ingester counters (`MessagesIngested`, `BytesIngested`). |
+| max size (policy bound) | max bytes | The proto field is `max_size` on both the rotation and the retention policy and the CLI flag is `--max-size`; the UI label is **Max Size** on both forms, never "Max Bytes" for one of them. |
+| pasted certificate / file-path certificate | monitored files certificate, file-based certificate, PEM certificate | Two certificate kinds, by where the key material lives; one name each through the buttons, the kind badges and the help. |
+| lookup table name | registry name | "Registry" is the server's internal structure; what the operator types after `\| lookup` is the table name, and the **Name** field says so. |
+| verify server certificate | disable server verification | One checkbox with one polarity for the shared `tls_verify` ingester param: checked verifies, and only the literal `false` turns verification off. |
+| ingester type label | raw type key in UI copy | The add menu and type badges show the type's help-topic title (`Fluent Forward`, `OTLP`); the key (`fluentfwd`, `otlp`) stays in config and the API. |
 | unmatched (routing counter) | dropped (at routing) | "Dropped" named two different quantities. `Unmatched` = matched no route, an intentional counted drop (proto `total_unmatched`, NodeStats `route_stats_unmatched`, UI label "Unmatched"); the invariant is `Routed = Matched + Unmatched`. "Dropped" is reserved for delivery drops: `StatsSnapshot.PerVaultDropped` counts already-matched records whose fan-out delivery to a vault failed — a per-vault sub-account of `Matched`, never part of the routed sum (gastrolog-5sdzfv). |
 
 ### Timestamp conventions

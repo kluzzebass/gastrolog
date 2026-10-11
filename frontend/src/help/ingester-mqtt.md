@@ -11,6 +11,7 @@ Subscribes to one or more MQTT topics on a broker. Each published message become
 | Client ID | MQTT client identifier. Auto-generated from the ingester ID if left empty | `gastrolog-<last 8 chars of ID>` |
 | Protocol Version | `v3.1.1` or `v5` | v3.1.1 |
 | Enable TLS | Use TLS for the broker connection | off |
+| Verify server certificate | Check the broker's TLS certificate against the CA; turning it off is unsafe (see below) | on |
 | Clean session | Start with a clean session (see below) | on |
 | Username | Username for broker authentication | |
 | Password | Password for broker authentication | |
@@ -32,7 +33,7 @@ The message payload is used as the raw log line.
 
 When TLS is enabled, the connection to the broker uses TLS. A CA Certificate from the certificate store pins the trust root — the safe way to talk to a broker with a self-signed or private-CA certificate. A Client Certificate is presented to brokers that require mutual TLS.
 
-Disabling server verification is unsafe: anyone between this node and the broker can read and forge records, and the ingester logs a warning at startup when it is set. Prefer a stored CA certificate instead.
+Turning **Verify server certificate** off is unsafe: anyone between this node and the broker can read and forge records, and the ingester logs a warning at startup when it is set. Prefer a stored CA certificate instead.
 
 ## Timestamps
 

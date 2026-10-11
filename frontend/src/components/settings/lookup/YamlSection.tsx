@@ -3,7 +3,8 @@
 // jq/key/value-column UI is identical — only the file extensions, preview
 // hook, payload key, and type badge differ.
 
-import { FileLookupAddForm, FileLookupCards, yamlFormatSpec } from "./FileLookupSection";
+import { FileLookupAddForm, FileLookupCards } from "./FileLookupSection";
+import { yamlFormatSpec } from "./fileLookupFormat";
 import type { YAMLFileLookupDraft, LookupSectionProps } from "./types";
 import type { YAMLFileLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 

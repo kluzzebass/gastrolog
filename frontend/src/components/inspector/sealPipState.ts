@@ -141,6 +141,19 @@ export function computePips(input: PipInputs): { pips: SealPip[]; ghosts: SealPi
  *  node — calm green for a cached copy, a dim hollow green ring where no
  *  local copy exists (normal after eviction), dashed red for an unreachable
  *  node. Same order and column stability as the birth/death row. */
+/** rowIsCalm reports a row with nothing to look at: every placement pip
+ *  holds its copy (sealed, or cached-or-not on a cloud-backed chunk) and
+ *  no ghost trails it. Sealed pips dim only in a calm row; beside an
+ *  anomaly they stay full green so the healthy copies read as the
+ *  contrast to the sick one. */
+export function rowIsCalm(pips: readonly SealPip[], ghosts: readonly SealPip[]): boolean {
+  return (
+    ghosts.length === 0 &&
+    pips.length > 0 &&
+    pips.every((p) => p.state === "sealed" || p.state === "uncached")
+  );
+}
+
 export function computeCloudPips(
   input: Pick<PipInputs, "placementNodes" | "residentNodes" | "liveNodes">,
   storeLabel: string,

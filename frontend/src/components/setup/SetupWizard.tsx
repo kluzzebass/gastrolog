@@ -35,8 +35,8 @@ interface WizardDataState {
 
 const wizardDataInitial: WizardDataState = {
   vault: { name: "", type: "file", dir: "" },
-  rotation: { name: "", maxAge: "", maxBytes: "", maxRecords: "", cron: "" },
-  retention: { name: "", maxChunks: "", maxAge: "", maxBytes: "" },
+  rotation: { name: "", maxAge: "", maxSize: "", maxRecords: "", cron: "" },
+  retention: { name: "", maxChunks: "", maxAge: "", maxSize: "" },
   ingester: { name: "", type: "", params: {} },
 };
 
@@ -120,11 +120,11 @@ export function SetupWizard() {
     setCreating(true);
 
     // Extract conditional expressions before try/catch for React Compiler compatibility
-    const hasRotation = rotation.maxAge || rotation.maxBytes || rotation.maxRecords || rotation.cron;
+    const hasRotation = rotation.maxAge || rotation.maxSize || rotation.maxRecords || rotation.cron;
     const rotationMaxRecords = rotation.maxRecords ? BigInt(rotation.maxRecords) : BigInt(0);
     const rotationName = rotation.name || namePlaceholders.rotation || "default";
 
-    const hasRetention = retention.maxChunks || retention.maxAge || retention.maxBytes;
+    const hasRetention = retention.maxChunks || retention.maxAge || retention.maxSize;
     const retentionMaxChunks = retention.maxChunks ? BigInt(retention.maxChunks) : BigInt(0);
     const retentionMaxAge = retention.maxAge || "";
     const retentionName = retention.name || namePlaceholders.retention || "default";
@@ -152,7 +152,7 @@ export function SetupWizard() {
             id: rotationIdBytes,
             name: rotationName,
             maxAge: rotation.maxAge,
-            maxSize: rotation.maxBytes,
+            maxSize: rotation.maxSize,
             maxRecords: rotationMaxRecords,
             cron: rotation.cron,
           },
@@ -167,7 +167,7 @@ export function SetupWizard() {
             name: retentionName,
             maxChunks: retentionMaxChunks,
             maxAge: retentionMaxAge,
-            maxSize: retention.maxBytes,
+            maxSize: retention.maxSize,
           },
         }),
       );

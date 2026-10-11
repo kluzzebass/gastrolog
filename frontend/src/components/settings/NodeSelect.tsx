@@ -4,16 +4,22 @@ import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { FormField, SelectInput } from "./FormField";
 
 /**
- * Node selector dropdown for choosing which cluster node owns a vault or ingester.
- * Hidden in single-node mode. Auto-selects the local node when no value is set.
+ * Node selector dropdown for choosing which cluster node a node-local
+ * resource belongs to. Hidden in single-node mode. Auto-selects the local
+ * node when no value is set.
  */
 export function NodeSelect({
   value,
   onChange,
+  description,
+  helpRef,
   dark,
 }: Readonly<{
   value: string;
   onChange: (nodeId: string) => void;
+  /** What choosing a node commits the resource to — the field says nothing on its own. */
+  description: string;
+  helpRef?: string;
   dark: boolean;
 }>) {
   const { data: clusterStatus } = useClusterStatus();
@@ -37,7 +43,7 @@ export function NodeSelect({
     .sort((a, b) => a.label.localeCompare(b.label));
 
   return (
-    <FormField label="Node" dark={dark}>
+    <FormField label="Node" description={description} helpRef={helpRef} dark={dark}>
       <SelectInput value={value} onChange={onChange} options={options} dark={dark} />
     </FormField>
   );

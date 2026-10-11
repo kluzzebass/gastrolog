@@ -24,6 +24,9 @@ export function endpointSchemeError(endpoint: string): string | null {
   return `Endpoint has no scheme — use "https://${host}", or "http://${host}" for a plaintext local/dev endpoint`;
 }
 
+/** The one-line form of the refusal, for the control it disables. */
+export const endpointSchemeReason = "Endpoint needs an http:// or https:// scheme";
+
 /**
  * Whether the endpoint value blocks submitting for this provider. Only
  * S3 and GCS take a custom endpoint; the backend refuses a scheme-less

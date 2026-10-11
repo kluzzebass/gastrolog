@@ -19,28 +19,48 @@ import { Spark } from "../Spark";
 // eslint-disable-next-line no-restricted-imports -- ThroughputRate is a passthrough stats type; no model wrap planned
 import type { ThroughputRate } from "../../api/gen/gastrolog/v1/vault_pb";
 import { type ClusterVaultStats, summarizeCluster } from "./clusterSummary";
+import type { Timestamp } from "@bufbuild/protobuf";
+import { StatsFreshnessCue } from "./StatsFreshness";
+import { formatRaftContact, leaderLabel, nodeStatsEmptyText } from "./nodeStatsText";
+import { useTick } from "./JobCard";
 
 /**
  * System stats view for a single node, using gossip-broadcast NodeStats.
- * Used identically for the local node and peers — no special-casing.
+ * Used identically for the local node and peers — no special-casing. The
+ * sample's age (from the responding node's receipt instant) heads the view
+ * so every figure below reads as "as of then".
  */
 interface SystemStatsViewProps {
   nodeStats: NodeStats | null;
+  /** The cluster's last contact with the node, shown when it has no stats. */
+  lastSeen?: Timestamp;
+  receivedAt?: Timestamp;
+  ttlMs?: number | null;
   dark: boolean;
 }
 
 export function SystemStatsView({
   nodeStats,
+  lastSeen,
+  receivedAt,
+  ttlMs = null,
   dark,
 }: Readonly<SystemStatsViewProps>) {
   const c = useThemeClass(dark);
+  const now = useTick();
 
   if (nodeStats) {
-    return <CompactView stats={nodeStats} dark={dark} />;
+    return (
+      <CompactView
+        stats={nodeStats}
+        freshness={<StatsFreshnessCue receivedAt={receivedAt} ttlMs={ttlMs} dark={dark} className="ml-auto" />}
+        dark={dark}
+      />
+    );
   }
   return (
     <div className={`text-[0.85em] italic ${c("text-text-muted", "text-light-text-muted")}`}>
-      Waiting for node stats...
+      {nodeStatsEmptyText(lastSeen, now)}
     </div>
   );
 }
@@ -49,13 +69,14 @@ export function SystemStatsView({
 
 function CompactView({
   stats,
+  freshness,
   dark,
-}: Readonly<{ stats: NodeStats; dark: boolean }>) {
+}: Readonly<{ stats: NodeStats; freshness?: React.ReactNode; dark: boolean }>) {
   return (
     <div className="flex flex-col gap-4">
       {/* System stats */}
       <section>
-        <CompactSectionLabel label="System" dark={dark} />
+        <CompactSectionLabel label="System" trailing={freshness} dark={dark} />
         <div className="grid grid-cols-2 gap-x-6 gap-y-1">
           <CompactStatRow label="CPU" value={formatPercent(stats.cpuPercent)} mono dark={dark} />
           <CompactStatRow label="Goroutines" value={stats.goroutines.toLocaleString()} mono dark={dark} />
@@ -65,6 +86,14 @@ function CompactView({
           <CompactStatRow label="Heap Idle" value={formatBytes(Number(stats.memoryHeapIdle))} mono dark={dark} />
           <CompactStatRow label="Stack" value={formatBytes(Number(stats.memoryStackInuse))} mono dark={dark} />
           <CompactStatRow label="GC Cycles" value={stats.numGc.toLocaleString()} mono dark={dark} />
+          {stats.uptimeSeconds > BigInt(0) && (
+            <CompactStatRow
+              label="Uptime"
+              value={formatUptime(stats.uptimeSeconds)}
+              title="time since this node's process started"
+              dark={dark}
+            />
+          )}
           {/* Diagnostic log records discarded because the capture channel was
               full. Shown only once it happens: at zero there is nothing to
               say, and it is a capacity signal to trend, not a condition to
@@ -74,6 +103,7 @@ function CompactView({
               label="Log Drops"
               value={Number(stats.selfIngesterDropsTotal).toLocaleString()}
               mono
+              title="diagnostic records the self ingester discarded because its capture channel was full — a capacity signal to trend, not a fault"
               helpRef="ingester-self"
               dark={dark}
             />
@@ -107,15 +137,9 @@ function CompactView({
               label="Depth"
               value={`${stats.ingestQueueDepth} / ${stats.ingestQueueCapacity}`}
               mono
+              title="records waiting in the ingest queue / its capacity"
               dark={dark}
             />
-            {stats.uptimeSeconds > BigInt(0) && (
-              <CompactStatRow
-                label="Uptime"
-                value={formatUptime(stats.uptimeSeconds)}
-                dark={dark}
-              />
-            )}
             {/* Ingest pressure raises no alarm: a throttled pipeline is a
                 handled condition, not one waiting on an operator. It is shown
                 here, next to the queue depth it derives from, and only once it
@@ -125,6 +149,7 @@ function CompactView({
               label="Pressure"
               value={stats.ingestPressureLevel || "normal"}
               reserved={stats.ingestPressureLevel === "" || stats.ingestPressureLevel === "normal"}
+              title="ingest pressure level, from the queue depth above — the pipeline throttles itself; nothing to act on"
               helpRef="inspector-system#throughput"
               dark={dark}
             />
@@ -167,40 +192,77 @@ function CompactView({
           <CompactDivider dark={dark} />
           <CompactSectionLabel label="Raft State" helpRef="inspector-system#peer-nodes-compact-view" dark={dark} />
           <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-            <CompactStatRow label="State" value={stats.raftState} dark={dark} />
-            <CompactStatRow label="Term" value={stats.raftTerm.toString()} mono dark={dark} />
-            <CompactStatRow label="Applied" value={stats.raftAppliedIndex.toString()} mono dark={dark} />
-            <CompactStatRow label="Commit" value={stats.raftCommitIndex.toString()} mono dark={dark} />
-            <CompactStatRow label="FSM Pending" value={stats.raftFsmPending.toString()} mono dark={dark} />
-            <CompactStatRow label="Last Contact" value={stats.raftLastContact || "never"} dark={dark} />
+            <CompactStatRow
+              label="State"
+              value={stats.raftState}
+              title="this node's role in the cluster-ctl Raft group"
+              dark={dark}
+            />
+            <CompactStatRow
+              label="Term"
+              value={stats.raftTerm.toString()}
+              mono
+              title="current Raft term — rises with every election"
+              dark={dark}
+            />
+            <CompactStatRow
+              label="Applied"
+              value={stats.raftAppliedIndex.toString()}
+              mono
+              title="last log index applied to this node's FSM"
+              dark={dark}
+            />
+            <CompactStatRow
+              label="Commit"
+              value={stats.raftCommitIndex.toString()}
+              mono
+              title="last log index persisted on a quorum"
+              dark={dark}
+            />
+            <CompactStatRow
+              label="FSM Pending"
+              value={stats.raftFsmPending.toString()}
+              mono
+              title="committed entries not yet applied here — grows while apply is slow"
+              dark={dark}
+            />
+            <CompactStatRow
+              label="Last Contact"
+              value={formatRaftContact(stats.raftLastContact)}
+              title="time since the leader last reached this node; never means no leader contact since start"
+              dark={dark}
+            />
           </div>
           {/* Raft liveness: WAL append health and election churn across every
-              group on this node. Elections/min above ~3 sustained is a storm;
-              WAL max latency near 1s means bulk I/O is starving consensus. */}
+              group on this node. */}
           {stats.raftWalAppendsTotal > 0 && (
             <div className="grid grid-cols-2 gap-x-6 gap-y-1 mt-1">
               <CompactStatRow
                 label="WAL Append"
                 value={`avg ${stats.raftWalAppendAvgMs.toFixed(1)}ms · max ${stats.raftWalAppendMaxMs.toFixed(0)}ms`}
                 mono
+                title="WAL append latency across every Raft group on this node — a max near 1s means bulk I/O is starving consensus"
                 dark={dark}
               />
               <CompactStatRow
                 label="Elections"
                 value={`${stats.raftElectionsTotal.toString()} (${stats.raftElectionsPerMin.toFixed(1)}/min)`}
                 mono
+                title="elections started on this node, total and per minute — above about 3/min sustained is an election storm"
                 dark={dark}
               />
               <CompactStatRow
                 label="Leader Losses"
                 value={stats.raftLeaderLossesTotal.toString()}
                 mono
+                title="times this node lost a leadership it held"
                 dark={dark}
               />
               <CompactStatRow
-                label="Failed HBs"
+                label="Failed heartbeats"
                 value={stats.raftFailedHeartbeatsTotal.toString()}
                 mono
+                title="replication heartbeats from this node that a follower did not answer"
                 dark={dark}
               />
             </div>
@@ -247,13 +309,14 @@ function CompactRateRow({
 
 // `reserved` holds the row's space while it has nothing to say, so a value
 // that comes and goes never moves the rows below it. With `helpRef` the
-// label opens that help section.
+// label opens that help section; `title` is the row's meaning on hover.
 function CompactStatRow({
   label,
   value,
   mono = false,
   reserved = false,
   helpRef,
+  title,
   dark,
 }: Readonly<{
   label: string;
@@ -261,6 +324,7 @@ function CompactStatRow({
   mono?: boolean;
   reserved?: boolean;
   helpRef?: string;
+  title?: string;
   dark: boolean;
 }>) {
   const c = useThemeClass(dark);
@@ -269,6 +333,7 @@ function CompactStatRow({
     <div
       className={`flex items-baseline justify-between gap-4 ${reserved ? "invisible" : ""}`}
       aria-hidden={reserved || undefined}
+      title={title}
     >
       {helpRef ? (
         <HelpLabel helpRef={helpRef} className={labelClass}>{label}</HelpLabel>
@@ -292,7 +357,12 @@ function HelpLabel({ helpRef, className, children }: Readonly<{ helpRef: string;
   return <HelpLink helpRef={helpRef} className={className}>{children}</HelpLink>;
 }
 
-function CompactSectionLabel({ label, helpRef, dark }: Readonly<{ label: string; helpRef?: string; dark: boolean }>) {
+function CompactSectionLabel({
+  label,
+  helpRef,
+  trailing,
+  dark,
+}: Readonly<{ label: string; helpRef?: string; trailing?: React.ReactNode; dark: boolean }>) {
   const c = useThemeClass(dark);
   return (
     <span
@@ -300,6 +370,7 @@ function CompactSectionLabel({ label, helpRef, dark }: Readonly<{ label: string;
     >
       {label}
       {helpRef && <HelpButton helpRef={helpRef} />}
+      {trailing && <span className="ml-auto normal-case tracking-normal">{trailing}</span>}
     </span>
   );
 }
@@ -360,7 +431,8 @@ export function ClusterSummaryView({
           <CompactStatRow label="Nodes" value={nodes.length.toString()} mono dark={dark} />
           <CompactStatRow
             label="Leader"
-            value={summary.leaderName || "none"}
+            value={leaderLabel(summary.leaderName)}
+            title={summary.leaderName ? "the cluster-ctl Raft leader" : "no node leads the cluster-ctl Raft group — configuration is read-only until a quorum elects one"}
             helpRef={summary.leaderName ? undefined : QUORUM_LOSS_HELP_REF}
             dark={dark}
           />

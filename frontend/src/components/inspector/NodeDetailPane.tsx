@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useVaults, useStorages, useIngesters, useNodeRegistry } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
+import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useConfig } from "../../api/hooks/useSystem";
 import { useSettings } from "../../api/hooks/useSettings";
@@ -15,6 +16,7 @@ import { JobCard, ScheduledJobsTable } from "./JobCard";
 import { HelpButton } from "../HelpButton";
 import { SystemStatsView } from "./SystemStatsView";
 import { PeerBytesSection } from "./PeerBytesSection";
+import { StatsFreshnessCue } from "./StatsFreshness";
 import { Badge } from "../Badge";
 
 interface NodeDetailPaneProps {
@@ -40,7 +42,10 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
   const { data: allVaults } = useVaults();
   const { data: allStorages } = useStorages();
   const allIngesters = useIngesters();
-  const { jobs } = useWatchJobs({ onError: toastError });
+  const { jobs, connected, reconnecting } = useWatchJobs({ onError: toastError });
+  // Until the job stream delivers its first snapshot an empty list means
+  // "not yet known", not "none" — the same condition the Jobs view waits on.
+  const jobsLoading = !connected && !reconnecting && jobs.length === 0;
 
   const nscs = config?.nodeStorageConfigs ?? [];
   const vaults = allVaults.filter((v) => v.isOn(nodeIdTyped, nscs, registry.localNodeId));
@@ -64,6 +69,9 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       <Section title="System" dark={dark} helpRef="inspector-system">
         <SystemStatsView
           nodeStats={nodeInfo?.stats ?? null}
+          lastSeen={nodeInfo?.lastSeen}
+          receivedAt={node?.statsReceivedAt}
+          ttlMs={registry.statsTtlMs}
           dark={dark}
         />
       </Section>
@@ -71,7 +79,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       {/* Vaults section */}
       <Section title="Vaults" dark={dark} helpRef="inspector-vaults">
         {vaults.length === 0 ? (
-          <EmptyMessage dark={dark}>No vaults on this node.</EmptyMessage>
+          <EmptyMessage dark={dark}>No vaults placed on this node.</EmptyMessage>
         ) : (
           <div className="flex flex-col gap-2">
             {[...vaults]
@@ -93,7 +101,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       {/* Storages section */}
       <Section title="Storages" dark={dark} helpRef="inspector-storages">
         {storages.length === 0 ? (
-          <EmptyMessage dark={dark}>No storages on this node.</EmptyMessage>
+          <EmptyMessage dark={dark}>No file storages configured on this node.</EmptyMessage>
         ) : (
           <div className="flex flex-col gap-2">
             {[...storages]
@@ -116,7 +124,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       {/* Ingesters section */}
       <Section title="Ingesters" dark={dark} helpRef="inspector-ingesters">
         {ingesters.length === 0 ? (
-          <EmptyMessage dark={dark}>No ingesters on this node.</EmptyMessage>
+          <EmptyMessage dark={dark}>No ingesters eligible to run on this node.</EmptyMessage>
         ) : (
           <div className="flex flex-col gap-2">
             {ingesters.map((ing) => (
@@ -136,7 +144,12 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
       </Section>
 
       {/* Network — per-link traffic (both peers' lanes merged). */}
-      <Section title="Network" dark={dark} helpRef="inspector-system#network">
+      <Section
+        title="Network"
+        dark={dark}
+        helpRef="inspector-system#network"
+        trailing={<StatsFreshnessCue receivedAt={node?.statsReceivedAt} ttlMs={registry.statsTtlMs} dark={dark} />}
+      >
         <PeerBytesSection
           viewNodeId={nodeIdTyped}
           nodeStats={nodeInfo?.stats ?? null}
@@ -147,18 +160,22 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
 
       {/* Scheduled jobs section */}
       <Section title="Scheduled" dark={dark} helpRef="inspector-jobs#scheduled-jobs">
-        {scheduled.length === 0 ? (
-          <EmptyMessage dark={dark}>No scheduled jobs on this node.</EmptyMessage>
-        ) : (
+        <JobsSectionBody
+          loading={jobsLoading}
+          empty={scheduled.length === 0 ? "No scheduled jobs on this node." : null}
+          dark={dark}
+        >
           <ScheduledJobsTable jobs={scheduled} dark={dark} showNodeBadge={false} />
-        )}
+        </JobsSectionBody>
       </Section>
 
       {/* Tasks section */}
       <Section title="Tasks" dark={dark} helpRef="inspector-jobs#tasks">
-        {tasks.length === 0 ? (
-          <EmptyMessage dark={dark}>No tasks on this node.</EmptyMessage>
-        ) : (
+        <JobsSectionBody
+          loading={jobsLoading}
+          empty={tasks.length === 0 ? "No tasks on this node." : null}
+          dark={dark}
+        >
           <div className="flex flex-col gap-2">
             {tasks.map((job) => (
               <JobCard
@@ -171,7 +188,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
               />
             ))}
           </div>
-        )}
+        </JobsSectionBody>
       </Section>
     </div>
   );
@@ -184,12 +201,14 @@ function Section({
   dark,
   count,
   helpRef,
+  trailing,
   children,
 }: Readonly<{
   title: string;
   dark: boolean;
   count?: number;
   helpRef?: string;
+  trailing?: React.ReactNode;
   children: React.ReactNode;
 }>) {
   const c = useThemeClass(dark);
@@ -205,10 +224,22 @@ function Section({
         {count !== undefined && count > 0 && (
           <Badge variant="muted" dark={dark}>{count}</Badge>
         )}
+        {trailing && <span className="ml-auto">{trailing}</span>}
       </div>
       {children}
     </section>
   );
+}
+
+function JobsSectionBody({
+  loading,
+  empty,
+  dark,
+  children,
+}: Readonly<{ loading: boolean; empty: string | null; dark: boolean; children: React.ReactNode }>) {
+  if (loading) return <LoadingPlaceholder dark={dark} />;
+  if (empty) return <EmptyMessage dark={dark}>{empty}</EmptyMessage>;
+  return <>{children}</>;
 }
 
 function EmptyMessage({

@@ -10,9 +10,11 @@ import { HelpButton } from "../../HelpButton";
 import { SettingsCard } from "../SettingsCard";
 import { AddFormCard } from "../AddFormCard";
 import { FileDropZone } from "../FileDropZone";
-import { type MMDBLookupDraft, type LookupSectionProps, mmdbDbTypes, mmdbDefaultName, emptyMmdbDraft, mmdbLookupEqual } from "./types";
+import { type MMDBLookupDraft, type LookupSectionProps, mmdbDbTypes, mmdbDefaultName, emptyMmdbDraft, mmdbFileIneligibility, mmdbLookupEqual } from "./types";
 import type { MMDBLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 import { useReadOnly } from "../../../hooks/useReadOnly";
+
+const MMDB_HELP_REF = "lookups-settings#mmdb-lookups";
 
 function serializeMmdbLookups(lookups: MMDBLookupDraft[]) {
   return lookups
@@ -62,7 +64,7 @@ export function MmdbAddForm({
       createDisabled={false}
       typeBadge="mmdb"
     >
-      <FormField label="Name" description="Registry name used in queries, e.g. | lookup geoip" dark={dark}>
+      <FormField label="Name" description="Table name used in queries, e.g. | lookup geoip" dark={dark}>
         <TextInput value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} placeholder={mmdbDefaultName[draft.dbType] || draft.dbType} dark={dark} mono />
       </FormField>
       <MmdbDbTypeRadio dark={dark} value={draft.dbType} onChange={(dbType) => setDraft((d) => ({ ...d, dbType }))} name="new-mmdb-db-type" />
@@ -74,6 +76,8 @@ export function MmdbAddForm({
           label={draft.dbType === "city" ? "GeoIP City .mmdb" : "ASN .mmdb"}
           currentFile={draft.fileId ? managedFiles.find((f) => encode(f.id) === draft.fileId) : undefined}
           pickableFiles={managedFiles.filter((f) => f.name.endsWith(".mmdb"))}
+          ineligibleReason={(f) => mmdbFileIneligibility(draft.dbType, f.name)}
+          helpRef={MMDB_HELP_REF}
           uploadFile={uploadFile}
           addToast={addToast}
           onFileSelected={(fileId) => setDraft((d) => ({ ...d, fileId }))}
@@ -148,7 +152,7 @@ export function MmdbCards({
             }
           >
             <div className="flex flex-col gap-3">
-              <FormField label="Name" description="Registry name used in queries, e.g. | lookup geoip" dark={dark}>
+              <FormField label="Name" description="Table name used in queries, e.g. | lookup geoip" dark={dark}>
                 <TextInput value={m.name} onChange={(v) => onUpdate(i, { name: v })} placeholder="" dark={dark} mono />
               </FormField>
               <MmdbDbTypeRadio dark={dark} value={m.dbType} onChange={(dbType) => onUpdate(i, { dbType })} name={`mmdb-db-type-${i}`} />
@@ -160,6 +164,8 @@ export function MmdbCards({
                   label={m.dbType === "city" ? "GeoIP City .mmdb" : "ASN .mmdb"}
                   currentFile={resolvedFile}
                   pickableFiles={managedFiles.filter((f) => f.name.endsWith(".mmdb"))}
+                  ineligibleReason={(f) => mmdbFileIneligibility(m.dbType, f.name)}
+                  helpRef={MMDB_HELP_REF}
                   uploadFile={uploadFile}
                   addToast={addToast}
                   onFileSelected={(fileId) => onUpdate(i, { fileId })}
@@ -168,7 +174,7 @@ export function MmdbCards({
               {!m.fileId && (
                 <div className={`flex items-center gap-1.5 text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
                   <span>No file uploaded — will use auto-downloaded {dbLabel} database if MaxMind auto-download is enabled.</span>
-                  <HelpButton helpRef="lookups-settings#mmdb-lookups" />
+                  <HelpButton helpRef={MMDB_HELP_REF} />
                 </div>
               )}
             </div>
@@ -183,7 +189,7 @@ function MmdbDbTypeRadio({ dark, value, onChange, name }: Readonly<{ dark: boole
   const readOnly = useReadOnly();
   const c = useThemeClass(dark);
   return (
-    <FormField label="Database Type" helpRef="lookups-settings#mmdb-lookups" dark={dark}>
+    <FormField label="Database Type" helpRef={MMDB_HELP_REF} dark={dark}>
       <div className="flex gap-3">
         {mmdbDbTypes.map((t) => (
           <label key={t.value} className="flex items-center gap-1.5 cursor-pointer">

@@ -1,6 +1,7 @@
 import { describe, expect, test, afterEach } from "bun:test";
 import { render, cleanup } from "@testing-library/react";
 import type { Timestamp } from "../api/model/node";
+import { HelpProvider } from "../hooks/useHelp";
 import { OfflineBadge } from "./OfflineBadge";
 
 afterEach(cleanup);
@@ -15,7 +16,11 @@ function renderAt(lastSeen: Timestamp | undefined, isOffline = true) {
   const origNow = Date.now;
   Date.now = () => NOW_MS;
   try {
-    return render(<OfflineBadge lastSeen={lastSeen} isOffline={isOffline} dark />);
+    return render(
+      <HelpProvider onOpen={() => {}}>
+        <OfflineBadge lastSeen={lastSeen} isOffline={isOffline} dark />
+      </HelpProvider>,
+    );
   } finally {
     Date.now = origNow;
   }

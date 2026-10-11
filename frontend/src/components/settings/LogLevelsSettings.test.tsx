@@ -50,3 +50,39 @@ describe("LogLevelsSettings help", () => {
     expect(openHelp).toHaveBeenCalledWith("log-levels#components");
   });
 });
+
+function renderWithRules(rules: { pattern: string; level: LogLevel }[]) {
+  const qc = createTestQueryClient();
+  qc.setQueryData(["system"], { logLevels: { defaultLevel: LogLevel.INFO, rules } });
+  qc.setQueryData(["log-components"], []);
+  return renderWritable(<LogLevelsSettings dark />, { wrapper: settingsWrapper(qc) });
+}
+
+describe("LogLevelsSettings save gates", () => {
+  test("an empty new rule disables Save with the reason, until the rule is removed", () => {
+    const { getByText, getByLabelText, queryByText } = renderWithRules([]);
+
+    fireEvent.click(getByText("+ Add rule"));
+    expect(getByText("Save").closest("button")!.disabled).toBe(true);
+    expect(getByText("Enter a pattern or remove the empty rule")).toBeTruthy();
+
+    fireEvent.click(getByLabelText("Remove rule"));
+    expect(queryByText("Enter a pattern or remove the empty rule")).toBeNull();
+  });
+
+  test("a flagged pattern shows its error under the row and the reason beside Save, until fixed", () => {
+    const { getByText, getAllByText, getAllByLabelText, queryByText } = renderWithRules([
+      { pattern: "orchestrator", level: LogLevel.DEBUG },
+      { pattern: "orchestrator", level: LogLevel.WARN },
+    ]);
+
+    expect(getAllByText("Duplicate pattern")).toHaveLength(2);
+    expect(getByText("Fix the flagged patterns")).toBeTruthy();
+    expect(getByText("Save").closest("button")!.disabled).toBe(true);
+
+    fireEvent.click(getAllByLabelText("Remove rule")[1]!);
+    expect(queryByText("Duplicate pattern")).toBeNull();
+    expect(queryByText("Fix the flagged patterns")).toBeNull();
+    expect(getByText("Save").closest("button")!.disabled).toBe(false);
+  });
+});

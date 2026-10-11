@@ -134,7 +134,7 @@ export function PemCertForm({
         <Checkbox
           checked={setAsDefault}
           onChange={setSetAsDefault}
-          label="Use as default for TLS-wrapping the main server"
+          label="Use as the default HTTPS certificate"
           helpRef="certificates#default-certificate"
           dark={dark}
         />
@@ -192,14 +192,14 @@ export function FilesCertForm({
       <p
         className={`text-[0.8em] mb-3 ${c("text-text-muted", "text-light-text-muted")}`}
       >
-        Paths to certificate and key files on the server. Files are monitored and
+        Paths to certificate and key files on the node. The files are watched and
         reloaded when they change.
       </p>
       <div className="flex flex-col gap-4">
         <FormField
           label="Certificate file path"
           description="Path to the PEM-encoded certificate file"
-          helpRef="certificates#hot-reload"
+          helpRef="certificates#file-path-certificates"
           dark={dark}
         >
           <TextInput
@@ -213,7 +213,7 @@ export function FilesCertForm({
         <FormField
           label="Key file path"
           description="Path to the PEM-encoded private key file"
-          helpRef="certificates#hot-reload"
+          helpRef="certificates#file-path-certificates"
           dark={dark}
         >
           <TextInput
@@ -227,7 +227,7 @@ export function FilesCertForm({
         <Checkbox
           checked={setAsDefault}
           onChange={setSetAsDefault}
-          label="Use as default for TLS-wrapping the main server"
+          label="Use as the default HTTPS certificate"
           helpRef="certificates#default-certificate"
           dark={dark}
         />

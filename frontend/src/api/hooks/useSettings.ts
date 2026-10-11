@@ -2,12 +2,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { systemClient } from "../client";
 import { applySettingsMutationEcho } from "./useSystem";
 import { decode } from "../glid";
+import { idFromBytes } from "../model/id";
+import { recordRespondingNode } from "./respondingNode";
 
 export function useSettings() {
   return useQuery({
     queryKey: ["settings"],
     queryFn: async () => {
       const response = await systemClient.getSettings({});
+      recordRespondingNode(idFromBytes(response.nodeId));
       return response;
     },
   });

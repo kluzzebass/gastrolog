@@ -14,6 +14,7 @@ import {
 import { useSettings } from "../../api/hooks/useSettings";
 import { useToast } from "../Toast";
 import { SettingsCard } from "./SettingsCard";
+import { certSourceBadge } from "./certificateSource";
 import { sortByName } from "../../lib/sort";
 import {
   PemCertForm,
@@ -336,7 +337,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
               Add pasted certificate
             </Button>
             <Button onClick={startAddFiles}>
-              Add monitored files
+              Add file-path certificate
             </Button>
           </div>
         </div>
@@ -345,9 +346,9 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
       <p
         className={`text-[0.85em] mb-5 ${c("text-text-muted", "text-light-text-muted")}`}
       >
-        TLS certificates for the server, ingesters, or storage engines. Choose
-        either pasted PEM content (stored in config) or file paths (monitored for
-        changes).
+        TLS certificates for HTTPS and ingester connections: a pasted certificate
+        stores PEM content in the configuration; a file-path certificate reads
+        files on the node and reloads them when they change.
       </p>
 
       {adding === "pem" && (
@@ -384,7 +385,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
 
       {adding === "files" && (
         <AddCertificatePanel
-          title="Add monitored files certificate"
+          title="Add file-path certificate"
           dark={dark}
           name={name}
           setName={setName}
@@ -411,7 +412,8 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
             <SettingsCard
               key={encode(cert.id)}
               id={cert.name || encode(cert.id)}
-              typeBadge={defaultCert === encode(cert.id) ? defaultBadge : undefined}
+              typeBadge={certSourceBadge(cert)}
+              secondaryBadge={defaultCert === encode(cert.id) ? defaultBadge : undefined}
               dark={dark}
               expanded={expanded === encode(cert.id)}
               onToggle={() => {

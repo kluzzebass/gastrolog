@@ -1,6 +1,6 @@
 # Jobs
 
-The Jobs tab shows background work that GastroLog performs automatically. In a [cluster](help:clustering), each node runs jobs for its own vaults independently.
+The Jobs tab shows background work that GastroLog performs automatically. In a [cluster](help:clustering), each node runs jobs for its own vaults independently, and the tab shows one card per node with its count of active and scheduled jobs. The rows arrive over a live stream from the server; a **reconnecting** badge means that stream dropped and the rows may be stale until it is back.
 
 ## Tasks
 

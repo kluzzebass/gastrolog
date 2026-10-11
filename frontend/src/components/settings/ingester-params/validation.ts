@@ -1,20 +1,29 @@
 import { encode } from "../../../api/glid";
 
-// Returns true when the params are valid enough to save.
-const VALID_MAP: Record<string, (params: Record<string, string>) => boolean> = {
-  tail: (p) => !!p["paths"],
-  mqtt: (p) => !!p["broker"] && !!p["topics"],
-  kafka: (p) => !!p["brokers"] && !!p["topic"],
-  syslog: (p) => !!p["udp_addr"] || !!p["tcp_addr"],
-  relp: (p) => !!p["addr"],
-  http: (p) => !!p["addr"],
-  fluentfwd: (p) => !!p["addr"],
-  otlp: (p) => !!p["http_addr"] || !!p["grpc_addr"],
+// Params an ingester cannot be saved without, by type. Each inner list is
+// one requirement satisfied by any of its params; labels match the form fields.
+const REQUIRED_PARAMS: Record<string, { key: string; label: string }[][]> = {
+  tail: [[{ key: "paths", label: "File Patterns" }]],
+  mqtt: [[{ key: "broker", label: "Broker" }], [{ key: "topics", label: "Topics" }]],
+  kafka: [[{ key: "brokers", label: "Brokers" }], [{ key: "topic", label: "Topic" }]],
+  syslog: [[{ key: "udp_addr", label: "UDP Address" }, { key: "tcp_addr", label: "TCP Address" }]],
+  relp: [[{ key: "addr", label: "Listen Address" }]],
+  http: [[{ key: "addr", label: "Listen Address" }]],
+  fluentfwd: [[{ key: "addr", label: "Listen Address" }]],
+  otlp: [[{ key: "http_addr", label: "HTTP Address" }, { key: "grpc_addr", label: "gRPC Address" }]],
 };
 
+/** One line naming the required params still empty, or undefined when none are. */
+export function missingIngesterParamsReason(type: string, params: Record<string, string>): string | undefined {
+  const missing = (REQUIRED_PARAMS[type] ?? [])
+    .filter((alternatives) => !alternatives.some((p) => !!params[p.key]))
+    .map((alternatives) => alternatives.map((p) => p.label).join(" or "));
+  if (missing.length === 0) return undefined;
+  return `${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} required`;
+}
+
 export function isIngesterParamsValid(type: string, params: Record<string, string>): boolean {
-  const check = VALID_MAP[type];
-  return !check || check(params);
+  return missingIngesterParamsReason(type, params) === undefined;
 }
 
 // Listen address extraction — mirrors the Go ListenAddrs functions.
@@ -89,4 +98,9 @@ export function listenAddrConflict(
     if (conflict) return conflict;
   }
   return null;
+}
+
+/** Whether `tls_verify` verifies: only the literal "false" turns verification off, as the ingesters read it. */
+export function tlsVerifies(params: Record<string, string>): boolean {
+  return params["tls_verify"] !== "false";
 }

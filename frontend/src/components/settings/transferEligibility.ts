@@ -1,7 +1,7 @@
 import { encode } from "../../api/glid";
 import { VaultType, type VaultConfig } from "../../api/gen/gastrolog/v1/system_pb";
 import type { EligibilityOption } from "./EligibilitySelect";
-import type { VaultTypeLabel } from "./VaultsSettings";
+import type { VaultTypeLabel } from "./vaultStorageEntry";
 
 // Every reason here names a rejection PutVault makes for
 // retention_disposition = "transfer"; the UI must neither offer a pairing the
