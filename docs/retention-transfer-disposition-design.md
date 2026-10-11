@@ -89,8 +89,10 @@ silently mishandle (gastrolog-2l918 review):
   abandoned-announce GC below) or an operator deleted it — the
   announce-import is refused. That refusal is reported as a distinct
   defer cause (`tombstoned`), not folded into the corruption path: the
-  right response is to wait for `PruneTombstones` to drop the tombstone
-  and retry, not to alarm as if the destination held conflicting data.
+  right response is to wait for the destination's chunk tombstone to be
+  pruned — once every vault-ctl member has confirmed it holds no copy of
+  the chunk (`PruneChunkTombstonesCommand`) — and retry, not to alarm as if
+  the destination held conflicting data.
   The source's chunk is untouched and retried every sweep like any
   other deferred transfer.
 - **The announce-before-bytes window is real and self-heals.**

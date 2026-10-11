@@ -365,36 +365,6 @@ func TestFSMSnapshotRestoreTombstones(t *testing.T) {
 	}
 }
 
-func TestFSMPruneTombstones(t *testing.T) {
-	fsm := New()
-
-	// Three tombstones; we'll prune the two old ones.
-	for i := 1; i <= 3; i++ {
-		applyCmd(t, fsm, MarshalFinalizeDelete(testChunkID(byte(i))))
-	}
-	if len(fsm.tombstones) != 3 {
-		t.Fatalf("expected 3 tombstones, got %d", len(fsm.tombstones))
-	}
-
-	// Age the first two so the prune sweep finds them.
-	old := time.Now().Add(-2 * time.Hour)
-	fsm.mu.Lock()
-	fsm.tombstones[testChunkID(1)] = old
-	fsm.tombstones[testChunkID(2)] = old
-	fsm.mu.Unlock()
-
-	pruned := fsm.PruneTombstones(time.Now().Add(-1 * time.Hour))
-	if pruned != 2 {
-		t.Errorf("expected 2 pruned, got %d", pruned)
-	}
-	if fsm.IsTombstoned(testChunkID(1)) || fsm.IsTombstoned(testChunkID(2)) {
-		t.Error("aged tombstones should have been pruned")
-	}
-	if !fsm.IsTombstoned(testChunkID(3)) {
-		t.Error("recent tombstone should still be present")
-	}
-}
-
 func TestFSMToChunkMeta(t *testing.T) {
 	// Not parallel — consistent with other multiraft tests.
 	fsm := New()

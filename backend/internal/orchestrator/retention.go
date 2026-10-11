@@ -317,12 +317,14 @@ func (o *Orchestrator) retentionSweepAll() {
 // offset from the retention sweep) on every node. For each (vault,
 // instance) on this node it runs the lifecycle reconciler's
 // consolidated ReconcileTick: one shared FSM/disk gather per tick, then
-// every reconcile category diffs against it (pending obligations, local
-// orphans, staging orphans, missing replicas, stale leader FSM entries,
-// nodes outside the placement, idle actives). See
+// every reconcile category diffs against it (pending obligations, missing
+// replicas, stale leader FSM entries, nodes outside the placement, idle
+// actives). See
 // VaultLifecycleReconciler.ReconcileTick for the category catalogue and
-// per-category ownership docs. It then runs the released-segment sweep for
-// every vault, instance or not (sweepReleasedSegments).
+// per-category ownership docs. It then runs the released-segment sweep and
+// the chunk tombstone sweep for every vault, instance or not
+// (sweepReleasedSegments, sweepChunkTombstones); the chunk tombstone sweep is
+// the periodic local- and staging-orphan pass.
 //
 // BACKSTOP, not the primary driver. Every category has an upstream event
 // that drives its primary convergence — delete obligations on
@@ -355,6 +357,7 @@ func (o *Orchestrator) vaultCatchupSweepAll() {
 		t.Reconciler.ReconcileTick()
 	}
 	o.sweepReleasedSegments()
+	o.sweepChunkTombstones()
 }
 
 // enforceMemoryBudgets checks memory vaults for budget overruns and transitions

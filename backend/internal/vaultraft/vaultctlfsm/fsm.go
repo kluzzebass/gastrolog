@@ -316,17 +316,12 @@ type FSM struct {
 	onFinalizeDelete func(chunk.ChunkID)           // CmdFinalizeDelete applied; expectedFrom was empty
 	onPruneNode      func(string, []chunk.ChunkID) // CmdPruneNode applied; (prunedNodeID, finalizableChunks)
 
-	// tombstones records chunk IDs that have been deleted, with the apply
-	// timestamp of the delete. Consulted by the receive side of vault
-	// replication to reject stale ImportSealed / Append commands that
-	// arrive after a chunk has been deleted — closes the race between
-	// retention and post-seal replication where a late replication RPC
-	// could otherwise recreate a "ghost" chunk on a follower.
-	//
-	// Periodically pruned by the orchestrator (entries older than the
-	// replication-job deadline, typically a few minutes, cannot still be
-	// in flight and are safe to drop).
-	tombstones map[chunk.ChunkID]time.Time
+	// tombstones holds the chunk tombstones: chunk ID → the delete sequence
+	// it was tombstoned at. See chunk_tombstones.go.
+	tombstones map[chunk.ChunkID]uint64
+	// deletes is the delete sequence — the count of applies that tombstoned a
+	// chunk — and each node's chunk purge confirmation against it.
+	deletes tombstoneLedger
 
 	// completedSegments is the pipeline registry of closed segments awaiting
 	// chunking. Populated by CmdPublishCompletedSegment; see segments.go.
@@ -360,11 +355,9 @@ type FSM struct {
 	// naming one is ignored, and the released-segment purge deletes its bytes on sight.
 	// See released_segments.go for how tombstones are pruned.
 	releasedSegments map[glid.GLID]uint64
-	// releaseSeq counts the ReleaseSegments applies that tombstoned a segment.
-	releaseSeq uint64
-	// segmentPurgeConfirmed maps node ID → the highest release sequence the
-	// node has confirmed purging through.
-	segmentPurgeConfirmed map[string]uint64
+	// releases is the release sequence — the count of ReleaseSegments applies
+	// that tombstoned a segment — and each node's purge confirmation against it.
+	releases tombstoneLedger
 
 	// onSealedManifest fires after SealOpenChunkManifest transitions open →
 	// sealed manifest awaiting local GLCB build (outside the FSM lock).
@@ -403,45 +396,14 @@ type FSM struct {
 // New creates an empty chunk metadata FSM.
 func New() *FSM {
 	return &FSM{
-		chunks:                make(map[chunk.ChunkID]*ManifestEntry),
-		tombstones:            make(map[chunk.ChunkID]time.Time),
-		pendingDeletes:        make(map[chunk.ChunkID]*PendingDelete),
-		completedSegments:     make(map[glid.GLID]*CompletedSegmentEntry),
-		segmentResume:         make(map[glid.GLID]uint32),
-		segmentChunks:         make(map[glid.GLID][]chunk.ChunkID),
-		releasedSegments:      make(map[glid.GLID]uint64),
-		segmentPurgeConfirmed: make(map[string]uint64),
+		chunks:            make(map[chunk.ChunkID]*ManifestEntry),
+		tombstones:        make(map[chunk.ChunkID]uint64),
+		pendingDeletes:    make(map[chunk.ChunkID]*PendingDelete),
+		completedSegments: make(map[glid.GLID]*CompletedSegmentEntry),
+		segmentResume:     make(map[glid.GLID]uint32),
+		segmentChunks:     make(map[glid.GLID][]chunk.ChunkID),
+		releasedSegments:  make(map[glid.GLID]uint64),
 	}
-}
-
-// IsTombstoned reports whether a chunk has been deleted and is still
-// within the tombstone retention window. Used by the replication receiver
-// to reject late commands that would otherwise recreate a deleted chunk.
-func (f *FSM) IsTombstoned(id chunk.ChunkID) bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	_, ok := f.tombstones[id]
-	return ok
-}
-
-// PruneTombstones removes tombstone entries whose delete time is older
-// than the given cutoff. Returns the number of entries pruned. Intended
-// to be called periodically from a non-Raft path on the leader — this
-// mutation is local only (not raft-replicated) because every node
-// independently applies identical tombstones via the delete command
-// and can safely prune them independently once the replication window
-// has elapsed.
-func (f *FSM) PruneTombstones(before time.Time) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	n := 0
-	for id, ts := range f.tombstones {
-		if ts.Before(before) {
-			delete(f.tombstones, id)
-			n++
-		}
-	}
-	return n
 }
 
 var _ hraft.FSM = (*FSM)(nil)
@@ -1090,6 +1052,10 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 		fx.prunedNode = pruned.nodeID
 		fx.prunedFinalizable = pruned.finalizable
 		fx.holdersChangedEntries = f.captureEntries(result, pruned.holdersChanged)
+	case *gastrologv1.VaultCtlCommand_ConfirmChunkPurge:
+		result = f.applyConfirmChunkPurge(c.ConfirmChunkPurge)
+	case *gastrologv1.VaultCtlCommand_PruneChunkTombstones:
+		result = f.applyPruneChunkTombstones(c.PruneChunkTombstones)
 	case *gastrologv1.VaultCtlCommand_AttachOffsets:
 		result = f.applyAttachOffsets(c.AttachOffsets)
 	case *gastrologv1.VaultCtlCommand_BeginSeal:
@@ -1331,7 +1297,6 @@ func (f *FSM) SnapshotProto() *gastrologv1.VaultCtlSnapshot {
 func (f *FSM) snapshotProtoLocked() *gastrologv1.VaultCtlSnapshot {
 	snap := &gastrologv1.VaultCtlSnapshot{
 		Entries:              make([]*gastrologv1.ManifestEntry, 0, len(f.chunks)),
-		Tombstones:           make([]*gastrologv1.Tombstone, 0, len(f.tombstones)),
 		PendingDeletes:       make([]*gastrologv1.PendingDelete, 0, len(f.pendingDeletes)),
 		CompletedSegments:    f.snapshotCompletedSegmentsLocked(),
 		OpenChunk:            f.snapshotOpenChunkLocked(),
@@ -1342,19 +1307,11 @@ func (f *FSM) snapshotProtoLocked() *gastrologv1.VaultCtlSnapshot {
 	}
 
 	f.snapshotReleasedSegmentsLocked(snap)
+	f.snapshotChunkTombstonesLocked(snap)
 
 	entryIDs := slices.SortedFunc(maps.Keys(f.chunks), chunk.ChunkID.Compare)
 	for _, id := range entryIDs {
 		snap.Entries = append(snap.Entries, entryToProto(f.chunks[id]))
-	}
-
-	tombIDs := slices.SortedFunc(maps.Keys(f.tombstones), chunk.ChunkID.Compare)
-	for _, id := range tombIDs {
-		idCopy := id
-		snap.Tombstones = append(snap.Tombstones, &gastrologv1.Tombstone{
-			ChunkId:        idCopy[:],
-			DeletedAtNanos: f.tombstones[id].UnixNano(),
-		})
 	}
 
 	pdIDs := slices.SortedFunc(maps.Keys(f.pendingDeletes), chunk.ChunkID.Compare)
@@ -1401,10 +1358,7 @@ func (f *FSM) restoreFromProtoLocked(snap *gastrologv1.VaultCtlSnapshot) {
 		e := entryFromProto(pe)
 		f.chunks[e.ID] = &e
 	}
-	f.tombstones = make(map[chunk.ChunkID]time.Time, len(snap.GetTombstones()))
-	for _, ts := range snap.GetTombstones() {
-		f.tombstones[chunkIDFromProto(ts.GetChunkId())] = time.Unix(0, ts.GetDeletedAtNanos())
-	}
+	f.restoreChunkTombstonesLocked(snap)
 	f.pendingDeletes = make(map[chunk.ChunkID]*PendingDelete, len(snap.GetPendingDeletes()))
 	for _, pp := range snap.GetPendingDeletes() {
 		p := pendingDeleteFromProto(pp)

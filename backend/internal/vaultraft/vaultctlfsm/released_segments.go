@@ -1,7 +1,6 @@
 package vaultctlfsm
 
 import (
-	"errors"
 	"maps"
 	"slices"
 
@@ -25,7 +24,7 @@ import (
 func (f *FSM) ReleaseSeq() uint64 {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.releaseSeq
+	return f.releases.seq
 }
 
 // ReleasedSegmentCount returns the number of released-segment tombstones.
@@ -40,7 +39,7 @@ func (f *FSM) ReleasedSegmentCount() int {
 func (f *FSM) SegmentPurgeConfirmed(nodeID string) uint64 {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.segmentPurgeConfirmed[nodeID]
+	return f.releases.confirmed[nodeID]
 }
 
 // ReleasedSegmentsPrunable reports whether a PruneReleasedSegments naming
@@ -49,67 +48,21 @@ func (f *FSM) SegmentPurgeConfirmed(nodeID string) uint64 {
 func (f *FSM) ReleasedSegmentsPrunable(members []string) bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	floor := f.purgeFloorLocked(members)
-	for _, seq := range f.releasedSegments {
-		if seq <= floor {
-			return true
-		}
-	}
-	for nodeID := range f.segmentPurgeConfirmed {
-		if !slices.Contains(members, nodeID) {
-			return true
-		}
-	}
-	return false
-}
-
-// purgeFloorLocked is the release sequence every node in members has
-// confirmed purging through. A member that has confirmed nothing holds it at
-// 0. Caller holds f.mu.
-func (f *FSM) purgeFloorLocked(members []string) uint64 {
-	floor := f.releaseSeq
-	for _, nodeID := range members {
-		floor = min(floor, f.segmentPurgeConfirmed[nodeID])
-	}
-	return floor
+	return prunable(&f.releases, f.releasedSegments, members)
 }
 
 func (f *FSM) applyConfirmSegmentPurge(c *gastrologv1.ConfirmSegmentPurgeCommand) error {
-	nodeID := c.GetNodeId()
-	if nodeID == "" {
-		return errors.New("confirm segment purge: node id required")
-	}
-	// A node can only have swept releases its own FSM applied, all of which
-	// precede this command in the log.
-	seq := min(c.GetReleaseSeq(), f.releaseSeq)
-	if seq > f.segmentPurgeConfirmed[nodeID] {
-		if f.segmentPurgeConfirmed == nil {
-			f.segmentPurgeConfirmed = make(map[string]uint64)
-		}
-		f.segmentPurgeConfirmed[nodeID] = seq
-	}
-	return nil
+	return f.releases.confirm(c.GetNodeId(), c.GetReleaseSeq())
 }
 
 func (f *FSM) applyPruneReleasedSegments(c *gastrologv1.PruneReleasedSegmentsCommand) error {
-	members := c.GetMembers()
-	if len(members) == 0 {
-		return errors.New("prune released segments: members required")
-	}
-	floor := f.purgeFloorLocked(members)
-	maps.DeleteFunc(f.releasedSegments, func(_ glid.GLID, seq uint64) bool {
-		return seq <= floor
-	})
-	maps.DeleteFunc(f.segmentPurgeConfirmed, func(nodeID string, _ uint64) bool {
-		return !slices.Contains(members, nodeID)
-	})
-	return nil
+	return prune(&f.releases, f.releasedSegments, c.GetMembers())
 }
 
 // snapshotReleasedSegmentsLocked emits the tombstones in segment-ID order and
 // the purge confirmations in node-ID order. Caller holds f.mu.
 func (f *FSM) snapshotReleasedSegmentsLocked(snap *gastrologv1.VaultCtlSnapshot) {
-	snap.ReleaseSeq = f.releaseSeq
+	snap.ReleaseSeq = f.releases.seq
 	for _, id := range slices.SortedFunc(maps.Keys(f.releasedSegments), glid.Compare) {
 		idCopy := id
 		snap.ReleasedSegments = append(snap.ReleasedSegments, &gastrologv1.ReleasedSegment{
@@ -117,25 +70,24 @@ func (f *FSM) snapshotReleasedSegmentsLocked(snap *gastrologv1.VaultCtlSnapshot)
 			ReleaseSeq: f.releasedSegments[id],
 		})
 	}
-	for _, nodeID := range slices.Sorted(maps.Keys(f.segmentPurgeConfirmed)) {
+	f.releases.eachConfirmation(func(nodeID string, seq uint64) {
 		snap.SegmentPurgeConfirmations = append(snap.SegmentPurgeConfirmations, &gastrologv1.SegmentPurgeConfirmation{
 			NodeId:     nodeID,
-			ReleaseSeq: f.segmentPurgeConfirmed[nodeID],
+			ReleaseSeq: seq,
 		})
-	}
+	})
 }
 
 // restoreReleasedSegmentsLocked replaces the tombstones and purge
 // confirmations from a snapshot. Caller holds f.mu.
 func (f *FSM) restoreReleasedSegmentsLocked(snap *gastrologv1.VaultCtlSnapshot) {
-	f.releaseSeq = snap.GetReleaseSeq()
 	f.releasedSegments = make(map[glid.GLID]uint64, len(snap.GetReleasedSegments()))
 	for _, rs := range snap.GetReleasedSegments() {
 		f.releasedSegments[glid.FromBytes(rs.GetSegmentId())] = rs.GetReleaseSeq()
 	}
-	f.segmentPurgeConfirmed = make(map[string]uint64, len(snap.GetSegmentPurgeConfirmations()))
+	f.releases.reset(snap.GetReleaseSeq(), len(snap.GetSegmentPurgeConfirmations()))
 	for _, pc := range snap.GetSegmentPurgeConfirmations() {
-		f.segmentPurgeConfirmed[pc.GetNodeId()] = pc.GetReleaseSeq()
+		f.releases.confirmed[pc.GetNodeId()] = pc.GetReleaseSeq()
 	}
 }
 

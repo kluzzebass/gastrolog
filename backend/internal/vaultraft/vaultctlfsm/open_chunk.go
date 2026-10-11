@@ -727,7 +727,7 @@ func (f *FSM) segmentRangeReferencedLocked(segID glid.GLID, first, last uint32) 
 
 func (f *FSM) applyReleaseSegments(c *gastrologv1.ReleaseSegmentsCommand) []glid.GLID {
 	var released []glid.GLID
-	seq := f.releaseSeq + 1
+	seq := f.releases.seq + 1
 	// A sealed chunk whose segment is released can no longer be built from
 	// segments on any home; a home still missing it pulls the GLCB from a
 	// peer instead.
@@ -752,7 +752,7 @@ func (f *FSM) applyReleaseSegments(c *gastrologv1.ReleaseSegmentsCommand) []glid
 		}
 		if _, tombstoned := f.releasedSegments[segID]; !tombstoned {
 			f.releasedSegments[segID] = seq
-			f.releaseSeq = seq
+			f.releases.seq = seq
 		}
 		delete(f.completedSegments, segID)
 		f.removeCompletedSegmentOrder(segID)

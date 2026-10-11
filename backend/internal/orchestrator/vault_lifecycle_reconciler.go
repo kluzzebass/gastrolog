@@ -279,7 +279,7 @@ func (r *VaultLifecycleReconciler) ReconcileFromSnapshot(fsm *vaultctlfsm.FSM) {
 	// propose), so they are safe to run inline on the after-restore
 	// goroutine that drives ReconcileFromSnapshot.
 	if ov := r.gatherReconcileView(); ov != nil {
-		r.reconcileLocalOrphans(ov)
+		_ = r.reconcileLocalOrphans(ov)
 		r.reconcileStagingOrphans(ov)
 	}
 
@@ -1013,13 +1013,6 @@ func (r *VaultLifecycleReconciler) gatherManifestView() *reconcileView {
 //   - pendingObligations  event: CmdRequestDelete apply (onRequestDelete
 //     → fulfillObligation) + ReconcileFromSnapshot.
 //     Tick = retry backstop for a failed async ack.
-//   - localOrphans        event: snapshot install (ReconcileFromSnapshot)
-//   - log-replay onRequestDelete. Tick = backstop.
-//   - stagingOrphans      event: snapshot install (ReconcileFromSnapshot)
-//   - chunk finalize-delete. Tick = backstop. Released
-//     segments' staging copies belong to the pipeline's
-//     release consumer and the orchestrator's
-//     released-segment sweep, which run on every node.
 //   - missingReplicas     event: lead-gained + snapshot install
 //     (ReconcileMembershipCatchup). No reliable
 //     per-chunk edge (the leader's seal-time push has
@@ -1041,14 +1034,17 @@ func (r *VaultLifecycleReconciler) gatherManifestView() *reconcileView {
 //     hold a chunk stranded mid-seal. Tick = backstop
 //     for the case with no edge at all — a post-seal
 //     job that failed under a stable leader.
+//
+// Local and staging orphans are not tick categories. Their event is snapshot
+// install (ReconcileFromSnapshot); their periodic pass is the orchestrator's
+// chunk tombstone sweep, which runs them on every node for every vault and
+// turns a complete pass into a chunk purge confirmation.
 func (r *VaultLifecycleReconciler) ReconcileTick() {
 	v := r.gatherReconcileView()
 	if v == nil {
 		return
 	}
 	r.reconcilePendingObligations(v)
-	r.reconcileLocalOrphans(v)
-	r.reconcileStagingOrphans(v)
 	r.reconcileMissingReplicas(v)
 	r.reconcileNodesOutsidePlacement(v)
 	r.reconcileIdleActiveChunks(v)
@@ -1177,14 +1173,30 @@ func (r *VaultLifecycleReconciler) reconcilePendingObligations(v *reconcileView)
 // without per-component log-level overrides — the whole point of this
 // sweep is operator-visible recovery.
 func (r *VaultLifecycleReconciler) SweepLocalOrphans() {
-	if v := r.gatherReconcileView(); v != nil {
-		r.reconcileLocalOrphans(v)
-	}
+	_ = r.purgeLocalOrphans()
 }
 
-func (r *VaultLifecycleReconciler) reconcileLocalOrphans(v *reconcileView) {
-	if r.vaultInst == nil || r.vaultInst.Chunks == nil || v.localListErr != nil {
-		return
+// purgeLocalOrphans runs the local-orphan pass and reports whether this
+// node's chunk store is left holding a tombstoned chunk: an error when the
+// FSM is not bound yet, the local listing failed, or a tombstoned copy could
+// not be deleted.
+func (r *VaultLifecycleReconciler) purgeLocalOrphans() error {
+	v := r.gatherReconcileView()
+	if v == nil {
+		return errors.New("local-orphan sweep: no vault-ctl FSM bound")
+	}
+	return r.reconcileLocalOrphans(v)
+}
+
+// reconcileLocalOrphans deletes local copies of tombstoned and ghost chunks
+// and raises unknown orphans. Returns an error when a tombstoned chunk may
+// still be in the local chunk store.
+func (r *VaultLifecycleReconciler) reconcileLocalOrphans(v *reconcileView) error {
+	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
+		return nil
+	}
+	if v.localListErr != nil {
+		return fmt.Errorf("list local chunks: %w", v.localListErr)
 	}
 	metas := v.localMetas
 	ensurer, _ := r.vaultInst.Chunks.(chunk.SealEnsurer) // optional
@@ -1197,6 +1209,7 @@ func (r *VaultLifecycleReconciler) reconcileLocalOrphans(v *reconcileView) {
 	const ghostAgeThreshold = 5 * time.Minute
 	now := time.Now()
 	var deleted int
+	var errs []error
 	for _, meta := range metas {
 		if v.entryByID[meta.ID] != nil {
 			continue
@@ -1241,17 +1254,20 @@ func (r *VaultLifecycleReconciler) reconcileLocalOrphans(v *reconcileView) {
 			if ensurer == nil {
 				r.logger.Warn("local-orphan sweep: chunk is local active but Manager has no SealEnsurer; skipping",
 					"chunk", meta.ID)
+				errs = append(errs, fmt.Errorf("chunk %s: local active without a seal ensurer", meta.ID))
 				continue
 			}
 			if err := ensurer.EnsureSealed(meta.ID); err != nil {
 				r.logger.Warn("local-orphan sweep: pre-demote failed",
 					"chunk", meta.ID, "error", err)
+				errs = append(errs, fmt.Errorf("chunk %s: pre-demote: %w", meta.ID, err))
 				continue
 			}
 		}
 		if err := r.deleteLocalCopy(meta.ID, "local-orphan-sweep"); err != nil {
 			r.logger.Warn("local-orphan sweep: delete failed",
 				"chunk", meta.ID, "error", err)
+			errs = append(errs, fmt.Errorf("chunk %s: %w", meta.ID, err))
 			continue
 		}
 		deleted++
@@ -1260,6 +1276,7 @@ func (r *VaultLifecycleReconciler) reconcileLocalOrphans(v *reconcileView) {
 		r.logger.Info("local-orphan sweep: cleaned up tombstoned orphans",
 			"deleted", deleted)
 	}
+	return errors.Join(errs...)
 }
 
 // alertUnknownOrphan raises an operator-visible alert for a chunk
@@ -1304,7 +1321,8 @@ func (r *VaultLifecycleReconciler) alertUnknownOrphan(meta chunk.ChunkMeta) {
 // finalize-delete applied while this node was offline. Unknown dirs are
 // preserved per the no-auto-delete-of-unknown-orphans invariant, so a
 // not-yet-caught-up FSM can only DELAY cleanup, never delete live data.
-// Idempotent; runs on the vaultCatchupSweepAll cadence.
+// Idempotent. Runs on snapshot install for a home; the chunk tombstone sweep
+// runs the same purge (purgeTombstonedChunkStaging) on every node.
 //
 // Released segments' staging copies (completed/, head/, pre-head/) are not
 // this sweep's: the pipeline's release consumer and the orchestrator's
@@ -1320,43 +1338,21 @@ func (r *VaultLifecycleReconciler) reconcileStagingOrphans(v *reconcileView) {
 	if r.orch == nil || !v.ready {
 		return
 	}
-	r.sweepTombstonedChunkStaging(v)
+	r.sweepTombstonedChunkStaging()
 }
 
-func (r *VaultLifecycleReconciler) sweepTombstonedChunkStaging(v *reconcileView) {
+func (r *VaultLifecycleReconciler) sweepTombstonedChunkStaging() {
 	chunkRoot, ok := r.orch.pipelineVaultChunkRoot(r.vaultID)
 	if !ok {
 		return
 	}
-	entries, err := os.ReadDir(chunkRoot)
+	removed, err := purgeTombstonedChunkStaging(r.fsm.Load(), chunkRoot)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			r.logger.Warn("staging-orphan sweep: list chunk staging failed",
-				"dir", chunkRoot, "error", err)
-		}
-		return
+		r.logger.Warn("staging-orphan sweep: purge incomplete", "dir", chunkRoot, "error", err)
 	}
-	removed := 0
-	for _, ent := range entries {
-		if !ent.IsDir() {
-			continue
-		}
-		id, err := chunk.ParseChunkID(ent.Name())
-		if err != nil {
-			continue
-		}
-		if v.entryByID[id] != nil || v.pendingByID[id] != nil {
-			continue
-		}
-		if !r.fsm.Load().IsTombstoned(id) {
-			continue
-		}
-		r.deletePipelineChunkDir(id)
-		removed++
-	}
-	if removed > 0 {
+	if len(removed) > 0 {
 		r.logger.Info("staging-orphan sweep: removed tombstoned chunk dirs this node missed",
-			"chunks", removed)
+			"chunks", len(removed))
 	}
 }
 
@@ -1631,8 +1627,8 @@ func (r *VaultLifecycleReconciler) replicationPeers() []string {
 // no plausible transient stall survives it, so false-positive GC is
 // rare; if the source really is still trying, its next sweep's
 // ensureDestManifestEntry re-announces (deferred by the destination's
-// tombstone — see deferCatTombstoned — until PruneTombstones drops it,
-// then the announce succeeds like new).
+// tombstone — see deferCatTombstoned — until the chunk tombstone sweep
+// prunes it, then the announce succeeds like new).
 const abandonedTransferAnnounceGCAge = 24 * time.Hour
 
 // reconcileAbandonedTransferAnnounces retracts a transfer announce-import
