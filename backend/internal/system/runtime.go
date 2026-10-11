@@ -11,6 +11,11 @@ type Runtime struct {
 	Nodes              []NodeConfig        `json:"nodes,omitempty"`
 	NodeStorageConfigs []NodeStorageConfig `json:"nodeStorageConfigs,omitempty"`
 
+	// RemovedNodes holds the Raft server ID of every node the cluster
+	// removed, sorted. A removed node ID is refused enrolment and membership
+	// for good, so a removed node's key cannot bring its identity back.
+	RemovedNodes []string `json:"removedNodes,omitempty"`
+
 	// Vault placements: which storages hold replicas, and who leads.
 	// Keyed by vault ID. The operator sets replication factor and storage
 	// class on VaultConfig; the system decides placements.

@@ -358,6 +358,24 @@ func (p *StoreProxy) DeleteNode(ctx context.Context, id glid.GLID) error {
 	return p.inner.DeleteNode(ctx, id)
 }
 
+func (p *StoreProxy) MarkNodeRemoved(ctx context.Context, nodeID string) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return err
+	}
+	return p.inner.MarkNodeRemoved(ctx, nodeID)
+}
+
+func (p *StoreProxy) IsNodeRemoved(ctx context.Context, nodeID string) (bool, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return false, err
+	}
+	return p.inner.IsNodeRemoved(ctx, nodeID)
+}
+
 func (p *StoreProxy) SetNodeState(ctx context.Context, id glid.GLID, state NodeState, since time.Time) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

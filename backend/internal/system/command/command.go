@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"gastrolog/internal/glid"
+	"slices"
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
@@ -775,6 +776,16 @@ func NewDeleteNodeConfig(id glid.GLID) *gastrologv1.SystemCommand {
 	}
 }
 
+// NewMarkNodeRemoved creates a ConfigCommand recording that the cluster
+// removed the node with this Raft server ID.
+func NewMarkNodeRemoved(nodeID string) *gastrologv1.SystemCommand {
+	return &gastrologv1.SystemCommand{
+		Command: &gastrologv1.SystemCommand_MarkNodeRemoved{
+			MarkNodeRemoved: &gastrologv1.MarkNodeRemovedCommand{NodeId: nodeID},
+		},
+	}
+}
+
 // NewSetNodeState creates a ConfigCommand for SetNodeState. The
 // `since` argument is captured by the proposer at propose-time and
 // applied deterministically by all replicas.
@@ -958,6 +969,7 @@ func BuildSnapshot(sys *system.System, users []system.User, tokens []system.Refr
 	}
 
 	snap.SetupWizardDismissed = rt.SetupWizardDismissed
+	snap.RemovedNodeIds = slices.Clone(rt.RemovedNodes)
 
 	// Config: log levels.
 	if cfg.LogLevels.Default != 0 || len(cfg.LogLevels.Rules) > 0 {
@@ -1138,6 +1150,7 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 	}
 
 	rt.SetupWizardDismissed = snap.GetSetupWizardDismissed()
+	rt.RemovedNodes = slices.Clone(snap.GetRemovedNodeIds())
 
 	return sys, users, tokens, nil
 }

@@ -86,6 +86,12 @@ type Store interface {
 	// StateSince during deterministic apply. Returns the FSM error
 	// (illegal-transition, missing node, etc.) if validation fails.
 	SetNodeState(ctx context.Context, id glid.GLID, state NodeState, since time.Time) error
+	// MarkNodeRemoved records that the cluster removed the node with this
+	// Raft server ID. The record is permanent.
+	MarkNodeRemoved(ctx context.Context, nodeID string) error
+	// IsNodeRemoved reports whether the cluster removed the node with this
+	// Raft server ID.
+	IsNodeRemoved(ctx context.Context, nodeID string) (bool, error)
 
 	// Cluster TLS (mTLS material for cluster port).
 	// Read via Load() → Config.ClusterTLS; PutClusterTLS is the Raft write path.

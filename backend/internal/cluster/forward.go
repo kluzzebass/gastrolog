@@ -960,6 +960,9 @@ func (s *Server) forwardSetNodeSuffrage(ctx context.Context, req *gastrologv1.Fo
 		return nil, status.Error(codes.Unavailable, "set node suffrage not configured")
 	}
 	if err := s.setNodeSuffrageFn(ctx, string(req.GetNodeId()), req.GetNodeAddr(), req.GetVoter()); err != nil {
+		if errors.Is(err, ErrNodeRemoved) {
+			return nil, status.Error(codes.PermissionDenied, err.Error())
+		}
 		return nil, status.Errorf(codes.Internal, "set node suffrage: %v", err)
 	}
 	return &gastrologv1.ForwardSetNodeSuffrageResponse{}, nil
@@ -1871,6 +1874,28 @@ func ForwardRemoveNode(ctx context.Context, peers *PeerConnManager, leaderID, no
 		return &translatedRefusal{msg: st.Message(), sentinel: ErrRemovalRefused}
 	}
 	return fmt.Errorf("forward remove node to leader %s: %w", leaderID, err)
+}
+
+// ForwardSetNodeSuffrage asks the leader to apply a suffrage change, or, with
+// a nodeAddr, to admit the node at that address, and translates the leader's
+// refusal of a removed node back into ErrNodeRemoved so the follower answers
+// the caller exactly as the leader would have.
+func ForwardSetNodeSuffrage(ctx context.Context, peers *PeerConnManager, leaderID, nodeID, nodeAddr string, voter bool) error {
+	req := &gastrologv1.ForwardSetNodeSuffrageRequest{
+		NodeId:   []byte(nodeID),
+		NodeAddr: nodeAddr,
+		Voter:    voter,
+	}
+	out := &gastrologv1.ForwardSetNodeSuffrageResponse{}
+	err := peers.InvokeService(ctx, leaderID, PurposeSuffrage,
+		"/gastrolog.v1.ClusterService/ForwardSetNodeSuffrage", req, out)
+	if err == nil {
+		return nil
+	}
+	if st, _ := status.FromError(err); st.Code() == codes.PermissionDenied {
+		return &translatedRefusal{msg: st.Message(), sentinel: ErrNodeRemoved}
+	}
+	return fmt.Errorf("forward suffrage to leader %s: %w", leaderID, err)
 }
 
 // translatedRefusal is a leader's refusal rebuilt after the hop: the

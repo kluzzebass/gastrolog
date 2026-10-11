@@ -88,7 +88,8 @@ type LifecycleServiceClient interface {
 	// The node's Raft state is replaced by the remote cluster's state via replication.
 	JoinCluster(context.Context, *connect.Request[v1.JoinClusterRequest]) (*connect.Response[v1.JoinClusterResponse], error)
 	// RemoveNode evicts a node from the cluster. Must be called on the leader.
-	// The evicted node receives a best-effort shutdown notification.
+	// The evicted node receives a best-effort shutdown notification. Its node
+	// ID is retired: the cluster refuses to enroll or re-admit it.
 	RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error)
 	// YieldLeadership asks this node to transfer Raft leadership to another
 	// voter, if it currently holds leadership. Non-leaders no-op. Intended
@@ -264,7 +265,8 @@ type LifecycleServiceHandler interface {
 	// The node's Raft state is replaced by the remote cluster's state via replication.
 	JoinCluster(context.Context, *connect.Request[v1.JoinClusterRequest]) (*connect.Response[v1.JoinClusterResponse], error)
 	// RemoveNode evicts a node from the cluster. Must be called on the leader.
-	// The evicted node receives a best-effort shutdown notification.
+	// The evicted node receives a best-effort shutdown notification. Its node
+	// ID is retired: the cluster refuses to enroll or re-admit it.
 	RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error)
 	// YieldLeadership asks this node to transfer Raft leadership to another
 	// voter, if it currently holds leadership. Non-leaders no-op. Intended

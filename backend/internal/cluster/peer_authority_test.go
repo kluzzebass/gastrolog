@@ -89,7 +89,9 @@ func TestOtherCallsNeedACertificate(t *testing.T) {
 
 // RequestMembership is the one call a node makes holding a certificate while
 // still outside the configuration — it is asking to be put in it. Requiring
-// membership here would make joining impossible.
+// membership here would make joining impossible. Passing this gate buys a
+// first-time joiner a nonvoter seat and a removed node nothing: the leader
+// decides both, against the removal record.
 func TestRequestMembershipDoesNotRequireMembership(t *testing.T) {
 	t.Parallel()
 	s := &Server{}

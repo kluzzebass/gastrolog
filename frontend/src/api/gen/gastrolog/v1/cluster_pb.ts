@@ -279,6 +279,10 @@ export class EnrollResponse extends Message<EnrollResponse> {
  * certificate enrolment just issued it, which is what proves it holds the
  * key rather than merely a copy of the join token.
  *
+ * The request carries no suffrage. A node outside the configuration enters
+ * as a nonvoter, and a member is re-added at the suffrage it already has:
+ * the vote is granted by the cluster, never claimed by the caller.
+ *
  * @generated from message gastrolog.v1.RequestMembershipRequest
  */
 export class RequestMembershipRequest extends Message<RequestMembershipRequest> {
@@ -292,11 +296,6 @@ export class RequestMembershipRequest extends Message<RequestMembershipRequest> 
    */
   nodeAddr = "";
 
-  /**
-   * @generated from field: bool voter = 3;
-   */
-  voter = false;
-
   constructor(data?: PartialMessage<RequestMembershipRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -307,7 +306,6 @@ export class RequestMembershipRequest extends Message<RequestMembershipRequest> 
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "node_addr", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "voter", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RequestMembershipRequest {
@@ -3447,7 +3445,9 @@ export class ForwardRemoveNodeResponse extends Message<ForwardRemoveNodeResponse
 
 /**
  * ForwardSetNodeSuffrageRequest is sent by a follower to the leader to
- * promote or demote a node's voting status.
+ * promote or demote a node's voting status, or, when node_addr is set, to
+ * carry a membership request on behalf of the node at that address. A
+ * membership request takes no suffrage, so voter is not read for one.
  *
  * @generated from message gastrolog.v1.ForwardSetNodeSuffrageRequest
  */

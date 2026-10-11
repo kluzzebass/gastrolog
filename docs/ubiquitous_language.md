@@ -515,6 +515,19 @@ one segmented file set, one batch-writer goroutine.
   vaults; the RF gate wraps the `ErrWouldDropBelowRF` sentinel.
   [`backend/internal/app/cluster.go`](../backend/internal/app/cluster.go).
 
+- **Removal record** — the replicated set of node IDs the cluster removed
+  (`system.Runtime.RemovedNodes`, written by `MarkNodeRemoved` before the
+  Raft configuration change). Permanent: enrolment and membership requests
+  naming a recorded ID are refused, so a removed node's key cannot bring its
+  identity back. The machine returns as a new node, under a new node ID.
+  See [`docs/cluster_enrollment.md`](cluster_enrollment.md).
+
+- **Admission** — the leader's answer to a membership request. The request
+  carries no suffrage: a node outside the configuration enters as a nonvoter
+  (learner), a member is re-added at its current suffrage, and a node in the
+  removal record is refused. Votes come only from the learner promoter or an
+  operator's promotion.
+
 - **Removal policy** — who asked for a node removal, which decides the
   RF-preservation gate's stance. **Operator** (`cluster remove-node`) is
   pessimistic: refuse and let the operator choose a remedy. **Self**

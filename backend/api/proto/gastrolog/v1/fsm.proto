@@ -57,6 +57,7 @@ message SystemCommand {
     SetNodeStateCommand set_node_state = 39;
     CatchupBarrierCommand catchup_barrier = 40;
     RotateRefreshTokenCommand rotate_refresh_token = 41;
+    MarkNodeRemovedCommand mark_node_removed = 42;
   }
 }
 
@@ -262,6 +263,14 @@ message DeleteNodeConfigCommand {
   bytes id = 1;
 }
 
+// MarkNodeRemovedCommand records that the cluster removed a node. The record
+// is permanent: the cluster refuses enrolment and membership to the node ID
+// from then on, so a removed node's key cannot bring its identity back.
+// node_id is the node's Raft server ID.
+message MarkNodeRemovedCommand {
+  string node_id = 1;
+}
+
 // SetNodeStateCommand transitions a node from its current lifecycle
 // state to the given state. The since field is the wall-clock instant
 // captured by the proposer at propose-time; replicas apply it
@@ -410,4 +419,6 @@ message SystemSnapshot {
   // entries) release read-after-write apply-wait barriers for every command
   // the snapshot covers (gastrolog-3klg1).
   uint64 last_applied_index = 21;
+  // Raft server IDs of every node the cluster removed.
+  repeated string removed_node_ids = 22;
 }

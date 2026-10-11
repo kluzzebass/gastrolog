@@ -359,11 +359,14 @@ func (x *EnrollResponse) GetNodeCertPem() []byte {
 // Unlike Enroll, this call is mTLS-authenticated: the caller presents the
 // certificate enrolment just issued it, which is what proves it holds the
 // key rather than merely a copy of the join token.
+//
+// The request carries no suffrage. A node outside the configuration enters
+// as a nonvoter, and a member is re-added at the suffrage it already has:
+// the vote is granted by the cluster, never claimed by the caller.
 type RequestMembershipRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NodeId        []byte                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	NodeAddr      string                 `protobuf:"bytes,2,opt,name=node_addr,json=nodeAddr,proto3" json:"node_addr,omitempty"`
-	Voter         bool                   `protobuf:"varint,3,opt,name=voter,proto3" json:"voter,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -410,13 +413,6 @@ func (x *RequestMembershipRequest) GetNodeAddr() string {
 		return x.NodeAddr
 	}
 	return ""
-}
-
-func (x *RequestMembershipRequest) GetVoter() bool {
-	if x != nil {
-		return x.Voter
-	}
-	return false
 }
 
 type RequestMembershipResponse struct {
@@ -4119,7 +4115,9 @@ func (*ForwardRemoveNodeResponse) Descriptor() ([]byte, []int) {
 }
 
 // ForwardSetNodeSuffrageRequest is sent by a follower to the leader to
-// promote or demote a node's voting status.
+// promote or demote a node's voting status, or, when node_addr is set, to
+// carry a membership request on behalf of the node at that address. A
+// membership request takes no suffrage, so voter is not read for one.
 type ForwardSetNodeSuffrageRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NodeId        []byte                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
@@ -5009,11 +5007,10 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\acsr_pem\x18\x04 \x01(\fR\x06csrPem\"T\n" +
 	"\x0eEnrollResponse\x12\x1e\n" +
 	"\vca_cert_pem\x18\x01 \x01(\fR\tcaCertPem\x12\"\n" +
-	"\rnode_cert_pem\x18\x02 \x01(\fR\vnodeCertPem\"f\n" +
+	"\rnode_cert_pem\x18\x02 \x01(\fR\vnodeCertPem\"P\n" +
 	"\x18RequestMembershipRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12\x1b\n" +
-	"\tnode_addr\x18\x02 \x01(\tR\bnodeAddr\x12\x14\n" +
-	"\x05voter\x18\x03 \x01(\bR\x05voter\"\x1b\n" +
+	"\tnode_addr\x18\x02 \x01(\tR\bnodeAddr\"\x1b\n" +
 	"\x19RequestMembershipResponse\"L\n" +
 	"\x10BroadcastRequest\x128\n" +
 	"\amessage\x18\x01 \x01(\v2\x1e.gastrolog.v1.BroadcastMessageR\amessage\"\x13\n" +

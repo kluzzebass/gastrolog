@@ -26,6 +26,9 @@ A single-node server can join an existing cluster from this tab. Enter the leade
 - Backs up the previous Raft state to `<home>/raft.bak.<timestamp>`
 - Keeps the API port running throughout (the cluster port restarts briefly)
 - Is **irreversible** — the old single-node configuration is replaced
+- Admits the node as a nonvoter; the cluster promotes it to voter once it has caught up
+
+A node that was removed from a cluster cannot join that cluster again under its node ID — see **Removing Nodes** below.
 
 You can also join at startup via CLI flags: `--join-addr` and `--join-token`.
 
@@ -40,7 +43,7 @@ The last remaining voter cannot be demoted — at least one voter must always ex
 
 ## Removing Nodes
 
-Removing a node evicts it from the cluster entirely. The removed node stops receiving replicated state and must re-join with a fresh token if needed. You cannot remove the local node — only peer nodes can be evicted.
+Removing a node evicts it from the cluster entirely. The removed node stops receiving replicated state, and its node ID is retired for good: the cluster refuses to enroll or re-admit it, even though the node still holds its certificate. To bring the same machine back, start it from an empty home directory — it gets a new node ID, joins with a join token like any new node, and enters as a nonvoter until it is promoted. You cannot remove the local node — only peer nodes can be evicted.
 
 Removal is refused when it would cost data or redundancy: if the node holds the only copy of a vault, or if removing it would leave a vault below its replication factor with no other eligible node to re-place onto. The Nodes tab works this out from the vault placements before you ask: **Remove** stays disabled and names the affected vaults, and the confirm step names the vaults that lose a copy on the node and are re-placed elsewhere. The leader checks the same rule again on the request. Lower the replication factor, drain those vaults to other nodes, or add an eligible node — or use `gastrolog cluster remove-node <node> --force` to remove anyway and accept the loss.
 

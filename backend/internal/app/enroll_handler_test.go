@@ -32,6 +32,14 @@ func enrollFixture(t *testing.T) (handler func(context.Context, *gastrologv1.Enr
 // the refusals that depend on current membership.
 func enrollFixtureMembers(t *testing.T, members memberLister) (handler func(context.Context, *gastrologv1.EnrollRequest) (*gastrologv1.EnrollResponse, error), secret string) {
 	t.Helper()
+	handler, secret, _ = enrollFixtureStore(t, members)
+	return handler, secret
+}
+
+// enrollFixtureStore is enrollFixtureMembers that also hands back the
+// replicated state the handler reads, for refusals that depend on it.
+func enrollFixtureStore(t *testing.T, members memberLister) (handler func(context.Context, *gastrologv1.EnrollRequest) (*gastrologv1.EnrollResponse, error), secret string, store *sysmem.Store) {
+	t.Helper()
 	ca, err := tlsutil.GenerateCA()
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +57,7 @@ func enrollFixtureMembers(t *testing.T, members memberLister) (handler func(cont
 		t.Fatal(err)
 	}
 
-	store := sysmem.NewStore()
+	store = sysmem.NewStore()
 	if err := store.PutClusterTLS(context.Background(), system.ClusterTLS{
 		CACertPEM:    string(ca.CertPEM),
 		CAKeyPEM:     string(ca.KeyPEM),
@@ -57,7 +65,7 @@ func enrollFixtureMembers(t *testing.T, members memberLister) (handler func(cont
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return makeEnrollHandler(store, members, slog.New(slog.DiscardHandler)), secret
+	return makeEnrollHandler(store, members, slog.New(slog.DiscardHandler)), secret, store
 }
 
 // csrFor produces what a joiner sends: a request for nodeID, signed by a key
@@ -275,5 +283,38 @@ func TestEnrollRefusesACurrentMembersID(t *testing.T) {
 	}
 	if len(resp.GetNodeCertPem()) == 0 {
 		t.Fatal("fresh enrollment returned no certificate")
+	}
+}
+
+// A removed node holds a join token as easily as anyone, and its ID is no
+// longer in the configuration, so the current-member refusal does not stop
+// it. A valid token plus a removed node's ID must yield a refusal, not a
+// fresh certificate for the identity the cluster retired.
+func TestEnrollRefusesARemovedNodesID(t *testing.T) {
+	t.Parallel()
+	h, secret, store := enrollFixtureStore(t, fakeMembers{"member-1"})
+	if err := store.MarkNodeRemoved(context.Background(), "removed-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := h(context.Background(), &gastrologv1.EnrollRequest{
+		TokenSecret: secret,
+		NodeId:      []byte("removed-1"),
+		NodeAddr:    "removed-1:4566",
+		CsrPem:      csrFor(t, "removed-1"),
+	})
+	if err == nil || resp != nil {
+		t.Fatal("a removed node's ID was issued a certificate")
+	}
+
+	// The refusal is about that identity, not the token or the machine: the
+	// same token enrols a node under a new ID at the same address.
+	if _, err := h(context.Background(), &gastrologv1.EnrollRequest{
+		TokenSecret: secret,
+		NodeId:      []byte("replacement-1"),
+		NodeAddr:    "removed-1:4566",
+		CsrPem:      csrFor(t, "replacement-1"),
+	}); err != nil {
+		t.Fatalf("a new node ID at the removed node's address was refused: %v", err)
 	}
 }
