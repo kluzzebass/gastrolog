@@ -16,9 +16,11 @@ import (
 	"gastrolog/internal/system"
 )
 
-// DeleteVault is this node's share of a vault deletion. It stops the vault's
-// pipeline, closes the vault, retires its vault-ctl Raft group — WAL state
-// and directory — and removes the vault's directories on this node.
+// DeleteVault is this node's share of a vault deletion. It drops the vault
+// from this node's registries and returns; a background teardown
+// (scheduleVaultTeardownLocked) then stops the vault's pipeline, closes the
+// vault, retires its vault-ctl Raft group — WAL state and directory — and
+// removes the vault's directories on this node.
 //
 // The files that hold the vault's records — staging segments, sealed chunks,
 // and a cloud-backed vault's cloud objects — go only with deleteData. Without
@@ -40,10 +42,113 @@ func (o *Orchestrator) DeleteVault(id glid.GLID, deleteData bool) error {
 
 	o.mu.Lock()
 	o.vaultDeletions.Add(1)
-	retired := o.retireVaultLocked(sys, id, deleteData)
+	o.scheduleVaultTeardownLocked(o.retireVaultLocked(sys, id, deleteData))
 	o.mu.Unlock()
+	return err
+}
 
-	return errors.Join(err, o.finishRetiredVault(retired))
+// vaultTeardown is one retired vault's teardown, pending until done closes.
+type vaultTeardown struct {
+	retired retiredVault
+	prev    *vaultTeardown // the vault's earlier teardown, finished first
+	done    chan struct{}
+}
+
+// scheduleVaultTeardownLocked runs the retired vault's teardown as a scheduler
+// job, after any earlier teardown of the same vault, and records it as the
+// vault's pending teardown until it finishes. The teardown waits on
+// goroutines, I/O, the network and Raft, so it runs neither under o.mu nor on
+// the caller's goroutine — for a deletion that is the config apply
+// goroutine. Caller holds o.mu.
+func (o *Orchestrator) scheduleVaultTeardownLocked(r retiredVault) {
+	if o.vaultTeardowns == nil {
+		o.vaultTeardowns = make(map[glid.GLID]*vaultTeardown)
+	}
+	td := &vaultTeardown{retired: r, prev: o.vaultTeardowns[r.id], done: make(chan struct{})}
+	o.vaultTeardowns[r.id] = td
+	ctx := o.teardownCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	name := fmt.Sprintf("%s%s:%d", vaultTeardownJobPrefix, r.id, o.teardownSeq.Add(1))
+	o.scheduler.Describe(name, fmt.Sprintf("Remove deleted vault %s from this node (delete data: %t)", r.id, r.deleteData))
+	if err := o.scheduler.RunOnce(name, func() error { return o.runVaultTeardown(ctx, td) }); err != nil {
+		o.logger.Warn("schedule deleted vault teardown; its files stay on disk", "vault", r.id, "error", err)
+		o.endVaultTeardownLocked(td)
+	}
+}
+
+// vaultTeardownJobPrefix names the scheduler jobs of vault teardowns.
+const vaultTeardownJobPrefix = "vault-teardown:"
+
+// runVaultTeardown is a teardown's scheduler job. A teardown abandoned at
+// shutdown leaves the rest of its work undone.
+func (o *Orchestrator) runVaultTeardown(ctx context.Context, td *vaultTeardown) error {
+	defer func() {
+		o.mu.Lock()
+		o.endVaultTeardownLocked(td)
+		o.mu.Unlock()
+	}()
+	if td.prev != nil {
+		select {
+		case <-td.prev.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	err := o.finishRetiredVault(ctx, td.retired)
+	if err != nil {
+		o.logger.Warn("deleted vault teardown incomplete", "vault", td.retired.id, "error", err)
+	}
+	return err
+}
+
+// endVaultTeardownLocked marks a teardown finished. Caller holds o.mu.
+func (o *Orchestrator) endVaultTeardownLocked(td *vaultTeardown) {
+	close(td.done)
+	if o.vaultTeardowns[td.retired.id] == td {
+		delete(o.vaultTeardowns, td.retired.id)
+	}
+}
+
+// lockWithoutVaultTeardown reads config for adding the vault (as
+// loadSystemForReload) and returns holding o.mu, once no teardown of a vault
+// with the same ID is pending: the new vault's files and vault-ctl group
+// share the old one's paths and group ID, which the teardown removes.
+func (o *Orchestrator) lockWithoutVaultTeardown(ctx context.Context, id glid.GLID) (*system.System, uint64, error) {
+	for {
+		if err := o.awaitVaultTeardown(ctx, id); err != nil {
+			return nil, 0, fmt.Errorf("wait for vault %s teardown: %w", id, err)
+		}
+		sys, deletions, err := o.loadSystemForReload(ctx)
+		if err != nil {
+			return nil, 0, fmt.Errorf("load config for AddVault: %w", err)
+		}
+		o.mu.Lock()
+		if o.vaultTeardowns[id] == nil {
+			return sys, deletions, nil
+		}
+		o.mu.Unlock()
+	}
+}
+
+// awaitVaultTeardown waits until the vault has no teardown pending: a vault
+// re-created under a deleted vault's ID shares its directories and vault-ctl
+// group ID, which a pending teardown would remove.
+func (o *Orchestrator) awaitVaultTeardown(ctx context.Context, id glid.GLID) error {
+	for {
+		o.mu.RLock()
+		td := o.vaultTeardowns[id]
+		o.mu.RUnlock()
+		if td == nil {
+			return nil
+		}
+		select {
+		case <-td.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 // retiredVault is a vault dropped from this node's registries whose teardown
@@ -85,7 +190,7 @@ func (o *Orchestrator) retireVaultLocked(sys *system.System, id glid.GLID, delet
 // finishRetiredVault runs a retired vault's teardown. It must not hold o.mu:
 // the vault's pipeline goroutines take it, and every step here can wait on
 // I/O, the network or Raft.
-func (o *Orchestrator) finishRetiredVault(r retiredVault) error {
+func (o *Orchestrator) finishRetiredVault(ctx context.Context, r retiredVault) error {
 	// The group stops first: its applies then fail at once instead of waiting
 	// out a quorum the other nodes' deletes are dissolving, so the pipeline
 	// goroutines waited for below return promptly, and no trailing apply
@@ -97,7 +202,7 @@ func (o *Orchestrator) finishRetiredVault(r retiredVault) error {
 	var err error
 	if r.deleteData && r.vault != nil && r.vault.Instance != nil {
 		if purger, ok := r.vault.Instance.Chunks.(cloudObjectPurger); ok {
-			if perr := purger.PurgeCloudObjects(context.Background()); perr != nil {
+			if perr := purger.PurgeCloudObjects(ctx); perr != nil {
 				err = errors.Join(err, fmt.Errorf("purge cloud objects of vault %s: %w", r.id, perr))
 			}
 		}
@@ -155,11 +260,8 @@ func (o *Orchestrator) registerUnlessDeleted(vault *Vault) bool {
 		o.mu.Unlock()
 		return true
 	}
-	retired := o.retireVaultLocked(sys, vault.ID, false)
+	o.scheduleVaultTeardownLocked(o.retireVaultLocked(sys, vault.ID, false))
 	o.mu.Unlock()
-	if err := o.finishRetiredVault(retired); err != nil {
-		o.logger.Warn("remove vault deleted while it initialized", "id", vault.ID, "error", err)
-	}
 	return false
 }
 

@@ -63,12 +63,10 @@ func resolveVaultDir(params map[string]string, vaultsDir, vaultID string) map[st
 // Loads the full config internally to resolve the vault's vault IDs to vault configs.
 // Returns ErrDuplicateID if a vault with this ID already exists.
 func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig, factories Factories) error {
-	sys, deletions, err := o.loadSystemForReload(ctx)
+	sys, deletions, err := o.lockWithoutVaultTeardown(ctx, vaultCfg.ID)
 	if err != nil {
-		return fmt.Errorf("load config for AddVault: %w", err)
+		return err
 	}
-
-	o.mu.Lock()
 	defer o.mu.Unlock()
 
 	if o.vaultDeletions.Load() != deletions {
@@ -212,11 +210,11 @@ func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 	o.vaultDeletions.Add(1)
 	retired := o.retireVaultLocked(nil, id, false)
 	retired.dirs = nil
+	o.scheduleVaultTeardownLocked(retired)
 	o.mu.Unlock()
 
-	err = o.finishRetiredVault(retired)
 	o.logger.Info("vault removed", "id", id, "name", vault.Name, "type", vault.Type())
-	return err
+	return nil
 }
 
 // checkVaultEmptyLocked returns the vault when it is registered and holds no

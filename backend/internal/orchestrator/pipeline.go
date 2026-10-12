@@ -840,6 +840,11 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 	var errs []error
 	chunkHomes := make(map[glid.GLID]bool, len(desired))
 	for vid := range desired {
+		if o.vaultTeardowns[vid] != nil {
+			// The vault's previous incarnation is still being torn down; its
+			// re-creation (AddVault) registers it once the teardown is done.
+			continue
+		}
 		home := o.isVaultHome(sys, vid)
 		fsm, applier, isLeader, hasHandle := o.vaultCtlHandle(vid)
 		policy, cronExpr := o.resolveChunkPolicy(sys, vid)

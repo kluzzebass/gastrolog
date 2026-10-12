@@ -239,6 +239,16 @@ type Orchestrator struct {
 	// re-reads it when the count moved since the read (currentSystemLocked).
 	vaultDeletions atomic.Uint64
 
+	// vaultTeardowns holds each vault's latest teardown still to finish
+	// (scheduleVaultTeardownLocked); guarded by mu. teardownSeq names their
+	// scheduler jobs. teardownCtx bounds them and is cancelled at Stop, so a
+	// teardown waiting on an unresponsive cloud store is abandoned instead of
+	// holding shutdown.
+	vaultTeardowns  map[glid.GLID]*vaultTeardown
+	teardownSeq     atomic.Uint64
+	teardownCtx     context.Context
+	cancelTeardowns context.CancelFunc
+
 	// pipelineReregisterHook, if non-nil, is invoked during a vault's
 	// (re-)registration after the supervisor has dropped its previous
 	// registration and before it registers the new one — the instant the
@@ -841,6 +851,8 @@ func New(cfg Config) (*Orchestrator, error) {
 		cloudHealthLogger:      compCloudHealth.Apply(baseLogger),
 	}
 	o.setSystemLoader(cfg.SystemLoader)
+	o.vaultTeardowns = make(map[glid.GLID]*vaultTeardown)
+	o.teardownCtx, o.cancelTeardowns = context.WithCancel(context.Background())
 
 	// The max-size bound measures the vault's whole local disk claim.
 	o.diskGuard.vaultFootprint = o.localVaultFootprintBytes

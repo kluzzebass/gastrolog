@@ -1007,9 +1007,14 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 
 - **Vault deletion** — the operator removing a vault from the config; every
   node then deletes its share (`Orchestrator.DeleteVault`, from the
-  vault-deleted notification), whether or not the vault is registered there:
-  it stops the vault's pipeline, closes the vault, decommissions its vault-ctl
-  group (WAL state and directory), and removes the vault's directories — each
+  vault-deleted notification), whether or not the vault is registered there.
+  The delete drops the vault from the node's registries and returns; a
+  background **vault teardown** — a `vault-teardown:` scheduler job, one at a
+  time per vault, abandoned at shutdown — then decommissions its vault-ctl
+  group (WAL state and directory), stops its pipeline, closes the vault, and
+  removes the vault's directories. A vault re-created under the same ID waits
+  for a pending teardown, which would otherwise remove its files. The
+  directories removed are each
   **pipeline root** candidate and each chunk-manager directory, all named by
   the vault's ID. **Delete data** decides the files holding records — staging
   segments, sealed chunks and their indexes, a cloud-backed vault's cloud

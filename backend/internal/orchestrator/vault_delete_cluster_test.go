@@ -85,12 +85,16 @@ func (h *orchRelHarness) dropVaultFromConfig(v vaultSpec, deleteData bool) {
 	}
 }
 
-// deleteVaultOn runs the dispatcher's vault-delete side effects on one node.
+// deleteVaultOn runs the dispatcher's vault-delete side effects on one node
+// and waits for the vault's background teardown there.
 func (h *orchRelHarness) deleteVaultOn(nodeID string, v vaultSpec, deleteData bool) {
 	h.t.Helper()
 	n := h.nodes[nodeID]
 	if err := n.orch.DeleteVault(v.id, deleteData); err != nil {
 		h.t.Fatalf("%s: DeleteVault %s: %v", n.label, v.label, err)
+	}
+	if err := n.orch.AwaitVaultTeardownForTest(context.Background(), v.id); err != nil {
+		h.t.Fatalf("%s: vault %s teardown: %v", n.label, v.label, err)
 	}
 	if err := n.orch.ReloadFilters(context.Background()); err != nil {
 		h.t.Fatalf("%s: ReloadFilters: %v", n.label, err)
@@ -1004,96 +1008,129 @@ func TestOrchVaultDeleteFencesConfigReadBeforeIt(t *testing.T) {
 }
 
 // listGatedStore holds the next List under one key prefix until released,
-// reporting when one is held: a cloud store that stops answering mid-delete.
+// reporting when one is held and how the hold ended: a cloud store that stops
+// answering mid-delete.
 type listGatedStore struct {
 	blobstore.Store
 	mu      sync.Mutex
 	prefix  string
 	gate    chan struct{}
 	holding chan struct{}
+	ended   chan error
 }
 
 // holdNextList makes the next List under prefix wait for release; holding is
-// closed when it starts waiting.
-func (s *listGatedStore) holdNextList(prefix string) (holding <-chan struct{}, release func()) {
+// closed when it starts waiting, and ended receives nil when it was released
+// or its context's error when that ended it first.
+func (s *listGatedStore) holdNextList(prefix string) (holding <-chan struct{}, ended <-chan error, release func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.prefix = prefix
 	s.gate = make(chan struct{})
 	s.holding = make(chan struct{})
+	s.ended = make(chan error, 1)
 	gate := s.gate
-	return s.holding, sync.OnceFunc(func() { close(gate) })
+	return s.holding, s.ended, sync.OnceFunc(func() { close(gate) })
 }
 
 func (s *listGatedStore) List(ctx context.Context, prefix string, fn func(blobstore.BlobInfo) error) error {
 	s.mu.Lock()
 	var gate, holding chan struct{}
+	var ended chan error
 	if s.gate != nil && strings.HasPrefix(prefix, s.prefix) {
-		gate, holding = s.gate, s.holding
-		s.gate, s.holding = nil, nil
+		gate, holding, ended = s.gate, s.holding, s.ended
+		s.gate, s.holding, s.ended = nil, nil, nil
 	}
 	s.mu.Unlock()
 	if gate != nil {
 		close(holding)
 		select {
 		case <-gate:
+			ended <- nil
 		case <-ctx.Done():
+			ended <- ctx.Err()
 			return ctx.Err()
 		}
 	}
 	return s.Store.List(ctx, prefix, fn)
 }
 
-// A vault delete that waits on an unresponsive cloud store does not hold the
-// orchestrator lock while it waits: the registry is readable and the lock is
-// free until the store answers, and then the delete completes and removes the
-// vault's files and objects. Deletes back to back complete the same way.
-func TestOrchVaultDeleteDoesNotHoldLockWhileCloudStoreBlocks(t *testing.T) {
-	if testing.Short() {
-		t.Skip("pipeline vault-delete acceptance test")
-	}
-	t.Parallel()
-
+// blockedStoreHarness is a one-node cluster whose cloud vaults, one per
+// label, share a bucket that can stop answering, each holding uploaded
+// sealed chunks.
+func blockedStoreHarness(t *testing.T, labels ...string) (*orchRelHarness, *listGatedStore, []vaultSpec) {
+	t.Helper()
 	bucket := &listGatedStore{Store: blobstore.NewMemory()}
 	h := newOrchRelHarness(t, 1,
 		withPipelineCluster(pipelineTestCompletePolicy, pipelineChunkMaxRecords),
 		withSharedCloudStore(bucket),
 	)
-	vs := h.addCloudVaultsWithOneRoute([]string{"P", "Q", "R"}, []glid.GLID{glid.New(), glid.New(), glid.New()}, []int{0})
-	node := h.nodes[h.nodeIDs[0]]
-
+	ids := make([]glid.GLID, len(labels))
+	for i := range ids {
+		ids[i] = glid.New()
+	}
+	vs := h.addCloudVaultsWithOneRoute(labels, ids, []int{0})
 	const total = 2 * pipelineChunkMaxRecords
-	h.submitIngestRecords(node.id, total, "blocked-store")
+	h.submitIngestRecords(h.nodeIDs[0], total, "blocked-store")
 	for _, v := range vs {
-		entries := h.waitSealedRecords(v, node.id, total)
+		entries := h.waitSealedRecords(v, h.nodeIDs[0], total)
 		h.waitProgress(fmt.Sprintf("vault %s: every sealed chunk uploaded", v.label), 100*time.Millisecond,
 			func() (string, bool) {
 				n := len(cloudKeys(t, bucket, v))
 				return fmt.Sprintf("objects=%d/%d", n, len(entries)), n == len(entries)
 			}, func() { h.dumpPipelineState(v) })
 	}
-	kept := vs[2]
+	return h, bucket, vs
+}
+
+// holdPurge makes the vault's next cloud purge wait on the store.
+func holdPurge(bucket *listGatedStore, v vaultSpec) (holding <-chan struct{}, ended <-chan error, release func()) {
+	return bucket.holdNextList("vault-" + v.id.String() + "/")
+}
+
+// A vault delete whose teardown waits on an unresponsive cloud store returns
+// at once — it runs on the config apply goroutine — and neither it nor the
+// waiting teardown holds the orchestrator lock: the registry is readable, the
+// teardown is a visible scheduler job, and a config change that follows
+// applies while it waits. Once the store answers the teardown removes the
+// vault's files and objects; deletes back to back complete the same way.
+func TestOrchVaultDeleteReturnsWhileTeardownWaitsOnCloudStore(t *testing.T) {
+	if testing.Short() {
+		t.Skip("pipeline vault-delete acceptance test")
+	}
+	t.Parallel()
+
+	h, bucket, vs := blockedStoreHarness(t, "P", "Q", "R")
+	node := h.nodes[h.nodeIDs[0]]
+	blocked, kept := vs[0], vs[2]
 	keptKeys := cloudKeys(t, bucket, kept)
 
-	blocked := vs[0]
 	h.dropVaultFromConfig(blocked, true)
-	holding, release := bucket.holdNextList("vault-" + blocked.id.String() + "/")
+	holding, _, release := holdPurge(bucket, blocked)
 	defer release()
-	deleted := make(chan error, 1)
-	go func() { deleted <- node.orch.DeleteVault(blocked.id, true) }()
-	awaitSignal(t, "delete waiting on the cloud store", holding)
+	if err := node.orch.DeleteVault(blocked.id, true); err != nil {
+		t.Fatalf("DeleteVault %s: %v", blocked.label, err)
+	}
+	awaitSignal(t, "teardown waiting on the cloud store", holding)
 
 	if !node.orch.TryLockForTest() {
-		t.Errorf("the delete holds the orchestrator lock while it waits on the cloud store")
-	}
-	release()
-	if err := <-deleted; err != nil {
-		t.Fatalf("DeleteVault %s: %v", blocked.label, err)
+		t.Errorf("the teardown holds the orchestrator lock while it waits on the cloud store")
 	}
 	if slices.Contains(node.orch.ListVaults(), blocked.id) {
 		t.Errorf("deleted vault %s still registered", blocked.label)
 	}
+	if !node.orch.Scheduler().HasPendingPrefix("vault-teardown:" + blocked.id.String()) {
+		t.Errorf("the pending teardown of vault %s is not a scheduler job", blocked.label)
+	}
+	added := h.addCloudVaultsWithOneRoute([]string{"N"}, []glid.GLID{glid.New()}, []int{0})[0]
+	if !slices.Contains(node.orch.ListVaults(), added.id) {
+		t.Errorf("vault created while a teardown waits is not registered")
+	}
 
+	release()
+	if err := node.orch.AwaitVaultTeardownForTest(context.Background(), blocked.id); err != nil {
+		t.Fatalf("teardown of %s: %v", blocked.label, err)
+	}
 	h.deleteVaultEverywhere(vs[1], true)
 	h.deleteVaultEverywhere(kept, false)
 
@@ -1107,4 +1144,103 @@ func TestOrchVaultDeleteDoesNotHoldLockWhileCloudStoreBlocks(t *testing.T) {
 		t.Errorf("vault deleted without its data: cloud objects %v, want %v", got, keptKeys)
 	}
 	h.assertOnlyRecordFilesKept("after the delete", kept)
+}
+
+// A vault re-created under the ID of a deleted vault whose teardown is still
+// pending shares that vault's directories and vault-ctl group ID. The
+// re-create waits for the teardown, so the teardown never removes the new
+// vault's files: the new vault ingests, seals and keeps its GLCBs.
+func TestOrchVaultRecreateWaitsForPendingTeardown(t *testing.T) {
+	if testing.Short() {
+		t.Skip("pipeline vault-delete acceptance test")
+	}
+	t.Parallel()
+
+	h, bucket, vs := blockedStoreHarness(t, "P")
+	node := h.nodes[h.nodeIDs[0]]
+	v := vs[0]
+	ctx := context.Background()
+	vaultCfg, err := h.cfgStore.GetVault(ctx, v.id)
+	if err != nil || vaultCfg == nil {
+		t.Fatalf("GetVault: %v", err)
+	}
+	routes, err := h.cfgStore.ListRoutes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h.dropVaultFromConfig(v, true)
+	holding, _, release := holdPurge(bucket, v)
+	defer release()
+	if err := node.orch.DeleteVault(v.id, true); err != nil {
+		t.Fatalf("DeleteVault: %v", err)
+	}
+	awaitSignal(t, "teardown waiting on the cloud store", holding)
+
+	// Re-create the vault, same ID, same route, while its teardown waits.
+	if err := h.cfgStore.PutVault(ctx, *vaultCfg); err != nil {
+		t.Fatal(err)
+	}
+	h.setVaultPlacements(v, v.nodeIdxs)
+	for _, rc := range routes {
+		if err := h.cfgStore.PutRoute(ctx, rc); err != nil {
+			t.Fatal(err)
+		}
+	}
+	added := make(chan error, 1)
+	go func() { added <- node.orch.AddVault(ctx, *vaultCfg, node.factories) }()
+	release()
+	if err := <-added; err != nil {
+		t.Fatalf("re-create AddVault: %v", err)
+	}
+	if err := node.orch.ReloadFilters(ctx); err != nil {
+		t.Fatalf("ReloadFilters: %v", err)
+	}
+
+	const total = 2 * pipelineChunkMaxRecords
+	h.submitIngestRecords(node.id, total, "recreated")
+	entries := h.waitSealedRecords(v, node.id, total)
+	h.waitGLCBsOnHomes(v, v.nodeIdxs, entries)
+	if err := node.orch.AwaitVaultTeardownForTest(ctx, v.id); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if _, err := os.Stat(h.pipelineGLCBPath(node.id, v, e.ID)); err != nil {
+			t.Errorf("re-created vault lost GLCB %s: %v", e.ID, err)
+		}
+	}
+	if !slices.Contains(node.orch.ListVaults(), v.id) {
+		t.Errorf("re-created vault not registered")
+	}
+}
+
+// Shutdown with a vault teardown waiting on an unresponsive cloud store
+// abandons the teardown: the wait ends by cancellation, not by the store's
+// own timeout, and Stop returns.
+func TestOrchStopAbandonsPendingVaultTeardown(t *testing.T) {
+	if testing.Short() {
+		t.Skip("pipeline vault-delete acceptance test")
+	}
+	t.Parallel()
+
+	h, bucket, vs := blockedStoreHarness(t, "P")
+	node := h.nodes[h.nodeIDs[0]]
+	v := vs[0]
+	h.dropVaultFromConfig(v, true)
+	holding, ended, release := holdPurge(bucket, v)
+	defer release()
+	if err := node.orch.DeleteVault(v.id, true); err != nil {
+		t.Fatalf("DeleteVault: %v", err)
+	}
+	awaitSignal(t, "teardown waiting on the cloud store", holding)
+
+	h.stopNode(node.id)
+	select {
+	case err := <-ended:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("the waiting teardown ended with %v, want cancellation by shutdown", err)
+		}
+	default:
+		t.Fatalf("Stop returned while the teardown still waited on the cloud store")
+	}
 }

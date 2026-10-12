@@ -225,6 +225,9 @@ func (o *Orchestrator) applyVaults(sys *system.System, factories Factories) erro
 // Returns nil on success and on recoverable init failures (vault is skipped).
 // Returns an error only for structural config problems.
 func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig, factories Factories) error {
+	if err := o.awaitVaultTeardown(context.Background(), vaultCfg.ID); err != nil {
+		return err
+	}
 	instance, err := o.buildVaultInstance(sys, vaultCfg, factories)
 	if err != nil {
 		o.logger.Error("vault failed to initialize, skipping",
