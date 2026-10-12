@@ -12,6 +12,7 @@ import (
 
 	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/orchestrator/pipeline"
 	"gastrolog/internal/system"
 )
 
@@ -42,53 +43,76 @@ func (o *Orchestrator) DeleteVault(id glid.GLID, deleteData bool) error {
 	retired := o.retireVaultLocked(sys, id, deleteData)
 	o.mu.Unlock()
 
-	return errors.Join(err, retired.removeFiles())
+	return errors.Join(err, o.finishRetiredVault(retired))
 }
 
-// retiredVault is a vault retired from this node whose files are still to be
-// removed: once its pipeline goroutines have stopped writing under its roots.
+// retiredVault is a vault dropped from this node's registries whose teardown
+// is still to run: stopping its pipeline, purging its cloud objects, retiring
+// its vault-ctl group, closing it and removing its files. Each of those waits
+// on goroutines, I/O, the network or Raft, so it runs without o.mu; the
+// deletion count keeps a reload from registering the vault in between.
 type retiredVault struct {
+	id         glid.GLID
 	deleteData bool
 	dirs       []string
-	stopped    func()
-	err        error
+	pipeline   *pipeline.Supervisor
+	vault      *Vault // nil when the vault was not registered here
 }
 
-// removeFiles waits for the vault's pipeline goroutines to return, then
-// removes its directories. Those goroutines take o.mu, so it runs without it.
-func (r retiredVault) removeFiles() error {
-	r.stopped()
-	err := r.err
-	for _, dir := range r.dirs {
-		err = errors.Join(err, removeVaultDir(dir, r.deleteData))
-	}
-	return err
-}
-
-// retireVaultLocked stops and drops the vault on this node as DeleteVault
-// describes, with sys the config naming this node's file storages, and
-// returns what removes its files. Caller holds o.mu.
+// retireVaultLocked drops the vault from this node's registries — its
+// pipeline registration and cron job, its retention runner, the vault itself
+// — and returns its remaining teardown for finishRetiredVault. sys is the
+// config naming this node's file storages. Caller holds o.mu.
 func (o *Orchestrator) retireVaultLocked(sys *system.System, id glid.GLID, deleteData bool) retiredVault {
+	r := retiredVault{
+		id:         id,
+		deleteData: deleteData,
+		dirs:       o.vaultDirsLocked(sys, id),
+		pipeline:   o.pipeline,
+		vault:      o.vaults[id],
+	}
+	o.reconcileChunkCron(id, false, "")
+	o.deletePipelineVaultLocked(id)
+	if r.vault != nil {
+		if inst := r.vault.Instance; inst != nil {
+			delete(o.retention, retentionKey(inst.VaultID, inst.StorageID))
+		}
+		delete(o.vaults, id)
+	}
+	return r
+}
+
+// finishRetiredVault runs a retired vault's teardown. It must not hold o.mu:
+// the vault's pipeline goroutines take it, and every step here can wait on
+// I/O, the network or Raft.
+func (o *Orchestrator) finishRetiredVault(r retiredVault) error {
+	// The group stops first: its applies then fail at once instead of waiting
+	// out a quorum the other nodes' deletes are dissolving, so the pipeline
+	// goroutines waited for below return promptly, and no trailing apply
+	// callback reaches the chunk manager closed after them.
+	o.decommissionVaultControlPlaneRaftGroup(r.id)
+	if r.pipeline != nil {
+		r.pipeline.UnregisterVault(r.id)()
+	}
 	var err error
-	dirs := o.vaultDirsLocked(sys, id)
-	stopped := o.unregisterPipelineVaultLocked(id)
-	vault, registered := o.vaults[id]
-	if deleteData && registered && vault.Instance != nil {
-		if purger, ok := vault.Instance.Chunks.(cloudObjectPurger); ok {
+	if r.deleteData && r.vault != nil && r.vault.Instance != nil {
+		if purger, ok := r.vault.Instance.Chunks.(cloudObjectPurger); ok {
 			if perr := purger.PurgeCloudObjects(context.Background()); perr != nil {
-				err = errors.Join(err, fmt.Errorf("purge cloud objects of vault %s: %w", id, perr))
+				err = errors.Join(err, fmt.Errorf("purge cloud objects of vault %s: %w", r.id, perr))
 			}
 		}
 	}
-	if registered {
-		o.teardownVault(id, vault)
-	} else {
-		o.cancelPendingChunkJobs(id)
-		o.decommissionVaultControlPlaneRaftGroup(id)
+	o.cancelPendingChunkJobs(r.id)
+	if r.vault != nil {
+		if cerr := r.vault.Close(); cerr != nil {
+			o.logger.Warn("close deleted vault", "vault", r.id, "error", cerr)
+		}
 	}
-
-	o.logger.Info("vault deleted on this node", "id", id, "delete_data", deleteData)
-	return retiredVault{deleteData: deleteData, dirs: dirs, stopped: stopped, err: err}
+	for _, dir := range r.dirs {
+		err = errors.Join(err, removeVaultDir(dir, r.deleteData))
+	}
+	o.logger.Info("vault deleted on this node", "id", r.id, "delete_data", r.deleteData)
+	return err
 }
 
 // loadSystemForReload reads config that the caller applies later under o.mu,
@@ -133,7 +157,7 @@ func (o *Orchestrator) registerUnlessDeleted(vault *Vault) bool {
 	}
 	retired := o.retireVaultLocked(sys, vault.ID, false)
 	o.mu.Unlock()
-	if err := retired.removeFiles(); err != nil {
+	if err := o.finishRetiredVault(retired); err != nil {
 		o.logger.Warn("remove vault deleted while it initialized", "id", vault.ID, "error", err)
 	}
 	return false

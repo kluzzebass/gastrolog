@@ -75,11 +75,13 @@ const (
 //	                      handles slow networks (≈150 KiB/s floor)
 //	cloudDownloadTimeout — TOC reads are 48 bytes; 10s is generous
 //	cloudDeleteTimeout  — simple metadata op; 15s
+//	cloudListTimeout    — one vault's key prefix, paged; 60s
 var (
 	cloudHeadTimeout     = 10 * time.Second
 	cloudUploadTimeout   = 60 * time.Second
 	cloudDownloadTimeout = 10 * time.Second
 	cloudDeleteTimeout   = 15 * time.Second
+	cloudListTimeout     = 60 * time.Second
 )
 
 var (
@@ -4478,10 +4480,13 @@ func (m *Manager) PurgeCloudObjects(ctx context.Context) error {
 	}
 
 	var keys []string
-	if err := store.List(ctx, m.cloudPrefix(), func(b blobstore.BlobInfo) error {
+	listCtx, listCancel := context.WithTimeout(ctx, cloudListTimeout)
+	err := store.List(listCtx, m.cloudPrefix(), func(b blobstore.BlobInfo) error {
 		keys = append(keys, b.Key)
 		return nil
-	}); err != nil {
+	})
+	listCancel()
+	if err != nil {
 		return fmt.Errorf("list cloud objects of vault %s: %w", m.cfg.VaultID, err)
 	}
 	var errs []error
@@ -4770,10 +4775,11 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	// multiple nodes from overwriting each other's uploads with slightly
 	// different compressed output, which causes InvalidRange errors when
 	// a node tries to read using its own (now stale) blob size.
-	headCtx, headCancel := context.WithTimeout(context.Background(), cloudHeadTimeout)
+	headCtx, headCancel := context.WithTimeout(writeCtx, cloudHeadTimeout)
 	existing, err := m.cfg.CloudStore.Head(headCtx, key)
 	headCancel()
 	if err == nil && existing.Size > 0 {
+		writeDone()
 		m.logger.Debug("cloud blob already exists, skipping upload", "chunk", id, "bytes", existing.Size)
 		return m.adoptCloudBlob(id, existing.Size, digest)
 	}

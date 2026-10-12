@@ -52,6 +52,19 @@ func withSiblingVault(of int, nodeIdxs []int) orchRelOption {
 // vault-delete side effects.
 func (h *orchRelHarness) deleteVaultEverywhere(v vaultSpec, deleteData bool) {
 	h.t.Helper()
+	h.dropVaultFromConfig(v, deleteData)
+	for _, id := range h.nodeIDs {
+		if n := h.nodes[id]; n.orch != nil {
+			h.deleteVaultOn(id, v, deleteData)
+		}
+	}
+}
+
+// dropVaultFromConfig is the config half of the operator's delete: the vault
+// leaves every route (the delete RPC refuses a route destination), every live
+// node reloads its routing, and the config drops the vault.
+func (h *orchRelHarness) dropVaultFromConfig(v vaultSpec, deleteData bool) {
+	h.t.Helper()
 	ctx := context.Background()
 	routes, err := h.cfgStore.ListRoutes(ctx)
 	if err != nil {
@@ -69,11 +82,6 @@ func (h *orchRelHarness) deleteVaultEverywhere(v vaultSpec, deleteData bool) {
 	h.reloadFiltersOnLiveNodes()
 	if err := h.cfgStore.DeleteVault(ctx, v.id, deleteData); err != nil {
 		h.t.Fatalf("cfgStore.DeleteVault %s: %v", v.label, err)
-	}
-	for _, id := range h.nodeIDs {
-		if n := h.nodes[id]; n.orch != nil {
-			h.deleteVaultOn(id, v, deleteData)
-		}
 	}
 }
 
@@ -993,4 +1001,110 @@ func TestOrchVaultDeleteFencesConfigReadBeforeIt(t *testing.T) {
 		}
 	}
 	h.assertNothingNamesVault("after config read before the delete was applied", v)
+}
+
+// listGatedStore holds the next List under one key prefix until released,
+// reporting when one is held: a cloud store that stops answering mid-delete.
+type listGatedStore struct {
+	blobstore.Store
+	mu      sync.Mutex
+	prefix  string
+	gate    chan struct{}
+	holding chan struct{}
+}
+
+// holdNextList makes the next List under prefix wait for release; holding is
+// closed when it starts waiting.
+func (s *listGatedStore) holdNextList(prefix string) (holding <-chan struct{}, release func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prefix = prefix
+	s.gate = make(chan struct{})
+	s.holding = make(chan struct{})
+	gate := s.gate
+	return s.holding, sync.OnceFunc(func() { close(gate) })
+}
+
+func (s *listGatedStore) List(ctx context.Context, prefix string, fn func(blobstore.BlobInfo) error) error {
+	s.mu.Lock()
+	var gate, holding chan struct{}
+	if s.gate != nil && strings.HasPrefix(prefix, s.prefix) {
+		gate, holding = s.gate, s.holding
+		s.gate, s.holding = nil, nil
+	}
+	s.mu.Unlock()
+	if gate != nil {
+		close(holding)
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return s.Store.List(ctx, prefix, fn)
+}
+
+// A vault delete that waits on an unresponsive cloud store does not hold the
+// orchestrator lock while it waits: the registry is readable and the lock is
+// free until the store answers, and then the delete completes and removes the
+// vault's files and objects. Deletes back to back complete the same way.
+func TestOrchVaultDeleteDoesNotHoldLockWhileCloudStoreBlocks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("pipeline vault-delete acceptance test")
+	}
+	t.Parallel()
+
+	bucket := &listGatedStore{Store: blobstore.NewMemory()}
+	h := newOrchRelHarness(t, 1,
+		withPipelineCluster(pipelineTestCompletePolicy, pipelineChunkMaxRecords),
+		withSharedCloudStore(bucket),
+	)
+	vs := h.addCloudVaultsWithOneRoute([]string{"P", "Q", "R"}, []glid.GLID{glid.New(), glid.New(), glid.New()}, []int{0})
+	node := h.nodes[h.nodeIDs[0]]
+
+	const total = 2 * pipelineChunkMaxRecords
+	h.submitIngestRecords(node.id, total, "blocked-store")
+	for _, v := range vs {
+		entries := h.waitSealedRecords(v, node.id, total)
+		h.waitProgress(fmt.Sprintf("vault %s: every sealed chunk uploaded", v.label), 100*time.Millisecond,
+			func() (string, bool) {
+				n := len(cloudKeys(t, bucket, v))
+				return fmt.Sprintf("objects=%d/%d", n, len(entries)), n == len(entries)
+			}, func() { h.dumpPipelineState(v) })
+	}
+	kept := vs[2]
+	keptKeys := cloudKeys(t, bucket, kept)
+
+	blocked := vs[0]
+	h.dropVaultFromConfig(blocked, true)
+	holding, release := bucket.holdNextList("vault-" + blocked.id.String() + "/")
+	defer release()
+	deleted := make(chan error, 1)
+	go func() { deleted <- node.orch.DeleteVault(blocked.id, true) }()
+	awaitSignal(t, "delete waiting on the cloud store", holding)
+
+	if !node.orch.TryLockForTest() {
+		t.Errorf("the delete holds the orchestrator lock while it waits on the cloud store")
+	}
+	release()
+	if err := <-deleted; err != nil {
+		t.Fatalf("DeleteVault %s: %v", blocked.label, err)
+	}
+	if slices.Contains(node.orch.ListVaults(), blocked.id) {
+		t.Errorf("deleted vault %s still registered", blocked.label)
+	}
+
+	h.deleteVaultEverywhere(vs[1], true)
+	h.deleteVaultEverywhere(kept, false)
+
+	for _, v := range vs[:2] {
+		if left := cloudKeys(t, bucket, v); len(left) > 0 {
+			t.Errorf("vault %s deleted with its data keeps cloud objects: %v", v.label, left)
+		}
+		h.assertNothingNamesVault("vault "+v.label+" after the delete", v)
+	}
+	if got := cloudKeys(t, bucket, kept); !slices.Equal(got, keptKeys) {
+		t.Errorf("vault deleted without its data: cloud objects %v, want %v", got, keptKeys)
+	}
+	h.assertOnlyRecordFilesKept("after the delete", kept)
 }
