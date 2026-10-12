@@ -18,6 +18,19 @@ import (
 // fan-out on every node.
 func (h *orchRelHarness) addCloudCacheVault(label string, nodeIdxs []int, cacheBudget string) vaultSpec {
 	h.t.Helper()
+	v := h.putCloudVault(label, cacheBudget)
+	v.nodeIdxs = nodeIdxs
+	h.setVaultPlacements(v, nodeIdxs)
+	h.vaults = append(h.vaults, v)
+	h.addVaultOnEveryNode(v)
+	return v
+}
+
+// putCloudVault writes a cloud-backed pipeline vault bound to a "memory" cloud
+// service, with the given warm-cache policy and no placement, and routes every
+// record to it.
+func (h *orchRelHarness) putCloudVault(label, cacheBudget string) vaultSpec {
+	h.t.Helper()
 	ctx := context.Background()
 	csID := glid.New()
 	if err := h.cfgStore.PutCloudService(ctx, system.CloudService{
@@ -25,7 +38,7 @@ func (h *orchRelHarness) addCloudCacheVault(label string, nodeIdxs []int, cacheB
 	}); err != nil {
 		h.t.Fatalf("PutCloudService: %v", err)
 	}
-	v := vaultSpec{label: label, id: glid.New(), nodeIdxs: nodeIdxs}
+	v := vaultSpec{label: label, id: glid.New()}
 	if err := h.cfgStore.PutVault(ctx, system.VaultConfig{
 		Enabled:          true,
 		ID:               v.id,
@@ -39,10 +52,15 @@ func (h *orchRelHarness) addCloudCacheVault(label string, nodeIdxs []int, cacheB
 	}); err != nil {
 		h.t.Fatalf("PutVault %s: %v", label, err)
 	}
-	h.setVaultPlacements(v, nodeIdxs)
-	h.vaults = append(h.vaults, v)
 	h.addMatchAllRoute(v)
+	return v
+}
 
+// addVaultOnEveryNode drives the dispatcher-equivalent fan-out of a vault
+// written to the config store: AddVault and a routing reload on every node.
+func (h *orchRelHarness) addVaultOnEveryNode(v vaultSpec) {
+	h.t.Helper()
+	ctx := context.Background()
 	sys, err := h.cfgStore.Load(ctx)
 	if err != nil {
 		h.t.Fatalf("Load: %v", err)
@@ -62,7 +80,6 @@ func (h *orchRelHarness) addCloudCacheVault(label string, nodeIdxs []int, cacheB
 			h.t.Fatalf("ReloadFilters on %s: %v", n.label, err)
 		}
 	}
-	return v
 }
 
 // TestOrchPipeline_CloudWarmCacheEvictsOnEveryHome drives the warm-cache

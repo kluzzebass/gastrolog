@@ -19,7 +19,7 @@ package orchestrator
 // and neither should page an operator; (3) success clears both the backoff
 // state and the alarm (if any), whether the chunk resolved through
 // backfillCloudUploads itself or was uploaded by the PRIMARY path
-// (schedulePipelineCloudUpload/onSeal) and observed cloud-backed on the next
+// (schedulePipelineCloudUpload on GLCB landing) and observed cloud-backed on the next
 // sweep; (4) a chunk that vanishes (deleted), or a vault this node stops
 // running backfill for (leadership handoff, teardown), drops all state and
 // alarms too — no strand.
@@ -419,7 +419,7 @@ func TestPruneVanishedBackfillFailuresDropsDeletedChunkState(t *testing.T) {
 // failure (GLCB verifiably on disk) escalates to the cloud-backfill-stuck
 // alarm. A GLCB-absent failure backs off the same way but never alarms —
 // build-lag entries clear entirely via the chunkIsCloudBacked cross-path
-// once the primary upload (schedulePipelineCloudUpload/onSeal) lands, and a
+// once the primary upload (schedulePipelineCloudUpload on GLCB landing) lands, and a
 // genuinely-deleted GLCB backs off to the cap without ever flooding the
 // scheduler journal (backfillDue still gates scheduling) or paging an
 // operator for state the primary path owns.
@@ -538,8 +538,8 @@ func TestMarkBackfillFailureAlarmEligibleGatesAlarmNotBackoff(t *testing.T) {
 
 // TestBackfillCloudUploads_CrossPathSuccessClearsEntryAndAlarm pins the
 // first Critical strand: a chunk with a standing backfill failure entry and
-// alarm gets uploaded by the PRIMARY path (schedulePipelineCloudUpload /
-// onSeal, not backfillCloudUploads) and becomes CloudBacked. The next
+// alarm gets uploaded by the PRIMARY path (schedulePipelineCloudUpload on
+// GLCB landing, not backfillCloudUploads) and becomes CloudBacked. The next
 // backfillCloudUploads sweep sees it via chunkIsCloudBacked and must clear
 // the entry+alarm right there — that continue is the only place the sweep
 // ever visits an already-resolved chunk again; without an explicit clear at

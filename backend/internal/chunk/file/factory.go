@@ -93,9 +93,6 @@ func NewFactoryWithStores(createStore StoreCreator) chunk.ManagerFactory {
 		if err := configureSealedBacking(&cfg, params, createStore); err != nil {
 			return nil, err
 		}
-		if params["_cloud_read_only"] == "true" {
-			cfg.CloudReadOnly = true
-		}
 
 		if err := applyCloudAndCacheParams(&cfg, params); err != nil {
 			return nil, err

@@ -89,18 +89,18 @@ func applyCloudChunkLifecycle(t *testing.T, fsm *vaultctlfsm.FSM, id chunk.Chunk
 	apply("upload", vaultctlfsm.MarshalUploadChunk(id, meta.CloudBytes, 0, 0, 0, 0, [32]byte{}, glid.GLID{}, 0))
 }
 
-// newFollowerCloudManager builds a CloudReadOnly Manager sharing the leader's
-// store — the production follower shape (buildInstance strips uploads but
-// keeps read access). Its cloud index starts empty.
+// newFollowerCloudManager builds a Manager sharing the leader's store on a
+// node that is not the vault's cloud uploader — the production follower
+// shape: read access, no uploads. Its cloud index starts empty.
 func newFollowerCloudManager(t *testing.T, vaultID glid.GLID, store blobstore.Store) *chunkfile.Manager {
 	t.Helper()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
-		Dir:            t.TempDir(),
-		Now:            time.Now,
-		RotationPolicy: chunk.NewRecordCountPolicy(1000),
-		CloudStore:     store,
-		VaultID:        vaultID,
-		CloudReadOnly:  true,
+		Dir:             t.TempDir(),
+		Now:             time.Now,
+		RotationPolicy:  chunk.NewRecordCountPolicy(1000),
+		CloudStore:      store,
+		VaultID:         vaultID,
+		IsCloudUploader: func() bool { return false },
 	})
 	if err != nil {
 		t.Fatal(err)

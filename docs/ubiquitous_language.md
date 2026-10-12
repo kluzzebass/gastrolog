@@ -107,6 +107,13 @@ for append-heavy write patterns and time-ordered reads.
 - **Cloud-backed** — record bytes live in S3/Azure/GCS, not local disk; marked
   with `CloudBacked = true` in `ChunkMeta`. A cloud-backed vault is a file vault
   with `CloudServiceID` set; there is no separate "cloud" vault type.
+- **Cloud uploader** — the node that uploads a cloud-backed vault's sealed
+  chunks: its placement leader, read from the replicated placement at every
+  upload rather than fixed when the vault instance was built. It uploads a
+  chunk once its own agreed copy has landed; an upload still queued when the
+  role moves is left to the new cloud uploader, whose catch-up sweep picks up
+  every sealed chunk not yet cloud-backed. Every other home reads the cloud
+  store and never writes the object.
 - **Memory vault** — a pipeline vault whose homes serve its sealed GLCBs from
   RAM (held, not mapped) and whose **memory budget** bounds the bytes of its
   sealed chunks on each node: over budget, retention retires the oldest

@@ -1,10 +1,13 @@
 package orchestrator
 
 import (
+	"context"
+	"errors"
 	"fmt"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/system"
 )
 
 // cloudUploadJobName is the scheduler job name for "upload this chunk to the
@@ -28,53 +31,44 @@ func cloudUploadJobPrefix(vaultID glid.GLID) string {
 	return "cloud-upload:" + vaultID.String() + ":"
 }
 
-// schedulePipelineCloudUpload schedules uploading a pipeline-built sealed chunk
-// to object storage when the vault has cloud backing on this node. Leader-only;
-// followers adopt via vault-ctl CmdUploadChunk.
+// schedulePipelineCloudUpload schedules the cloud upload of a sealed pipeline
+// chunk whose agreed GLCB has landed on this home (onGLCBLanded), when this
+// node owes it (cloudUploadOwed). The job asks again when it runs: an upload
+// still queued after the uploader moved is left to the new uploader, whose
+// catch-up sweep finds the chunk.
 func (o *Orchestrator) schedulePipelineCloudUpload(vaultID glid.GLID, chunkID chunk.ChunkID) {
 	if !o.isPipelineIngestVault(vaultID) {
 		return
 	}
-	// No o.mu here: findLocalVaultInstance takes its own read lock, and an
-	// outer RLock made this a recursive read acquisition — with a writer
-	// queued between the two, the second RLock parks behind the writer,
-	// the writer waits on the first hold, and the node wedges. This exact
-	// shape deadlocked node-2 and node-1; the lock tracker named this
-	// line. Everything below works on the returned instance and the
-	// scheduler, which lock for themselves.
+	// No o.mu here: findLocalVaultInstance takes its own read lock, and a
+	// recursive read acquisition wedges the node once a writer queues
+	// between the two. Everything below works on the returned instance and
+	// the scheduler, which lock for themselves.
 	vaultInst := o.findLocalVaultInstance(vaultID)
 	if vaultInst == nil {
 		return
 	}
-	if !vaultInstCanUploadToCloud(vaultInst) {
-		return
-	}
 	uploader, ok := vaultInst.Chunks.(chunk.ChunkCloudUploader)
-	if !ok {
+	if !ok || !o.cloudUploadOwed(vaultInst, chunkID) {
 		return
-	}
-	// The FSM manifest entry is the cluster-wide seal/upload gate: skip a
-	// chunk the cluster hasn't finished sealing (GLCB not yet committed) or
-	// has already uploaded. ManifestEntry is nil only in memory mode, where
-	// cloud upload is already gated off above (vaultInstCanUploadToCloud).
-	if vaultInst.ManifestEntry != nil {
-		e, ok := vaultInst.ManifestEntry(chunkID)
-		if !ok || e.State != chunk.ChunkStateSealed || e.CloudBacked {
-			return
-		}
 	}
 
 	// Describe BEFORE scheduling: the description is read into the Scheduled
 	// event's JobInfo, and completeOneTimeJob deletes the entry when the job
-	// finishes. Describing afterwards both lost the label on the event and
-	// leaked one descriptions entry per chunk for jobs that finished first.
+	// finishes, so describing afterwards loses the label on the event and
+	// leaks one descriptions entry per chunk for jobs that finished first.
 	name := cloudUploadJobName(vaultID, chunkID)
 	o.scheduler.Describe(name, fmt.Sprintf("Pipeline cloud upload for chunk %s", chunkID))
-	// Claim-or-skip in one step. A HasPendingPrefix check followed by RunOnce
-	// is a check-then-act race: this path and the catch-up sweep can both
-	// observe "nothing pending" and both enqueue an upload for one chunk.
+	// Claim-or-skip in one step: this path and the catch-up sweep share the
+	// name, so a chunk has at most one upload job on this node.
 	if _, err := o.scheduler.RunOnceIfAbsent(name, func(id chunk.ChunkID) error {
+		if !o.cloudUploadOwed(vaultInst, id) {
+			return nil
+		}
 		err := uploader.UploadToCloud(id)
+		if errors.Is(err, chunk.ErrNotCloudUploader) {
+			return nil
+		}
 		if err != nil {
 			o.cloudHealthLogger.Warn("pipeline cloud upload failed",
 				"vault", vaultID, "chunk", id, "error", err)
@@ -83,5 +77,47 @@ func (o *Orchestrator) schedulePipelineCloudUpload(vaultID glid.GLID, chunkID ch
 	}, chunkID); err != nil {
 		o.cloudHealthLogger.Warn("failed to schedule pipeline cloud upload",
 			"name", name, "error", err)
+	}
+}
+
+// cloudUploadOwed reports whether this node owes a chunk its cloud upload
+// now: it uploads for the vault (vaultInstRunsCloudBackfill), and the
+// vault-ctl FSM has the chunk sealed and not yet cloud-backed. ManifestEntry
+// is nil only in memory mode, where there is no FSM to consult.
+func (o *Orchestrator) cloudUploadOwed(vaultInst *VaultInstance, id chunk.ChunkID) bool {
+	if !o.vaultInstRunsCloudBackfill(vaultInst) {
+		return false
+	}
+	if vaultInst.ManifestEntry == nil {
+		return true
+	}
+	e, ok := vaultInst.ManifestEntry(id)
+	return ok && e.State == chunk.ChunkStateSealed && !e.CloudBacked
+}
+
+// isCloudUploader reports whether this node uploads the vault's sealed chunks
+// to its cloud store, read from the replicated config at the moment of asking:
+// the uploader is the vault's placement leader. Without a system loader there
+// is no replicated placement, and the node uploads the vaults it runs.
+func (o *Orchestrator) isCloudUploader(vaultID glid.GLID) bool {
+	loader := o.systemLoader()
+	if loader == nil {
+		return true
+	}
+	sys, err := loader.Load(context.Background())
+	if err != nil || sys == nil {
+		return false
+	}
+	return system.LeaderNodeID(sys.PlacementsFor(vaultID), sys.Runtime.NodeStorageConfigs) == o.localNodeID
+}
+
+// installCloudUploaderCheck gates every upload the instance's chunk manager
+// performs — the post-seal pipeline's included — on isCloudUploader.
+func (o *Orchestrator) installCloudUploaderCheck(inst *VaultInstance, vaultID glid.GLID) {
+	if inst == nil || inst.Chunks == nil {
+		return
+	}
+	if setter, ok := inst.Chunks.(chunk.CloudUploaderSetter); ok {
+		setter.SetCloudUploader(func() bool { return o.isCloudUploader(vaultID) })
 	}
 }

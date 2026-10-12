@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -72,11 +73,11 @@ func (o *Orchestrator) evaluateCloudHealth() {
 	active := make(map[glid.GLID]bool)
 	for _, vault := range o.vaults {
 		vaultInst := vault.Instance
-		if vaultInst == nil || !vaultInstanceHasCloudBacking(vaultInst) {
+		if vaultInst == nil || !o.vaultInstanceHasCloudBacking(vaultInst) {
 			continue
 		}
 		o.evaluateVaultCloudHealth(vaultInst)
-		if vaultInstRunsCloudBackfill(vaultInst) {
+		if o.vaultInstRunsCloudBackfill(vaultInst) {
 			active[vaultInst.VaultID] = true
 		}
 	}
@@ -85,28 +86,28 @@ func (o *Orchestrator) evaluateCloudHealth() {
 
 // vaultInstanceHasCloudBacking reports whether this instance participates in
 // cloud upload / health monitoring: dedicated cloud vaults, or file vaults with
-// a wired CloudStore on the placement leader. Followers (CloudReadOnly) are excluded.
-func vaultInstanceHasCloudBacking(vi *VaultInstance) bool {
-	return vaultInstCanUploadToCloud(vi) || (vi != nil && vi.Type == "cloud")
+// a wired CloudStore on the vault's cloud uploader.
+func (o *Orchestrator) vaultInstanceHasCloudBacking(vi *VaultInstance) bool {
+	return o.vaultInstCanUploadToCloud(vi) || (vi != nil && vi.Type == "cloud")
 }
 
-// vaultInstCanUploadToCloud reports whether this node's vault instance can
-// perform S3 uploads (placement leader with CloudStore). Vault-ctl Raft
-// leadership alone is insufficient — followers keep CloudReadOnly even when
-// they are the ctl leader.
-func vaultInstCanUploadToCloud(vi *VaultInstance) bool {
+// vaultInstCanUploadToCloud reports whether this node's vault instance
+// uploads to the cloud store: it has one wired, and this node is the vault's
+// cloud uploader (isCloudUploader). Vault-ctl Raft leadership does not make a
+// node the uploader.
+func (o *Orchestrator) vaultInstCanUploadToCloud(vi *VaultInstance) bool {
 	if vi == nil || vi.Chunks == nil {
 		return false
 	}
 	cs, ok := vi.Chunks.(interface{ CloudStoreConfigured() bool })
-	return ok && cs.CloudStoreConfigured()
+	return ok && cs.CloudStoreConfigured() && o.isCloudUploader(vi.VaultID)
 }
 
 // evaluateVaultCloudHealth checks a single cloud instance's health and, on the
 // vault's cloud uploader only, fires a one-shot upload catch-up sweep on the
-// edges that the live onSeal effect cannot cover. It is NOT the primary upload
-// mechanism (that is the seal effect → schedulePipelineCloudUpload, plus the
-// vault-ctl leadership-gain and snapshot-restore catch-up hooks). Steady-state
+// edges that the live GLCB-landing effect cannot cover. It is NOT the primary
+// upload mechanism (that is GLCB landing → schedulePipelineCloudUpload, plus
+// the vault-ctl leadership-gain and snapshot-restore catch-up hooks). Steady-state
 // healthy ticks with nothing stuck do no sweep at all.
 //
 // The catch-up sweep runs only when NOT degraded (uploading into an unreachable
@@ -115,7 +116,7 @@ func vaultInstCanUploadToCloud(vi *VaultInstance) bool {
 //     ctl-leadership change that just made this node the uploader; picks up
 //     chunks sealed before this node was the uploader;
 //   - degraded→healthy recovery — picks up chunks that sealed during the outage,
-//     whose live seal-effect upload failed and was never retried;
+//     whose live landing-effect upload failed and was never retried;
 //   - an outstanding backfill-failure entry for the vault — retries a stuck
 //     chunk on the existing exponential backoff (backfillDue gates the attempt).
 //
@@ -146,7 +147,7 @@ func (o *Orchestrator) evaluateVaultCloudHealth(vaultInst *VaultInstance) {
 	} else {
 		o.alerts.Clear("cloud-store", vaultInst.VaultID.String())
 	}
-	if !vaultInstRunsCloudBackfill(vaultInst) {
+	if !o.vaultInstRunsCloudBackfill(vaultInst) {
 		o.forgetCloudDegradedState(vaultInst.VaultID)
 		return
 	}
@@ -164,16 +165,16 @@ func (o *Orchestrator) evaluateVaultCloudHealth(vaultInst *VaultInstance) {
 // cloudUploadCatchupForVault runs a one-shot cloud-upload catch-up sweep for a
 // single vault — the event-driven replacement for the retired 5s backfill tick.
 // Invoked on the edges that can leave sealed-but-not-cloud-backed chunks
-// undiscovered by the live onSeal effect: vault-ctl leadership gain and snapshot
+// undiscovered by the live landing effect: vault-ctl leadership gain and snapshot
 // restore. No-op unless this node is the vault's cloud uploader
 // (vaultInstRunsCloudBackfill). Safe to call without holding o.mu —
 // findLocalVaultInstance takes its own read lock and the sweep locks for itself.
 func (o *Orchestrator) cloudUploadCatchupForVault(vaultID glid.GLID) {
 	vaultInst := o.findLocalVaultInstance(vaultID)
-	if vaultInst == nil || !vaultInstanceHasCloudBacking(vaultInst) {
+	if vaultInst == nil || !o.vaultInstanceHasCloudBacking(vaultInst) {
 		return
 	}
-	if !vaultInstRunsCloudBackfill(vaultInst) {
+	if !o.vaultInstRunsCloudBackfill(vaultInst) {
 		return
 	}
 	o.backfillCloudUploads(vaultInst)
@@ -218,16 +219,16 @@ func (o *Orchestrator) vaultHasBackfillFailures(vaultID glid.GLID) bool {
 
 // vaultInstRunsCloudBackfill reports whether this node should schedule cloud
 // upload backfill for a vault. File/cloud-backed pipeline vaults upload from
-// the placement leader (CloudStore configured). Legacy type=cloud vaults keep
-// the vault-ctl Raft leader gate.
-func vaultInstRunsCloudBackfill(vi *VaultInstance) bool {
+// the cloud uploader (vaultInstCanUploadToCloud). Legacy type=cloud vaults
+// keep the vault-ctl Raft leader gate.
+func (o *Orchestrator) vaultInstRunsCloudBackfill(vi *VaultInstance) bool {
 	if vi == nil {
 		return false
 	}
 	if vi.Type == "cloud" {
 		return vi.IsRaftLeader == nil || vi.IsRaftLeader()
 	}
-	return vaultInstCanUploadToCloud(vi)
+	return o.vaultInstCanUploadToCloud(vi)
 }
 
 // backfillCloudUploads reconciles sealed chunks against the vault-ctl FSM
@@ -239,7 +240,7 @@ func vaultInstRunsCloudBackfill(vi *VaultInstance) bool {
 // The local CloudBacked flag from List() is intentionally ignored — only
 // the FSM decides whether a chunk needs work.
 func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
-	if !vaultInstRunsCloudBackfill(vaultInst) {
+	if !o.vaultInstRunsCloudBackfill(vaultInst) {
 		return
 	}
 	uploader, ok := vaultInst.Chunks.(chunk.ChunkCloudUploader)
@@ -273,7 +274,7 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 			continue
 		}
 		if o.chunkIsCloudBacked(vaultInst, m) {
-			// The PRIMARY path (schedulePipelineCloudUpload / onSeal) may
+			// The PRIMARY path (schedulePipelineCloudUpload on GLCB landing) may
 			// have resolved this chunk before this sweep's RunOnce ever
 			// ran again — that upload never went through
 			// markBackfillFailure/clearBackfillFailure, so without this the
@@ -322,7 +323,7 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 // build-lag gate lives: onDisk (GLCB verifiably present on disk) is computed
 // once and gates entry into the backoff/alarm track. A chunk whose local build
 // simply hasn't finished yet (onDisk false) fails the same not-found error but
-// is owned by the primary upload path (schedulePipelineCloudUpload / onSeal)
+// is owned by the primary upload path (schedulePipelineCloudUpload on landing)
 // and resolves itself in seconds — pushing it into the 5-minute backoff track
 // would pollute it with build-lag noise that was never actually stuck.
 //
@@ -332,7 +333,13 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 // m.metas read. A failure that survives here is a genuine cloud/transient
 // error, not a missing registration.
 func (o *Orchestrator) runBackfillUpload(vaultInst *VaultInstance, id chunk.ChunkID, uploader chunk.ChunkCloudUploader) error {
+	if !o.cloudUploadOwed(vaultInst, id) {
+		return nil
+	}
 	err := uploader.UploadToCloud(id)
+	if errors.Is(err, chunk.ErrNotCloudUploader) {
+		return nil
+	}
 	if err != nil {
 		onDisk := o.backfillChunkOnDisk(vaultInst.VaultID, id)
 		// Both onDisk cases get a failure entry with the same exponential
