@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/routing"
 	"slices"
 
 	"connectrpc.com/connect"
@@ -64,14 +65,9 @@ func (s *SystemServer) PutRoute(
 		destinations = append(destinations, vid)
 	}
 
-	// Default distribution to "fanout".
-	distribution := req.Msg.Config.Distribution
-	if distribution == "" {
-		distribution = "fanout"
-	}
-	if distribution != "fanout" && distribution != "round-robin" && distribution != "failover" {
-		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("distribution must be \"fanout\", \"round-robin\", or \"failover\", got %q", distribution))
+	distribution, err := routing.ParseDistribution(req.Msg.Config.Distribution)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
 	cfg := system.RouteConfig{

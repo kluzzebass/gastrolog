@@ -1217,6 +1217,9 @@ message GetRouteStatsResponse {
 message VaultRouteStats {
   bytes vault_id = 1;
   int64 records_matched = 2; // records that matched a route targeting this vault
+  // records a matched route sent this vault's way but it did not receive:
+  // the vault was disabled, or its sink went away mid-delivery
+  int64 records_dropped = 3;
 }
 
 message PerRouteStats {

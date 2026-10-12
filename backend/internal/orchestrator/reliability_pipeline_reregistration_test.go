@@ -26,25 +26,27 @@ func (h *orchRelHarness) applyOnVaultCtlLeader(v vaultSpec, chunkCmd []byte) {
 	h.t.Helper()
 	data := vaultraft.MarshalVaultChunkCommand(v.id, chunkCmd)
 	gid := raftgroup.VaultControlPlaneGroupID(v.id)
-	var lastErr error
-	for range 10 {
-		leader := h.waitForVaultCtlLeaderForVault(v)
-		g := leader.groupMgr.GetGroup(gid)
-		if g == nil {
-			lastErr = fmt.Errorf("%s has no vault-ctl group", leader.label)
-			continue
-		}
-		err := g.Raft.Apply(data, cluster.RaftApplyTimeout).Error()
-		if err == nil {
-			return
-		}
-		if !errors.Is(err, hraft.ErrNotLeader) && !errors.Is(err, hraft.ErrLeadershipLost) &&
-			!errors.Is(err, hraft.ErrLeadershipTransferInProgress) {
-			h.t.Fatalf("vault-ctl apply on %s: %v", leader.label, err)
-		}
-		lastErr = err
-	}
-	h.t.Fatalf("vault-ctl apply never landed on a stable leader: %v", lastErr)
+	// A leadership change — the harness steers vault-ctl leadership onto the
+	// placement leader — refuses applies until it settles; the apply is
+	// retried on whichever node leads until one lands. Progress metric: the
+	// leader and term observed, which move while a transfer runs.
+	h.waitProgress(fmt.Sprintf("vault %s: vault-ctl apply on a stable leader", v.label), 20*time.Millisecond,
+		func() (string, bool) {
+			leader := h.waitForVaultCtlLeaderForVault(v)
+			g := leader.groupMgr.GetGroup(gid)
+			if g == nil {
+				return leader.label + " has no vault-ctl group", false
+			}
+			err := g.Raft.Apply(data, cluster.RaftApplyTimeout).Error()
+			if err == nil {
+				return "applied", true
+			}
+			if !errors.Is(err, hraft.ErrNotLeader) && !errors.Is(err, hraft.ErrLeadershipLost) &&
+				!errors.Is(err, hraft.ErrLeadershipTransferInProgress) {
+				h.t.Fatalf("vault-ctl apply on %s: %v", leader.label, err)
+			}
+			return fmt.Sprintf("%s: %v", h.vaultCtlLeadership(v, leader.id), err), false
+		}, nil)
 }
 
 // The placement leader's pipeline re-registration fails (its segmentation

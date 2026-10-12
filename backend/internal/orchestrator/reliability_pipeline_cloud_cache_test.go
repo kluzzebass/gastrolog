@@ -27,6 +27,7 @@ func (h *orchRelHarness) addCloudCacheVault(label string, nodeIdxs []int, cacheB
 	}
 	v := vaultSpec{label: label, id: glid.New(), nodeIdxs: nodeIdxs}
 	if err := h.cfgStore.PutVault(ctx, system.VaultConfig{
+		Enabled:          true,
 		ID:               v.id,
 		Name:             "orch-rel-vault-" + label,
 		Type:             system.VaultTypeFile,

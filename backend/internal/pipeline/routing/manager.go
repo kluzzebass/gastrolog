@@ -92,7 +92,10 @@ type Manager struct {
 	perVault        counterMap
 	perRoute        counterMap
 	perVaultDropped counterMap
-	running         atomic.Bool
+	// rotations holds each round-robin route's rotation (*atomic.Uint64),
+	// keyed by route ID so it survives table swaps.
+	rotations sync.Map
+	running   atomic.Bool
 }
 
 // New returns a routing manager.
@@ -239,21 +242,15 @@ func (m *Manager) route(ctx context.Context, in Input) {
 		sendAck(in.Ack, nil)
 		return
 	}
-	// Per-destination admission: any gated matched vault rejects the whole
-	// record before it is counted or delivered anywhere. The nack reaches
-	// the source, which retries like any other backpressure signal.
-	if m.vaultGate != nil {
-		for _, vaultID := range vaults {
-			if err := m.vaultGate(vaultID); err != nil {
-				// Name the gated destination: with two-plus matched vaults the
-				// sentinel alone doesn't say WHICH one rejected the record, and
-				// the operator (or the deferral alarm text built from this
-				// error) needs that to act. errors.Is still matches the
-				// wrapped sentinel through %w.
-				sendAck(in.Ack, fmt.Errorf("destination vault %s: %w", vaultID, err))
-				return
-			}
-		}
+	vaults, err := m.selectDestinations(matchedRoute, vaults)
+	if err != nil {
+		// The nack reaches the source, which retries like any other
+		// backpressure signal.
+		sendAck(in.Ack, err)
+		return
+	}
+	for _, vaultID := range matchedRoute.DisabledVaultIDs {
+		m.perVaultDropped.incr(vaultID)
 	}
 	m.matched.Add(1)
 	m.perRoute.incr(matchedRoute.ID)
@@ -295,6 +292,63 @@ func (m *Manager) route(ctx context.Context, in Input) {
 	}
 
 	m.fanOutJoined(ctx, rec, targets, in.Ack)
+}
+
+// selectDestinations picks which of a matched route's destinations the record
+// goes to, by the route's distribution, or returns the admission error that
+// refuses it. Fanout sends to every destination and is refused when any one
+// refuses. Failover and round-robin send to the first destination that
+// admits the record — in configured order, or from the route's rotating
+// start — and are refused only when every destination refuses.
+func (m *Manager) selectDestinations(r *Route, vaults []glid.GLID) ([]glid.GLID, error) {
+	if r.Distribution == DistributeFanout || len(vaults) == 0 {
+		for _, vaultID := range vaults {
+			if err := m.admits(vaultID); err != nil {
+				return nil, err
+			}
+		}
+		return vaults, nil
+	}
+	start := 0
+	if r.Distribution == DistributeRoundRobin {
+		start = m.nextRotation(r.ID, len(vaults))
+	}
+	var refusals []error
+	for i := range vaults {
+		vaultID := vaults[(start+i)%len(vaults)]
+		err := m.admits(vaultID)
+		if err == nil {
+			return []glid.GLID{vaultID}, nil
+		}
+		refusals = append(refusals, err)
+	}
+	return nil, fmt.Errorf("route %s: no destination admits the record: %w", r.Name, errors.Join(refusals...))
+}
+
+// nextRotation returns a round-robin route's starting destination among n and
+// advances it. The rotation is kept per route ID by the manager, so it
+// carries across table swaps: a rebuilt table restarting every route at its
+// first destination would favour that destination on every reload.
+func (m *Manager) nextRotation(routeID glid.GLID, n int) int {
+	v, ok := m.rotations.Load(routeID)
+	if !ok {
+		v, _ = m.rotations.LoadOrStore(routeID, new(atomic.Uint64))
+	}
+	return int((v.(*atomic.Uint64).Add(1) - 1) % uint64(n)) //nolint:gosec // G115: n is a small positive destination count
+}
+
+// admits reports whether a destination vault admits a record, naming the vault
+// when it refuses: with two-plus destinations the sentinel alone doesn't say
+// which one refused, and the operator (or the deferral alarm text built from
+// this error) needs that to act. errors.Is still matches the wrapped sentinel.
+func (m *Manager) admits(vaultID glid.GLID) error {
+	if m.vaultGate == nil {
+		return nil
+	}
+	if err := m.vaultGate(vaultID); err != nil {
+		return fmt.Errorf("destination vault %s: %w", vaultID, err)
+	}
+	return nil
 }
 
 // sinkTarget pairs a matched destination vault with its local vault sink, so

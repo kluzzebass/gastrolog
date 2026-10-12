@@ -422,9 +422,11 @@ func (p *PeerState) AggregateRouteStats() (routed, unmatched, matched int64, rou
 				vaultMap[key] = &gastrologv1.VaultRouteStats{
 					VaultId:        vs.VaultId,
 					RecordsMatched: vs.RecordsMatched,
+					RecordsDropped: vs.RecordsDropped,
 				}
 			} else {
 				existing.RecordsMatched += vs.RecordsMatched
+				existing.RecordsDropped += vs.RecordsDropped
 			}
 		}
 		for _, rs := range e.stats.RoutePerRouteStats {
