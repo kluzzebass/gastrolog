@@ -14,7 +14,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	hraft "github.com/hashicorp/raft"
 
@@ -169,8 +172,8 @@ func TestRemovalClaimsNeedAMajorityOfTheOtherVoters(t *testing.T) {
 			t.Parallel()
 			var c removalClaims
 			reached := false
-			for _, by := range tc.claimants {
-				_, reached = c.add(7, by, tc.others)
+			for i, by := range tc.claimants {
+				_, reached, _ = c.add("config", uint64(i+1), by, tc.others, noneRemoved)
 			}
 			if reached != tc.want {
 				t.Fatalf("claims from %v against other voters %v reach a majority: %v, want %v", tc.claimants, tc.others, reached, tc.want)
@@ -182,12 +185,30 @@ func TestRemovalClaimsNeedAMajorityOfTheOtherVoters(t *testing.T) {
 		t.Parallel()
 		var c removalClaims
 		others := []string{"a", "b"}
-		c.add(7, "a", others)
-		if _, reached := c.add(8, "b", others); reached {
+		c.add("config-1", 1, "a", others, noneRemoved)
+		if _, reached, _ := c.add("config-2", 2, "b", others, noneRemoved); reached {
 			t.Fatal("a claim made under an earlier configuration still counted")
 		}
 	})
+
+	// The cluster marks a node removed in its FSM before it changes the
+	// configuration; in between, a claim that node made earlier must stop
+	// counting, or it outlives the standing it was counted on.
+	t.Run("a claimant later marked removed stops counting", func(t *testing.T) {
+		t.Parallel()
+		var c removalClaims
+		others := []string{"a", "b", "c"}
+		marked := map[string]bool{}
+		removed := func(id string) bool { return marked[id] }
+		c.add("config", 1, "a", others, removed)
+		marked["a"] = true
+		if n, reached, _ := c.add("config", 2, "b", others, removed); reached || n != 1 {
+			t.Fatalf("after a was marked removed: %d claims counted, majority %v; want b's alone, no majority", n, reached)
+		}
+	})
 }
+
+func noneRemoved(string) bool { return false }
 
 // Through the server's own configuration: in a three-voter configuration
 // the first member's refusal is not acted on, a repeat of it changes
@@ -213,5 +234,106 @@ func TestOneMembersRefusalDoesNotEndMembership(t *testing.T) {
 	s.observeRefusedAsRemoved("node-b")
 	if len(ended) != 1 {
 		t.Fatalf("refusals from both other voters ended membership %d times, want once", len(ended))
+	}
+}
+
+// claimWeigher is a server whose configuration and log a test controls, with
+// its log captured.
+func claimWeigher(t *testing.T, self string, members []hraft.Server) (*Server, *syncBuffer) {
+	t.Helper()
+	logs := &syncBuffer{}
+	s := &Server{cfg: Config{NodeID: self}, logger: slog.New(slog.NewTextHandler(logs, nil))}
+	s.raft = createVaultRaft(t, self, &hraft.MockFSM{}, true, members)
+	return s, logs
+}
+
+type syncBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.Write(p)
+}
+
+func (b *syncBuffer) count(substr string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return strings.Count(b.b.String(), substr)
+}
+
+const waitingForMajority = "waiting for a majority of the other voters"
+
+// One claimant answering every call this node makes — Raft traffic among
+// them — costs one configuration read and one log line, not one per call,
+// while nothing it is weighed against has changed.
+func TestRepeatedRefusalsFromOneClaimantAreWeighedOnce(t *testing.T) {
+	t.Parallel()
+	const self = "node-self"
+	s, logs := claimWeigher(t, self, []hraft.Server{
+		{ID: self, Address: self},
+		{ID: "node-a", Address: "node-a"},
+		{ID: "node-b", Address: "node-b"},
+		{ID: "node-c", Address: "node-c"},
+	})
+	for range 50 {
+		s.observeRefusedAsRemoved("node-a")
+	}
+	if got := s.configReads.Load(); got != 1 {
+		t.Fatalf("50 refusals from one claimant read the configuration %d times, want once", got)
+	}
+	if got := logs.count(waitingForMajority); got != 1 {
+		t.Fatalf("50 refusals from one claimant logged %d times, want once", got)
+	}
+}
+
+// When the log does move — a healthy node's log always does — the claimant
+// is weighed again, and still logged once.
+func TestRepeatedRefusalsLogOnceWhileTheLogMoves(t *testing.T) {
+	t.Parallel()
+	const self = "node-self"
+	s, logs := claimWeigher(t, self, nil)
+	waitVaultLeader(t, s.raft, 5*time.Second)
+	if err := s.raft.AddNonvoter("node-a", "node-a", 0, time.Second).Error(); err != nil {
+		t.Fatal(err)
+	}
+	for range 10 {
+		if err := s.raft.Apply([]byte("entry"), time.Second).Error(); err != nil {
+			t.Fatal(err)
+		}
+		s.observeRefusedAsRemoved("node-a")
+	}
+	if got := s.configReads.Load(); got != 10 {
+		t.Fatalf("configuration read %d times across 10 log moves, want 10", got)
+	}
+	if got := logs.count(waitingForMajority); got != 1 {
+		t.Fatalf("one claimant logged %d times while the log moved, want once", got)
+	}
+}
+
+// The tally starts over when the configuration changes, which it detects by
+// who is in the configuration and with what suffrage.
+func TestConfigurationFingerprintTracksMembershipAndSuffrage(t *testing.T) {
+	t.Parallel()
+	base := localConfiguration{servers: []hraft.Server{
+		{ID: "a", Suffrage: hraft.Voter}, {ID: "b", Suffrage: hraft.Voter},
+	}}
+	reordered := localConfiguration{servers: []hraft.Server{
+		{ID: "b", Suffrage: hraft.Voter}, {ID: "a", Suffrage: hraft.Voter},
+	}}
+	demoted := localConfiguration{servers: []hraft.Server{
+		{ID: "a", Suffrage: hraft.Voter}, {ID: "b", Suffrage: hraft.Nonvoter},
+	}}
+	shrunk := localConfiguration{servers: []hraft.Server{{ID: "a", Suffrage: hraft.Voter}}}
+	if base.fingerprint() != reordered.fingerprint() {
+		t.Error("the same configuration listed in another order reads as a change")
+	}
+	if base.fingerprint() == demoted.fingerprint() {
+		t.Error("a suffrage change does not read as a configuration change")
+	}
+	if base.fingerprint() == shrunk.fingerprint() {
+		t.Error("a membership change does not read as a configuration change")
 	}
 }

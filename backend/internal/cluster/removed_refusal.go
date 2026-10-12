@@ -3,7 +3,9 @@ package cluster
 import (
 	"context"
 	"crypto/x509"
+	"fmt"
 	"slices"
+	"strings"
 	"sync"
 
 	hraft "github.com/hashicorp/raft"
@@ -65,7 +67,17 @@ func (s *Server) SetRefusedAsRemovedObserver(fn func(byPeer string)) {
 // or a just-removed one this node has not yet seen go, would otherwise take
 // out every node that dials it. Membership ends once a majority of the other
 // voters in this node's configuration have refused it, each counted once.
+//
+// A claimant that keeps refusing is weighed again only once this node's
+// Raft log has moved: until then neither the configuration nor the removal
+// record can have changed, so the answer cannot either. Raft traffic is
+// frequent, and one claimant answering all of it must not cost a
+// configuration read and a log line per call.
 func (s *Server) observeRefusedAsRemoved(byPeer string) {
+	logIndex := s.lastLogIndex()
+	if s.removalClaims.counted(byPeer, logIndex) {
+		return
+	}
 	conf, ok := s.localConfiguration()
 	if !ok || !refusalEndsMembership(conf.ids(), byPeer, s.isRemoved) {
 		if _, logged := s.ignoredRemovalClaims.LoadOrStore(byPeer, struct{}{}); !logged {
@@ -75,10 +87,12 @@ func (s *Server) observeRefusedAsRemoved(byPeer string) {
 		return
 	}
 	others := conf.otherVoters(s.cfg.NodeID)
-	claimants, reached := s.removalClaims.add(conf.index, byPeer, others)
+	claimants, reached, first := s.removalClaims.add(conf.fingerprint(), logIndex, byPeer, others, s.isRemoved)
 	if !reached {
-		logging.Default(s.logger).Warn("a member refuses this node as removed; waiting for a majority of the other voters before taking it",
-			"claimant_node_id", byPeer, "claimants", claimants, "other_voters", len(others))
+		if first {
+			logging.Default(s.logger).Warn("a member refuses this node as removed; waiting for a majority of the other voters before taking it",
+				"claimant_node_id", byPeer, "claimants", claimants, "other_voters", len(others))
+		}
 		return
 	}
 	if fn := s.refusedAsRemoved.Load(); fn != nil {
@@ -86,27 +100,53 @@ func (s *Server) observeRefusedAsRemoved(byPeer string) {
 	}
 }
 
+func (s *Server) lastLogIndex() uint64 {
+	if s.raft == nil {
+		return 0
+	}
+	return s.raft.LastIndex()
+}
+
 // removalClaims tallies the distinct members that refused this node as
 // removed. The tally belongs to one configuration: when the configuration
 // changes, who counts and how many are needed change with it, so it starts
 // over.
 type removalClaims struct {
-	mu          sync.Mutex
-	configIndex uint64
-	claimants   map[string]struct{}
+	mu        sync.Mutex
+	config    string
+	logIndex  uint64
+	claimants map[string]struct{}
 }
 
-// add records byPeer's claim under the configuration at configIndex and
-// reports how many of otherVoters have claimed, and whether that is a
-// majority of them.
-func (c *removalClaims) add(configIndex uint64, byPeer string, otherVoters []string) (int, bool) {
+// counted reports whether byPeer's claim is already in the tally and the
+// Raft log has not moved since the tally was last weighed.
+func (c *removalClaims) counted(byPeer string, logIndex uint64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.claimants == nil || c.configIndex != configIndex {
-		c.configIndex, c.claimants = configIndex, map[string]struct{}{}
+	_, ok := c.claimants[byPeer]
+	return ok && logIndex != 0 && logIndex == c.logIndex
+}
+
+// add records byPeer's claim under the configuration config, weighed at
+// logIndex, and reports how many of otherVoters have claimed, whether that
+// is a majority of them, and whether byPeer is new to the tally. Claimants
+// the removal record now names are dropped: they had standing when they
+// claimed, and have none now.
+func (c *removalClaims) add(config string, logIndex uint64, byPeer string, otherVoters []string, removed func(string) bool) (int, bool, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.claimants == nil || c.config != config {
+		c.config, c.claimants = config, map[string]struct{}{}
 	}
+	c.logIndex = logIndex
+	for claimant := range c.claimants {
+		if removed(claimant) {
+			delete(c.claimants, claimant)
+		}
+	}
+	_, known := c.claimants[byPeer]
 	c.claimants[byPeer] = struct{}{}
-	return claimsFromVoters(c.claimants, otherVoters), claimsReachMajority(c.claimants, otherVoters)
+	return claimsFromVoters(c.claimants, otherVoters), claimsReachMajority(c.claimants, otherVoters), !known
 }
 
 func claimsFromVoters(claimants map[string]struct{}, otherVoters []string) int {
@@ -129,10 +169,8 @@ func claimsReachMajority(claimants map[string]struct{}, otherVoters []string) bo
 	return claimsFromVoters(claimants, otherVoters) > len(otherVoters)/2
 }
 
-// localConfiguration is the Raft configuration this node holds, with the
-// log index it was set at.
+// localConfiguration is the Raft configuration this node holds.
 type localConfiguration struct {
-	index   uint64
 	servers []hraft.Server
 }
 
@@ -154,15 +192,28 @@ func (c localConfiguration) otherVoters(self string) []string {
 	return voters
 }
 
+// fingerprint identifies the configuration by who is in it and with what
+// suffrage — everything the tally depends on. hashicorp/raft's
+// GetConfiguration does not report the index a configuration was set at.
+func (c localConfiguration) fingerprint() string {
+	members := make([]string, 0, len(c.servers))
+	for _, srv := range c.servers {
+		members = append(members, fmt.Sprintf("%s:%d", srv.ID, srv.Suffrage))
+	}
+	slices.Sort(members)
+	return strings.Join(members, ",")
+}
+
 func (s *Server) localConfiguration() (localConfiguration, bool) {
 	if s.raft == nil {
 		return localConfiguration{}, false
 	}
+	s.configReads.Add(1)
 	future := s.raft.GetConfiguration()
 	if err := future.Error(); err != nil {
 		return localConfiguration{}, false
 	}
-	return localConfiguration{index: future.Index(), servers: future.Configuration().Servers}, true
+	return localConfiguration{servers: future.Configuration().Servers}, true
 }
 
 // refusalEndsMembership decides whether byPeer's refusal of this node as

@@ -138,6 +138,8 @@ type Server struct {
 	ignoredRemovalClaims sync.Map
 	// removalClaims tallies the members that refused this node as removed.
 	removalClaims removalClaims
+	// configReads counts the configuration reads weighing those claims costs.
+	configReads atomic.Int64
 
 	// evictionHandler is called with the leader's reason when this node
 	// receives a NotifyEviction RPC, meaning it has been removed from the

@@ -293,16 +293,26 @@ claim, and a claim counts only when all of these hold:
   node being removed.
 
 No single claim ends a membership. The node ends it once a majority of the
-other voters in its configuration have claimed it, each counted once; the
-tally starts over whenever its configuration changes. A restarted removed
-node dials every member it lists, and every genuine member refuses it, so it
-gets there quickly: in a three-node cluster both others, in a two-node
-cluster the one other. One member's word is never enough, because a removed
-node keeps its certificate and still answers whatever dials it — a member
-that has not yet seen the removal, or is cut off from the rest, still lists
-and dials it — and because a single compromised member would otherwise take
-out every node that dials it. A two-node cluster is the exception it cannot
-cover: there, the one other voter is the majority.
+other voters in its configuration have claimed it, each counted once. The
+tally starts over whenever its configuration changes (who is in it, or with
+what suffrage), and a claimant the node's removal record has since come to
+name stops counting. A restarted removed node dials every member it lists,
+and every genuine member refuses it, so it gets there quickly: with three
+voters both others, with two voters the one other. One member's word is
+never enough, because a removed node keeps its certificate and still answers
+whatever dials it — a member that has not yet seen the removal, or is cut
+off from the rest, still lists and dials it — and because a single
+compromised member would otherwise take out every node that dials it.
+
+The exception is any node whose own configuration has exactly one other
+voter: there, that voter is the majority, and its word alone ends the
+membership. That is a two-voter cluster, whatever learners it has, and also
+the interval in which a three-voter cluster is removing one voter and a
+member already holds the two-voter configuration.
+
+A claimant that keeps refusing is weighed again only once the node's Raft
+log has moved, and logged once per configuration: one claimant answering
+every call must not cost a configuration read and a log line each.
 
 A `RequestMembership` refused with the detail never counts on its own: the
 node at the join address is only known to hold a certificate the cluster CA
