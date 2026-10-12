@@ -341,23 +341,48 @@ func TestResolveTransferTargetDefersWhenTargetDisabled(t *testing.T) {
 	}
 }
 
-func TestResolveTransferTargetDefersWhenTargetNotFileVault(t *testing.T) {
+// A target whose chunks transfer cannot move in — a JSONL sink, or a
+// cloud-backed vault — defers the transfer (config drifted after PutVault
+// validation) rather than sending chunks it cannot hold.
+func TestResolveTransferTargetDefersWhenTargetIneligible(t *testing.T) {
+	t.Parallel()
+	csID := glid.New()
+	for name, target := range map[string]system.VaultConfig{
+		"jsonl sink":   {Name: "sink-target", Type: system.VaultTypeJSONL, Enabled: true},
+		"cloud-backed": {Name: "cloud-target", Type: system.VaultTypeFile, CloudServiceID: &csID, Enabled: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			target.ID = glid.New()
+			orch := newResolveTargetOrch(t, target)
+			r := &retentionRunner{orch: orch}
+
+			cfg, category, cause := r.resolveTransferTarget(target.ID)
+			if cfg != nil {
+				t.Fatal("want nil config for an ineligible target")
+			}
+			if category != deferCatTargetIneligible {
+				t.Errorf("category = %q, want %q", category, deferCatTargetIneligible)
+			}
+			if !strings.Contains(cause, "can no longer receive transferred chunks") {
+				t.Errorf("cause must say the target cannot receive transferred chunks; got: %s", cause)
+			}
+		})
+	}
+}
+
+// A memory vault receives transferred chunks like a file vault: its sealed
+// chunks are pipeline GLCBs in a local chunk root too.
+func TestResolveTransferTargetSucceedsForMemoryVault(t *testing.T) {
 	t.Parallel()
 	targetID := glid.New()
 	orch := newResolveTargetOrch(t, system.VaultConfig{
 		ID: targetID, Name: "mem-target", Type: system.VaultTypeMemory, Enabled: true,
 	})
 	r := &retentionRunner{orch: orch}
-
 	cfg, category, cause := r.resolveTransferTarget(targetID)
-	if cfg != nil {
-		t.Fatal("want nil config for a non-file target (config drifted after PutVault validation)")
-	}
-	if category != deferCatTargetNotFileVault {
-		t.Errorf("category = %q, want %q", category, deferCatTargetNotFileVault)
-	}
-	if !strings.Contains(cause, "file vault") {
-		t.Errorf("cause must name the file-vault requirement; got: %s", cause)
+	if cfg == nil {
+		t.Fatalf("memory target refused: category=%q cause=%q", category, cause)
 	}
 }
 

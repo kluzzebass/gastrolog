@@ -330,7 +330,7 @@ export function VaultStorageForm({
             onChange={(v) => onUpdate({ retentionTransferTarget: v })}
             options={transferTargetOptions}
             placeholder="Select target vault..."
-            emptyMessage="No eligible targets — transfer requires a different, non-cloud file vault."
+            emptyMessage="No eligible targets — transfer requires a different file or memory vault that is not cloud-backed."
             helpRef={TRANSFER_HELP_REF}
             dark={dark}
           />

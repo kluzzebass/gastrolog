@@ -66,7 +66,7 @@ const (
 	deferCatTargetUnconfigured = "target-unconfigured"
 	deferCatConfigLoadFailed   = "config-load-failed"
 	deferCatTargetDisabled     = "target-disabled"
-	deferCatTargetNotFileVault = "target-not-file-vault"
+	deferCatTargetIneligible   = "target-ineligible"
 	deferCatTargetNotFound     = "target-not-found"
 	deferCatAdmission          = "target-admission"
 	deferCatNoHandle           = "no-vault-ctl-handle"
@@ -282,8 +282,8 @@ func (r *retentionRunner) resolveTransferTarget(targetID glid.GLID) (*system.Vau
 		if !targetCfg.Enabled {
 			return nil, deferCatTargetDisabled, fmt.Sprintf("transfer target vault %q is disabled", targetCfg.Name)
 		}
-		if targetCfg.Type != system.VaultTypeFile || targetCfg.IsCloud() {
-			return nil, deferCatTargetNotFileVault, fmt.Sprintf("transfer target vault %q is no longer a plain file vault", targetCfg.Name)
+		if !targetCfg.TransferEligible() {
+			return nil, deferCatTargetIneligible, fmt.Sprintf("transfer target vault %q can no longer receive transferred chunks (it is %s, cloud=%t)", targetCfg.Name, targetCfg.Type, targetCfg.IsCloud())
 		}
 		return targetCfg, "", ""
 	}

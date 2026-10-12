@@ -149,6 +149,15 @@ func (v VaultConfig) IsCloud() bool {
 	return v.CloudServiceID != nil
 }
 
+// TransferEligible reports whether retention transfer can move the vault's
+// sealed chunks out or in: they are pipeline GLCBs in a local chunk root, as
+// in a file or memory vault. A cloud-backed vault keeps them in object
+// storage with its own upload and cache lifecycle, and a JSONL sink holds no
+// chunks to transfer.
+func (v VaultConfig) TransferEligible() bool {
+	return (v.Type == VaultTypeFile || v.Type == VaultTypeMemory) && !v.IsCloud()
+}
+
 // DistributionMode controls how messages are distributed across route destinations.
 type DistributionMode string
 

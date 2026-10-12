@@ -973,7 +973,8 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   its local copy — no loss window. The destination-side retention clock
   starts fresh at arrival (`SealedAt` stamped on landing), so a shorter
   destination TTL does not re-fire retention the moment the chunk
-  lands. File vaults only (source and target); self-transfer is
+  lands. File and memory vaults that are not cloud-backed, as source
+  and target; self-transfer is
   rejected at `PutVault`. See
   docs/retention-transfer-disposition-design.md (gastrolog-2l918).
 

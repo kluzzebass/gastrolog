@@ -207,7 +207,7 @@ shape (memory, file, file+cloud, JSONL) defined by --type, --storage-class
 	cmd.Flags().String("cache-budget", "", "warm-cache soft cap for cloud-backed chunks (e.g. 1GB, 500MB, 1GiB). Unset defaults to a bounded budget for cloud vaults; 0 is rejected")
 	cmd.Flags().String("cache-ttl", "", "cache TTL duration for ttl eviction mode (e.g. 1h, 7d)")
 	cmd.Flags().String("retention-disposition", "delete", "what retention does with aged-out records: delete (drop), route (send through routing engine), or transfer (re-home the sealed chunk unchanged to --retention-transfer-target)")
-	cmd.Flags().String("retention-transfer-target", "", "vault name or ID records transfer to when --retention-disposition=transfer; must be a different, non-cloud file vault")
+	cmd.Flags().String("retention-transfer-target", "", "vault name or ID records transfer to when --retention-disposition=transfer; must be a different file or memory vault that is not cloud-backed")
 	cmd.Flags().String("path", "", "direct path for JSONL sinks")
 	cmd.Flags().String("memory-budget", "", "in-memory storage cap for memory vaults (e.g. 1GB, 512MiB). Unset defaults to a bounded budget; 0 is rejected")
 	_ = cmd.MarkFlagRequired("name")
