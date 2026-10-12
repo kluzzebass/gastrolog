@@ -25,9 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster/tlsutil"
-	"gastrolog/internal/glid"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/multiraft"
 
@@ -138,21 +136,9 @@ type Server struct {
 	// setNodeSuffrageFn handles promote/demote on the leader. Set by main.go.
 	setNodeSuffrageFn func(ctx context.Context, nodeID, nodeAddr string, voter bool) error
 
-	// replicaCatchupFn handles RequestReplicaCatchup on the placement leader:
-	// for each requested chunk ID, fan out a sealed-chunk push to the
-	// requesting follower via the existing replicateToFollower machinery.
-	// Returns the count of chunks for which a push was actually scheduled
-	// (after leader-side filtering: tombstoned, cloud-backed, missing-locally).
-	// Set by the composition root in app.go.
-	replicaCatchupFn func(ctx context.Context, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error)
-
 	// recordImporter imports records as a sealed chunk in a local vault.
 	// Set after the orchestrator is created, before chunk transfer starts.
 	recordImporter RecordImporter
-
-	// vaultRecordImporter imports records as a sealed chunk in a specific vault,
-	// preserving the original chunk ID. Used for sealed-chunk replication.
-	vaultRecordImporter VaultRecordImporter
 
 	// searchExecutor runs a search on a local vault for remote search requests.
 	// Set after the orchestrator is created, before search forwarding starts.
@@ -172,10 +158,6 @@ type Server struct {
 
 	// listChunksExecutor lists chunks in a local vault for remote ListChunks requests.
 	listChunksExecutor ListChunksExecutor
-
-	// waitVaultReadyExecutor blocks until a local vault is ready for remote
-	// WaitVaultReady requests (drain synchronization).
-	waitVaultReadyExecutor WaitVaultReadyExecutor
 
 	// pipelineBacklogDiskExecutor returns local pipeline disk counts for remote fan-out.
 	pipelineBacklogDiskExecutor PipelineBacklogDiskExecutor
@@ -203,9 +185,6 @@ type Server struct {
 
 	// analyzeChunkExecutor runs index analysis on a local vault.
 	analyzeChunkExecutor AnalyzeChunkExecutor
-
-	// sealVaultExecutor seals the active chunk of a local vault.
-	sealVaultExecutor SealVaultExecutor
 
 	// reindexVaultExecutor rebuilds all indexes for a local vault.
 	reindexVaultExecutor ReindexVaultExecutor
@@ -416,6 +395,10 @@ var (
 	// ErrNodeNotInCluster is returned when the node named is not in the
 	// Raft configuration.
 	ErrNodeNotInCluster = errors.New("node not in cluster configuration")
+	// ErrNodeRemoved is returned when a node the cluster removed asks to be
+	// put back in the configuration. A removed node ID never re-enters: the
+	// machine comes back as a new node, under a new ID.
+	ErrNodeRemoved = errors.New("node was removed from the cluster and cannot rejoin under its node ID")
 )
 
 // removalRefusal is a removal-gate refusal: its own message, and a match for
@@ -568,16 +551,6 @@ func (s *Server) SetRemoveNodeFn(fn RemoveNodeFunc) {
 // This is called on the leader to execute the Raft suffrage change.
 func (s *Server) SetNodeSuffrageFn(fn func(ctx context.Context, nodeID, nodeAddr string, voter bool) error) {
 	s.setNodeSuffrageFn = fn
-}
-
-// SetReplicaCatchupFn registers the callback for the RequestReplicaCatchup
-// RPC. Called on the placement leader to fan out per-chunk pushes to the
-// requesting follower via the existing replicateToFollower machinery.
-// Returns the count of chunks for which a push was actually scheduled
-// (after leader-side filtering of tombstoned / cloud-backed / locally-
-// missing chunks).
-func (s *Server) SetReplicaCatchupFn(fn func(ctx context.Context, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error)) {
-	s.replicaCatchupFn = fn
 }
 
 // Pause installs a gate that causes every subsequent gRPC handler on this
@@ -773,13 +746,13 @@ func (s *Server) baseServerOpts(maxRecv int) []grpc.ServerOption {
 		tlsCfg := s.cfg.TLS.ServerTLSConfig()
 		opts = append(opts,
 			grpc.Creds(credentials.NewTLS(tlsCfg)),
-			grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor, s.mTLSUnaryInterceptor),
-			grpc.ChainStreamInterceptor(s.pauseStreamInterceptor, s.mTLSStreamInterceptor),
+			grpc.ChainUnaryInterceptor(peerStatusUnaryServerInterceptor, s.pauseUnaryInterceptor, s.mTLSUnaryInterceptor),
+			grpc.ChainStreamInterceptor(peerStatusStreamServerInterceptor, s.pauseStreamInterceptor, s.mTLSStreamInterceptor),
 		)
 	} else {
 		opts = append(opts,
-			grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor),
-			grpc.ChainStreamInterceptor(s.pauseStreamInterceptor),
+			grpc.ChainUnaryInterceptor(peerStatusUnaryServerInterceptor, s.pauseUnaryInterceptor),
+			grpc.ChainStreamInterceptor(peerStatusStreamServerInterceptor, s.pauseStreamInterceptor),
 		)
 	}
 
@@ -827,7 +800,10 @@ func (s *Server) mTLSStreamInterceptor(srv any, ss grpc.ServerStream, info *grpc
 // takes no certificate at all, because it exists to hand one out.
 // RequestMembership takes the certificate but cannot require membership —
 // the caller is asking for exactly that — so it is the one call a node holds
-// a certificate for while still being outside the configuration.
+// a certificate for while still being outside the configuration. What that
+// call can buy is decided by the leader, not here: a node the cluster removed
+// is refused, and any other node outside the configuration enters as a
+// nonvoter.
 func (s *Server) requirePeerAuthority(ctx context.Context, method string) error {
 	if strings.HasSuffix(method, "/Enroll") {
 		return nil

@@ -100,7 +100,8 @@ export const LifecycleService = {
     },
     /**
      * RemoveNode evicts a node from the cluster. Must be called on the leader.
-     * The evicted node receives a best-effort shutdown notification.
+     * The evicted node receives a best-effort shutdown notification. Its node
+     * ID is retired: the cluster refuses to enroll or re-admit it.
      *
      * @generated from rpc gastrolog.v1.LifecycleService.RemoveNode
      */

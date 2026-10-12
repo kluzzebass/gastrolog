@@ -225,6 +225,40 @@ func applyDirective(q *query.Query, k, v string) (bool, error) {
 	}
 }
 
+// forwardedQueryExpression is the wire form of q for a peer node: the filter
+// followed by every directive applyDirective reads back, with absolute
+// timestamps. A peer parses it with ParseExpression, so a directive missing
+// here is one the peer's scan silently ignores.
+func forwardedQueryExpression(q query.Query) string {
+	q = q.Normalize()
+	var parts []string
+	if q.BoolExpr != nil {
+		parts = append(parts, q.BoolExpr.String())
+	}
+	timeDirective := func(key string, t time.Time) {
+		if !t.IsZero() {
+			parts = append(parts, key+"="+t.Format(time.RFC3339Nano))
+		}
+	}
+	timeDirective("start", q.Start)
+	timeDirective("end", q.End)
+	timeDirective("source_start", q.SourceStart)
+	timeDirective("source_end", q.SourceEnd)
+	if q.IsReverse {
+		parts = append(parts, "reverse=true")
+	}
+	if q.OrderBy != query.OrderByIngestTS {
+		parts = append(parts, "order="+q.OrderBy.String())
+	}
+	if q.Limit > 0 {
+		parts = append(parts, "limit="+strconv.Itoa(q.Limit))
+	}
+	if q.Pos != nil {
+		parts = append(parts, "pos="+strconv.FormatUint(*q.Pos, 10))
+	}
+	return strings.Join(parts, " ")
+}
+
 // parseDuration parses a duration string like "5m", "1h", or "3d".
 // Extends time.ParseDuration with support for day suffixes.
 func parseDuration(s string) (time.Duration, error) {

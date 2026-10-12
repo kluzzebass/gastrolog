@@ -183,8 +183,8 @@ func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 // instead of reaching into v.mu/v.segments/v.retired directly. This trades one
 // v.mu acquisition covering all N segments for N acquisitions, but nothing
 // depends on the batch being atomic: retirement is monotonic per segment ID
-// (delete from segments, add to retired) and the one caller (the FSM release
-// callback in orchestrator/pipeline/supervisor.go) never inspects retired
+// (delete from segments, add to retired) and the one caller (the release
+// consumer in orchestrator/pipeline/release.go) never inspects retired
 // state between two IDs of the same release batch — it just purges files by
 // ID in a separate loop afterward.
 func (m *Manager) RetireSegments(vaultID glid.GLID, segmentIDs []glid.GLID) {

@@ -23,11 +23,11 @@ type unreachableThenServePull struct {
 	failures atomic.Int32
 }
 
-func (p *unreachableThenServePull) Pull(ctx context.Context, nodeID glid.GLID, segmentID glid.GLID, dest io.Writer) error {
+func (p *unreachableThenServePull) Pull(ctx context.Context, nodeID glid.GLID, segmentID glid.GLID, exclude []string, dest io.Writer) (string, error) {
 	if p.failures.Add(-1) >= 0 {
-		return fmt.Errorf("pull segment %s: %w", segmentID, errPeerUnreachable)
+		return "", fmt.Errorf("pull segment %s: %w", segmentID, errPeerUnreachable)
 	}
-	return p.inner.Pull(ctx, nodeID, segmentID, dest)
+	return p.inner.Pull(ctx, nodeID, segmentID, exclude, dest)
 }
 
 // startCollection runs the manager with one registered vault. The worker's
@@ -119,17 +119,17 @@ type perSegmentFailPull struct {
 	fail  map[glid.GLID]*failPlan
 }
 
-func (p *perSegmentFailPull) Pull(ctx context.Context, nodeID glid.GLID, segmentID glid.GLID, dest io.Writer) error {
+func (p *perSegmentFailPull) Pull(ctx context.Context, nodeID glid.GLID, segmentID glid.GLID, exclude []string, dest io.Writer) (string, error) {
 	p.mu.Lock()
 	plan := p.fail[segmentID]
 	if plan != nil && plan.left > 0 {
 		plan.left--
 		err := plan.err
 		p.mu.Unlock()
-		return fmt.Errorf("pull segment %s: %w", segmentID, err)
+		return "", fmt.Errorf("pull segment %s: %w", segmentID, err)
 	}
 	p.mu.Unlock()
-	return p.inner.Pull(ctx, nodeID, segmentID, dest)
+	return p.inner.Pull(ctx, nodeID, segmentID, exclude, dest)
 }
 
 func (p *perSegmentFailPull) state() string {

@@ -5,7 +5,7 @@ import "gastrolog/internal/logging/comp"
 // Component paths for the orchestrator package and its sub-systems.
 var (
 	compOrchestrator = comp.Root("orchestrator").Desc(
-		"Top-level orchestrator — vault lifecycle, scheduling, drain, replication, retention. Most operator filters target one of the subsystem sub-paths below rather than this root.")
+		"Top-level orchestrator — vault lifecycle, scheduling, chunk moves, retention. Most operator filters target one of the subsystem sub-paths below rather than this root.")
 
 	compVaultCtlLeader = compOrchestrator.Sub("vault-ctl-leader-manager").Desc(
 		"Per-vault control-plane Raft leader epoch supervision: membership reconcile and optional leadership transfer.")
@@ -13,11 +13,8 @@ var (
 	compVaultLifecycle = compOrchestrator.Sub("vault-lifecycle-reconciler").Desc(
 		"Per-vault FSM-driven reconciler — applies snapshot state, runs the receipt protocol, sweeps missing replicas, drives PostSealProcess.")
 
-	compReplication = compOrchestrator.Sub("replication").Desc(
-		"Sealed-chunk replication to RF followers: target selection, fan-out, retry, partial-failure aggregation.")
-
-	compDrain = compOrchestrator.Sub("drain").Desc(
-		"Vault drain — moving chunks off a vault that's leaving this node, plus inter-vault chunk transfers.")
+	compChunkMove = compOrchestrator.Sub("chunk-move").Desc(
+		"Inter-vault chunk moves — retention transfer of a sealed chunk to another vault, locally or to another node.")
 
 	compRetention = compOrchestrator.Sub("retention").Desc(
 		"Retention sweep + archival sweep — applies policy-driven eviction and archival to sealed chunks.")

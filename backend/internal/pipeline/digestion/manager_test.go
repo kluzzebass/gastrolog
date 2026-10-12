@@ -316,30 +316,6 @@ func TestManagerRunTwice(t *testing.T) {
 	}
 }
 
-func TestManagerWaitForReplica(t *testing.T) {
-	t.Parallel()
-
-	mgr, out := digestion.New(digestion.Config{Workers: 1})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	in := make(chan ingestion.IngestMessage, 2)
-	in <- ingestion.IngestMessage{EventID: record.EventID{IngestSeq: 0}, Raw: []byte("plain")}
-	in <- ingestion.IngestMessage{EventID: record.EventID{IngestSeq: 1}, Raw: []byte("ack"), Ack: make(chan error, 1)}
-	close(in)
-
-	go func() { _ = mgr.Run(ctx, in) }()
-
-	o0 := <-out
-	o1 := <-out
-	if o0.Record.WaitForReplica {
-		t.Fatal("plain message should not wait for replica")
-	}
-	if !o1.Record.WaitForReplica {
-		t.Fatal("ack message should wait for replica")
-	}
-}
-
 func TestManagerParallelLoad(t *testing.T) {
 	t.Parallel()
 

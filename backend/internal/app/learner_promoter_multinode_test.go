@@ -231,7 +231,7 @@ func TestMultiNode_ClusterCtlLearnerPromotedEventDriven(t *testing.T) {
 
 	membership := realRaftMembership{r: leader.raft}
 	ps := &clusterCtlLivePeerStats{learnerID: learnerID, learner: learner.raft}
-	p := newClusterCtlLearnerPromoter(membership, ps, quietLogger())
+	p := newClusterCtlLearnerPromoter(membership, ps, promoteThrough(membership), quietLogger())
 
 	driveUntilVoter(t, p, leader.raft, learnerID)
 }

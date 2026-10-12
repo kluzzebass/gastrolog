@@ -68,7 +68,9 @@ func (o OrderBy) RecordTS(rec chunk.Record) time.Time {
 // or by vault placement, would return a different window depending on which
 // node received the query and on how routing fanned copies across vaults.
 // EventID's fields are intrinsic to the event and identical on every copy of
-// it, so every node ranks the same two records the same way.
+// it, so every node ranks the same two records the same way. An EventID
+// without an ingester identity ranks as the zero EventID, whatever IngestTS a
+// read path filled into it: records lacking an identity tie with each other.
 func (o OrderBy) CompareRecords(a, b chunk.Record, reverse bool) int {
 	return compareOrderKeys(o.RecordTS(a), a.EventID, o.RecordTS(b), b.EventID, reverse)
 }
@@ -78,12 +80,21 @@ func (o OrderBy) CompareRecords(a, b chunk.Record, reverse bool) int {
 func compareOrderKeys(tsA time.Time, evA chunk.EventID, tsB time.Time, evB chunk.EventID, reverse bool) int {
 	c := tsA.Compare(tsB)
 	if c == 0 {
-		c = evA.Compare(evB)
+		c = rankedIdentity(evA).Compare(rankedIdentity(evB))
 	}
 	if reverse {
 		return -c
 	}
 	return c
+}
+
+// rankedIdentity is the EventID an event ranks by: itself, or the zero EventID
+// when it carries no ingester identity.
+func rankedIdentity(ev chunk.EventID) chunk.EventID {
+	if ev.IngesterID.IsZero() {
+		return chunk.EventID{}
+	}
+	return ev
 }
 
 // KeyValueFilter represents a key=value filter that searches both
@@ -157,7 +168,9 @@ type Query struct {
 	// previous page ended at, on the OrderBy axis. Every scanner drops
 	// records at or before it before the limit is counted, so a page
 	// boundary inside a group of records sharing a timestamp resumes
-	// exactly. A zero event skips only records strictly before the timestamp.
+	// exactly. A record without an ingester identity has no place among
+	// ties: a zero event drops every identity-less record at the timestamp
+	// along with the one it names.
 	ResumeAfterTS    time.Time
 	ResumeAfterEvent chunk.EventID
 
@@ -169,6 +182,18 @@ type Query struct {
 	// SkipCloud skips cloud-backed chunks during search. Used by the
 	// histogram to compute filtered counts from local data only.
 	SkipCloud bool
+
+	// budget is the memory ledger this query's execution charges on this
+	// node. Copies of the query share it; nil means the engine opens one.
+	budget *Budget
+}
+
+// WithBudget returns q running on budget: every structure the engine builds
+// for it — sort keys, histogram state, pipeline working sets — charges that
+// one ledger.
+func (q Query) WithBudget(b *Budget) Query {
+	q.budget = b
+	return q
 }
 
 // String returns a human-readable representation of the query including all parameters.
@@ -612,8 +637,8 @@ func chunkMatchesQuery(m chunk.ChunkMeta, q Query, lower, upper time.Time, chunk
 
 // chunkCmp returns the planner sort comparator for chunk metas: forward =
 // ascending start, reverse = live chunks first, then descending end. The
-// lazy-prime merge (vaultChunksOverlap, one-scanner-at-a-time opening)
-// assumes this order holds GLOBALLY across the chunk list it receives —
+// lazy-prime merge (lazyOpenCompeting stops at the first chunk that cannot
+// compete) assumes this order holds GLOBALLY across the chunk list it receives —
 // per-vault sorted runs concatenated in registry order are not enough.
 func chunkCmp(orderBy OrderBy, reverse bool) func(a, b chunk.ChunkMeta) int {
 	startTS, endTS := chunkTimeBounds(orderBy)
@@ -645,7 +670,8 @@ func sortChunks(out []chunk.ChunkMeta, orderBy OrderBy, reverse bool) {
 
 // searchChunkWithRef returns an iterator over records in a single chunk, including their refs.
 // vaultID identifies which vault the chunk belongs to (for multi-vault queries).
-// startPos allows resuming from a specific position within the chunk.
+// startPos allows resuming from a specific position within the chunk; only a
+// scan in physical order honours it (see physicalOrderScan).
 // Unsealed chunks are scanned sequentially without indexes.
 func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID glid.GLID, meta chunk.ChunkMeta, startPos *uint64) iter.Seq2[recordWithRef, error] {
 	return func(yield func(recordWithRef, error) bool) {
@@ -659,12 +685,15 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID glid.G
 		}
 		defer func() { _ = cursor.Close() }()
 
+		cm, im := e.getVaultManagers(vaultID)
+		if !physicalOrderScan(cm, im, q.OrderBy, meta) {
+			startPos = nil
+		}
 		if err := positionCursor(cursor, q, meta, startPos); err != nil {
 			yield(recordWithRef{}, asReadError(vaultID, meta.ID, err))
 			return
 		}
 
-		cm, im := e.getVaultManagers(vaultID)
 		scanner, err := e.buildScannerWithManagers(ctx, cursor, q, vaultID, meta, startPos, cm, im)
 		if err != nil {
 			yield(recordWithRef{}, err)
@@ -757,11 +786,23 @@ func chunkLocallyMaterialized(cm chunk.ChunkManager, meta chunk.ChunkMeta) bool 
 	return ok && lc.HasLocalContent(meta.ID)
 }
 
+// physicalOrderScan reports whether a chunk is read in physical write order:
+// an ingest-ordered scan of a chunk with no local copy and no timestamp index.
+// Every other scan walks a timestamp index or sorts the chunk in memory, so a
+// physical resume position — whoever minted it — cannot bound it; such a chunk
+// resumes under the canonical cursor alone.
+func physicalOrderScan(cm chunk.ChunkManager, im index.IndexManager, orderBy OrderBy, meta chunk.ChunkMeta) bool {
+	if orderBy != OrderByIngestTS || chunkLocallyMaterialized(cm, meta) {
+		return false
+	}
+	return !chunkHasTSIndex(tsIndexViewForChunk(cm, im, orderBy), meta.ID)
+}
+
 func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.RecordCursor, q Query, vaultID glid.GLID, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
 	b := newScannerBuilder(meta.ID)
 	b.vaultID = vaultID
 
-	setMinPositionsFromBounds(b, q, meta, cm, im)
+	setMinPositionFromIngestBound(b, q, meta, cm, im)
 
 	// Resume position takes precedence over time-based start. Direction
 	// decides which bound it is: forward has already returned everything
@@ -808,14 +849,11 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 	// (registered with the chunk manager), use the embedded ITSI like a sealed
 	// chunk. Any other ordering over such a chunk has no index to walk, so the
 	// chunk is sorted in memory.
-	if !chunkLocallyMaterialized(cm, meta) {
-		view := tsIndexViewForChunk(cm, im, q.OrderBy)
-		if !chunkHasTSIndex(view, meta.ID) {
-			if q.OrderBy == OrderByIngestTS {
-				return b.build(ctx, cursor, q), nil
-			}
-			return e.buildSortedScanner(ctx, cursor, q, b, meta), nil
-		}
+	if physicalOrderScan(cm, im, q.OrderBy, meta) {
+		return b.build(ctx, cursor, q), nil
+	}
+	if !chunkLocallyMaterialized(cm, meta) && !chunkHasTSIndex(tsIndexViewForChunk(cm, im, q.OrderBy), meta.ID) {
+		return e.buildSortedScanner(ctx, cursor, q, b, meta), nil
 	}
 
 	// Records are stored in physical write order but must be yielded in
@@ -846,53 +884,34 @@ func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordC
 	return scan, nil
 }
 
-// setMinPositionsFromBounds sets the scanner builder's minimum position from time bounds
-// using IngestTS and SourceTS indexes (sealed flat index or active chunk B+ tree).
-func setMinPositionsFromBounds(b *scannerBuilder, q Query, meta chunk.ChunkMeta, cm chunk.ChunkManager, im index.IndexManager) {
-	// IngestTS: use sealed flat index or active chunk B+ tree.
+// setMinPositionFromIngestBound narrows the scan to the positions the ingest
+// lower bound can admit, where that set is a position suffix.
+func setMinPositionFromIngestBound(b *scannerBuilder, q Query, meta chunk.ChunkMeta, cm chunk.ChunkManager, im index.IndexManager) {
+	if pos, ok := ingestBoundMinPosition(q, meta, cm, im); ok {
+		b.setMinPosition(pos)
+	}
+}
+
+// ingestBoundMinPosition returns the lowest physical position whose record
+// the ingest lower bound admits, when every record below it is excluded.
+// That holds only on a sealed chunk whose IngestTS never decreases in
+// physical order: the records under the bound are exactly the first
+// rank-many positions. On any other chunk an admitted record can sit at any
+// position, and SourceTS carries no such order at all, so those bounds stay
+// rank ranges and per-record checks.
+func ingestBoundMinPosition(q Query, meta chunk.ChunkMeta, cm chunk.ChunkManager, im index.IndexManager) (uint64, bool) {
 	lower, _ := q.TimeBounds()
-	seekIngestTS(b, lower, meta, cm, im)
-	seekSourceTS(b, q.SourceStart, meta, cm, im)
-}
-
-func seekIngestTS(b *scannerBuilder, lower time.Time, meta chunk.ChunkMeta, cm chunk.ChunkManager, im index.IndexManager) {
-	if lower.IsZero() {
-		return
+	if lower.IsZero() || !meta.Sealed || !meta.IngestTSMonotonic {
+		return 0, false
 	}
-	if meta.Sealed {
-		if pos, found, err := im.FindIngestStartPosition(meta.ID, lower); err == nil && found {
-			b.setMinPosition(pos)
-			return
-		}
-		// Fallback: chunk manager handles cloud-backed chunks with locally-cached TS index.
-		if pos, found, err := cm.FindIngestStartPosition(meta.ID, lower); err == nil && found {
-			b.setMinPosition(pos)
-		}
-		return
+	if rank, found, err := im.FindIngestEntryIndex(meta.ID, lower); err == nil && found {
+		return rank, true
 	}
-	if pos, found, err := cm.FindIngestStartPosition(meta.ID, lower); err == nil && found {
-		b.setMinPosition(pos)
+	// Cold cloud-backed chunks resolve their rank through the chunk manager.
+	if rank, found, err := cm.FindIngestEntryIndex(meta.ID, lower); err == nil && found {
+		return rank, true
 	}
-}
-
-func seekSourceTS(b *scannerBuilder, sourceStart time.Time, meta chunk.ChunkMeta, cm chunk.ChunkManager, im index.IndexManager) {
-	if sourceStart.IsZero() {
-		return
-	}
-	if meta.Sealed {
-		if pos, found, err := im.FindSourceStartPosition(meta.ID, sourceStart); err == nil && found {
-			b.setMinPosition(pos)
-			return
-		}
-		// Fallback: chunk manager handles cloud-backed chunks with locally-cached TS index.
-		if pos, found, err := cm.FindSourceStartPosition(meta.ID, sourceStart); err == nil && found {
-			b.setMinPosition(pos)
-		}
-		return
-	}
-	if pos, found, err := cm.FindSourceStartPosition(meta.ID, sourceStart); err == nil && found {
-		b.setMinPosition(pos)
-	}
+	return 0, false
 }
 
 // applyBoolExpr converts a BoolExpr to DNF and applies index acceleration and runtime filters

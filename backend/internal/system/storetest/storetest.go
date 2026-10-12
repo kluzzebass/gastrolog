@@ -38,6 +38,38 @@ func TestStore(t *testing.T, newStore func(t *testing.T) system.Store) {
 	testAuth(t, newStore)
 	testCloudServices(t, newStore)
 	testNodeStorageConfigs(t, newStore)
+	testRemovedNodes(t, newStore)
+}
+
+func testRemovedNodes(t *testing.T, newStore func(t *testing.T) system.Store) {
+	t.Run("MarkNodeRemoved", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		if removed, err := s.IsNodeRemoved(ctx, "node-1"); err != nil || removed {
+			t.Fatalf("fresh store reports node-1 removed=%v err=%v", removed, err)
+		}
+		if err := s.MarkNodeRemoved(ctx, "node-1"); err != nil {
+			t.Fatalf("MarkNodeRemoved: %v", err)
+		}
+		if err := s.MarkNodeRemoved(ctx, "node-1"); err != nil {
+			t.Fatalf("MarkNodeRemoved again: %v", err)
+		}
+		if removed, err := s.IsNodeRemoved(ctx, "node-1"); err != nil || !removed {
+			t.Fatalf("IsNodeRemoved(node-1) = %v, %v; want true", removed, err)
+		}
+		if removed, err := s.IsNodeRemoved(ctx, "node-2"); err != nil || removed {
+			t.Fatalf("IsNodeRemoved(node-2) = %v, %v; want false", removed, err)
+		}
+
+		sys, err := s.Load(ctx)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if sys == nil || len(sys.Runtime.RemovedNodes) != 1 || sys.Runtime.RemovedNodes[0] != "node-1" {
+			t.Fatalf("Load carries removed nodes %+v, want [node-1]", sys)
+		}
+	})
 }
 
 func testRotationPolicies(t *testing.T, newStore func(t *testing.T) system.Store) {

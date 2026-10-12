@@ -27,6 +27,8 @@ The timeline visualization uses the histogram to show record counts over time, b
 
 Without a filter, this is very fast — it counts records from the index without reading any record data. With a filter, it runs a full search and buckets the results.
 
+In a [cluster](help:clustering), the histogram counts every vault in the search, wherever it lives: each node counts its own vaults while the records stream, and the counts are added together. Every node counts on the same buckets, so a search without a time range spans the oldest to the newest record across all of its vaults. If a node cannot report its share — or, for a search without a time range, cannot say where its vault's records lie — the search shows no histogram rather than one that quietly leaves that node out.
+
 ## Context View
 
 Click a record to see what was happening around it. The context view shows a configurable number of records before and after the selected one (up to 50 each), pulled from all vaults by timestamp — including vaults on remote [cluster nodes](help:clustering).

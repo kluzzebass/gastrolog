@@ -91,7 +91,7 @@ func TestClusterCtlPromoter_NoLearners_NoOp(t *testing.T) {
 		},
 	}
 	ps := &mockPeerStats{byNode: map[string]uint64{"n1": 100, "n2": 100}}
-	newClusterCtlLearnerPromoter(srv, ps, quietLogger()).evaluate()
+	newClusterCtlLearnerPromoter(srv, ps, promoteThrough(srv), quietLogger()).evaluate()
 
 	if got := srv.voterCalls(); len(got) != 0 {
 		t.Fatalf("expected no AddVoter when no learners, got %v", got)
@@ -110,7 +110,7 @@ func TestClusterCtlPromoter_CaughtUpLearnerPromoted(t *testing.T) {
 		},
 	}
 	ps := &mockPeerStats{byNode: map[string]uint64{"learner": 100}}
-	newClusterCtlLearnerPromoter(srv, ps, quietLogger()).evaluate()
+	newClusterCtlLearnerPromoter(srv, ps, promoteThrough(srv), quietLogger()).evaluate()
 
 	got := srv.voterCalls()
 	if len(got) != 1 || got[0].id != "learner" || got[0].addr != "addr-x" {
@@ -130,7 +130,7 @@ func TestClusterCtlPromoter_LaggingLearnerHeldOff(t *testing.T) {
 		},
 	}
 	ps := &mockPeerStats{byNode: map[string]uint64{"lagger": 50}}
-	newClusterCtlLearnerPromoter(srv, ps, quietLogger()).evaluate()
+	newClusterCtlLearnerPromoter(srv, ps, promoteThrough(srv), quietLogger()).evaluate()
 
 	if got := srv.voterCalls(); len(got) != 0 {
 		t.Fatalf("expected no AddVoter for lagging learner, got %v", got)
@@ -149,7 +149,7 @@ func TestClusterCtlPromoter_NoPeerStatsBlocksPromotion(t *testing.T) {
 		},
 	}
 	ps := &mockPeerStats{byNode: map[string]uint64{}}
-	newClusterCtlLearnerPromoter(srv, ps, quietLogger()).evaluate()
+	newClusterCtlLearnerPromoter(srv, ps, promoteThrough(srv), quietLogger()).evaluate()
 
 	if got := srv.voterCalls(); len(got) != 0 {
 		t.Fatalf("expected no AddVoter for unobserved learner, got %v", got)
@@ -168,7 +168,7 @@ func TestClusterCtlPromoter_StagingTreatedAsLearner(t *testing.T) {
 		},
 	}
 	ps := &mockPeerStats{byNode: map[string]uint64{"staging": 100}}
-	newClusterCtlLearnerPromoter(srv, ps, quietLogger()).evaluate()
+	newClusterCtlLearnerPromoter(srv, ps, promoteThrough(srv), quietLogger()).evaluate()
 
 	got := srv.voterCalls()
 	if len(got) != 1 || got[0].id != "staging" {
@@ -187,7 +187,7 @@ func TestClusterCtlPromoter_NonLeaderNoOp(t *testing.T) {
 		},
 	}
 	ps := &mockPeerStats{byNode: map[string]uint64{"n1": 100}}
-	newClusterCtlLearnerPromoter(srv, ps, quietLogger()).evaluate()
+	newClusterCtlLearnerPromoter(srv, ps, promoteThrough(srv), quietLogger()).evaluate()
 
 	if got := srv.voterCalls(); len(got) != 0 {
 		t.Fatalf("non-leader: AddVoter called %v", got)
@@ -206,7 +206,7 @@ func TestClusterCtlPromoter_LeaderAppliedZeroSkips(t *testing.T) {
 		},
 	}
 	ps := &mockPeerStats{byNode: map[string]uint64{"learner": 0}}
-	newClusterCtlLearnerPromoter(srv, ps, quietLogger()).evaluate()
+	newClusterCtlLearnerPromoter(srv, ps, promoteThrough(srv), quietLogger()).evaluate()
 
 	if got := srv.voterCalls(); len(got) != 0 {
 		t.Fatalf("leaderApplied==0 must skip, got %v", got)
@@ -226,7 +226,7 @@ func TestClusterCtlPromoter_AddVoterFailRetries(t *testing.T) {
 		},
 	}
 	ps := &mockPeerStats{byNode: map[string]uint64{"stuck": 100}}
-	p := newClusterCtlLearnerPromoter(srv, ps, quietLogger())
+	p := newClusterCtlLearnerPromoter(srv, ps, promoteThrough(srv), quietLogger())
 
 	p.evaluate()
 	if got := srv.voterCalls(); len(got) != 1 {
@@ -250,7 +250,7 @@ func TestClusterCtlPromoter_ServersErrorNoOp(t *testing.T) {
 		isLeader: true, appliedIndex: 100, serversErr: errFakeMember,
 	}
 	ps := &mockPeerStats{byNode: map[string]uint64{}}
-	newClusterCtlLearnerPromoter(srv, ps, quietLogger()).evaluate()
+	newClusterCtlLearnerPromoter(srv, ps, promoteThrough(srv), quietLogger()).evaluate()
 
 	if got := srv.voterCalls(); len(got) != 0 {
 		t.Fatalf("expected no AddVoter on Servers() error, got %v", got)
@@ -270,5 +270,25 @@ func TestLocalAppliedIndex_ParsesStats(t *testing.T) {
 	}
 	if got := localAppliedIndex(nil); got != 0 {
 		t.Fatalf("expected 0 for nil membership, got %d", got)
+	}
+}
+
+// promoteThrough promotes a learner by AddVoter at its configured address,
+// the operation the production gated suffrage change ends in.
+func promoteThrough(m interface {
+	Servers() ([]cluster.RaftServer, error)
+	AddVoter(id, addr string, timeout time.Duration) error
+}) func(nodeID string) error {
+	return func(nodeID string) error {
+		servers, err := m.Servers()
+		if err != nil {
+			return err
+		}
+		for _, srv := range servers {
+			if srv.ID == nodeID {
+				return m.AddVoter(nodeID, srv.Address, 5*time.Second)
+			}
+		}
+		return cluster.ErrNodeNotInCluster
 	}
 }

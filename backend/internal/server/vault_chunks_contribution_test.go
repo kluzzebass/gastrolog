@@ -89,8 +89,12 @@ func (s *stubExplainSearcher) Search(_ context.Context, _ string, _ *gastrologv1
 	return nil, errors.New("not implemented")
 }
 
-func (s *stubExplainSearcher) SearchStream(_ context.Context, _ string, _ *gastrologv1.ForwardSearchRequest) (<-chan []*gastrologv1.ExportRecord, *gastrologv1.TableResult, <-chan error, func() []byte, func() []*gastrologv1.HistogramBucket) {
-	return nil, nil, nil, nil, nil
+func (s *stubExplainSearcher) SearchStream(_ context.Context, _ string, _ *gastrologv1.ForwardSearchRequest) (<-chan []*gastrologv1.ExportRecord, *gastrologv1.TableResult, <-chan error, func() []byte) {
+	return nil, nil, nil, nil
+}
+
+func (s *stubExplainSearcher) ListChunks(_ context.Context, _ string, _ *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error) {
+	return &gastrologv1.ForwardListChunksResponse{}, nil
 }
 
 func (s *stubExplainSearcher) GetContext(_ context.Context, _ string, _ *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error) {

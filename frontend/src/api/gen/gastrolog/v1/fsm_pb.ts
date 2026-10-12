@@ -269,6 +269,12 @@ export class SystemCommand extends Message<SystemCommand> {
      */
     value: RotateRefreshTokenCommand;
     case: "rotateRefreshToken";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.MarkNodeRemovedCommand mark_node_removed = 42;
+     */
+    value: MarkNodeRemovedCommand;
+    case: "markNodeRemoved";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<SystemCommand>) {
@@ -320,6 +326,7 @@ export class SystemCommand extends Message<SystemCommand> {
     { no: 39, name: "set_node_state", kind: "message", T: SetNodeStateCommand, oneof: "command" },
     { no: 40, name: "catchup_barrier", kind: "message", T: CatchupBarrierCommand, oneof: "command" },
     { no: 41, name: "rotate_refresh_token", kind: "message", T: RotateRefreshTokenCommand, oneof: "command" },
+    { no: 42, name: "mark_node_removed", kind: "message", T: MarkNodeRemovedCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemCommand {
@@ -1626,6 +1633,48 @@ export class DeleteNodeConfigCommand extends Message<DeleteNodeConfigCommand> {
 }
 
 /**
+ * MarkNodeRemovedCommand records that the cluster removed a node. The record
+ * is permanent: the cluster refuses enrolment and membership to the node ID
+ * from then on, so a removed node's key cannot bring its identity back.
+ * node_id is the node's Raft server ID.
+ *
+ * @generated from message gastrolog.v1.MarkNodeRemovedCommand
+ */
+export class MarkNodeRemovedCommand extends Message<MarkNodeRemovedCommand> {
+  /**
+   * @generated from field: string node_id = 1;
+   */
+  nodeId = "";
+
+  constructor(data?: PartialMessage<MarkNodeRemovedCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.MarkNodeRemovedCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MarkNodeRemovedCommand {
+    return new MarkNodeRemovedCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): MarkNodeRemovedCommand {
+    return new MarkNodeRemovedCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): MarkNodeRemovedCommand {
+    return new MarkNodeRemovedCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: MarkNodeRemovedCommand | PlainMessage<MarkNodeRemovedCommand> | undefined, b: MarkNodeRemovedCommand | PlainMessage<MarkNodeRemovedCommand> | undefined): boolean {
+    return proto3.util.equals(MarkNodeRemovedCommand, a, b);
+  }
+}
+
+/**
  * SetNodeStateCommand transitions a node from its current lifecycle
  * state to the given state. The since field is the wall-clock instant
  * captured by the proposer at propose-time; replicas apply it
@@ -2451,6 +2500,13 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
    */
   lastAppliedIndex = protoInt64.zero;
 
+  /**
+   * Raft server IDs of every node the cluster removed.
+   *
+   * @generated from field: repeated string removed_node_ids = 22;
+   */
+  removedNodeIds: string[] = [];
+
   constructor(data?: PartialMessage<SystemSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2480,6 +2536,7 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
     { no: 19, name: "ingester_checkpoints", kind: "message", T: SetIngesterCheckpointCommand, repeated: true },
     { no: 20, name: "log_levels", kind: "message", T: LogLevelConfig },
     { no: 21, name: "last_applied_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 22, name: "removed_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemSnapshot {

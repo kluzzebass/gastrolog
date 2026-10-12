@@ -40,7 +40,7 @@ func TestAddRefRejectsReleasedSegment(t *testing.T) {
 		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 9, SliceBytes: 10, RefAddedAt: now,
 	}))
 	applyCmd(t, f, MarshalSealOpenChunkManifest(chunkID, now.Add(time.Minute)))
-	applyCmd(t, f, MarshalSealChunk(chunkID, now.Add(time.Minute), 10, 10, now, now, now, true, now.Add(time.Minute)))
+	applyCmd(t, f, MarshalSealChunk(chunkID, now.Add(time.Minute), 10, 10, now, now, now, true, now.Add(time.Minute), [32]byte{}))
 	applyCmd(t, f, MarshalReleaseSegments([]glid.GLID{segID}))
 
 	// A stale ref to the released segment must be refused.
@@ -133,7 +133,7 @@ func TestDiscardUnbuildableManifests(t *testing.T) {
 		t.Fatal("survivor registry entry must remain")
 	}
 	// Discarded chunks must not count toward supersession.
-	if wedged.SegmentSuperseded(survivor, 1) {
+	if wedged.SegmentSuperseded(survivor, []string{"home-a"}) {
 		t.Fatal("discarded chunks must be scrubbed from the supersession mapping")
 	}
 	// Chunk entries gone.

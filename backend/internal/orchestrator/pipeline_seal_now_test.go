@@ -19,8 +19,8 @@ import (
 
 // An operator's seal commits the open manifest ahead of policy — on the
 // chunking leader only, and only when there is something to seal. A follower
-// home asked to seal a manifest that holds records refuses with ErrNotLeader
-// instead of reporting that nothing needed sealing.
+// home refuses with ErrNotLeader whether or not its FSM shows records open:
+// its FSM can lag the commit, so it never reports that nothing needed sealing.
 func TestSealOpenManifestSealsOnTheLeaderOnly(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -44,12 +44,13 @@ func TestSealOpenManifestSealsOnTheLeaderOnly(t *testing.T) {
 		t.Fatalf("leader RegisterVault: %v", err)
 	}
 
-	// Nothing open yet: nothing to seal, on either side.
+	// Nothing open yet: the leader has nothing to seal; the follower cannot
+	// vouch for that.
 	if sealed, err := leader.SealOpenManifest(vaultID); err != nil || sealed {
 		t.Fatalf("seal with no open manifest = (%v, %v), want (false, nil)", sealed, err)
 	}
-	if sealed, err := follower.SealOpenManifest(vaultID); err != nil || sealed {
-		t.Fatalf("follower seal with no open manifest = (%v, %v), want (false, nil)", sealed, err)
+	if sealed, err := follower.SealOpenManifest(vaultID); !errors.Is(err, chunking.ErrNotLeader) || sealed {
+		t.Fatalf("follower seal with no open manifest = (%v, %v), want (false, ErrNotLeader)", sealed, err)
 	}
 
 	planUntilOpenRef(t, ctx, leader, fsm, vaultID)
@@ -145,6 +146,7 @@ type pipelineSealHost struct {
 
 func (pipelineSealHost) isPipelineIngestVault(glid.GLID) bool                 { return true }
 func (pipelineSealHost) pipelineVaultChunkRoot(glid.GLID) (string, bool)      { return "", false }
+func (pipelineSealHost) homeHoldsGLCB(glid.GLID, chunk.ChunkID) bool          { return false }
 func (pipelineSealHost) schedulePipelineCloudUpload(glid.GLID, chunk.ChunkID) {}
 func (pipelineSealHost) EmitChunkSealed(glid.GLID, chunk.ChunkMeta)           {}
 func (pipelineSealHost) alertSink() alert.Sink                                { return nil }
@@ -165,7 +167,7 @@ func TestReconcilerOnSealSkipsLegacyProjectionForPipelineVaults(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, now, now, now)}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 100, 1234, now, now, now, false, now)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 100, 1234, now, now, now, false, now, [32]byte{})}); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
 	if len(cm.ensured) != 0 {

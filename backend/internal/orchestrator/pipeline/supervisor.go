@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -30,7 +31,6 @@ import (
 	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/pipeline/distribution"
 	"gastrolog/internal/pipeline/ingestion"
-	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/record"
@@ -157,7 +157,10 @@ type VaultSpec struct {
 	HomeRoot string
 	// ChunkRoot is where GLCB chunk blobs are written. Required when Home is set.
 	ChunkRoot string
-	// FSM is the vault-ctl state machine. Required when Home is set.
+	// FSM is the vault-ctl state machine. Required when Home is set. When set,
+	// this node consumes the vault's segment releases whether or not it is a
+	// home: an Origin retires and purges its completed/ copies, and every
+	// staging root drops its head/ copies.
 	FSM *vaultctlfsm.FSM
 	// LookupFSM returns the live vault-ctl sub-FSM after snapshot Restore.
 	LookupFSM func() *vaultctlfsm.FSM
@@ -196,22 +199,21 @@ type VaultSpec struct {
 }
 
 type vaultRoles struct {
-	origin       bool
-	home         bool
-	collects     bool
-	chunking     bool
-	unsubRelease func()
+	origin   bool
+	home     bool
+	collects bool
+	chunking bool
+	release  *releaseConsumer
 }
 
-// stagingHeadPurgeRoots returns distinct vault staging roots whose head/ copies
-// must be dropped after ReleaseSegments. Origin and home often share one root
-// in production; tests and misconfig can split them.
-func stagingHeadPurgeRoots(originRoot, homeRoot string, origin, homeSide bool) []string {
+// stagingRoots returns the distinct staging roots this node uses for a vault.
+// Origin and home share one root in production; tests can split them.
+func stagingRoots(originRoot, homeRoot string, origin, homeSide bool) []string {
 	var roots []string
 	if origin && originRoot != "" {
 		roots = append(roots, originRoot)
 	}
-	if homeSide && homeRoot != "" && homeRoot != originRoot {
+	if homeSide && homeRoot != "" && !slices.Contains(roots, homeRoot) {
 		roots = append(roots, homeRoot)
 	}
 	return roots
@@ -636,8 +638,6 @@ func (s *Supervisor) ChunkStageStats() []chunking.VaultStageStats {
 // RegisterVault starts the managers for the roles the vault holds on this node.
 // Safe before or during Start. It is idempotent only in the sense that a second
 // registration of the same vault returns ErrVaultRegistered.
-//
-//nolint:gocognit // wires origin, home, collection, chunking, and release hooks per vault
 func (s *Supervisor) RegisterVault(spec VaultSpec) error {
 	if spec.VaultID.IsZero() {
 		return errors.New("vault spec missing ID")
@@ -663,8 +663,15 @@ func (s *Supervisor) RegisterVault(spec VaultSpec) error {
 		chunking: spec.Locate != nil,
 	}
 
+	// Bound before distribution registers, so its completed/ rescan never
+	// republishes a segment the FSM already released.
+	roles.release = s.newReleaseConsumer(spec, homeSide)
+	if roles.release != nil {
+		roles.release.bind(spec.FSM)
+	}
 	if spec.Origin {
 		if err := s.registerOrigin(spec); err != nil {
+			roles.release.unbindIfSet()
 			return err
 		}
 	}
@@ -673,40 +680,33 @@ func (s *Supervisor) RegisterVault(spec VaultSpec) error {
 			if spec.Origin {
 				s.unregisterOrigin(spec.VaultID)
 			}
+			roles.release.unbindIfSet()
 			return err
 		}
 	}
 
-	releaseRoot := spec.OriginRoot
-	if releaseRoot == "" {
-		releaseRoot = spec.HomeRoot
-	}
-	if spec.FSM != nil && releaseRoot != "" {
-		vaultID := spec.VaultID
-		homeRoot := spec.HomeRoot
-		purgeHomeHead := homeSide && homeRoot != ""
-		originRoot := spec.OriginRoot
-		headPurgeRoots := stagingHeadPurgeRoots(originRoot, homeRoot, spec.Origin, purgeHomeHead)
-		roles.unsubRelease = spec.FSM.AddOnReleaseSegments(func(ids []glid.GLID) {
-			if spec.Origin {
-				s.dist.RetireSegments(vaultID, ids)
-				for _, id := range ids {
-					_ = paths.PurgeCompleted(releaseRoot, id)
-				}
-			}
-			// Drop head/pre-head on every staging root this node uses. Distribution
-			// promotes under OriginRoot; collection/chunking use HomeRoot when set.
-			// Purging only HomeRoot left OriginRoot/head debris.
-			for _, id := range ids {
-				for _, root := range headPurgeRoots {
-					_ = paths.PurgeHeadStaging(root, id)
-				}
-			}
-		})
-	}
-
 	s.vaults[spec.VaultID] = roles
 	return nil
+}
+
+// newReleaseConsumer builds the vault's release consumer, or nil when the spec
+// carries no vault-ctl FSM or no staging root. Released copies are dropped on
+// every staging root this node uses: distribution promotes under OriginRoot,
+// collection and chunking use HomeRoot.
+func (s *Supervisor) newReleaseConsumer(spec VaultSpec, homeSide bool) *releaseConsumer {
+	roots := stagingRoots(spec.OriginRoot, spec.HomeRoot, spec.Origin, homeSide)
+	if spec.FSM == nil || len(roots) == 0 {
+		return nil
+	}
+	c := &releaseConsumer{
+		vaultID: spec.VaultID,
+		logger:  s.logger,
+		roots:   roots,
+	}
+	if spec.Origin {
+		c.dist = s.dist
+	}
+	return c
 }
 
 func (s *Supervisor) registerOrigin(spec VaultSpec) error {
@@ -856,15 +856,36 @@ func (s *Supervisor) NoteGLCBRestored(vaultID glid.GLID, chunkID chunk.ChunkID) 
 	}
 }
 
-// RewireVaultAfterCtlRestore rebinds chunking and collection to the live vault-ctl
-// sub-FSM after a group-level snapshot Restore. Returns ErrUnknownVault when the
-// vault is not registered on this home yet (transient during startup).
+// CheckLandedGLCB reports whether this home's GLCB for the sealed chunk e is
+// the copy agreed at seal (chunking.Manager.CheckLandedGLCB). ok is false when
+// chunking does not run the vault on this node.
+func (s *Supervisor) CheckLandedGLCB(vaultID glid.GLID, e vaultctlfsm.ManifestEntry) (agrees, ok bool) {
+	if s.chunk == nil || !s.chunk.HasVault(vaultID) {
+		return false, false
+	}
+	return s.chunk.CheckLandedGLCB(vaultID, e), true
+}
+
+// RewireVaultAfterCtlRestore rebinds release consumption, chunking, and
+// collection — whichever of those the vault runs on this node — to the live
+// vault-ctl sub-FSM after a group-level snapshot Restore. Returns
+// chunking.ErrUnknownVault when the vault is not registered on this node yet
+// (transient during startup).
 func (s *Supervisor) RewireVaultAfterCtlRestore(vaultID glid.GLID, cfg RewireVaultConfig) error {
 	if cfg.FSM == nil {
 		return errors.New("vault-ctl FSM required")
 	}
+	s.mu.Lock()
+	roles, registered := s.vaults[vaultID]
+	if registered && roles.release != nil {
+		roles.release.bind(cfg.FSM)
+	}
+	s.mu.Unlock()
+	if !registered {
+		return chunking.ErrUnknownVault
+	}
 	chunkUnknown := false
-	if s.chunk != nil {
+	if s.chunk != nil && roles.chunking {
 		if err := s.chunk.RewireVaultFSM(vaultID, cfg.FSM, cfg.Applier); err != nil {
 			if errors.Is(err, chunking.ErrUnknownVault) {
 				chunkUnknown = true
@@ -873,7 +894,7 @@ func (s *Supervisor) RewireVaultAfterCtlRestore(vaultID glid.GLID, cfg RewireVau
 			}
 		}
 	}
-	if s.col != nil && cfg.Log != nil && cfg.Pull != nil && cfg.Receipts != nil {
+	if s.col != nil && roles.collects && cfg.Log != nil && cfg.Pull != nil && cfg.Receipts != nil {
 		if err := s.col.RewireVaultFSM(vaultID, collection.VaultConfig{
 			FSM:      cfg.FSM,
 			Log:      cfg.Log,
@@ -910,9 +931,9 @@ func (s *Supervisor) RotateChunkCron(ctx context.Context, vaultID glid.GLID) err
 }
 
 // SealOpenChunk seals a vault's open chunk manifest on demand and reports
-// whether a manifest was sealed. It returns chunking.ErrNotLeader when the
-// manifest holds records but this home is not the chunking leader, and
-// chunking.ErrUnknownVault when this node is not a home for the vault.
+// whether a manifest was sealed. It returns chunking.ErrNotLeader when this
+// home is not the chunking leader, and chunking.ErrUnknownVault when this node
+// is not a home for the vault.
 func (s *Supervisor) SealOpenChunk(vaultID glid.GLID) (bool, error) {
 	return s.chunk.SealOpenManifest(vaultID)
 }
@@ -930,9 +951,7 @@ func (s *Supervisor) UnregisterVault(vaultID glid.GLID) {
 	if !ok {
 		return
 	}
-	if roles.unsubRelease != nil {
-		roles.unsubRelease()
-	}
+	roles.release.unbindIfSet()
 	if roles.home {
 		s.chunk.UnregisterVault(vaultID)
 		s.col.UnregisterVault(vaultID)

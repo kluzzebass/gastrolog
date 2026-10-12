@@ -17,7 +17,7 @@ func (o *Orchestrator) RegisterVault(vault *Vault) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.vaults[vault.ID] = vault
-	o.signalVaultReadyChange()
+	o.bindVaultInstanceToCtlLocked(vault.ID, vault.Instance)
 }
 
 // RegisterIngester adds an ingester to the registry. When the orchestrator is

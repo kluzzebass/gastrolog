@@ -296,7 +296,7 @@ func TestReleaseSegments(t *testing.T) {
 	// pops it from the queue). With no manifest referencing segA, release
 	// succeeds.
 	applyCmd(t, fsm, MarshalSealOpenChunkManifest(chunkID, now))
-	applyCmd(t, fsm, MarshalSealChunk(chunkID, now, 1, 1, now, now, now, false, now))
+	applyCmd(t, fsm, MarshalSealChunk(chunkID, now, 1, 1, now, now, now, false, now, [32]byte{}))
 	applyCmd(t, fsm, MarshalReleaseSegments([]glid.GLID{segA}))
 	if fsm.GetCompletedSegment(segA) != nil {
 		t.Fatal("segA should be released once no manifest references it")
@@ -418,7 +418,7 @@ func TestSealChunkRepairsMissingManifestEntry(t *testing.T) {
 		t.Fatal("expected missing manifest entry before repair")
 	}
 
-	applyCmd(t, fsm, MarshalSealChunk(chunkID, now.Add(2*time.Minute), 10, 500, now, now, now, true, now.Add(2*time.Minute)))
+	applyCmd(t, fsm, MarshalSealChunk(chunkID, now.Add(2*time.Minute), 10, 500, now, now, now, true, now.Add(2*time.Minute), [32]byte{}))
 	entry := fsm.Get(chunkID)
 	if entry == nil || entry.State != chunk.ChunkStateSealed {
 		t.Fatalf("entry after repair = %+v", entry)
@@ -443,14 +443,14 @@ func TestSealChunkClearsStaleTombstoneForPendingManifest(t *testing.T) {
 	applyCmd(t, fsm, MarshalSealOpenChunkManifest(chunkID, now.Add(time.Minute)))
 
 	fsm.mu.Lock()
-	fsm.tombstones[chunkID] = time.Now()
+	fsm.tombstoneChunksLocked(chunkID)
 	delete(fsm.chunks, chunkID)
 	fsm.mu.Unlock()
 	if !fsm.IsTombstoned(chunkID) {
 		t.Fatal("expected tombstone before repair")
 	}
 
-	applyCmd(t, fsm, MarshalSealChunk(chunkID, now.Add(2*time.Minute), 10, 500, now, now, now, true, now.Add(2*time.Minute)))
+	applyCmd(t, fsm, MarshalSealChunk(chunkID, now.Add(2*time.Minute), 10, 500, now, now, now, true, now.Add(2*time.Minute), [32]byte{}))
 	if fsm.IsTombstoned(chunkID) {
 		t.Fatal("stale tombstone must clear when pending sealed manifest seals")
 	}

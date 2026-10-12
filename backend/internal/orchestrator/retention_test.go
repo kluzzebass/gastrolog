@@ -215,8 +215,7 @@ func TestSweepTTLAnchorsOnOverlaySealedAt(t *testing.T) {
 		t.Fatalf("create: %v", result)
 	}
 	if result := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(
-		chunkID, writeEnd, 1000, 100, opened, writeEnd, writeEnd, true, sealedAt,
-	)}); result != nil {
+		chunkID, writeEnd, 1000, 100, opened, writeEnd, writeEnd, true, sealedAt, [32]byte{})}); result != nil {
 		t.Fatalf("seal: %v", result)
 	}
 
@@ -227,7 +226,7 @@ func TestSweepTTLAnchorsOnOverlaySealedAt(t *testing.T) {
 	}
 	vaultID := glid.New()
 	inst := &VaultInstance{VaultID: vaultID}
-	inst.applyRaftCallbacks(buildVaultRaftCallbacks(nil, fsm, nil))
+	inst.applyRaftCallbacks(buildVaultRaftCallbacks(nil, nil, func() *vaultctlfsm.FSM { return fsm }, nil))
 	orch := &Orchestrator{vaults: map[glid.GLID]*Vault{vaultID: {ID: vaultID, Instance: inst}}}
 
 	r := &retentionRunner{
@@ -604,7 +603,7 @@ func int64Ptr(v int64) *int64 { return &v }
 // ==========================================================================
 
 // TestClusterRetentionSweepDeletesOnAllNodes sets up a 4-node cluster,
-// ingests records to create 10 sealed chunks, replicates to all followers,
+// ingests records to create 10 sealed chunks, copies them to all followers,
 // then runs a retention sweep with keepN=3 on the leader. Verifies:
 //   - Expired chunks (7 oldest) deleted from leader AND all followers
 //   - Retained chunks (3 newest) still readable on leader AND all followers
@@ -612,9 +611,6 @@ func int64Ptr(v int64) *int64 { return &v }
 func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("multi-node convergence test")
-	}
-	if raceEnabled {
-		t.Skip("flaky under -race: same root cause as TestClusterRetentionSweepWithTTLOnAllNodes — manual replicateSealedChunk calls race with fire-and-forget peer forwards under parallel load, producing over-replication (1100 records when 1000 were ingested). Production doesn't hit this path (no synchronous replicateSealedChunk after ingestion).")
 	}
 	t.Parallel()
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 100)
@@ -645,15 +641,14 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 		t.Fatalf("expected at least 5 sealed chunks, got %d", len(metas))
 	}
 
-	// PostSealProcess + replicate to all followers.
 	processor, ok := leaderInst.Chunks.(chunk.ChunkPostSealProcessor)
 	ctx := context.Background()
 	for _, m := range metas {
 		if ok {
 			_ = processor.PostSealProcess(ctx, m.ID)
 		}
-		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, m.ID, leaderInst.FollowerTargets)
 	}
+	h.copySealedToFollowers(t, leaderNode, 0, metas)
 
 	// Verify followers have all records before sweep.
 	for _, fid := range []string{"f1", "f2", "f3"} {
@@ -729,19 +724,24 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 			t.Fatalf("append %d: %v", i, err)
 		}
 	}
-	h.sealAndReplicate(t, leaderNode, 0)
+	h.sealActiveOnAllNodes(t, leaderNode, 0)
 
 	metas, _ := leaderInst.Chunks.List()
 	t.Logf("leader: %d sealed chunks", len(metas))
 
-	// Replicate to followers.
 	processor, ok := leaderInst.Chunks.(chunk.ChunkPostSealProcessor)
 	ctx := context.Background()
 	for _, m := range metas {
 		if ok {
 			_ = processor.PostSealProcess(ctx, m.ID)
 		}
-		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, m.ID, leaderInst.FollowerTargets)
+	}
+	h.copySealedToFollowers(t, leaderNode, 0, metas)
+
+	for _, fid := range []string{"f1", "f2", "f3"} {
+		if count := cursorCountRecords(t, h.nodes[fid].instances[0].Chunks); count != 500 {
+			t.Fatalf("follower %s holds %d records before the sweep, want 500", fid, count)
+		}
 	}
 
 	// Run TTL sweep with clock set 5 minutes in the future — all chunks expired.

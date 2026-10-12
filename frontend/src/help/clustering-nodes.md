@@ -26,6 +26,9 @@ A single-node server can join an existing cluster from this tab. Enter the leade
 - Backs up the previous Raft state to `<home>/raft.bak.<timestamp>`
 - Keeps the API port running throughout (the cluster port restarts briefly)
 - Is **irreversible** — the old single-node configuration is replaced
+- Admits the node as a nonvoter; the cluster promotes it to voter once it has caught up
+
+A node that was removed from a cluster cannot join that cluster again under its node ID — see **Removing Nodes** below.
 
 You can also join at startup via CLI flags: `--join-addr` and `--join-token`.
 
@@ -40,7 +43,7 @@ The last remaining voter cannot be demoted — at least one voter must always ex
 
 ## Removing Nodes
 
-Removing a node evicts it from the cluster entirely. The removed node stops receiving replicated state and must re-join with a fresh token if needed. You cannot remove the local node — only peer nodes can be evicted.
+Removing a node evicts it from the cluster entirely. The removed node stops receiving replicated state, and its node ID is retired for good: the cluster refuses to enroll or re-admit it, even though the node still holds its certificate. To bring the same machine back, start it from an empty home directory — it gets a new node ID, joins with a join token like any new node, and enters as a nonvoter until it is promoted. You cannot remove the local node — only peer nodes can be evicted.
 
 Removal is refused when it would cost data or redundancy: if the node holds the only copy of a vault, or if removing it would leave a vault below its replication factor with no other eligible node to re-place onto. The Nodes tab works this out from the vault placements before you ask: **Remove** stays disabled and names the affected vaults, and the confirm step names the vaults that lose a copy on the node and are re-placed elsewhere. The leader checks the same rule again on the request. Lower the replication factor, drain those vaults to other nodes, or add an eligible node — or use `gastrolog cluster remove-node <node> --force` to remove anyway and accept the loss.
 
@@ -51,13 +54,13 @@ Each node card carries its role (**leader** or **follower**) and suffrage (**vot
 | Badge | Meaning |
 |-------|---------|
 | _(none)_ | Live: a cluster member in Raft contact |
-| **unreachable** | The cluster has lost Raft contact with the node — check the process and its network; its placements wait for it |
-| **maintenance** | An operator declared the node absent; the cluster expects it back and keeps its placements |
+| **unreachable** | The cluster has lost Raft contact with the node — check the process and its network; its placements wait for it, and for each vault it follows, a spare live node (if there is one) joins as an extra follower until it returns |
+| **maintenance** | An operator declared the node absent; the cluster expects it back and keeps its placements; for each vault it follows, a spare live node (if there is one) joins as an extra follower until it returns |
 | **draining** | Chunks are being transferred off the node ahead of its removal |
 | **decommissioning** | The node is being removed from the cluster and stops receiving placements |
 | **offline** | A live node whose stats broadcast has stopped arriving — it is down or unreachable; the badge shows how long it has been silent |
 
-The duration after a state badge is how long the node has been in that state.
+The duration after a state badge is how long the node has been in that state. Only a live node receives new vault placements; a node in any other state keeps the placements it holds. A node that is merely restarting keeps all of its placements — the cluster waits for the unreachable threshold before treating its absence as anything more.
 
 ## Offline Nodes
 

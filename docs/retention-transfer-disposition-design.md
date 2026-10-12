@@ -23,8 +23,9 @@ archive vault want exactly this.
   destination's homes pull the sealed GLCB via the existing
   PullChunkGLCB verify-before-promote machinery, pointed at the
   destination vault's chunk root; the destination vault-ctl FSM registers
-  the chunk (the ImportSealedChunk / registerPipelineGLCB seams); chunk
-  holder receipts confirm the destination holds ≥ its replication factor;
+  the chunk (the registerPipelineGLCB seam); chunk
+  holder receipts from homes in the destination's current placement
+  confirm the destination holds ≥ its replication factor;
   ONLY THEN does the source propose its delete (CmdRequestDelete-style
   receipt protocol). No loss window: the source keeps its copies until the
   destination's RF is met. Duplicate-on-retry at the destination is
@@ -88,8 +89,10 @@ silently mishandle (gastrolog-2l918 review):
   abandoned-announce GC below) or an operator deleted it — the
   announce-import is refused. That refusal is reported as a distinct
   defer cause (`tombstoned`), not folded into the corruption path: the
-  right response is to wait for `PruneTombstones` to drop the tombstone
-  and retry, not to alarm as if the destination held conflicting data.
+  right response is to wait for the destination's chunk tombstone to be
+  pruned — once every vault-ctl member has confirmed it holds no copy of
+  the chunk (`PruneChunkTombstonesCommand`) — and retry, not to alarm as if
+  the destination held conflicting data.
   The source's chunk is untouched and retried every sweep like any
   other deferred transfer.
 - **The announce-before-bytes window is real and self-heals.**
@@ -224,8 +227,8 @@ catalog + doc table row updated for the rename and new causes.
   receipts never arrive (defer + alarm, chunk retained).
 - Multi-node: the server harness is memory-vault-only (33ul6h finding) —
   transfer REQUIRES file vaults, so multi-node coverage uses the
-  orchestrator multi-node fixtures that the chunk-replication/catch-up
-  tests use (find them: replicateToFollower / PullChunkGLCB tests);
+  orchestrator multi-node fixtures that the GLCB catch-up tests use
+  (find them: PullChunkGLCB tests);
   destination RF > 1: receipts gate holds until every destination home
   holds the chunk. If those fixtures cannot express it, the gap is named
   in the report and covered at epic validation on the real cluster —

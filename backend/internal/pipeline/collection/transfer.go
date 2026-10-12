@@ -21,8 +21,7 @@ var (
 
 	// ErrPreHeadPurged is returned when the pre-head file vanishes between
 	// the pull's rename-in and the promote — a concurrent purge
-	// (paths.PurgeHeadStaging on segment release, via the supervisor's
-	// OnReleaseSegments hook or chunking's release/stale purges) deleted it
+	// (the pipeline's release purge, or chunking's release/stale purges) deleted it
 	// because the registry no longer needs the segment. A catch-up race, not
 	// a data-integrity failure: no byte was ever verified and found wrong.
 	// Joining ErrCorruptSegment here instead surfaced every such race as a
@@ -37,18 +36,20 @@ var (
 const preHeadPullSuffix = ".pulling"
 
 // PullToPreHead streams a segment from pull directly into pre-head without
-// holding the full payload in an intermediate memory buffer.
-func PullToPreHead(ctx context.Context, vaultRoot string, vaultID, segmentID glid.GLID, pull PullClient) (string, error) {
+// holding the full payload in an intermediate memory buffer, skipping the
+// sources named in exclude. It returns the pre-head path and the source that
+// served the bytes.
+func PullToPreHead(ctx context.Context, vaultRoot string, vaultID, segmentID glid.GLID, exclude []string, pull PullClient) (path, source string, err error) {
 	if err := paths.EnsurePreHeadDir(vaultRoot); err != nil {
-		return "", err
+		return "", "", err
 	}
 	finalPath := paths.PreHeadSegment(vaultRoot, segmentID)
 	tmpPath := finalPath + preHeadPullSuffix
 	f, err := os.OpenFile(filepath.Clean(tmpPath), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	pullErr := pull.Pull(ctx, vaultID, segmentID, f)
+	source, pullErr := pull.Pull(ctx, vaultID, segmentID, exclude, f)
 	if pullErr == nil {
 		// Durability barrier: the holder receipt this pull leads to asserts
 		// cluster-wide that a copy exists. Fsync before the receipt can
@@ -59,20 +60,20 @@ func PullToPreHead(ctx context.Context, vaultRoot string, vaultID, segmentID gli
 	closeErr := f.Close()
 	if pullErr != nil {
 		_ = os.Remove(tmpPath)
-		return "", pullErr
+		return "", source, pullErr
 	}
 	if closeErr != nil {
 		_ = os.Remove(tmpPath)
-		return "", closeErr
+		return "", source, closeErr
 	}
 	if err := os.Rename(filepath.Clean(tmpPath), filepath.Clean(finalPath)); err != nil {
 		_ = os.Remove(tmpPath)
-		return "", err
+		return "", source, err
 	}
 	if err := paths.SyncDir(paths.PreHeadDir(vaultRoot)); err != nil {
-		return "", err
+		return "", source, err
 	}
-	return finalPath, nil
+	return finalPath, source, nil
 }
 
 // isPreHeadPullingName reports whether name matches PullToPreHead's exact

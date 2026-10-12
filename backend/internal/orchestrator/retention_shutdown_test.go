@@ -58,7 +58,7 @@ func TestFireRetentionEventAbortsOnceOnStoppedPipeline(t *testing.T) {
 		logger:  slog.New(slog.NewTextHandler(logSink, nil)),
 	}
 
-	if r.fireRetentionEvent(fx.sealedID) {
+	if r.fireRetentionEvent(fx.sealedID, "") {
 		t.Fatal("fireRetentionEvent must report non-completion when the pipeline is stopped")
 	}
 
@@ -99,7 +99,7 @@ func TestTryRetainChunkPreservesRouteGateOnAbort(t *testing.T) {
 		// a panic here IS the regression.
 	}
 
-	r.tryRetainChunk(fx.sealedID, retentionRule{}, false)
+	r.tryRetainChunk(fx.sealedID, "", false)
 
 	if markCalls != 0 {
 		t.Errorf("aborted fan-out must not apply retention-pending (gate burned); markCalls=%d", markCalls)
@@ -140,7 +140,7 @@ func TestTryRetainChunkMarksPendingAfterSuccessfulRoute(t *testing.T) {
 	// it runs AFTER the mark, so recover to keep the assertions reachable.
 	func() {
 		defer func() { _ = recover() }()
-		r.tryRetainChunk(fx.sealedID, retentionRule{}, false)
+		r.tryRetainChunk(fx.sealedID, "", false)
 	}()
 
 	waitForRouteStats(t, fx.orch, "3 routed records before mark", func(s *RouteStats) bool {
@@ -179,7 +179,7 @@ func TestTryRetainChunkSkipsEverythingDuringShutdown(t *testing.T) {
 		// shutdown tryRetainChunk must return before ANY of it.
 	}
 
-	r.tryRetainChunk(fx.sealedID, retentionRule{}, false)
+	r.tryRetainChunk(fx.sealedID, "", false)
 
 	if s := fx.orch.GetRouteStats(); s.Routed != 0 {
 		t.Errorf("shutdown sweep must not fan out records; ingested=%d", s.Routed)

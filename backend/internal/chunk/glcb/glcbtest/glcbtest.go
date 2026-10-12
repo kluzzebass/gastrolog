@@ -63,11 +63,11 @@ func WriteSealedBlob(t *testing.T, root string, chunkID chunk.ChunkID, vaultID g
 	if err != nil {
 		t.Fatalf("WriteTo %s: %v", path, err)
 	}
-	return path, externalInfo(records, w.TOC(), written)
+	return path, externalInfo(records, w.TOC(), written, w.IngestTSMonotonic())
 }
 
-func externalInfo(records []chunk.Record, toc glcb.BlobTOC, diskBytes int64) chunk.ExternalGLCBInfo {
-	info := chunk.ExternalGLCBInfo{RecordCount: int64(len(records)), DiskBytes: diskBytes, IngestTSMonotonic: true}
+func externalInfo(records []chunk.Record, toc glcb.BlobTOC, diskBytes int64, ingestTSMonotonic bool) chunk.ExternalGLCBInfo {
+	info := chunk.ExternalGLCBInfo{RecordCount: int64(len(records)), DiskBytes: diskBytes, IngestTSMonotonic: ingestTSMonotonic}
 	for i, rec := range records {
 		info.Bytes += int64(len(rec.Raw))
 		if i == 0 {

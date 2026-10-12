@@ -73,9 +73,9 @@ func TestJoinClusterSucceedsAgainstAMemberThatDoesNotLead(t *testing.T) {
 	t.Parallel()
 
 	var served atomic.Bool
-	addr, joinerTLS := startMember(t, func(_ context.Context, nodeID, nodeAddr string, voter bool) error {
-		if nodeID != "node-2" || nodeAddr != "node-2:4566" || voter {
-			t.Errorf("request arrived altered: id=%q addr=%q voter=%v", nodeID, nodeAddr, voter)
+	addr, joinerTLS := startMember(t, func(_ context.Context, nodeID, nodeAddr string) error {
+		if nodeID != "node-2" || nodeAddr != "node-2:4566" {
+			t.Errorf("request arrived altered: id=%q addr=%q", nodeID, nodeAddr)
 		}
 		served.Store(true)
 		return nil
@@ -83,7 +83,7 @@ func TestJoinClusterSucceedsAgainstAMemberThatDoesNotLead(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := JoinCluster(ctx, nil, addr, "node-2", "node-2:4566", joinerTLS, false); err != nil {
+	if err := JoinCluster(ctx, nil, addr, "node-2", "node-2:4566", joinerTLS); err != nil {
 		t.Fatalf("a member refused to serve the join: %v", err)
 	}
 	if !served.Load() {
@@ -97,7 +97,7 @@ func TestJoinClusterWaitsOutAnElection(t *testing.T) {
 	t.Parallel()
 
 	var attempts atomic.Int32
-	addr, joinerTLS := startMember(t, func(context.Context, string, string, bool) error {
+	addr, joinerTLS := startMember(t, func(context.Context, string, string) error {
 		if attempts.Add(1) < 3 {
 			return ErrNoLeader
 		}
@@ -106,7 +106,7 @@ func TestJoinClusterWaitsOutAnElection(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := JoinCluster(ctx, nil, addr, "node-2", "node-2:4566", joinerTLS, false); err != nil {
+	if err := JoinCluster(ctx, nil, addr, "node-2", "node-2:4566", joinerTLS); err != nil {
 		t.Fatalf("the joiner gave up during an election: %v", err)
 	}
 	if got := attempts.Load(); got < 3 {
@@ -120,14 +120,14 @@ func TestJoinClusterStopsOnARefusal(t *testing.T) {
 	t.Parallel()
 
 	var attempts atomic.Int32
-	addr, joinerTLS := startMember(t, func(context.Context, string, string, bool) error {
+	addr, joinerTLS := startMember(t, func(context.Context, string, string) error {
 		attempts.Add(1)
 		return errors.New("node id already in the configuration at another address")
 	}, "node-2")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := JoinCluster(ctx, nil, addr, "node-2", "node-2:4566", joinerTLS, false); err == nil {
+	if err := JoinCluster(ctx, nil, addr, "node-2", "node-2:4566", joinerTLS); err == nil {
 		t.Fatal("a refused join was reported as success")
 	}
 	if got := attempts.Load(); got != 1 {
@@ -142,7 +142,7 @@ func TestJoinClusterStopsOnARefusal(t *testing.T) {
 func TestRequestMembershipRefusesACallerWithoutTheClusterCertificate(t *testing.T) {
 	t.Parallel()
 
-	addr, ctls := startMember(t, func(context.Context, string, string, bool) error {
+	addr, ctls := startMember(t, func(context.Context, string, string) error {
 		t.Error("a caller with no cluster certificate reached the configuration")
 		return nil
 	}, "attacker")
@@ -210,14 +210,14 @@ func insecureTLSCreds() credentials.TransportCredentials {
 func TestRequestMembershipRefusesAnIDTheCertificateDoesNotName(t *testing.T) {
 	t.Parallel()
 
-	addr, joinerTLS := startMember(t, func(_ context.Context, nodeID, _ string, _ bool) error {
+	addr, joinerTLS := startMember(t, func(_ context.Context, nodeID, _ string) error {
 		t.Errorf("a caller certified as node-2 changed membership for %q", nodeID)
 		return nil
 	}, "node-2")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	err := JoinCluster(ctx, nil, addr, "node-victim", "attacker:4566", joinerTLS, true)
+	err := JoinCluster(ctx, nil, addr, "node-victim", "attacker:4566", joinerTLS)
 	if err == nil {
 		t.Fatal("membership for another node's ID was accepted")
 	}

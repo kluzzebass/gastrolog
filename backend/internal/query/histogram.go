@@ -187,13 +187,17 @@ func (e *Engine) applyCloudSelectivity(selectedVaults []glid.GLID, start, end ti
 	}
 }
 
-// clampBuckets normalizes the bucket count to the valid range [1, 500], defaulting to 50.
+// MaxHistogramBuckets is the most buckets a histogram or timechart counts on.
+const MaxHistogramBuckets = 500
+
+// clampBuckets normalizes the bucket count to the valid range
+// [1, MaxHistogramBuckets], defaulting to 50.
 func clampBuckets(n int) int {
 	if n <= 0 {
 		return 50
 	}
-	if n > 500 {
-		return 500
+	if n > MaxHistogramBuckets {
+		return MaxHistogramBuckets
 	}
 	return n
 }

@@ -53,7 +53,7 @@ A row with nothing wrong — every copy sealed, no stale copy trailing it — di
 **Node and anomaly states:**
 
 - Dashed red slashed ring, glowing — placement node unreachable (a node condition, not a chunk state)
-- Muted glowing dot after a gap — stale residency: a copy on a node that is no longer in the placement
+- Muted glowing dot after a gap — stale residency: a copy on a node that is no longer in the placement. It never counts toward the copies that let segments be released, and it disappears once the departed node is pruned from the vault — right after the placement change, or when the node is removed from the cluster
 - Bordered label after the pips — cloud-backed chunk; bytes are durable in the named blob store. Its pips report the LOCAL CACHE per node: calm green for a cached copy, a dim hollow green ring where no local copy exists (normal once bytes are in the store)
 
 Expand a chunk row to see the same pips with node names beside them.

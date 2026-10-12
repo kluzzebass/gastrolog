@@ -169,15 +169,21 @@ type vaultChunking struct {
 	// planFailureAlerted tracks the unplannable-segment alert state so
 	// planner passes raise/clear only on transitions. Guarded by planMu.
 	planFailureAlerted bool
-	// corruptMu guards corruptGLCBs. Its own lock:
+	// corruptMu guards corruptGLCBs and divergentGLCBs. Its own lock:
 	// corruption is flagged from the build pass (under buildMu) and restart
-	// recovery, and cleared from those plus the orchestrator's peer re-pull
-	// (Manager.NoteGLCBRestored) — see glcb_corrupt.go.
+	// recovery, divergence from the orchestrator's landing check
+	// (Manager.CheckLandedGLCB), and both are cleared from those plus the
+	// orchestrator's peer re-pull (Manager.NoteGLCBRestored) — see
+	// glcb_corrupt.go and glcb_divergent.go.
 	corruptMu sync.Mutex
 	// corruptGLCBs maps chunks whose existing sealed GLCB was detected
 	// unreadable (and quarantined) to the read-error detail, feeding the
 	// corrupt-GLCB operator alert until every flagged chunk heals.
 	corruptGLCBs map[chunk.ChunkID]string
+	// divergentGLCBs holds chunks whose copy on this home carried a digest
+	// other than the sealed one and was quarantined; the build pass does not
+	// rebuild them, and the agreed copy landing removes them.
+	divergentGLCBs map[chunk.ChunkID]struct{}
 	// pendingRelease holds segment IDs awaiting ReleaseSegments once every
 	// required vault home has committed a holder receipt.
 	pendingRelease []glid.GLID
@@ -479,12 +485,11 @@ func (m *Manager) RewireVaultFSM(vaultID glid.GLID, fsm *vaultctlfsm.FSM, applie
 	cfg := v.cfg
 	cfg.FSM = fsm
 	m.wireVaultFSMCallbacks(v, cfg)
-	if pending := fsm.SealedManifest(); pending != nil {
-		v.progress.setPending(pending)
+	if headID, ok := fsm.SealedManifestHeadChunkID(); ok {
 		// Hot FSM restore can leave the seal-proposed guard set from when this
 		// home was a follower; clear so the vault-ctl leader can commit
 		// CmdSealChunk.
-		if entry := fsm.Get(pending.ChunkID); entry == nil || !entry.IsSealed() {
+		if entry := fsm.Get(headID); entry == nil || !entry.IsSealed() {
 			v.progress.resetSealProposal()
 		}
 	}
@@ -527,8 +532,7 @@ func (m *Manager) wireVaultFSMCallbacks(v *vaultChunking, cfg VaultConfig) {
 	// All four FSM callbacks coalesce into the same wake signal; the worker
 	// runs a plan step followed by a build step on every wake, and both
 	// no-op quickly when there is nothing to do.
-	cfg.FSM.SetOnSealedManifest(func(m *vaultctlfsm.OpenChunkManifest) {
-		v.progress.setPending(m)
+	cfg.FSM.SetOnSealedManifest(func(*vaultctlfsm.OpenChunkManifest) {
 		v.wake.Notify()
 	})
 	v.unsubPublish = cfg.FSM.AddOnPublishCompletedSegment(func(vaultctlfsm.CompletedSegmentEntry) {
@@ -563,9 +567,10 @@ func (m *Manager) wireVaultFSMCallbacks(v *vaultChunking, cfg VaultConfig) {
 	//
 	// Must NOT call afterSealBuild inline: holder-receipt Apply on the Raft
 	// FSM apply goroutine deadlocks the vault-ctl leader.
-	cfg.FSM.SetOnSealedManifestCleared(func(_ chunk.ChunkID) {
-		if pending := v.progress.noteSealCleared(); pending != nil {
-			v.goAfterSealBuild(pending)
+	cfg.FSM.SetOnSealedManifestCleared(func(id chunk.ChunkID) {
+		v.progress.noteSealCleared()
+		if sealed := cfg.FSM.SealedChunkManifest(id); sealed != nil {
+			v.goAfterSealBuild(sealed)
 		}
 		v.wake.Notify()
 	})
@@ -610,9 +615,9 @@ func (m *Manager) PlanCatchUp(ctx context.Context, vaultID glid.GLID) error {
 }
 
 // SealOpenManifest seals the vault's open chunk manifest now, regardless of
-// its rotation policy, and reports whether it did. An empty or absent manifest
-// reports (false, nil). Only the chunking leader may seal: anywhere else a
-// manifest holding records reports ErrNotLeader, and an unregistered vault
+// its rotation policy, and reports whether it did. Only the chunking leader
+// answers: on it an empty or absent manifest reports (false, nil); every other
+// home reports ErrNotLeader whatever its FSM holds, and an unregistered vault
 // reports ErrUnknownVault.
 func (m *Manager) SealOpenManifest(vaultID glid.GLID) (bool, error) {
 	m.mu.Lock()
@@ -895,7 +900,7 @@ func (v *vaultChunking) releaseOnce(ctx context.Context) error {
 	}
 	required, resolved := v.requiredHolders()
 	giveUpTTL, giveUpNow := v.giveUpBound()
-	scan := v.fsm().SnapshotReleaseScan(v.plannerMinHolders())
+	scan := v.fsm().SnapshotReleaseScan(quorumPlacement(required, resolved))
 	ready, stillPending := partitionPendingRelease(scan, pending, required, resolved, giveUpTTL, giveUpNow)
 	if len(ready) == 0 {
 		v.mu.Lock()

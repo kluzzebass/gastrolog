@@ -33,7 +33,12 @@ const maxConcurrentGLCBPulls = 4
 const glcbCatchupJobPrefix = "glcb-catchup:"
 
 func glcbCatchupJobName(vaultID glid.GLID, chunkID chunk.ChunkID) string {
-	return glcbCatchupJobPrefix + vaultID.String() + ":" + chunkID.String()
+	return glcbCatchupVaultJobPrefix(vaultID) + chunkID.String()
+}
+
+// glcbCatchupVaultJobPrefix names one vault's replica catch-up pull jobs.
+func glcbCatchupVaultJobPrefix(vaultID glid.GLID) string {
+	return glcbCatchupJobPrefix + vaultID.String() + ":"
 }
 
 // pullMissingGLCB schedules recovery of this home's copy of a sealed chunk
@@ -65,9 +70,9 @@ func glcbCatchupJobName(vaultID glid.GLID, chunkID chunk.ChunkID) string {
 // own job map, via RunOnceIfAbsentUnderLimit keyed on glcbCatchupJobName /
 // glcbCatchupJobPrefix. There is deliberately no second bookkeeping map: the
 // claim is a lease held for exactly as long as the job is registered, so
-// cancelling a pending pull (RemoveJobsByPrefix on vault teardown) releases
-// the right to retry it instead of stranding a claim that would stop the
-// chunk from ever being pulled again.
+// cancelling a pending pull (cancelPendingChunkJobs on vault teardown)
+// releases the right to retry it instead of stranding a claim that would stop
+// the chunk from ever being pulled again.
 func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.ManifestEntry) {
 	if o.chunkGLCBPuller == nil || o.scheduler == nil {
 		return // single-node: every chunk this node should hold, it built
@@ -120,7 +125,7 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 		sourceVaultID = e.TransferSourceVaultID
 	}
 
-	// Describe BEFORE scheduling — see scheduleReplication for why (missing
+	// Describe BEFORE scheduling — see schedulePostSealProcessing for why (missing
 	// label on the Scheduled event, leaked descriptions entry when the job
 	// finishes first).
 	name := glcbCatchupJobName(vaultID, e.ID)
@@ -207,17 +212,10 @@ func (o *Orchestrator) runGLCBPull(destVaultID, sourceVaultID glid.GLID, e vault
 	if o.pipeline != nil {
 		o.pipeline.NoteGLCBRestored(destVaultID, e.ID)
 	}
-	o.mu.RLock()
-	var rec *VaultLifecycleReconciler
-	if vault := o.vaults[destVaultID]; vault != nil && vault.Instance != nil {
-		rec = vault.Instance.Reconciler
-	}
-	o.mu.RUnlock()
-	if rec != nil {
-		// The pulled bytes are now on the canonical path; the lazy resolver
-		// makes them queryable on first lookup. Propose this node's holder
-		// receipt event-driven now that the verified copy is on disk.
-		rec.ackOwnHolderReceipt(e)
+	// The pulled bytes are now on the canonical path; the lazy resolver makes
+	// them queryable on first lookup.
+	if ti := o.findLocalVaultInstance(destVaultID); ti != nil {
+		o.onGLCBLanded(destVaultID, ti, e)
 	}
 }
 
@@ -303,45 +301,32 @@ func verifyAndPromoteGLCB(tmp, glcbPath string, e vaultctlfsm.ManifestEntry, log
 	return os.Rename(tmp, glcbPath)
 }
 
-// verifyGLCBDigest compares a pulled blob's whole-blob digest against the one
-// the manifest recorded when the chunk was uploaded.
+// verifyGLCBDigest checks a pulled blob's bytes against the digest the
+// manifest recorded when the chunk was sealed.
 //
 // The record count agrees for any blob carrying the right number of records,
 // altered or not, so the digest is the only part of the check that binds the
-// bytes to what the cluster agreed they are. It is the peer's word otherwise.
+// bytes to the copy the cluster agreed on. The bytes are hashed rather than the
+// footer read: a copy altered after it was written — in flight, or on the
+// peer's disk — still parses and still carries the original footer.
 //
-// The digest is stamped at upload, so a chunk that has never been uploaded
-// has none. That is normal and says so at debug. A chunk the manifest calls
-// cloud-backed and yet carries no digest is not normal: something recorded
-// the upload without recording what it uploaded, and the pull proceeds
-// unverifiable, so it says so at warn.
+// The sealing leader records its build's digest, so a sealed chunk without one
+// was sealed by a path that built no GLCB. Its bytes are still checked against
+// their own footer, and the copy is accepted with a warning: nothing records
+// which bytes the cluster agreed on.
 func verifyGLCBDigest(path string, e vaultctlfsm.ManifestEntry, logger *slog.Logger) error {
+	digest, err := glcb.VerifyBlobDigest(path)
+	if err != nil {
+		return fmt.Errorf("pulled GLCB for %s failed digest verification: %w", e.ID, err)
+	}
 	if e.Hash == ([32]byte{}) {
-		if e.CloudBacked {
-			logger.Warn("accepting a pulled GLCB unverified: the manifest calls this chunk cloud-backed but records no digest",
-				"chunk", e.ID)
-		} else {
-			logger.Debug("accepting a pulled GLCB without a digest check: the chunk has never been uploaded, so the manifest records no digest",
-				"chunk", e.ID)
-		}
+		logger.Warn("accepting a pulled GLCB without an agreed digest: the manifest records none for this chunk",
+			"chunk", e.ID, "cloud_backed", e.CloudBacked)
 		return nil
 	}
-	f, err := os.Open(filepath.Clean(path))
-	if err != nil {
-		return fmt.Errorf("open pulled GLCB for digest verify: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		return fmt.Errorf("stat pulled GLCB for digest verify: %w", err)
-	}
-	toc, err := glcb.ReadTOC(f, info.Size())
-	if err != nil {
-		return fmt.Errorf("read pulled GLCB TOC for digest verify: %w", err)
-	}
-	if toc.BlobDigest != e.Hash {
+	if digest != e.Hash {
 		return fmt.Errorf("pulled GLCB digest mismatch for %s: manifest=%x blob=%x",
-			e.ID, e.Hash[:8], toc.BlobDigest[:8])
+			e.ID, e.Hash[:8], digest[:8])
 	}
 	return nil
 }

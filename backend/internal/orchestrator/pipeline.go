@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/cluster"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/orchestrator/pipeline"
@@ -80,15 +79,16 @@ func (o *Orchestrator) ServeChunkGLCBPull(vaultID glid.GLID, chunkID chunk.Chunk
 // SubmitRetentionRecord routes a single record ejected from a vault during a
 // retention event (disposition=route) through the pipeline routing stage with a
 // RetentionSource context, so routes matching _source="retention" / _vault=<id>
-// fan it out to their configured destinations. It carries the durability ack
-// and waits for it: a nil return means every matched destination durably
+// / _reason=<trigger> fan it out to their configured destinations. It carries
+// the durability ack and waits for it: a nil return means every matched
+// destination durably
 // committed the record (an unmatched record is a counted drop that also
 // returns nil). A per-destination admission rejection (ErrVaultMaxSize,
 // ErrStorageDiskProtect, ErrVaultBacklogBudget) surfaces here so the caller can
 // abort the whole chunk fan-out and retain the chunk — before the ack was
 // wired, the routing gate's whole-record nack went to a nil ack and the
 // record silently vanished.
-func (o *Orchestrator) SubmitRetentionRecord(ctx context.Context, sourceVaultID glid.GLID, rec chunk.Record, reason string) error {
+func (o *Orchestrator) SubmitRetentionRecord(ctx context.Context, sourceVaultID glid.GLID, rec chunk.Record, reason chunk.RetentionReason) error {
 	o.mu.RLock()
 	pl := o.pipeline
 	o.mu.RUnlock()
@@ -103,7 +103,7 @@ func (o *Orchestrator) SubmitRetentionRecord(ctx context.Context, sourceVaultID 
 	ack := make(chan error, 1)
 	if err := pl.SubmitDrain(ctx, routing.Input{
 		Record: &prec,
-		Source: routing.RetentionSource(sourceVaultID, reason),
+		Source: routing.RetentionSource(sourceVaultID, string(reason)),
 		Ack:    ack,
 	}); err != nil {
 		return err
@@ -142,15 +142,25 @@ func (o *Orchestrator) SubmitToVault(ctx context.Context, vaultID glid.GLID, rec
 // supervisor, so reloadPipelineFromConfig re-registers only when something
 // material changed: its Home role (placement membership), whether the vault-ctl
 // handle is yet available (publisher upgraded from fail-closed to the real
-// VaultCtlPublisher), or its chunk rotation policy (the chunking manager
-// captures the policy at register, so a policy edit must re-register).
+// VaultCtlPublisher), its chunk rotation policy (the chunking manager
+// captures the policy at register, so a policy edit must re-register), or its
+// root (pipelineRootFor: a placement change that moves the vault to another
+// storage on this node, or makes the node a home or no longer one).
 //
 // Leadership is deliberately NOT part of this key: the chunking planner reads
 // IsLeader() live on every tick, so leadership changes need no re-registration.
+//
+// failed marks a vault whose supervisor registration failed, or whose files
+// could not all be gathered into its root. The vault stays published —
+// configuration makes it a pipeline vault whether or not its managers are
+// running — and a failed registration never equals a wanted one, so the next
+// reload retries it.
 type pipelineVaultReg struct {
 	home      bool
 	hasHandle bool
 	policy    chunking.ManifestRotationPolicy
+	root      string
+	failed    bool
 }
 
 // buildPipelineVaultSpec builds the supervisor VaultSpec for a destination vault.
@@ -160,6 +170,8 @@ type pipelineVaultReg struct {
 // vault-ctl handle is available, the Origin publishes completed-segment metadata
 // to the registry via the leader-forwarding applier; otherwise it falls back to
 // the fail-closed noHandlePublisher (single-node/memory mode with no group).
+// With the handle the Origin also consumes segment release from the vault-ctl
+// FSM every node holds, home or not: released segments leave its completed/.
 //
 // When this node is also a placement member (Home) for the vault with a
 // vault-ctl handle, it registers the chunking side (Rubicon D): the leader
@@ -172,11 +184,12 @@ type pipelineVaultReg struct {
 // puller is available (cluster mode): roll the registry, pull segments this
 // node does not yet hold, and commit holder receipts. Single-node homes have
 // no peers to pull from, so they chunk from their own head/ without collection.
-func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm *vaultctlfsm.FSM, applier vaultctlfsm.Applier, isLeader func() bool, hasHandle bool, policy chunking.ManifestRotationPolicy) (pipeline.VaultSpec, error) {
-	root, err := o.originRoot(vaultID)
+func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, reg pipelineVaultReg, fsm *vaultctlfsm.FSM, applier vaultctlfsm.Applier, isLeader func() bool) (pipeline.VaultSpec, error) {
+	root, err := o.registeredRoot(vaultID, reg)
 	if err != nil {
 		return pipeline.VaultSpec{}, err
 	}
+	home, hasHandle, policy := reg.home, reg.hasHandle, reg.policy
 	spec := pipeline.VaultSpec{
 		VaultID:    vaultID,
 		VaultName:  func() string { return o.vaultLabel(vaultID) },
@@ -189,6 +202,7 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 			Applier:      applier,
 			OriginNodeID: o.localNodeID,
 		}
+		spec.FSM = fsm
 	}
 	if home && hasHandle {
 		// This node holds everything it originates locally (completed→head).
@@ -197,7 +211,6 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 		// the peer puller: the leader plans the manifest, all homes build the
 		// sealed GLCB. Locate resolves manifest refs under head/ then completed/.
 		spec.HomeRoot = root
-		spec.FSM = fsm
 		spec.LookupFSM = func() *vaultctlfsm.FSM {
 			f, _, _, ok := o.vaultCtlHandle(vaultID)
 			if ok && f != nil {
@@ -245,12 +258,12 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 
 // onPipelineChunkBuilt handles a freshly-built pipeline GLCB on this home.
 // Queryability needs no action — the lazy on-miss GLCB resolver serves the
-// chunk on first lookup the moment its FSM entry and file both exist. Two
-// build-completion effects remain event-driven here: the home's holder receipt
-// (build completion is the byte-presence proof the receipt asserts, and it
-// covers the build-finishes-after-seal ordering gap where onSeal fired before
-// the file existed), and — once the chunk is fully Sealed — its cloud upload.
-// A Sealing-only entry defers both to the later seal.
+// chunk on first lookup the moment its FSM entry and file both exist. The
+// build is a GLCB landing on this home (onGLCBLanded — the blob is final
+// whether or not the seal has committed, and the receipt here covers the
+// build-finishes-after-seal gap where onSeal fired before the file existed),
+// and once the chunk is fully Sealed it is also due its cloud upload. A
+// Sealing-only entry defers the upload to the later seal.
 func (o *Orchestrator) onPipelineChunkBuilt(vaultID glid.GLID, fsm *vaultctlfsm.FSM, id chunk.ChunkID) {
 	e := fsm.Get(id)
 	if e == nil {
@@ -261,24 +274,130 @@ func (o *Orchestrator) onPipelineChunkBuilt(vaultID glid.GLID, fsm *vaultctlfsm.
 		return
 	}
 	ti := o.findLocalVaultInstance(vaultID)
-	if ti == nil || ti.Reconciler == nil {
+	if ti == nil {
 		// Boot ordering: OnBuilt can fire from chunking recovery before the
-		// vault instance/reconciler exists. The catch-up sweep re-earns the
-		// holder receipt, but the skip must be visible — a node once held
-		// 297 complete GLCBs its chunk manager knew nothing about, and
+		// vault instance exists. The instance's arrival sweeps this home's
+		// GLCBs (scheduleHomeIndexSweep) and the catch-up sweep re-earns the
+		// holder receipt, but the skip must be visible — a node once held 297
+		// complete GLCBs its chunk manager knew nothing about, and
 		// retention/backfill/queries all starved with zero log lines.
-		o.noteRegisterSkip(vaultID, id, "vault instance or reconciler not ready")
+		o.noteRegisterSkip(vaultID, id, "vault instance not ready")
 		return
 	}
-	// The blob this node just built is final whether or not the seal has
-	// committed, so its secondary indexes are built now. Nothing else builds
-	// them for a pipeline-sealed chunk: the legacy post-seal path is not used
-	// and the missing-index sweep runs only at startup.
-	o.scheduleIndexRebuildIfNeeded(context.Background(), vaultID, ti, manifestEntryToChunkMeta(*e, true))
-	ti.Reconciler.ackOwnHolderReceipt(*e)
+	o.onGLCBLanded(vaultID, ti, *e)
 	if e.State == chunk.ChunkStateSealed {
 		o.schedulePipelineCloudUpload(vaultID, id)
 	}
+}
+
+// onGLCBLanded runs what this home owes a chunk whose GLCB is now in its chunk
+// root: secondary indexes for its copy — any home can become the vault leader
+// that serves searches — and its holder receipt. Every path that puts a GLCB
+// on a home calls it: a local build, a replica catch-up pull, a
+// retention-transfer copy, and the seal apply for a copy the home already
+// holds. Both are owed only for the copy the cluster agreed on at seal; a copy
+// that is not is quarantined by the check, and its agreed copy pulled.
+func (o *Orchestrator) onGLCBLanded(vaultID glid.GLID, ti *VaultInstance, e vaultctlfsm.ManifestEntry) {
+	if !o.landedGLCBAgrees(vaultID, e) {
+		if !e.IsSealed() {
+			return
+		}
+		forgetPipelineGLCB(ti, e.ID)
+		if !e.CloudBacked {
+			// Off the caller's goroutine: the seal apply runs this on the Raft
+			// apply pump, and the pull's guards take locks the pump must not
+			// wait on. The catch-up sweep retries a pull this one misses. A
+			// cloud-backed chunk is never pulled: the cloud object is its
+			// durable copy.
+			go o.pullMissingGLCB(vaultID, e)
+		}
+		return
+	}
+	if ti.Indexes != nil {
+		o.scheduleIndexRebuildIfNeeded(context.Background(), vaultID, ti, manifestEntryToChunkMeta(e, true))
+	}
+	if ti.Reconciler != nil {
+		ti.Reconciler.ackOwnHolderReceipt(e)
+	}
+}
+
+// pipelineGLCBForgetter is the chunk-manager seam that drops a pipeline GLCB's
+// cached mapping and registration once the copy is no longer the one to serve.
+type pipelineGLCBForgetter interface {
+	ForgetPipelineGLCB(chunk.ChunkID)
+}
+
+// forgetPipelineGLCB makes the instance's chunk manager resolve the chunk
+// afresh: a sealed chunk whose landed copy is not the agreed copy has been
+// quarantined off its path or is not there at all, and a mapping or
+// registration made from it must not keep serving it.
+func forgetPipelineGLCB(ti *VaultInstance, id chunk.ChunkID) {
+	if ti == nil || ti.Chunks == nil {
+		return
+	}
+	if f, ok := ti.Chunks.(pipelineGLCBForgetter); ok {
+		f.ForgetPipelineGLCB(id)
+	}
+}
+
+// landedGLCBAgrees reports whether this home's GLCB for e is the copy the
+// cluster agreed on at seal: e is sealed and the copy's digest is the one the
+// seal recorded. Where chunking runs the vault, its check also quarantines a
+// divergent copy and raises the alarm (chunking.Manager.CheckLandedGLCB).
+func (o *Orchestrator) landedGLCBAgrees(vaultID glid.GLID, e vaultctlfsm.ManifestEntry) bool {
+	if !e.IsSealed() {
+		return false
+	}
+	if o.pipeline != nil {
+		if agrees, ok := o.pipeline.CheckLandedGLCB(vaultID, e); ok {
+			return agrees
+		}
+	}
+	root, ok := o.pipelineVaultChunkRoot(vaultID)
+	if !ok {
+		return false
+	}
+	_, agrees, err := chunking.GLCBAgreesWithSeal(chunking.ChunkGLCBPath(root, e.ID), e)
+	return err == nil && agrees
+}
+
+// homeHoldsGLCB reports whether this node is a pipeline home of the vault and
+// the chunk's GLCB is in its chunk root.
+func (o *Orchestrator) homeHoldsGLCB(vaultID glid.GLID, id chunk.ChunkID) bool {
+	root, ok := o.pipelineVaultChunkRoot(vaultID)
+	if !ok {
+		return false
+	}
+	_, err := os.Stat(chunking.ChunkGLCBPath(root, id))
+	return err == nil
+}
+
+// scheduleHomeIndexSweep sweeps a pipeline home's GLCBs for missing secondary
+// indexes once both things that make them indexable exist: the vault instance
+// and the vault's home registration with a vault-ctl handle. The arrival of
+// each calls it, and it acts only when the other is already there. A GLCB that
+// landed while either was missing — a build that finished before the instance
+// existed — has no event of its own left to index it.
+func (o *Orchestrator) scheduleHomeIndexSweep(vaultID glid.GLID, ti *VaultInstance) {
+	if ti == nil || ti.Indexes == nil {
+		return
+	}
+	if _, _, ok := o.pipelineGLCBSource(vaultID); !ok {
+		return
+	}
+	name := homeIndexSweepJobName(vaultID)
+	o.scheduler.Describe(name, fmt.Sprintf("Build missing indexes for the GLCBs this home holds of vault %s", vaultID))
+	if _, err := o.scheduler.RunOnceIfAbsent(name, func() {
+		if err := o.rebuildVaultIndexes(context.Background(), vaultID, ti); err != nil {
+			o.logger.Warn("home index sweep failed", "vault", vaultID, "error", err)
+		}
+	}); err != nil {
+		o.logger.Warn("failed to schedule home index sweep", "vault", vaultID, "error", err)
+	}
+}
+
+func homeIndexSweepJobName(vaultID glid.GLID) string {
+	return "home-index-sweep:" + vaultID.String()
 }
 
 // noteRegisterSkip surfaces silently-skipped GLCB registrations, throttled
@@ -324,27 +443,15 @@ func (o *Orchestrator) vaultCtlHandle(vaultID glid.GLID) (*vaultctlfsm.FSM, vaul
 	if o.groupMgr == nil {
 		return nil, nil, nil, false
 	}
-	gid := raftgroup.VaultControlPlaneGroupID(vaultID)
-	g := o.groupMgr.GetGroup(gid)
+	g := o.vaultCtlGroup(vaultID)
 	if g == nil {
 		return nil, nil, nil, false
 	}
-	var fsm *vaultctlfsm.FSM
-	switch raw := g.FSM.(type) {
-	case *vaultctlfsm.FSM:
-		fsm = raw
-	case *vaultraft.FSM:
-		fsm = raw.EnsureVaultFSM(vaultID)
-	}
+	fsm := vaultCtlSubFSM(g, vaultID)
 	if fsm == nil {
 		return nil, nil, nil, false
 	}
-	var applier vaultctlfsm.Applier
-	if o.peerConns != nil {
-		applier = cluster.NewVaultCtlChunkApplyForwarder(g.Raft, gid, vaultID, groupApplyWait(g), o.peerConns, cluster.ReplicationTimeout)
-	} else {
-		applier = &vaultCtlApplier{o: o, vaultID: vaultID}
-	}
+	applier := o.vaultCtlChunkApplier(g, vaultID)
 	raft := g.Raft
 	localID := o.localNodeID
 	isLeader := func() bool {
@@ -467,18 +574,29 @@ func (o *Orchestrator) isVaultHome(sys *system.System, vaultID glid.GLID) bool {
 	return false
 }
 
-// originRoot returns the segmentation root for a vault under the configured
-// node home (SegmentsDir/<vaultID>). Callers must set Config.SegmentsDir from
-// home.Dir.SegmentsDir() before enabling the pipeline.
+// originRoot returns the vault's pipeline root on this node: the root its
+// current registration was made with (pipelineRootFor), or the node home's
+// root for a vault the pipeline does not run here. Lock-free, like every
+// reader of the registration.
 func (o *Orchestrator) originRoot(vaultID glid.GLID) (string, error) {
+	reg, _ := o.lookupPipelineVault(vaultID)
+	return o.registeredRoot(vaultID, reg)
+}
+
+// registeredRoot is the root a registration names, defaulting to the node
+// home's root when it names none.
+func (o *Orchestrator) registeredRoot(vaultID glid.GLID, reg pipelineVaultReg) (string, error) {
+	if reg.root != "" {
+		return reg.root, nil
+	}
 	if o.segmentsDir == "" {
-		return "", errors.New("segments directory unset: configure orchestrator.Config.SegmentsDir from node home")
+		return "", errNoSegmentsDir
 	}
 	return pipelineVaultRoot(o.segmentsDir, vaultID), nil
 }
 
-// pipelineVaultRoot is a vault's segmentation root under the node's segments
-// directory; pipelineChunkRoot is where its built chunks live beneath that.
+// pipelineVaultRoot is a vault's pipeline root under a segments directory;
+// pipelineChunkRoot is where its built chunks live beneath that.
 func pipelineVaultRoot(segmentsDir string, vaultID glid.GLID) string {
 	return filepath.Join(segmentsDir, vaultID.String())
 }
@@ -547,43 +665,25 @@ func (o *Orchestrator) deletePipelineVaultLocked(vaultID glid.GLID) {
 	o.pipelineVaults.Store(&next)
 }
 
-// pipelineVaultChunkRoot returns the segmentation chunk root for a vault when
-// this node currently runs the pipeline as a home for it — the directory under
-// which pipeline-built sealed GLCBs land (<segmentsDir>/<vaultID>/chunks, the
-// "chunks" subdir of originRoot). ok=false when the vault is not a pipeline home
-// on this node or no segments base is configured, in which case there are no
-// pipeline GLCBs to register. Lock-free: reads the published registration
-// snapshot, and segmentsDir is write-once at construction. The caller does the
-// stat/registration I/O afterwards. Both properties are required, not
-// incidental — the Raft apply pump calls this.
+// pipelineVaultChunkRoot returns the chunk root for a vault when this node
+// currently runs the pipeline as a home for it — the directory under which
+// pipeline-built sealed GLCBs land (the "chunks" subdir of the vault's
+// pipeline root). ok=false when the vault is not a pipeline home on this node
+// or no root resolves, in which case there are no pipeline GLCBs to register.
+// Lock-free: reads the published registration snapshot, and segmentsDir is
+// write-once at construction. The caller does the stat/registration I/O
+// afterwards. Both properties are required, not incidental — the Raft apply
+// pump calls this.
 func (o *Orchestrator) pipelineVaultChunkRoot(vaultID glid.GLID) (string, bool) {
-	if o.segmentsDir == "" {
-		return "", false
-	}
 	reg, registered := o.lookupPipelineVault(vaultID)
 	if !registered || !reg.home {
 		return "", false
 	}
-	return pipelineChunkRoot(pipelineVaultRoot(o.segmentsDir, vaultID)), true
-}
-
-// pipelineVaultStagingRoot returns the segment staging root for a vault
-// when this node runs the pipeline for it in any role
-// (<segmentsDir>/<vaultID> — the parent of working/, completed/, head/,
-// pre-head/ and chunks/). Unlike pipelineVaultChunkRoot it is NOT
-// home-gated: origins hold completed/ files too, and the staging-orphan
-// sweep must purge released segments on every role.
-//
-// Lock-free for the same reason as pipelineVaultChunkRoot: reachable from the
-// Raft apply pump, which must not block on o.mu.
-func (o *Orchestrator) pipelineVaultStagingRoot(vaultID glid.GLID) (string, bool) {
-	if o.segmentsDir == "" {
+	root, err := o.registeredRoot(vaultID, reg)
+	if err != nil {
 		return "", false
 	}
-	if _, registered := o.lookupPipelineVault(vaultID); !registered {
-		return "", false
-	}
-	return filepath.Join(o.segmentsDir, vaultID.String()), true
+	return pipelineChunkRoot(root), true
 }
 
 // errNoVaultCtlHandle rejects publishes while no vault-ctl handle is available.
@@ -718,38 +818,97 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 	// Home role, vault-ctl handle availability, or chunk rotation policy
 	// changed, so unchanged vaults never flap their pipeline state. The cron
 	// rotation job is reconciled every pass regardless (its schedule may change
-	// independent of the registration key, and it is idempotent).
+	// independent of the registration key, and it is idempotent). One vault's
+	// failure does not hold back the others.
+	var errs []error
 	chunkHomes := make(map[glid.GLID]bool, len(desired))
 	for vid := range desired {
 		home := o.isVaultHome(sys, vid)
 		fsm, applier, isLeader, hasHandle := o.vaultCtlHandle(vid)
 		policy, cronExpr := o.resolveChunkPolicy(sys, vid)
+		root, err := o.pipelineRootFor(sys, vid)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("resolve pipeline root of vault %s: %w", vid, err))
+			continue
+		}
+		want := pipelineVaultReg{home: home, hasHandle: hasHandle, policy: policy, root: root}
+		registered, err := o.ensurePipelineRegistrationLocked(sys, vid, want, fsm, applier, isLeader)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		if !registered {
+			continue
+		}
 		chunkEnabled := home && hasHandle
 		chunkHomes[vid] = chunkEnabled
-		want := pipelineVaultReg{home: home, hasHandle: hasHandle, policy: policy}
-		if prev, ok := o.lookupPipelineVault(vid); ok {
-			if prev == want {
-				o.reconcileChunkCron(vid, chunkEnabled, cronExpr)
-				o.finishPendingPipelineCtlRestore(vid)
-				continue
-			}
-			o.pipeline.UnregisterVault(vid)
-			o.deletePipelineVaultLocked(vid)
-		}
-		spec, err := o.buildPipelineVaultSpec(vid, home, fsm, applier, isLeader, hasHandle, policy)
-		if err != nil {
-			return fmt.Errorf("build pipeline vault %s: %w", vid, err)
-		}
-		if err := o.pipeline.RegisterVault(spec); err != nil {
-			return fmt.Errorf("register vault %s: %w", vid, err)
-		}
-		o.setPipelineVaultLocked(vid, want)
 		o.reconcileChunkCron(vid, chunkEnabled, cronExpr)
 		o.finishPendingPipelineCtlRestore(vid)
+		if v := o.vaults[vid]; chunkEnabled && v != nil {
+			o.scheduleHomeIndexSweep(vid, v.Instance)
+		}
 	}
 
 	o.rewireChunkHomesAfterReload(chunkHomes)
-	return nil
+	return errors.Join(errs...)
+}
+
+// ensurePipelineRegistrationLocked re-registers the vault when want differs
+// from its published registration, gathering its files from every root the
+// node could hold them under, and reports whether the supervisor runs the
+// vault. Caller holds o.mu.
+func (o *Orchestrator) ensurePipelineRegistrationLocked(sys *system.System, vid glid.GLID, want pipelineVaultReg, fsm *vaultctlfsm.FSM, applier vaultctlfsm.Applier, isLeader func() bool) (bool, error) {
+	prev, ok := o.lookupPipelineVault(vid)
+	if ok && prev == want {
+		return true, nil
+	}
+	candidates := o.pipelineRootCandidates(sys, vid)
+	if ok && prev.root != "" && !slices.Contains(candidates, prev.root) {
+		candidates = append(candidates, prev.root)
+	}
+	return o.registerPipelineVaultLocked(vid, want, candidates, fsm, applier, isLeader)
+}
+
+// registerPipelineVaultLocked (re-)registers a vault with the pipeline
+// supervisor and publishes want as its registration, reporting whether the
+// supervisor now runs the vault. Caller holds o.mu.
+//
+// Between unregistering and registering, the vault's files under every other
+// candidate root are gathered into its root (gatherPipelineRoot), so the
+// registration recovers, republishes and serves them. A gather that leaves
+// files behind still registers — ingest for the vault must not stop over
+// files it can still reach later — but publishes the registration failed so
+// the next reload retries the gather.
+//
+// The vault is published as a pipeline vault at every instant, because the
+// lock-free readers of the registration decide from it whether the vault's
+// chunks are pipeline chunks: the previous registration stays published until
+// want replaces it in one store, and a failure publishes want marked failed
+// instead of dropping the vault.
+func (o *Orchestrator) registerPipelineVaultLocked(vid glid.GLID, want pipelineVaultReg, candidates []string, fsm *vaultctlfsm.FSM, applier vaultctlfsm.Applier, isLeader func() bool) (bool, error) {
+	failed := want
+	failed.failed = true
+	spec, err := o.buildPipelineVaultSpec(vid, want, fsm, applier, isLeader)
+	if err != nil {
+		o.setPipelineVaultLocked(vid, failed)
+		return false, fmt.Errorf("build pipeline vault %s: %w", vid, err)
+	}
+	o.pipeline.UnregisterVault(vid)
+	if o.pipelineReregisterHook != nil {
+		o.pipelineReregisterHook(vid)
+	}
+	gatherErr := gatherPipelineRoot(spec.OriginRoot, want.home, candidates)
+	if err := o.pipeline.RegisterVault(spec); err != nil {
+		o.setPipelineVaultLocked(vid, failed)
+		return false, fmt.Errorf("register vault %s: %w", vid, err)
+	}
+	if gatherErr != nil {
+		o.logger.Warn("pipeline files left outside the vault's pipeline root; retrying on the next reload",
+			"vault", vid, "root", spec.OriginRoot, "error", gatherErr)
+		o.setPipelineVaultLocked(vid, failed)
+		return true, nil
+	}
+	o.setPipelineVaultLocked(vid, want)
+	return true, nil
 }
 
 // rewireChunkHomesAfterReload re-wires chunking for the vaults this node

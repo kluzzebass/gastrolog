@@ -51,11 +51,18 @@ matching and are never stored:
   `"retention"` for records fed back through routing by a retention event.
 - **`_ingester`** — the ingester ID (ingest records).
 - **`_vault`** — the source vault ID (retention records).
-- **`_reason`** — the retention reason (retention records).
+- **`_reason`** — the trigger that selected the chunk for its retention event
+  (retention records): `"age"` (the policy's TTL), `"size"` (the policy's max
+  size), `"count"` (the policy's max chunk count), or `"memory-budget"` (a
+  memory vault over its memory budget). When several triggers select the same
+  chunk — in one policy or across the vault's attached policies — the chunk
+  carries exactly one reason, the first of `age`, `size`, `count`,
+  `memory-budget`. Every record of a chunk carries the same reason.
 
 Use them to keep input streams separate: `_source = "ingest"` matches live
 traffic only; `_source = "retention" AND _vault = "<id>"` matches records
-draining from a specific vault. A retention route that narrows on `_vault`
+draining from a specific vault; adding `AND _reason = "age"` narrows that to
+the chunks that aged out, so size- or count-drained chunks can go elsewhere. A retention route that narrows on `_vault`
 cannot loop — re-routed records only re-enter routing if their new vault
 also fires a retention event with a routing disposition.
 

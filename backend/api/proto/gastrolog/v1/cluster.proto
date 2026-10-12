@@ -55,10 +55,13 @@ message EnrollResponse {
 // Unlike Enroll, this call is mTLS-authenticated: the caller presents the
 // certificate enrolment just issued it, which is what proves it holds the
 // key rather than merely a copy of the join token.
+//
+// The request carries no suffrage. A node outside the configuration enters
+// as a nonvoter, and a member is re-added at the suffrage it already has:
+// the vote is granted by the cluster, never claimed by the caller.
 message RequestMembershipRequest {
   bytes node_id = 1;
   string node_addr = 2;
-  bool voter = 3;
 }
 
 message RequestMembershipResponse {}
@@ -335,100 +338,9 @@ message ForwardVaultApplyResponse {
   uint64 applied_index = 1;
 }
 
-// --- Chunk Replication Protocol ---
-//
-// A single ordered bidirectional stream per vault per follower. Unifies
-// record forwarding (fire-and-forget) and sealed chunk replacement
-// (one-shot) so all chunk operations for a vault are sequenced on one
-// stream, eliminating the race between record forwarding and sealed
-// chunk replacement. Chunks are vault-keyed.
-
-// ChunkReplicationCommand is sent leader → follower. The vault_id
-// identifies the target vault; the oneof command determines the
-// operation. New command types can be added without changing framing.
-message ChunkReplicationCommand {
-  bytes vault_id = 1;
-
-  oneof command {
-    // Sealed-chunk import is a three-phase sequence on the same stream:
-    // ImportBegin → 1..N ImportRecords frames → ImportCommit. Replaces
-    // a legacy single-frame ChunkReplicationImport that packed the whole
-    // chunk into one message; chunks past the gRPC receive cap wedged
-    // the catchup path forever. See gastrolog-4yvhh.
-    ChunkReplicationImportBegin import_begin = 10;
-    ChunkReplicationImportRecords import_records = 11;
-    ChunkReplicationImportCommit import_commit = 12;
-  }
-}
-
-// ChunkReplicationImportBegin opens a streaming sealed-chunk import.
-// The follower stages an import context keyed by chunk_id and ack's
-// success; subsequent ImportRecords frames push batches of records
-// into that staged context until ImportCommit finalizes the import.
-// Each (vault, follower) stream allows at most one import in flight.
-message ChunkReplicationImportBegin {
-  bytes chunk_id = 1;
-}
-
-// ChunkReplicationImportRecords carries one bounded batch of records
-// for the in-flight import. Frame size is capped on the leader side so
-// no individual gRPC message exceeds the receive limit regardless of
-// chunk size. The follower consumes records record-by-record and
-// applies backpressure: the ack is not sent until the importer has
-// pulled every record in the frame.
-message ChunkReplicationImportRecords {
-  repeated ExportRecord records = 1;
-}
-
-// ChunkReplicationImportCommit finalizes the in-flight import. The
-// follower closes its record-source channel, waits for the importer
-// goroutine to drain and return, and acks with the importer's result.
-// chunk_id is echoed for sanity-checking against ImportBegin.
-message ChunkReplicationImportCommit {
-  bytes chunk_id = 1;
-}
-
-// ImportRejection classifies a failed chunk replication command so the
-// sender can act on the cause without reading the error text.
-enum ImportRejection {
-  IMPORT_REJECTION_UNSPECIFIED = 0; // a failure with no classification
-  IMPORT_REJECTION_VAULT_NOT_READY = 1; // the vault has no instance on the receiver yet; retry later
-}
-
-// ChunkReplicationAck is sent follower → leader after each command.
-message ChunkReplicationAck {
-  bool ok = 1;
-  string error = 2;
-  bytes chunk_id = 3; // echoes the chunk_id from the command
-  ImportRejection rejection = 4; // set when ok is false and the cause is known
-}
-
-// RequestReplicaCatchupRequest is sent follower → placement leader. The
-// follower computes the local FSM-vs-disk diff in its lifecycle reconciler
-// (SweepMissingReplicas) and asks the leader to re-push specific sealed
-// chunks via the streaming ChunkReplicationImport{Begin,Records,Commit}
-// path. Used to recover from replication pushes that failed during a
-// follower pause / partition / rejoin window — see gastrolog-2dgvj.
-message RequestReplicaCatchupRequest {
-  bytes vault_id = 1;
-  repeated bytes chunk_ids = 2;        // 16-byte ChunkIDs
-  bytes requester_node_id = 3;         // utf-8 node ID of the requesting follower
-}
-
-// RequestReplicaCatchupResponse acknowledges receipt of the catchup
-// request. The leader fans the actual pushes out asynchronously via
-// existing replicateToFollower machinery, so success here means
-// "request accepted, pushes scheduled" — not "all chunks delivered".
-// The follower will re-request anything still missing on its next
-// sweep tick if the leader's pushes fail.
-message RequestReplicaCatchupResponse {
-  uint32 scheduled = 1; // number of chunk pushes scheduled (after leader-side filtering)
-}
-
-// ForwardSearchRequest is sent to a replica holder node to execute a
-// scoped search locally and return matching records. When sealed_chunk_ids
-// is empty and search_pipeline_chunks is false, the holder runs a legacy
-// leader-only full-vault search (backward compatible).
+// ForwardSearchRequest is sent to the node leading vault_id to run the query
+// against that vault: a record stream, a pipeline's table, or — with a
+// histogram_grid — the vault's page histogram.
 message ForwardSearchRequest {
   bytes vault_id = 1;
   string query = 2;
@@ -437,6 +349,19 @@ message ForwardSearchRequest {
   // count) so the coordinator can merge per-node tables instead of gathering
   // records.
   bool partial_aggregates = 4;
+  // When set, answer with the vault's page histogram on this grid and no
+  // records. The coordinator asks for it beside the record stream, so a record
+  // stream never waits on the histogram's scan of the window.
+  HistogramGrid histogram_grid = 5;
+}
+
+// HistogramGrid is the one bucket grid a search's page histogram is counted
+// on. The coordinator chooses it and every node counts its vaults' share on
+// it, so the shares sum bucket by bucket.
+message HistogramGrid {
+  int64 start_nanos = 1; // first bucket's start, inclusive
+  int64 end_nanos = 2;   // last bucket's end, exclusive
+  int32 buckets = 3;     // equal-width buckets between start and end
 }
 
 message ForwardSearchResponse {
@@ -444,7 +369,7 @@ message ForwardSearchResponse {
   bytes resume_token = 2;
   bool has_more = 3;
   TableResult table_result = 4;          // Pipeline results (timechart, stats)
-  repeated HistogramBucket histogram = 5; // Volume histogram from this node's vaults
+  repeated HistogramBucket histogram = 5; // The vault's page histogram, answering histogram_grid
 }
 
 // ForwardGetContextRequest asks a remote node to return records surrounding
@@ -473,17 +398,6 @@ message ForwardListChunksRequest {
 message ForwardListChunksResponse {
   repeated ChunkMeta chunks = 1;
 }
-
-// ForwardWaitVaultReadyRequest asks a remote node to block until the named
-// vault is registered and ready to accept transferred records, or the RPC
-// deadline / cancellation fires. Replaces the source-side ForwardListChunks
-// poll used by DrainVault to synchronize with the target node's AddVault.
-// See gastrolog-3sdnn.
-message ForwardWaitVaultReadyRequest {
-  bytes vault_id = 1;
-}
-
-message ForwardWaitVaultReadyResponse {}
 
 // ForwardGetPipelineBacklogRequest asks a remote node for its local
 // on-disk pipeline segment counts for one vault.
@@ -608,13 +522,6 @@ message ForwardAnalyzeChunkResponse {
   repeated ChunkAnalysis analyses = 1;
 }
 
-// ForwardSealVaultRequest asks a remote node to seal the active chunk of a vault.
-message ForwardSealVaultRequest {
-  bytes vault_id = 1;
-}
-
-message ForwardSealVaultResponse {}
-
 // ForwardReindexVaultRequest asks a remote node to rebuild all indexes for a vault.
 message ForwardReindexVaultRequest {
   bytes vault_id = 1;
@@ -662,7 +569,9 @@ message ForwardRemoveNodeRequest {
 message ForwardRemoveNodeResponse {}
 
 // ForwardSetNodeSuffrageRequest is sent by a follower to the leader to
-// promote or demote a node's voting status.
+// promote or demote a node's voting status, or, when node_addr is set, to
+// carry a membership request on behalf of the node at that address. A
+// membership request takes no suffrage, so voter is not read for one.
 message ForwardSetNodeSuffrageRequest {
   bytes node_id = 1;
   string node_addr = 2;

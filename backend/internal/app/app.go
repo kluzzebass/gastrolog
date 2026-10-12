@@ -398,6 +398,11 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return nil
 	}
 
+	// One gate for every cluster-ctl membership change this node makes as
+	// leader — admission, removal, operator suffrage and learner promotion —
+	// so none of them can interleave with a removal.
+	var membershipChanges membershipGate
+
 	groupMgr, vaultWAL, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger, alertCollector)
 
 	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, groupMgr, nodeAddrResolver, nodeID)
@@ -428,21 +433,6 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	if cfg.LogFilter != nil {
 		go WatchLogLevels(ctx, cfg.LogFilter, cfgStore, configSignal, logger)
 	}
-	disp.catchupScheduler = func(vaultID glid.GLID, followerNodeIDs []string) {
-		orch.ScheduleCatchup(vaultID, followerNodeIDs)
-	}
-
-	// Wire follower-driven replica catchup. The cluster server's
-	// RequestReplicaCatchup handler delegates here; the orchestrator
-	// validates leadership, filters chunk eligibility, and fans out pushes
-	// asynchronously via the existing replicateToFollower machinery.
-	if clusterSrv != nil {
-		clusterSrv.SetReplicaCatchupFn(func(ctx context.Context, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error) {
-			n, err := orch.CatchupSelectedChunks(ctx, vaultID, requesterNodeID, chunkIDs)
-			return int(n), err
-		})
-	}
-
 	if err := startOrchestrator(ctx, logger, orch, appSys, factories); err != nil {
 		return err
 	}
@@ -582,7 +572,9 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		// broadcast arrival — the "learner made progress" event — plus a
 		// leadership-gain observation for a node inheriting caught-up
 		// learners from a previous epoch. Leader-only inside evaluate().
-		ccPromoter := newClusterCtlLearnerPromoter(clusterSrv, peerState, compCluster.Apply(logger))
+		ccPromoter := newClusterCtlLearnerPromoter(clusterSrv, peerState, func(nodeID string) error {
+			return changeMemberSuffrageOnLeader(ctx, clusterSrv, cfgStore, &membershipChanges, logger, nodeID, true)
+		}, compCluster.Apply(logger))
 		go ccPromoter.Run(ctx)
 		clusterSrv.Subscribe(ccPromoter.onBroadcast)
 		observeLeadershipGain(ctx, clusterSrv, ccPromoter)
@@ -646,8 +638,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	advertisedAddr := cfg.advertisedClusterAddr()
 	if cfg.ConfigType == "raft" && clusterSrv != nil {
 		joinClusterFn = makeJoinClusterFunc(proxy, clusterSrv, clusterTLS, hd, nodeID, advertisedAddr, orch, disp, logger)
-		removeNodeFn = makeRemoveNodeFunc(clusterSrv, cfgStore, nodeID, logger)
-		setNodeSuffrageFn = makeSetNodeSuffrageFunc(clusterSrv, nodeID, orch.Scheduler(), logger)
+		removeNodeFn = makeRemoveNodeFunc(clusterSrv, cfgStore, &membershipChanges, nodeID, logger)
+		setNodeSuffrageFn = makeSetNodeSuffrageFunc(clusterSrv, cfgStore, &membershipChanges, nodeID, orch.Scheduler(), logger)
 
 		// Register eviction handler: reinitialize as a fresh single-node cluster.
 		clusterSrv.SetEvictionHandler(makeEvictionHandler(proxy, clusterSrv, clusterTLS, hd, nodeID, orch, disp, logger))
@@ -734,13 +726,9 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		}
 	}
 
-	// Wire cross-node chunk migration and replication.
+	// Wire cross-node chunk migration.
 	chunkTransferrer := cluster.NewChunkTransferrer(peerConns)
 	orch.SetRemoteTransferrer(chunkTransferrer)
-
-	// Vault replication: unified ordered stream per vault per follower.
-	chunkReplicator := cluster.NewChunkReplicator(peerConns, compVaultReplicator.Apply(logger))
-	orch.SetChunkReplicator(chunkReplicator)
 
 	// Same readiness gate for bulk chunk imports.
 	clusterSrv.SetRecordImporter(func(ctx context.Context, vaultID glid.GLID, next chunk.RecordIterator) error {
@@ -749,17 +737,10 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		}
 		return orch.ImportChunkRecords(ctx, vaultID, next)
 	})
-	clusterSrv.SetVaultRecordImporter(func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
-		if err := waitForOrch(ctx); err != nil {
-			return err
-		}
-		return orch.ImportToVault(ctx, vaultID, chunkID, next)
-	})
 	searchForwarder := cluster.NewSearchForwarder(peerConns)
 	clusterSrv.SetSearchExecutor(newSearchExecutor(orch))
 	clusterSrv.SetContextExecutor(newContextExecutor(orch))
 	clusterSrv.SetListChunksExecutor(newListChunksExecutor(orch))
-	clusterSrv.SetWaitVaultReadyExecutor(orch.WaitVaultReady)
 	clusterSrv.SetPipelineBacklogDiskExecutor(newPipelineBacklogDiskExecutor(orch))
 	clusterSrv.SetGetIndexesExecutor(newGetIndexesExecutor(orch))
 	clusterSrv.SetValidateVaultExecutor(newValidateVaultExecutor(orch))
@@ -767,7 +748,6 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetGetChunkExecutor(newGetChunkExecutor(orch))
 	clusterSrv.SetAnalyzeChunkExecutor(newAnalyzeChunkExecutor(orch))
 	clusterSrv.SetChunkEventSubscriber(newChunkEventSubscriber(orch))
-	clusterSrv.SetSealVaultExecutor(newSealVaultExecutor(orch))
 	clusterSrv.SetReindexVaultExecutor(newReindexVaultExecutor(orch))
 	clusterSrv.SetExplainExecutor(newExplainExecutor(orch, nodeID))
 	clusterSrv.SetFollowExecutor(newFollowExecutor(orch))
@@ -1027,7 +1007,7 @@ func resolveIdentity(logger *slog.Logger, cfg RunConfig, hd home.Dir) (string, e
 
 // loadLocalConfig attempts to load config from the local FSM or bootstrap.
 func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cfgStore system.Store, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, nodeID string) (*system.System, bool, error) {
-	if err := requestClusterMembership(ctx, logger, cfg, cfgStore, clusterSrv, clusterTLS, nodeID); err != nil {
+	if err := requestClusterMembership(ctx, logger, cfg, clusterSrv, clusterTLS, nodeID); err != nil {
 		return nil, false, err
 	}
 
@@ -1108,15 +1088,14 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 
 // requestClusterMembership asks a cluster member to put this node in the
 // Raft configuration. The member serves the request wherever it sits in the
-// configuration, so cfg.JoinAddr names any node, not the leader. Fresh
-// joiners enter as nonvoters (learners) and get promoted by the cluster-ctl
-// learner promoter once caught up; a node rejoining at a new address asks as
-// a voter, which re-adds it there. The fresh-vs-restart decision probes the
-// local FSM (presence of vault configs or a JWT secret).
+// configuration, so cfg.JoinAddr names any node, not the leader. The cluster
+// decides the suffrage: a fresh joiner enters as a nonvoter (learner) and is
+// promoted by the cluster-ctl learner promoter once caught up, and a member
+// coming back at a new address is re-added there at the suffrage it has.
 //
 // No-op if join parameters are not set, or if this node is already in the
 // configuration at this address — see alreadyInConfiguration.
-func requestClusterMembership(ctx context.Context, logger *slog.Logger, cfg RunConfig, cfgStore system.Store, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, nodeID string) error {
+func requestClusterMembership(ctx context.Context, logger *slog.Logger, cfg RunConfig, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, nodeID string) error {
 	advertise := cfg.advertisedClusterAddr()
 	if cfg.JoinAddr == "" || clusterTLS == nil || advertise == "" {
 		return nil
@@ -1125,18 +1104,13 @@ func requestClusterMembership(ctx context.Context, logger *slog.Logger, cfg RunC
 		logger.Info("already in the cluster configuration at this address, not asking to be added", "advertise", advertise)
 		return nil
 	}
-	asVoter := isRestartOfVoter(ctx, cfg, cfgStore)
-	kind := "nonvoter (learner)"
-	if asVoter {
-		kind = "voter (restart of existing voter)"
-	}
-	logger.Info("requesting cluster membership", "member_addr", cfg.JoinAddr, "advertise", advertise, "as", kind)
+	logger.Info("requesting cluster membership", "member_addr", cfg.JoinAddr, "advertise", advertise)
 	joinCtx, joinCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer joinCancel()
-	if err := cluster.JoinCluster(joinCtx, logger, cfg.JoinAddr, nodeID, advertise, clusterTLS, asVoter); err != nil {
+	if err := cluster.JoinCluster(joinCtx, logger, cfg.JoinAddr, nodeID, advertise, clusterTLS); err != nil {
 		return fmt.Errorf("join cluster: %w", err)
 	}
-	logger.Info("cluster membership granted", "as", kind)
+	logger.Info("cluster membership granted")
 	return nil
 }
 
@@ -1176,10 +1150,9 @@ func configurationLists(servers []cluster.RaftServer, nodeID, advertise string) 
 }
 
 // isRestartOfVoter probes the local FSM to determine whether this
-// join request is a restart of an existing voter (preserved local
-// state) versus a fresh joiner (empty local state). Used by both
-// requestClusterMembership and loadLocalConfig — extracted so the two
-// agree on the boundary without duplicating the predicate.
+// start is a restart of an existing voter (preserved local state) versus a
+// fresh joiner (empty local state). loadLocalConfig uses it to decide
+// whether to resume from the local FSM or wait for replication.
 //
 // True (restart): local FSM has at least one vault or a JWT secret —
 // the snapshot replay from the previous incarnation populated state
@@ -1854,7 +1827,7 @@ func wireClusterRaftApplies(clusterSrv *cluster.Server, groupMgr *raftgroup.Grou
 		if g == nil {
 			return 0, fmt.Errorf("raft group %s not found", groupID)
 		}
-		future := g.Raft.Apply(data, cluster.ReplicationTimeout)
+		future := g.Raft.Apply(data, cluster.RaftApplyTimeout)
 		if err := future.Error(); err != nil {
 			return 0, err
 		}

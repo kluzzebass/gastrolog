@@ -101,7 +101,7 @@ func TestGroundMetaFromEntryDoesNotClobberLocalDiskBytes(t *testing.T) {
 
 	applyLocal := func(data []byte) { fsm.Apply(&hraft.Log{Data: data}) }
 	applyLocal(vaultctlfsm.MarshalCreateChunk(id, now, now, now))
-	applyLocal(vaultctlfsm.MarshalSealChunk(id, now, 10, 5000, now, now, now, false, now))
+	applyLocal(vaultctlfsm.MarshalSealChunk(id, now, 10, 5000, now, now, now, false, now, [32]byte{}))
 	applyLocal(vaultctlfsm.MarshalUploadChunk(id, 1234, 0, 0, 0, 0, [32]byte{}, glid.GLID{}, 0))
 
 	e := fsm.Get(id)

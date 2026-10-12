@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
@@ -18,7 +17,10 @@ import (
 // cannot diverge.
 
 func (v *vaultChunking) buildDue() bool {
-	pending := v.sealedManifestForBuild()
+	if v.sealedChunkBuildDue() {
+		return true
+	}
+	pending := v.fsm().SealedManifest()
 	if pending == nil {
 		return false
 	}
@@ -38,14 +40,6 @@ func (v *vaultChunking) buildDue() bool {
 		return true
 	}
 	return false
-}
-
-func (v *vaultChunking) sealedManifestForBuild() *vaultctlfsm.OpenChunkManifest {
-	if pending := v.fsm().SealedManifest(); pending != nil {
-		v.progress.setPending(pending)
-		return pending
-	}
-	return v.progress.pendingManifest()
 }
 
 func (v *vaultChunking) afterSealBuild(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest) {
@@ -83,12 +77,19 @@ func (v *vaultChunking) afterSealBuild(ctx context.Context, pending *vaultctlfsm
 		}
 		v.releaseWake.Notify()
 	}
-	v.progress.clearPendingAfterBuilt(pending.ChunkID, key)
 }
 
+// buildOnce runs one build pass: first every sealed chunk this home has not
+// built, in seal order, then the seal-queue head. A sealed chunk that cannot
+// be built here does not hold back the seal-queue head.
 func (v *vaultChunking) buildOnce(ctx context.Context) error {
 	v.pruneCorruptGLCBs()
-	pending := v.sealedManifestForBuild()
+	sealedErr := v.buildSealedChunksMissingLocally(ctx)
+	return errors.Join(v.buildSealQueueHead(ctx), sealedErr)
+}
+
+func (v *vaultChunking) buildSealQueueHead(ctx context.Context) error {
+	pending := v.fsm().SealedManifest()
 	if pending == nil {
 		return nil
 	}
@@ -135,7 +136,6 @@ func (v *vaultChunking) buildOnceIfSealedElsewhere(ctx context.Context, pending 
 	if !v.progress.alreadyBuilt(key) {
 		return false, nil
 	}
-	v.progress.clearPendingAfterBuilt(pending.ChunkID, key)
 
 	// Another home proposed CmdSealChunk first; this home still needs local
 	// head purge and release-queue work.
@@ -171,34 +171,20 @@ func (v *vaultChunking) runBuildOncePass(ctx context.Context, pending *vaultctlf
 	return result, true, nil
 }
 
-// adoptExistingGLCBIfPresent loads BuildResult when data.glcb is already on
-// disk (BuildGLCBFile only renames into place after a complete build).
+// adoptExistingGLCBIfPresent adopts the GLCB already on the chunk's
+// canonical path when it is a build of pending (glcb_mismatched.go); a GLCB
+// that is not is quarantined and the caller builds the chunk instead.
 func (v *vaultChunking) adoptExistingGLCBIfPresent(pending *vaultctlfsm.OpenChunkManifest, key buildKey) (BuildResult, bool, error) {
-	glcbPath := ChunkGLCBPath(v.cfg.ChunkRoot, pending.ChunkID)
-	if _, err := os.Stat(glcbPath); err != nil {
-		if os.IsNotExist(err) {
-			return BuildResult{}, false, nil
-		}
-		return BuildResult{}, false, err
-	}
 	sealedAt := pending.SealedAt
 	if sealedAt.IsZero() {
 		if entry := v.fsm().Get(pending.ChunkID); entry != nil && !entry.WriteEnd.IsZero() {
 			sealedAt = entry.WriteEnd
 		}
 	}
-	result, readErr := BuildResultFromExistingGLCB(glcbPath, sealedAt)
-	if readErr != nil {
-		// Unified corrupt-GLCB story (glcb_corrupt.go): quarantine + alert,
-		// then report "not adopted" so the caller falls through to a full
-		// rebuild from source segments — self-heal with the corruption
-		// signal preserved.
-		v.quarantineCorruptGLCB(pending.ChunkID, glcbPath, readErr)
-		return BuildResult{}, false, nil
+	result, adopted, err := v.existingGLCBBuildOf(pending, sealedAt)
+	if err != nil || !adopted {
+		return BuildResult{}, false, err
 	}
-	// Readable again (e.g. a peer re-pull restored the canonical file after
-	// an earlier quarantine): the chunk is healed on this home.
-	v.clearCorruptGLCB(pending.ChunkID, "existing GLCB readable")
 	adoptKey := key
 	if adoptKey.sealedAt.IsZero() {
 		adoptKey.sealedAt = result.WriteEnd
@@ -251,6 +237,7 @@ func (v *vaultChunking) proposeSealOnce(ctx context.Context, pending *vaultctlfs
 		result.SourceEnd,
 		result.IngestTSMonotonic,
 		v.now(),
+		result.BlobDigest,
 	)); err != nil {
 		return false, err
 	}
@@ -294,11 +281,6 @@ func (v *vaultChunking) finishBuildOnce(ctx context.Context, pending *vaultctlfs
 	// Re-flushing here doubled the seal tail: a second full purge pass —
 	// including releasableSegmentIDs over the whole manifest — on every build
 	// wake after the post-seal work had already run.
-	// Retain the pending manifest until CmdSealChunk commits so
-	// OnSealedManifestCleared can run afterSealBuild on follower homes.
-	if entry := v.fsm().Get(pending.ChunkID); entry != nil && entry.State == chunk.ChunkStateSealed {
-		v.progress.clearPendingAfterBuilt(pending.ChunkID, key)
-	}
 }
 
 func (v *vaultChunking) discardEmptySealedManifest(pending *vaultctlfsm.OpenChunkManifest) error {
@@ -313,13 +295,16 @@ func (v *vaultChunking) build(ctx context.Context, pending *vaultctlfsm.OpenChun
 	if err := v.materializeManifestSegments(ctx, manifest); err != nil {
 		return BuildResult{}, err
 	}
-	input := BuildInput{
+	return BuildSealedChunk(v.buildInput(manifest))
+}
+
+func (v *vaultChunking) buildInput(manifest SealedManifest) BuildInput {
+	return BuildInput{
 		Manifest:  manifest,
 		VaultID:   v.cfg.VaultID,
 		ChunkRoot: v.cfg.ChunkRoot,
 		Locate:    v.cfg.Locate,
 	}
-	return BuildSealedChunk(input)
 }
 
 // materializeManifestSegments ensures every segment referenced by a sealed

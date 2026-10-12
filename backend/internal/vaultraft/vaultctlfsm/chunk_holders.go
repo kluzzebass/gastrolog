@@ -61,17 +61,49 @@ func (f *FSM) applyRevokeChunkHolder(c *gastrologv1.RevokeChunkHolderCommand) ([
 		if !ok {
 			continue
 		}
-		i := slices.Index(entry.Holders, nodeID)
-		if i < 0 {
+		holders, ok := withoutHolder(entry.Holders, nodeID)
+		if !ok {
 			continue
 		}
-		holders := make([]string, 0, len(entry.Holders)-1)
-		holders = append(holders, entry.Holders[:i]...)
-		holders = append(holders, entry.Holders[i+1:]...)
 		entry.Holders = holders
 		removed = append(removed, id)
 	}
 	return removed, nil
+}
+
+// withoutHolder returns holders minus nodeID as a fresh slice, and whether
+// nodeID was present. Copy-on-write: the input backing array may be shared
+// with entry copies handed out under an earlier read lock.
+func withoutHolder(holders []string, nodeID string) ([]string, bool) {
+	i := slices.Index(holders, nodeID)
+	if i < 0 {
+		return holders, false
+	}
+	out := make([]string, 0, len(holders)-1)
+	out = append(out, holders[:i]...)
+	out = append(out, holders[i+1:]...)
+	return out, true
+}
+
+// HolderQuorum is the number of placed holders a vault needs before a gate
+// may destroy another copy of the same records: min(2, placement size). Zero
+// for an empty placement, which disables the gate.
+func HolderQuorum(placement []string) int {
+	return min(2, len(placement))
+}
+
+// PlacedHolderCount counts the holders that are members of placement. A
+// holder outside the vault's current placement runs no vault instance: no
+// reconciler revokes its claim when its bytes go, and no sweep repairs them,
+// so its claim never counts toward a gate that destroys another copy.
+func PlacedHolderCount(holders, placement []string) int {
+	n := 0
+	for _, h := range holders {
+		if slices.Contains(placement, h) {
+			n++
+		}
+	}
+	return n
 }
 
 // NewAckChunkHolders builds an AckChunkHolder VaultCtlCommand covering every

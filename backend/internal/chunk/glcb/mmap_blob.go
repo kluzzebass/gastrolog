@@ -21,6 +21,7 @@ import (
 // and TS-index lookups (Section only) do not heap-load every chunk in a window.
 type MappedBlob struct {
 	path           string
+	file           os.FileInfo
 	data           []byte
 	layout         blobLayoutMeta
 	meta           BlobMeta
@@ -67,6 +68,7 @@ func OpenMappedBlob(path string) (*MappedBlob, error) {
 		return nil, err
 	}
 	blob.path = path
+	blob.file = info
 	blob.data = data
 	return blob, nil
 }
@@ -134,8 +136,21 @@ func (b *MappedBlob) unmap() error {
 // Path returns the file this mapping was opened from.
 func (b *MappedBlob) Path() string { return b.path }
 
+// FileInfo describes the file this mapping was opened from.
+func (b *MappedBlob) FileInfo() os.FileInfo { return b.file }
+
+// IsFile reports whether info describes the file this mapping was opened
+// from. A file renamed over Path since the mapping opened is a different
+// file, though Path names both.
+func (b *MappedBlob) IsFile(info os.FileInfo) bool {
+	return b.file != nil && info != nil && os.SameFile(b.file, info)
+}
+
 // Meta returns parsed blob metadata.
 func (b *MappedBlob) Meta() BlobMeta { return b.meta }
+
+// BlobDigest returns the whole-blob digest the TOC footer records.
+func (b *MappedBlob) BlobDigest() [32]byte { return b.toc.BlobDigest }
 
 // Section returns the TOC entry and a sub-slice of the mapping for a TOC
 // section type. The entry carries the section's recorded version so decode

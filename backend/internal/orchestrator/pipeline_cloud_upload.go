@@ -20,14 +20,12 @@ import (
 // and the chunk was uploaded twice. One name is what makes them mutually
 // exclusive.
 func cloudUploadJobName(vaultID glid.GLID, chunkID chunk.ChunkID) string {
-	return cloudUploadJobPrefix(vaultID) + ":" + chunkID.String()
+	return cloudUploadJobPrefix(vaultID) + chunkID.String()
 }
 
-// cloudUploadJobPrefix is the per-vault name prefix for every cloud-upload
-// job, used by vault teardown/unregister to cancel outstanding uploads with
-// RemoveJobsByPrefix before the chunk manager closes.
+// cloudUploadJobPrefix names one vault's cloud-upload jobs.
 func cloudUploadJobPrefix(vaultID glid.GLID) string {
-	return "cloud-upload:" + vaultID.String()
+	return "cloud-upload:" + vaultID.String() + ":"
 }
 
 // schedulePipelineCloudUpload schedules uploading a pipeline-built sealed chunk

@@ -450,7 +450,7 @@ func TestManagerReleaseUnpinsDeadHolderWithFixedPlacement(t *testing.T) {
 	}))
 	sealedAt := base.Add(time.Minute)
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
-	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt, 1, 1, base, base, base, true, sealedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt, 1, 1, base, base, base, true, sealedAt, [32]byte{}))
 
 	// Only the live homes ever ack the raw SEGMENT — dead-home never does,
 	// so a holder-completeness gate would pin the registry entry (and the
@@ -856,7 +856,7 @@ func TestSealChunkClearsSealedManifest(t *testing.T) {
 	if fsm.SealedManifest() == nil {
 		t.Fatal("expected sealed manifest before SealChunk")
 	}
-	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, now.Add(2*time.Minute), 1, 100, now, now, now, true, now.Add(2*time.Minute)))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, now.Add(2*time.Minute), 1, 100, now, now, now, true, now.Add(2*time.Minute), [32]byte{}))
 	if fsm.SealedManifest() != nil {
 		t.Fatal("sealed manifest must clear after SealChunk")
 	}
@@ -866,7 +866,7 @@ func TestRecordingApplierSealChunkProto(t *testing.T) {
 	t.Parallel()
 	id := chunk.NewChunkID()
 	now := time.Unix(0, 1_700_000_000_000).UTC()
-	data := vaultctlfsm.MarshalSealChunk(id, now, 10, 500, now, now, now, true, now)
+	data := vaultctlfsm.MarshalSealChunk(id, now, 10, 500, now, now, now, true, now, [32]byte{})
 	var cmd gastrologv1.VaultCtlCommand
 	if err := proto.Unmarshal(data, &cmd); err != nil {
 		t.Fatal(err)

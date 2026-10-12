@@ -71,7 +71,7 @@ func TestFireRetentionEventFansOutManyRecords(t *testing.T) {
 		orch:    orch,
 		logger:  slog.Default(),
 	}
-	r.fireRetentionEvent(sealedID)
+	r.fireRetentionEvent(sealedID, "")
 
 	waitForRouteStats(t, orch, "all records routed", func(s *RouteStats) bool {
 		return s.Matched == recordCount
@@ -128,7 +128,7 @@ func TestFireRetentionEventPipelineStopped(t *testing.T) {
 		orch:    fx.orch,
 		logger:  slog.Default(),
 	}
-	r.fireRetentionEvent(fx.sealedID)
+	r.fireRetentionEvent(fx.sealedID, "")
 
 	if s := fx.orch.GetRouteStats(); s.Routed != 0 {
 		t.Errorf("stopped pipeline should not ingest records, got Routed=%d", s.Routed)
@@ -190,7 +190,7 @@ func TestFireRetentionEventFileBackedGLCBParallel(t *testing.T) {
 		orch:    orch,
 		logger:  slog.Default(),
 	}
-	r.fireRetentionEvent(sealedID)
+	r.fireRetentionEvent(sealedID, "")
 
 	waitForRouteStats(t, orch, "file GLCB parallel fan-out", func(s *RouteStats) bool {
 		return s.Matched == recordCount

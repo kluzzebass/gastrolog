@@ -3,6 +3,7 @@ package orchestrator_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"gastrolog/internal/alert"
+	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/cluster"
@@ -63,11 +66,16 @@ type orchRelNode struct {
 	groupMgr      *raftgroup.GroupManager
 	orch          *orchestrator.Orchestrator
 	peerConns     *cluster.PeerConnManager // non-nil only with withPipelineCluster
+	// classStorageIDs holds the node's additional file storages, one per
+	// class registered with withStorageClassVault, each in its own directory.
+	classStorageIDs map[uint32]glid.GLID
 	// factories is the node's component-factory set as built by startNode,
 	// kept so tests can drive dispatcher-equivalent calls (AddVaultInstance)
 	// after config changes.
 	factories orchestrator.Factories
-	cancel    context.CancelFunc
+	// alerts is the node's alarm collector, wired as the orchestrator's sink.
+	alerts *alert.Collector
+	cancel context.CancelFunc
 }
 
 // orchRelHarness boots N in-process nodes, each running a real orchestrator
@@ -77,8 +85,7 @@ type orchRelNode struct {
 // ListAllChunkMetas, the scheduler, vault readiness gating, and the
 // vault-ctl Raft group built via createVaultRaftGroupVaultCtl.
 //
-// Cross-node cluster RPCs (RecordForwarder, RemoteTransferrer,
-// ChunkReplicator) are left nil — scenarios that need them should stub via
+// Cross-node cluster RPCs (RecordForwarder, RemoteTransferrer) are left nil — scenarios that need them should stub via
 // direct in-process shims. The default harness exercises replication
 // through vault-ctl Raft only, which is the primary target for
 // metadata-divergence tests.
@@ -111,10 +118,23 @@ type orchRelHarness struct {
 	// fresh-joiner way: ApplyConfig(nil) at startNode, config arriving only
 	// through the test-driven dispatcher-equivalent fan-out.
 	nilConfigBootIdxs map[int]bool
+	// vaultCtlHiddenPeer maps a node index (into h.nodeIDs) to the index of a
+	// peer its vault-ctl member resolution cannot see at boot, so its vault-ctl
+	// group creation defers until resolveVaultCtlPeers. Such nodes are left
+	// out of the boot-time readiness wait.
+	vaultCtlHiddenPeer map[int]int
+	// extraStorageClasses lists the classes of the additional file storage
+	// every node gets (withStorageClassVault).
+	extraStorageClasses []uint32
 	// rotationPolicyID is the shared pipeline rotation policy written by
 	// seedSharedConfig (nil without withPipelineCluster); vaults added
 	// mid-test (addRuntimeVault) reference it too.
 	rotationPolicyID *glid.GLID
+	// cloudStore, when non-nil, is the one bucket every node's "memory"
+	// cloud service resolves to (withSharedCloudStore), so an object the
+	// placement leader uploads is readable by every home, as with a real
+	// provider.
+	cloudStore blobstore.Store
 }
 
 // pipelineClusterOpts carries the pipeline tuning for withPipelineCluster.
@@ -131,6 +151,17 @@ type vaultSpec struct {
 	label    string    // human label for test output ("A", "B", ...)
 	id       glid.GLID // vault GLID
 	nodeIdxs []int     // indexes into h.nodeIDs; first is vault leader
+	// storageClass is the vault's storage class; zero means
+	// harnessStorageClass, the class of every node's default file storage.
+	storageClass uint32
+}
+
+// class is the vault's storage class.
+func (v vaultSpec) class() uint32 {
+	if v.storageClass == 0 {
+		return harnessStorageClass
+	}
+	return v.storageClass
 }
 
 // orchRelOption configures a harness before it boots. Applied between
@@ -156,6 +187,40 @@ func withExtraVault(nodeIdxs []int) orchRelOption {
 	}
 }
 
+// withStorageClassVault gives every node an additional file storage of the
+// given class, in its own directory (<home>/class-<N>), and registers a vault
+// of that class placed on those storages of the given node indexes (first is
+// the vault leader). Labeled like withExtraVault.
+func withStorageClassVault(class uint32, nodeIdxs []int) orchRelOption {
+	return func(h *orchRelHarness) {
+		label := string(rune('B' + len(h.vaults) - 1))
+		h.vaults = append(h.vaults, vaultSpec{
+			label:        label,
+			id:           glid.New(),
+			nodeIdxs:     nodeIdxs,
+			storageClass: class,
+		})
+		if !slices.Contains(h.extraStorageClasses, class) {
+			h.extraStorageClasses = append(h.extraStorageClasses, class)
+		}
+	}
+}
+
+// classStoragePath is the directory of a node's additional file storage of a
+// class (withStorageClassVault).
+func classStoragePath(n *orchRelNode, class uint32) string {
+	return filepath.Join(n.home, fmt.Sprintf("class-%d", class))
+}
+
+// storageFor is the node's file storage of the vault's class: its ID and
+// directory.
+func (h *orchRelHarness) storageFor(n *orchRelNode, v vaultSpec) (glid.GLID, string) {
+	if v.class() == harnessStorageClass {
+		return n.fileStorageID, filepath.Join(n.home, "chunks")
+	}
+	return n.classStorageIDs[v.class()], classStoragePath(n, v.class())
+}
+
 // withNilConfigBoot marks the node at nodeIdx to boot the fresh-joiner way:
 // startNode calls ApplyConfig with nil config, as production does when the
 // config has not replicated yet, and the test drives the dispatcher-replay
@@ -166,6 +231,19 @@ func withNilConfigBoot(nodeIdx int) orchRelOption {
 			h.nilConfigBootIdxs = make(map[int]bool)
 		}
 		h.nilConfigBootIdxs[nodeIdx] = true
+	}
+}
+
+// withVaultCtlPeerHidden boots the node at nodeIdx unable to resolve the node
+// at hiddenIdx for vault-ctl membership — a peer not yet in its cluster-ctl
+// Raft configuration — so its vault-ctl groups defer creation while every
+// other node creates them. resolveVaultCtlPeers lifts it.
+func withVaultCtlPeerHidden(nodeIdx, hiddenIdx int) orchRelOption {
+	return func(h *orchRelHarness) {
+		if h.vaultCtlHiddenPeer == nil {
+			h.vaultCtlHiddenPeer = make(map[int]int)
+		}
+		h.vaultCtlHiddenPeer[nodeIdx] = hiddenIdx
 	}
 }
 
@@ -180,6 +258,31 @@ func withPipelineCluster(completePolicy segmentation.CompletePolicy, chunkMaxRec
 			chunkMaxRecords: chunkMaxRecords,
 		}
 	}
+}
+
+// withSharedCloudStore makes every node's "memory" cloud service one shared
+// bucket. Without it each node's memory provider is a private store and a
+// follower can never read what the leader uploaded.
+func withSharedCloudStore(store blobstore.Store) orchRelOption {
+	return func(h *orchRelHarness) {
+		h.cloudStore = store
+	}
+}
+
+// chunkManagerFactory is the file chunk-manager factory every node uses: the
+// production one, with "memory" cloud services bound to the shared bucket when
+// withSharedCloudStore is set.
+func (h *orchRelHarness) chunkManagerFactory() chunk.ManagerFactory {
+	if h.cloudStore == nil {
+		return chunkfile.NewFactory()
+	}
+	shared := h.cloudStore
+	return chunkfile.NewFactoryWithStores(func(provider string, params map[string]string, log *slog.Logger) (blobstore.Store, error) {
+		if provider == "memory" {
+			return shared, nil
+		}
+		return blobstore.CreateStore(provider, params, log)
+	})
 }
 
 // withMatchAllRoute seeds an enabled match-all ("*") route targeting the
@@ -544,16 +647,28 @@ func (h *orchRelHarness) seedSharedConfig() {
 		}
 		storageID := glid.New()
 		n.fileStorageID = storageID
-		if err := h.cfgStore.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
-			NodeID: id,
-			FileStorages: []system.FileStorage{
-				{
-					ID:           storageID,
-					StorageClass: harnessStorageClass,
-					Name:         n.label + "-fs",
-					Path:         filepath.Join(n.home, "chunks"),
-				},
+		storages := []system.FileStorage{
+			{
+				ID:           storageID,
+				StorageClass: harnessStorageClass,
+				Name:         n.label + "-fs",
+				Path:         filepath.Join(n.home, "chunks"),
 			},
+		}
+		n.classStorageIDs = make(map[uint32]glid.GLID, len(h.extraStorageClasses))
+		for _, class := range h.extraStorageClasses {
+			classID := glid.New()
+			n.classStorageIDs[class] = classID
+			storages = append(storages, system.FileStorage{
+				ID:           classID,
+				StorageClass: class,
+				Name:         fmt.Sprintf("%s-class-%d", n.label, class),
+				Path:         classStoragePath(n, class),
+			})
+		}
+		if err := h.cfgStore.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
+			NodeID:       id,
+			FileStorages: storages,
 		}); err != nil {
 			h.t.Fatalf("PutNodeStorageConfig %s: %v", n.label, err)
 		}
@@ -586,7 +701,7 @@ func (h *orchRelHarness) seedSharedConfig() {
 			ID:               v.id,
 			Name:             "orch-rel-vault-" + v.label,
 			Type:             system.VaultTypeFile,
-			StorageClass:     harnessStorageClass,
+			StorageClass:     v.class(),
 			RotationPolicyID: rotationPolicyID,
 		}); err != nil {
 			h.t.Fatalf("PutVault %s: %v", v.label, err)
@@ -598,8 +713,9 @@ func (h *orchRelHarness) seedSharedConfig() {
 				h.t.Fatalf("vault %s: invalid node index %d (have %d nodes)", v.label, idx, len(h.nodeIDs))
 			}
 			n := h.nodes[h.nodeIDs[idx]]
+			storageID, _ := h.storageFor(n, v)
 			placements = append(placements, system.VaultPlacement{
-				StorageID: n.fileStorageID.String(),
+				StorageID: storageID.String(),
 				Leader:    pos == 0,
 			})
 		}
@@ -661,9 +777,11 @@ func (h *orchRelHarness) startNode(id string) {
 	if os.Getenv("ORCH_REL_LOG") != "" {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})).With("node", n.label)
 	}
+	n.alerts = alert.New()
 	orchCfg := orchestrator.Config{
 		LocalNodeID: id,
 		Logger:      logger,
+		Alerts:      n.alerts,
 		// Per-node segments base, mirroring production's <home>/segments.
 		SegmentsDir: filepath.Join(n.home, "segments"),
 	}
@@ -680,11 +798,22 @@ func (h *orchRelHarness) startNode(id string) {
 	}
 	n.orch = orch
 
+	resolver := h.resolver()
+	if hiddenIdx, ok := h.vaultCtlHiddenPeer[slices.Index(h.nodeIDs, id)]; ok {
+		hidden := h.nodeIDs[hiddenIdx]
+		resolvesAll := resolver
+		resolver = func(nodeID string) (string, bool) {
+			if nodeID == hidden {
+				return "", false
+			}
+			return resolvesAll(nodeID)
+		}
+	}
 	factories := orchestrator.Factories{
 		GroupManager:        groupMgr,
-		NodeAddressResolver: h.resolver(),
+		NodeAddressResolver: resolver,
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			vaultTypeKey: chunkfile.NewFactory(),
+			vaultTypeKey: h.chunkManagerFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
 			vaultTypeKey: indexfile.NewFactory(),
@@ -699,7 +828,7 @@ func (h *orchRelHarness) startNode(id string) {
 	// Vault-ctl apply forwarding, wired for EVERY multi-node harness rather
 	// than only pipeline ones.
 	//
-	// factories.PeerConns is what makes ensureVaultCtlMetadata choose the
+	// factories.PeerConns is what makes the vault-ctl instance binding choose the
 	// forwarding applier; without it a vault-ctl announce from a node that is
 	// not the group leader hits g.Raft.Apply directly and fails with
 	// "node is not the leader". A chunk sealed on a non-leader then never
@@ -716,7 +845,7 @@ func (h *orchRelHarness) startNode(id string) {
 		if g == nil {
 			return 0, fmt.Errorf("raft group %s not found", groupID)
 		}
-		future := g.Raft.Apply(data, cluster.ReplicationTimeout)
+		future := g.Raft.Apply(data, cluster.RaftApplyTimeout)
 		if err := future.Error(); err != nil {
 			return 0, err
 		}
@@ -766,8 +895,9 @@ func (h *orchRelHarness) setVaultPlacements(v vaultSpec, nodeIdxs []int) {
 	placements := make([]system.VaultPlacement, 0, len(nodeIdxs))
 	for pos, idx := range nodeIdxs {
 		n := h.nodes[h.nodeIDs[idx]]
+		storageID, _ := h.storageFor(n, v)
 		placements = append(placements, system.VaultPlacement{
-			StorageID: n.fileStorageID.String(),
+			StorageID: storageID.String(),
 			Leader:    pos == 0,
 		})
 	}
@@ -906,9 +1036,12 @@ func (h *orchRelHarness) waitForAllReady() {
 	// is still false, so a slow-but-live election never reads as a stall.
 	h.waitProgress("vault replication readiness", 50*time.Millisecond, func() (string, bool) {
 		var notReady []string
-		for _, id := range h.nodeIDs {
+		for i, id := range h.nodeIDs {
 			n := h.nodes[id]
 			if n.orch == nil {
+				continue
+			}
+			if _, deferred := h.vaultCtlHiddenPeer[i]; deferred {
 				continue
 			}
 			if !n.orch.LocalVaultsReplicationReady() {
@@ -923,6 +1056,22 @@ func (h *orchRelHarness) waitForAllReady() {
 		_ = pprof.Lookup("goroutine").WriteTo(&stacks, 1)
 		h.t.Logf("goroutine profile at readiness stall:\n%s", stacks.String())
 	})
+}
+
+// resolveVaultCtlPeers makes every peer resolvable for the node and runs the
+// node-config refresh the dispatcher drives when the missing peer's address
+// reaches the cluster-ctl Raft configuration.
+func (h *orchRelHarness) resolveVaultCtlPeers(id string) {
+	h.t.Helper()
+	idx := slices.Index(h.nodeIDs, id)
+	delete(h.vaultCtlHiddenPeer, idx)
+	n := h.nodes[id]
+	n.factories.NodeAddressResolver = h.resolver()
+	nodes, err := h.cfgStore.ListNodes(context.Background())
+	if err != nil {
+		h.t.Fatalf("ListNodes: %v", err)
+	}
+	n.orch.RefreshVaultCtlMembers(nodes, n.factories)
 }
 
 // sweepJobLastRun reports when a node's named scheduler job last ran, and
@@ -1029,10 +1178,13 @@ func (h *orchRelHarness) appendBurst(v vaultSpec, prefix string, count int) *orc
 }
 
 // sealActiveOn seals the chunk manager's active chunk for one vault on one node.
+// sealActiveOn seals n's chunk-manager active chunk. Off the chunking leader
+// the open manifest's half of the seal is refused alongside the count.
 func (h *orchRelHarness) sealActiveOn(n *orchRelNode, v vaultSpec) {
 	h.t.Helper()
-	if _, err := n.orch.SealActive(v.id); err != nil {
-		h.t.Fatalf("%s: SealActive vault %s: %v", n.label, v.label, err)
+	sealed, err := n.orch.SealActive(v.id)
+	if err != nil && (sealed == 0 || !errors.Is(err, orchestrator.ErrNotChunkingLeader)) {
+		h.t.Fatalf("%s: SealActive vault %s = (%d, %v)", n.label, v.label, sealed, err)
 	}
 }
 

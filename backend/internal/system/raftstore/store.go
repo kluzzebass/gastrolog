@@ -423,6 +423,14 @@ func (s *Store) DeleteNode(ctx context.Context, id glid.GLID) error {
 	return s.apply(ctx, command.NewDeleteNodeConfig(id))
 }
 
+func (s *Store) MarkNodeRemoved(ctx context.Context, nodeID string) error {
+	return s.apply(ctx, command.NewMarkNodeRemoved(nodeID))
+}
+
+func (s *Store) IsNodeRemoved(ctx context.Context, nodeID string) (bool, error) {
+	return s.fsm.Store().IsNodeRemoved(ctx, nodeID)
+}
+
 func (s *Store) SetNodeState(ctx context.Context, id glid.GLID, state system.NodeState, since time.Time) error {
 	return s.apply(ctx, command.NewSetNodeState(id, state, since))
 }

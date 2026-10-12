@@ -133,9 +133,9 @@ type Config struct {
 	CacheEviction string
 
 	// CacheBudgetBytes is the soft cap on total bytes occupied by warm-cache
-	// copies of cloud-backed chunks (<chunkDir>/data.glcb). Zero disables
-	// budget enforcement. Used by both LRU mode (primary cap) and TTL
-	// mode (secondary cap applied after age-based eviction).
+	// copies of cloud-backed chunks — every local data.glcb, the chunk
+	// dir's and the pipeline-built one alike. Zero disables budget
+	// enforcement. Only consulted in LRU mode; TTL mode ignores it.
 	CacheBudgetBytes uint64
 
 	// CacheTTL is the maximum age (since last OpenCursor) of a warm-cache
@@ -209,6 +209,15 @@ type Manager struct {
 	// lock-light and never re-enter this manager. Protected by mu.
 	externalLister func() []chunk.ChunkID
 
+	// externalLocator names where this node's pipeline-built data.glcb for a
+	// chunk lives, without touching disk or the FSM. It is what lets the
+	// read and eviction paths find a cloud-backed chunk's pipeline copy when
+	// no external registration names it — a cloud-backed chunk resolves
+	// from the cloud index first, so after a restart nothing registers its
+	// pipeline path. Lock-free; never re-enters this manager. Protected by
+	// mu.
+	externalLocator func(chunk.ChunkID) (string, bool)
+
 	// cloudBackedResolver resolves a meta-lookup miss to a cloud-backed chunk
 	// on demand from the replicated vault-ctl FSM manifest — the single fill
 	// path for cloudIdx entries this node did not upload itself. A chunk is
@@ -277,8 +286,8 @@ type Manager struct {
 	chunkLocksMu sync.Mutex
 	chunkLocks   map[chunk.ChunkID]*sync.RWMutex
 
-	// lastAccess records the most recent OpenCursor time for each
-	// cloud-backed chunk's local data.glcb cache. Used by EvictCacheLRU to
+	// lastAccess records the most recent OpenCursor time for each chunk
+	// read through its local data.glcb. Used by EvictCacheLRU to
 	// pick the coldest entries when the cache exceeds its budget. In-memory
 	// only — never persisted; eviction signals don't outlive the process,
 	// per the chunk-redesign doc's "cache eviction signals are node-local,
@@ -385,13 +394,6 @@ type chunkMeta struct {
 	// Used by uploadToCloud to populate cloud BlobMeta.RawBytes without
 	// re-parsing the seekable record body.
 	rawBytes int64
-
-	// blobDigest is the GLCB whole-blob hash from the TOC footer:
-	// sha256(header ‖ section_hashes_in_TOC_order ‖ TOC_bytes). Captured
-	// at sealToGLCB time so AnnounceUpload can publish it onto the FSM
-	// entry without re-reading the local file. Verified on every cache
-	// re-fetch.
-	blobDigest [32]byte
 }
 
 func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
@@ -892,6 +894,14 @@ func (m *Manager) SetExternalGLCBLister(fn func() []chunk.ChunkID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.externalLister = fn
+}
+
+// SetExternalGLCBLocator installs the pipeline-path locator. See the
+// externalLocator field for the contract.
+func (m *Manager) SetExternalGLCBLocator(fn func(chunk.ChunkID) (string, bool)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.externalLocator = fn
 }
 
 // SetCloudBackedChunkResolver installs the on-miss resolver for cloud-backed
@@ -2391,10 +2401,10 @@ func (s *importState) writeRecord(rec chunk.Record) error {
 		AttrOffset: uint32(s.attrOffset),   //nolint:gosec // G115: bounded by rotation policy
 		AttrSize:   uint16(len(attrBytes)), //nolint:gosec // G115: bounded by attr encoding
 		// EventID fields preserve cluster-wide record identity through
-		// ImportRecords (cross-node sealed-chunk replication, MoveChunk,
-		// catchup paths). Without these, follower-replicated chunks land
-		// with zero EventIDs and histogram dedup can't match them
-		// against leader-original records → silent double-count.
+		// ImportRecords (MoveChunk, cross-node chunk transfer). Without
+		// these, imported chunks land with zero EventIDs and histogram
+		// dedup can't match them against the original records → silent
+		// double-count.
 		IngestSeq:  rec.EventID.IngestSeq,
 		IngesterID: rec.EventID.IngesterID,
 		NodeID:     rec.EventID.NodeID,
@@ -3315,6 +3325,9 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 	delete(m.externalGLCB, id)   // clean up external pipeline GLCB path, if any
 	m.evictMappedGLCB(id)
 	m.mu.Unlock()
+	m.lastAccessMu.Lock()
+	delete(m.lastAccess, id)
+	m.lastAccessMu.Unlock()
 	return nil
 }
 
@@ -3503,6 +3516,9 @@ func (m *Manager) openLocalGLCBCursor(id chunk.ChunkID) (chunk.RecordCursor, err
 func (m *Manager) sealedGLCBCursorOrFallback(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	cursor, err := m.openLocalGLCBCursor(id)
 	if err == nil {
+		// A pipeline-built chunk read here may already be cloud-backed in
+		// the FSM; its recency must count when the eviction sweep ranks it.
+		m.touchLastAccess(id)
 		return cursor, nil
 	}
 	if _, statErr := os.Stat(m.rawLogPath(id)); statErr == nil {
@@ -3544,17 +3560,72 @@ func (m *Manager) GLCBBlobPath(id chunk.ChunkID) (string, bool) {
 // glcbPath returns the on-disk path to a chunk's data.glcb. For chunks
 // registered with an external GLCB path (pipeline-built, living under the
 // vault ChunkRoot rather than this manager's Dir) it returns that path;
-// otherwise the canonical <chunkDir>/data.glcb. Safe to call without mu
-// held — it briefly takes mu to read the externalGLCB map and is never
-// invoked from a code path that already holds it.
+// otherwise the canonical <chunkDir>/data.glcb — unless that file is absent
+// and this node's pipeline-built copy exists, which is how an unregistered
+// cloud-backed chunk's pipeline GLCB serves as its warm cache. A registered
+// path whose file is gone defers to the locator: a placement change moves the
+// vault's pipeline root, and the locator names where the copy lives now. Safe
+// to call without mu held — it briefly takes mu to read the externalGLCB map
+// and is never invoked from a code path that already holds it.
 func (m *Manager) glcbPath(id chunk.ChunkID) string {
 	m.mu.Lock()
 	p, ok := m.externalGLCB[id]
+	locate := m.externalLocator
 	m.mu.Unlock()
 	if ok {
+		if _, err := os.Stat(p); err == nil || locate == nil {
+			return p
+		}
+		if located, found := locate(id); found {
+			if _, err := os.Stat(located); err == nil {
+				return located
+			}
+		}
 		return p
 	}
-	return filepath.Join(m.chunkDir(id), dataGLCBFileName)
+	local := filepath.Join(m.chunkDir(id), dataGLCBFileName)
+	if locate == nil {
+		return local
+	}
+	if _, err := os.Stat(local); err == nil {
+		return local
+	}
+	if located, ok := locate(id); ok {
+		if _, err := os.Stat(located); err == nil {
+			return located
+		}
+	}
+	return local
+}
+
+// localGLCBCopies returns every data.glcb this node holds for id — the
+// pipeline-built copy (registered or located) and the chunk dir's — with
+// their combined size.
+func (m *Manager) localGLCBCopies(id chunk.ChunkID) ([]string, int64) {
+	m.mu.Lock()
+	registered, isRegistered := m.externalGLCB[id]
+	locate := m.externalLocator
+	m.mu.Unlock()
+	candidates := []string{filepath.Join(m.chunkDir(id), dataGLCBFileName)}
+	if isRegistered {
+		candidates = append(candidates, registered)
+	}
+	if locate != nil {
+		if located, ok := locate(id); ok && !slices.Contains(candidates, located) {
+			candidates = append(candidates, located)
+		}
+	}
+	var paths []string
+	var size int64
+	for _, p := range candidates {
+		info, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		paths = append(paths, p)
+		size += info.Size()
+	}
+	return paths, size
 }
 
 // touchLastAccess records that the warm cache for this chunk was just hit
@@ -3723,26 +3794,12 @@ func (m *Manager) runEvictionSweep(label string, rules []evictionRule) (int, int
 		if matched == "" {
 			continue
 		}
-		chunkLock := m.chunkLockFor(c.id)
-		chunkLock.Lock()
-		if err := os.Remove(c.path); err != nil {
-			chunkLock.Unlock()
-			m.logger.Debug("cache eviction: remove failed", "chunk", c.id, "error", err)
+		removed := m.evictLocalCopies(c)
+		if removed == 0 {
 			continue
 		}
-		m.evictMappedGLCB(c.id)
-		// The local warm cache is gone — persist that to the cloud index
-		// (diskBytes -> 0) BEFORE releasing this chunk's lock, so no
-		// concurrent reader/re-warmer can observe the window where the
-		// file is already gone but the index still claims a positive
-		// local footprint.
-		m.updateCloudDiskBytes(c.id, 0)
-		chunkLock.Unlock()
-		m.lastAccessMu.Lock()
-		delete(m.lastAccess, c.id)
-		m.lastAccessMu.Unlock()
-		totalRemaining -= c.size
-		freed += c.size
+		totalRemaining -= removed
+		freed += removed
 		evicted++
 	}
 	if evicted > 0 {
@@ -3791,43 +3848,157 @@ func (m *Manager) updateCloudDiskBytes(id chunk.ChunkID, diskBytes int64) {
 	m.mu.Unlock()
 }
 
-// cacheEntry is one row in the eviction-candidate set: a chunk whose
-// data.glcb is local-but-not-authoritative (cloud-backed).
+// evictLocalCopies removes every local data.glcb of one candidate under the
+// chunk's write lock (in-flight cursors drain first) and returns the bytes
+// freed. Afterwards nothing in this manager points at a removed file: the
+// external registration and any pipeline-registered local meta are dropped,
+// so the next lookup resolves the chunk as cloud-backed and reads re-fetch
+// through the cold path.
+func (m *Manager) evictLocalCopies(c cacheEntry) int64 {
+	chunkLock := m.chunkLockFor(c.id)
+	chunkLock.Lock()
+	defer chunkLock.Unlock()
+
+	var freed int64
+	remaining := 0
+	for _, p := range c.paths {
+		info, statErr := os.Stat(p)
+		if err := os.Remove(p); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				remaining++
+				m.logger.Debug("cache eviction: remove failed", "chunk", c.id, "path", p, "error", err)
+			}
+			continue
+		}
+		if statErr == nil {
+			freed += info.Size()
+		}
+		if p != filepath.Join(m.chunkDir(c.id), dataGLCBFileName) {
+			// The pipeline chunk dir holds nothing but the GLCB; an empty
+			// dir per evicted chunk would otherwise accumulate.
+			_ = os.Remove(filepath.Dir(p))
+		}
+	}
+	if remaining == len(c.paths) {
+		return 0
+	}
+	m.evictMappedGLCB(c.id)
+	m.forgetEvictedGLCB(c.id)
+	if remaining == 0 {
+		// Persisted BEFORE releasing the chunk lock, so no concurrent
+		// reader or re-warmer observes the file gone while the index still
+		// claims a positive local footprint.
+		m.updateCloudDiskBytes(c.id, 0)
+		m.lastAccessMu.Lock()
+		delete(m.lastAccess, c.id)
+		m.lastAccessMu.Unlock()
+	}
+	return freed
+}
+
+// ForgetPipelineGLCB drops everything this manager holds of a chunk's
+// pipeline-built GLCB whose copy left its path: the cached mapping, the
+// external registration, and the meta registered from that copy. The next
+// lookup resolves the chunk afresh — the copy that lands on the path, or the
+// cloud-backed entry — so a copy quarantined as divergent or corrupt is never
+// served from a mapping or registration made before it left.
+//
+// Takes no chunk lock: it runs on the Raft apply path, which must not wait
+// for in-flight cursors to drain. A cursor already open keeps its pinned
+// mapping until it closes; no later read reaches that mapping.
+func (m *Manager) ForgetPipelineGLCB(id chunk.ChunkID) {
+	m.evictMappedGLCB(id)
+	m.forgetEvictedGLCB(id)
+}
+
+// forgetEvictedGLCB drops the manager state that names a chunk's local GLCB
+// that is gone: its external registration and a non-cloud meta registered
+// from the pipeline copy before the FSM marked the chunk cloud-backed.
+func (m *Manager) forgetEvictedGLCB(id chunk.ChunkID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if meta, ok := m.metas[id]; ok && !meta.cloudBacked {
+		if m.active == nil || m.active.meta.id != id {
+			delete(m.metas, id)
+		}
+	}
+	delete(m.externalGLCB, id)
+	m.cloudListCache = nil
+}
+
+// cacheEntry is one row in the eviction-candidate set: a cloud-backed chunk
+// and every local data.glcb copy of it.
 type cacheEntry struct {
 	id         chunk.ChunkID
-	path       string
+	paths      []string
 	size       int64
 	lastAccess time.Time
 }
 
-// cacheCandidates walks the cloud index and returns one entry per
-// cloud-backed chunk whose <chunkDir>/data.glcb still exists locally.
-// Local-only sealed chunks are NOT eviction candidates — their data.glcb
-// is the authoritative copy and removing it would lose data.
+// cacheCandidates returns one entry per confirmed-uploaded chunk (see
+// uploadedChunkIDs) that still has a local data.glcb copy. Local-only sealed
+// chunks are NOT eviction candidates — their data.glcb is the authoritative
+// copy and removing it would lose data.
 func (m *Manager) cacheCandidates() []cacheEntry {
 	if m.cloudIdx == nil {
 		return nil
 	}
 	var out []cacheEntry
-	m.cloudIdxMu.Lock()
-	_ = m.cloudIdx.ForEach(func(id chunk.ChunkID, _ *chunkMeta) bool {
-		path := filepath.Join(m.chunkDir(id), dataGLCBFileName)
-		info, err := os.Stat(path)
-		if err != nil {
-			return true
+	for _, id := range m.uploadedChunkIDs() {
+		paths, size := m.localGLCBCopies(id)
+		if len(paths) == 0 {
+			continue
 		}
 		m.lastAccessMu.Lock()
 		la := m.lastAccess[id]
 		m.lastAccessMu.Unlock()
 		out = append(out, cacheEntry{
 			id:         id,
-			path:       path,
-			size:       info.Size(),
+			paths:      paths,
+			size:       size,
 			lastAccess: la,
 		})
+	}
+	return out
+}
+
+// uploadedChunkIDs returns the chunks whose cloud copy is confirmed, the
+// only chunks whose local GLCB eviction may remove. With the vault-ctl
+// resolver wired, that is exactly the set the replicated manifest marks
+// CloudBacked — CmdUploadChunk commits only after the object is in the store
+// — whether this node holds a chunk as a cloud-index entry or still as a
+// pipeline-registered local meta. Without a resolver it is the cloud index,
+// which only this manager's own completed uploads and the store listing
+// fill.
+func (m *Manager) uploadedChunkIDs() []chunk.ChunkID {
+	var indexed []chunk.ChunkID
+	m.cloudIdxMu.Lock()
+	_ = m.cloudIdx.ForEach(func(id chunk.ChunkID, _ *chunkMeta) bool {
+		indexed = append(indexed, id)
 		return true
 	})
 	m.cloudIdxMu.Unlock()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.cloudBackedResolver == nil {
+		return indexed
+	}
+	ids := indexed
+	if m.cloudBackedLister != nil {
+		ids = append(ids, m.cloudBackedLister()...)
+	}
+	seen := make(map[chunk.ChunkID]struct{}, len(ids))
+	out := ids[:0:0]
+	for _, id := range ids {
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		if _, uploaded := m.cloudBackedResolver(id); uploaded {
+			out = append(out, id)
+		}
+	}
 	return out
 }
 
@@ -4237,17 +4408,21 @@ func (m *Manager) removeFromCloudIndex(id chunk.ChunkID) {
 }
 
 // rebuildCloudListCache scans the cloud B+ tree index and caches the result.
-// Must be called with m.mu held.
+// Must be called with m.mu held; it takes cloudIdxMu for the walk, since the
+// tree is not safe for concurrent use even while reading.
 func (m *Manager) rebuildCloudListCache() {
 	var cache []chunk.ChunkMeta
-	if err := m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
+	m.cloudIdxMu.Lock()
+	err := m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
 		if _, exists := m.metas[id]; !exists {
 			cm := meta.toChunkMeta()
 			cm.CloudStorageClass = m.storageClasses[id]
 			cache = append(cache, cm)
 		}
 		return true
-	}); err != nil {
+	})
+	m.cloudIdxMu.Unlock()
+	if err != nil {
 		m.logger.Warn("cloud index: ForEach failed during cache rebuild", "error", err)
 	}
 	m.cloudListCache = cache
@@ -4449,7 +4624,6 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*glcb.Writer, int64, error) {
 		meta.sourceIdxOffset = toc.SourceIdxOffset
 		meta.sourceIdxSize = toc.SourceIdxSize
 		meta.rawBytes = bm.RawBytes
-		meta.blobDigest = toc.BlobDigest
 	}
 	m.mu.Unlock()
 
@@ -4509,6 +4683,13 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	}
 	m.mu.Unlock()
 
+	glcbPath := m.glcbPath(id)
+	src, digest, err := m.openAgreedGLCB(id, glcbPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = src.Close() }()
+
 	// If the blob already exists (leader or another replica uploaded first),
 	// skip the upload and adopt the existing blob's size. This prevents
 	// multiple nodes from overwriting each other's uploads with slightly
@@ -4519,19 +4700,21 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	headCancel()
 	if err == nil && existing.Size > 0 {
 		m.logger.Debug("cloud blob already exists, skipping upload", "chunk", id, "bytes", existing.Size)
-		return m.adoptCloudBlob(id, existing.Size)
+		return m.adoptCloudBlob(id, existing.Size, digest)
 	}
-
-	glcbPath := m.glcbPath(id)
 
 	// Frame the uncompressed GLCB for transport: per-section zstd frames
 	// plus a raw tail directory, so readers can range-GET individual
 	// sections of the object (glcb.WrapForTransport documents the layout).
 	// The format itself stays uncompressed on local disk; cloud transport
 	// applies the framing here and DownloadAndUnwrap removes it on read.
+	// It streams src — the file whose digest was checked, not whatever the
+	// path names by now.
 	pr, pw := io.Pipe()
+	wrapped := make(chan struct{})
 	go func() {
-		if _, wrapErr := glcb.WrapForTransport(pw, glcbPath); wrapErr != nil {
+		defer close(wrapped)
+		if _, wrapErr := glcb.WrapFileForTransport(pw, src); wrapErr != nil {
 			_ = pw.CloseWithError(wrapErr)
 			return
 		}
@@ -4547,6 +4730,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	)
 	uploadCancel()
 	_ = pr.Close()
+	<-wrapped
 	m.trackCloudResult(err)
 	if err != nil {
 		return fmt.Errorf("upload GLCB: %w", err)
@@ -4591,7 +4775,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		m.cfg.Announcer.AnnounceUpload(id, blobSize,
 			toc.IngestIdxOffset, toc.IngestIdxSize,
 			toc.SourceIdxOffset, toc.SourceIdxSize,
-			meta.blobDigest, m.cfg.CloudServiceID, currentKeyScheme)
+			digest, m.cfg.CloudServiceID, currentKeyScheme)
 	}
 
 	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — they
@@ -4651,14 +4835,58 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	return nil
 }
 
+// ErrGLCBDisagreesWithSeal is returned by an upload whose local GLCB carries
+// a whole-blob digest other than the sealed digest. That copy is divergent,
+// and the cloud object becomes the chunk's durable copy, so only the agreed
+// copy may become it.
+var ErrGLCBDisagreesWithSeal = errors.New("local GLCB differs from the copy agreed at seal")
+
+// openAgreedGLCB opens the chunk's local GLCB for upload and returns the
+// whole-blob digest its TOC footer records. A copy whose digest differs from
+// the sealed digest is refused with ErrGLCBDisagreesWithSeal. A chunk with no
+// sealed digest — none recorded, or no verifier on this vault — accepts any
+// readable copy, and the upload announce records that copy's digest.
+func (m *Manager) openAgreedGLCB(id chunk.ChunkID, path string) (*os.File, [32]byte, error) {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, [32]byte{}, fmt.Errorf("open GLCB for upload: %w", err)
+	}
+	digest, err := m.checkGLCBAgainstSeal(id, f)
+	if err != nil {
+		_ = f.Close()
+		return nil, [32]byte{}, err
+	}
+	return f, digest, nil
+}
+
+func (m *Manager) checkGLCBAgainstSeal(id chunk.ChunkID, f *os.File) ([32]byte, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("stat GLCB for upload: %w", err)
+	}
+	toc, err := glcb.ReadTOC(f, info.Size())
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("read GLCB TOC for upload: %w", err)
+	}
+	if m.cfg.IntegrityVerifier == nil {
+		return toc.BlobDigest, nil
+	}
+	if sealed, ok := m.cfg.IntegrityVerifier.ExpectedDigest(id); ok && sealed != toc.BlobDigest {
+		return [32]byte{}, fmt.Errorf("chunk %s: %w (local %x, sealed %x)",
+			id, ErrGLCBDisagreesWithSeal, toc.BlobDigest[:8], sealed[:8])
+	}
+	return toc.BlobDigest, nil
+}
+
 // adoptCloudBlob transitions a local chunk to cloud-backed using an existing
 // S3 blob. Used when another node (typically the leader) already uploaded the
 // same chunk while we were preparing our own upload. The local data.glcb is
 // byte-identical to the cloud blob by construction (sealToGLCB and the cloud
 // writer share the encoder, and the input record set is the same), so the
 // TOC cached on chunkMeta during sealToGLCB matches what's in S3 — no range
-// request needed to read it back.
-func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
+// request needed to read it back. digest is the local copy's whole-blob
+// digest, already checked against the sealed digest.
+func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64, digest [32]byte) error {
 	// Per-chunk write lock around the FSM announce, the disk transition,
 	// and the meta mutation; same rationale as uploadToCloud.
 	// adoptCloudBlob fires when another node beat us to the upload — we
@@ -4687,7 +4915,6 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	ingestIdxSize := am.ingestIdxSize
 	sourceIdxOff := am.sourceIdxOffset
 	sourceIdxSize := am.sourceIdxSize
-	blobDigest := am.blobDigest
 
 	// FSM-first: announce before any local mutation. Applier.Apply blocks on
 	// quorum + local FSM apply, so once the announce returns the FSM is
@@ -4700,7 +4927,7 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 		m.cfg.Announcer.AnnounceUpload(id, blobSize,
 			ingestIdxOff, ingestIdxSize,
 			sourceIdxOff, sourceIdxSize,
-			blobDigest, m.cfg.CloudServiceID, currentKeyScheme)
+			digest, m.cfg.CloudServiceID, currentKeyScheme)
 	}
 
 	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — same

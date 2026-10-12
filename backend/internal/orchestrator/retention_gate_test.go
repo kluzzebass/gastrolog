@@ -35,7 +35,7 @@ func TestFireRetentionEventAbortsOnCappedDestination(t *testing.T) {
 		logger:  slog.New(slog.NewTextHandler(logSink, nil)),
 	}
 
-	if r.fireRetentionEvent(fx.sealedID) {
+	if r.fireRetentionEvent(fx.sealedID, "") {
 		t.Fatal("fireRetentionEvent must report non-completion when a destination vault is capped")
 	}
 	logs := logSink.String()
@@ -86,7 +86,7 @@ func TestFireRetentionEventAbortsOnBacklogCappedDestination(t *testing.T) {
 		logger:  slog.New(slog.NewTextHandler(logSink, nil)),
 	}
 
-	if r.fireRetentionEvent(fx.sealedID) {
+	if r.fireRetentionEvent(fx.sealedID, "") {
 		t.Fatal("fireRetentionEvent must report non-completion when a destination vault is backlog-capped")
 	}
 	logs := logSink.String()
@@ -158,7 +158,7 @@ func TestFireRetentionEventRunsUnderAdmissionGate(t *testing.T) {
 		orch:    fx.orch,
 		logger:  slog.Default(),
 	}
-	if !r.fireRetentionEvent(fx.sealedID) {
+	if !r.fireRetentionEvent(fx.sealedID, "") {
 		t.Fatal("fan-out must complete in the frozen band (admission gate engaged, drain gate open)")
 	}
 	waitForRouteStats(t, fx.orch, "3 records routed under the admission gate", func(s *RouteStats) bool {
@@ -182,7 +182,7 @@ func TestFireRetentionEventDefersBelowFloor(t *testing.T) {
 		orch:    fx.orch,
 		logger:  slog.New(slog.NewTextHandler(logSink, nil)),
 	}
-	if r.fireRetentionEvent(fx.sealedID) {
+	if r.fireRetentionEvent(fx.sealedID, "") {
 		t.Fatal("fan-out must defer below the floor")
 	}
 	if !strings.Contains(logSink.String(), "route fan-out deferred") {
@@ -218,7 +218,7 @@ func TestFireRetentionEventAbortsOnAgeBoundCappedDestination(t *testing.T) {
 		logger:  slog.New(slog.NewTextHandler(logSink, nil)),
 	}
 
-	if r.fireRetentionEvent(fx.sealedID) {
+	if r.fireRetentionEvent(fx.sealedID, "") {
 		t.Fatal("fireRetentionEvent must report non-completion when a destination vault is age-bound-capped")
 	}
 	logs := logSink.String()
@@ -247,7 +247,7 @@ func TestFireRetentionEventAbortsOnChunkCountBoundCappedDestination(t *testing.T
 		logger:  slog.New(slog.NewTextHandler(logSink, nil)),
 	}
 
-	if r.fireRetentionEvent(fx.sealedID) {
+	if r.fireRetentionEvent(fx.sealedID, "") {
 		t.Fatal("fireRetentionEvent must report non-completion when a destination vault is chunk-count-bound-capped")
 	}
 	logs := logSink.String()

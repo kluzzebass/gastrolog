@@ -12,15 +12,16 @@ import (
 )
 
 // releaseScanFor snapshots the FSM the way a release pass does.
-func releaseScanFor(fsm *vaultctlfsm.FSM, minChunkHolders int) *vaultctlfsm.ReleaseScan {
-	return fsm.SnapshotReleaseScan(minChunkHolders)
+func releaseScanFor(fsm *vaultctlfsm.FSM, placement []string) *vaultctlfsm.ReleaseScan {
+	return fsm.SnapshotReleaseScan(placement)
 }
 
 // testMayRelease evaluates the registry-release gate for one segment the way
-// production does: one scan per pass, pure decision over it. resolved=false
-// models an unresolved placement lookup (fail closed).
-func testMayRelease(fsm *vaultctlfsm.FSM, segID glid.GLID, required []string, resolved bool, minChunkHolders int, giveUpTTL time.Duration, now time.Time) bool {
-	scan := releaseScanFor(fsm, minChunkHolders)
+// production does: one scan per pass over the resolved placement, pure
+// decision over it. resolved=false models an unresolved placement lookup
+// (fail closed).
+func testMayRelease(fsm *vaultctlfsm.FSM, segID glid.GLID, required []string, resolved bool, giveUpTTL time.Duration, now time.Time) bool {
+	scan := releaseScanFor(fsm, quorumPlacement(required, resolved))
 	entry := scan.Entry(segID)
 	if entry == nil {
 		return false
@@ -111,12 +112,12 @@ func TestPartitionPendingReleaseWaitsForHolders(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(chunkID, sealedAt, 1, 1, now, now, now, true, sealedAt)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(chunkID, sealedAt, 1, 1, now, now, now, true, sealedAt, [32]byte{})}); err != nil {
 		t.Fatal(err)
 	}
 
 	required := []string{"home-a", "home-b"}
-	ready, pending := partitionPendingRelease(releaseScanFor(fsm, 2), []glid.GLID{segID}, required, true, 0, time.Time{})
+	ready, pending := partitionPendingRelease(releaseScanFor(fsm, required), []glid.GLID{segID}, required, true, 0, time.Time{})
 	if len(ready) != 0 || len(pending) != 1 {
 		t.Fatalf("before ack: ready=%v pending=%v", ready, pending)
 	}
@@ -124,7 +125,7 @@ func TestPartitionPendingReleaseWaitsForHolders(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalAckSegmentHolder(segID, "home-a")}); err != nil {
 		t.Fatal(err)
 	}
-	ready, pending = partitionPendingRelease(releaseScanFor(fsm, 2), []glid.GLID{segID}, required, true, 0, time.Time{})
+	ready, pending = partitionPendingRelease(releaseScanFor(fsm, required), []glid.GLID{segID}, required, true, 0, time.Time{})
 	if len(ready) != 0 || len(pending) != 1 {
 		t.Fatalf("after one ack: ready=%v pending=%v", ready, pending)
 	}
@@ -132,7 +133,7 @@ func TestPartitionPendingReleaseWaitsForHolders(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalAckSegmentHolder(segID, "home-b")}); err != nil {
 		t.Fatal(err)
 	}
-	ready, pending = partitionPendingRelease(releaseScanFor(fsm, 2), []glid.GLID{segID}, required, true, 0, time.Time{})
+	ready, pending = partitionPendingRelease(releaseScanFor(fsm, required), []glid.GLID{segID}, required, true, 0, time.Time{})
 	if len(ready) != 1 || ready[0] != segID || len(pending) != 0 {
 		t.Fatalf("after all acks: ready=%v pending=%v", ready, pending)
 	}
@@ -163,7 +164,7 @@ func TestSegmentReadyForRegistryReleaseBlockedInSealedManifest(t *testing.T) {
 	}
 	// Even the explicit no-holder-gate opt-out (resolved, empty requirement)
 	// must not release a segment still referenced by an unbuilt manifest.
-	if testMayRelease(fsm, segID, nil, true, 2, 0, time.Time{}) {
+	if testMayRelease(fsm, segID, nil, true, 0, time.Time{}) {
 		t.Fatal("segment in sealed manifest awaiting build must not be releasable")
 	}
 }
@@ -195,13 +196,13 @@ func TestReleaseUnpinsDeadHolderViaSupersession(t *testing.T) {
 	}))
 	sealedAt := now.Add(time.Minute)
 	apply(vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
-	apply(vaultctlfsm.MarshalSealChunk(chunkID, sealedAt, 1, 1, now, now, now, true, sealedAt))
+	apply(vaultctlfsm.MarshalSealChunk(chunkID, sealedAt, 1, 1, now, now, now, true, sealedAt, [32]byte{}))
 
 	// dead-home is required but will never ack the segment or the chunk.
 	required := []string{"live-a", "live-b", "dead-home"}
 
 	// Before RF: neither the fast path (dead-home missing) nor supersession fires.
-	if testMayRelease(fsm, segID, required, true, 2, 0, time.Time{}) {
+	if testMayRelease(fsm, segID, required, true, 0, time.Time{}) {
 		t.Fatal("released before chunk reached RF")
 	}
 
@@ -216,7 +217,7 @@ func TestReleaseUnpinsDeadHolderViaSupersession(t *testing.T) {
 	ackChunk("live-a")
 	ackChunk("live-b")
 
-	if !testMayRelease(fsm, segID, required, true, 2, 0, time.Time{}) {
+	if !testMayRelease(fsm, segID, required, true, 0, time.Time{}) {
 		t.Fatal("segment not releasable after chunk reached RF among live homes — dead home pins it")
 	}
 }
@@ -244,23 +245,23 @@ func TestReleaseGiveUpOnRetentionExpiry(t *testing.T) {
 
 	// Inside the TTL: no give-up, and the normal gates refuse (not exhausted,
 	// holders never acked).
-	if testMayRelease(fsm, segID, required, true, 2, ttl, ingested.Add(time.Minute)) {
+	if testMayRelease(fsm, segID, required, true, ttl, ingested.Add(time.Minute)) {
 		t.Fatal("segment inside the retention TTL must not give up")
 	}
 
 	// No bound configured: never gives up regardless of age.
-	if testMayRelease(fsm, segID, required, true, 2, 0, ingested.Add(24*time.Hour)) {
+	if testMayRelease(fsm, segID, required, true, 0, ingested.Add(24*time.Hour)) {
 		t.Fatal("without a TTL bound the segment must not give up")
 	}
 
 	// Records out-age the TTL: released even though nothing else is satisfied.
-	if !testMayRelease(fsm, segID, required, true, 2, ttl, ingested.Add(ttl+time.Second)) {
+	if !testMayRelease(fsm, segID, required, true, ttl, ingested.Add(ttl+time.Second)) {
 		t.Fatal("segment past the retention TTL must give up (counted expiry)")
 	}
 
 	// Placement lookup unresolved (resolved=false): give-up still fires —
 	// that broken state is exactly what it exists for.
-	if !testMayRelease(fsm, segID, nil, false, 2, ttl, ingested.Add(ttl+time.Second)) {
+	if !testMayRelease(fsm, segID, nil, false, ttl, ingested.Add(ttl+time.Second)) {
 		t.Fatal("give-up must fire even with unresolved placement")
 	}
 
@@ -274,7 +275,7 @@ func TestReleaseGiveUpOnRetentionExpiry(t *testing.T) {
 	})}); err != nil {
 		t.Fatal(err)
 	}
-	if testMayRelease(fsm, segID, required, true, 2, ttl, ingested.Add(ttl+time.Second)) {
+	if testMayRelease(fsm, segID, required, true, ttl, ingested.Add(ttl+time.Second)) {
 		t.Fatal("segment referenced by an unbuilt manifest must never give up")
 	}
 }

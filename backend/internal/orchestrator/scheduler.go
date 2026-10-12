@@ -269,12 +269,14 @@ func (s *Scheduler) SetOnJobChange(fn func()) {
 func (s *Scheduler) Events() *JobEventBroker { return s.events }
 
 // publishEvent constructs a JobEvent and hands it to the broker. Called
-// outside any lock so the broker's non-blocking publish stays fast.
+// outside any lock so the broker's non-blocking publish stays fast. The event
+// carries a snapshot of the progress record: subscribers read it without the
+// record's lock while the task may still be updating it.
 func (s *Scheduler) publishEvent(kind JobEventKind, info JobInfo) {
 	if s.events == nil {
 		return
 	}
-	s.events.Publish(JobEvent{Kind: kind, Job: info})
+	s.events.Publish(JobEvent{Kind: kind, Job: info.Snapshot()})
 }
 
 // Rebuild recreates the gocron scheduler with a new concurrency limit,
@@ -398,8 +400,8 @@ func (s *Scheduler) UpdateJob(name, cronExpr string, taskFn any, args ...any) er
 }
 
 // RemoveJobsByPrefix stops and removes all jobs whose name starts with prefix.
-// Used to cancel pending one-time jobs (compress, index-build) for a vault
-// that is about to be closed, preventing use-after-close on the chunk manager.
+// Used to cancel a vault's pending one-time jobs before the vault closes, so
+// none of them runs against a closed chunk or index manager.
 func (s *Scheduler) RemoveJobsByPrefix(prefix string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -1,6 +1,7 @@
 package vaultctlfsm
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -56,8 +57,7 @@ const (
 	// the FSM via CmdUploadChunk, leaving sealed-but-not-yet-uploaded
 	// chunks with zero offsets in the manifest and breaking the
 	// histogram's GLCB section-reader path. Fires from chunk/file.Manager
-	// after sealToGLCB and from the import path
-	// (orchestrator/vault_ops.finalizeImportedChunk) for replicated chunks.
+	// after sealToGLCB.
 	CmdAttachOffsets Command = 9
 
 	// CmdBeginSeal carries the Active → Sealing transition: the leader
@@ -215,14 +215,11 @@ type ManifestEntry struct {
 	SourceIdxOffset int64
 	SourceIdxSize   int64
 
-	// Integrity fields populated at upload time, verified on every cache
-	// re-fetch.
-	//
-	// Hash is the GLCB whole-blob digest from the TOC footer:
-	// sha256(header ‖ section_hashes_in_TOC_order ‖ TOC_bytes). Re-fetch
-	// verification re-derives this from the on-disk file's footer + TOC
-	// section hashes — O(1) work regardless of blob size — and rejects on
-	// mismatch.
+	// Hash is the whole-blob digest of the chunk's agreed GLCB: the TOC
+	// footer's blobDigest, the SHA-256 of every byte before the footer. The
+	// sealing leader's CmdSealChunk records it; every home's copy (built,
+	// pulled from a peer, or transfer-copied) and every cloud re-fetch must
+	// match it. CmdUploadChunk sets it only for a chunk sealed without one.
 	Hash [32]byte
 	// CloudServiceID pins the chunk to the cloud store it was actually
 	// uploaded to, surviving any future vault reconfiguration that points
@@ -316,17 +313,12 @@ type FSM struct {
 	onFinalizeDelete func(chunk.ChunkID)           // CmdFinalizeDelete applied; expectedFrom was empty
 	onPruneNode      func(string, []chunk.ChunkID) // CmdPruneNode applied; (prunedNodeID, finalizableChunks)
 
-	// tombstones records chunk IDs that have been deleted, with the apply
-	// timestamp of the delete. Consulted by the receive side of vault
-	// replication to reject stale ImportSealed / Append commands that
-	// arrive after a chunk has been deleted — closes the race between
-	// retention and post-seal replication where a late replication RPC
-	// could otherwise recreate a "ghost" chunk on a follower.
-	//
-	// Periodically pruned by the orchestrator (entries older than the
-	// replication-job deadline, typically a few minutes, cannot still be
-	// in flight and are safe to drop).
-	tombstones map[chunk.ChunkID]time.Time
+	// tombstones holds the chunk tombstones: chunk ID → the delete sequence
+	// it was tombstoned at. See chunk_tombstones.go.
+	tombstones map[chunk.ChunkID]uint64
+	// deletes is the delete sequence — the count of applies that tombstoned a
+	// chunk — and each node's chunk purge confirmation against it.
+	deletes tombstoneLedger
 
 	// completedSegments is the pipeline registry of closed segments awaiting
 	// chunking. Populated by CmdPublishCompletedSegment; see segments.go.
@@ -337,9 +329,15 @@ type FSM struct {
 
 	// openChunk is the in-progress manifest-backed active chunk. See open_chunk.go.
 	openChunk *OpenChunkManifest
-	// sealedManifests is the FIFO queue of sealed open-chunk manifests awaiting
-	// local GLCB build. SealedManifest() returns the queue head.
+	// sealedManifests is the seal queue: sealed open-chunk manifests, FIFO,
+	// awaiting the leader's CmdSealChunk. SealedManifest() returns the head.
 	sealedManifests []*OpenChunkManifest
+	// sealedChunkManifests holds, in seal order, the sealed manifests whose
+	// CmdSealChunk has committed. The leader's seal moves a manifest here
+	// from the seal queue; it stays until a segment it references is
+	// released or its chunk is deleted, so a home that has not built the
+	// chunk yet still has the refs to build it from.
+	sealedChunkManifests []*OpenChunkManifest
 	// segmentResume maps segment ID → next EventID-order record number after
 	// a partial manifest ref.
 	segmentResume map[glid.GLID]uint32
@@ -349,10 +347,14 @@ type FSM struct {
 	// chunk replication (records live in an RF-replicated chunk) after the build.
 	// Cleared when the segment is released.
 	segmentChunks map[glid.GLID][]chunk.ChunkID
-	// releasedSegments records segment IDs dropped by ReleaseSegments. Stale
-	// PublishCompletedSegment replays after release must not re-add registry
-	// entries without on-disk bytes (distribution publish race).
-	releasedSegments map[glid.GLID]struct{}
+	// releasedSegments holds the released-segment tombstones: segment ID →
+	// the release sequence it was released at. A PublishCompletedSegment
+	// naming one is ignored, and the released-segment purge deletes its bytes on sight.
+	// See released_segments.go for how tombstones are pruned.
+	releasedSegments map[glid.GLID]uint64
+	// releases is the release sequence — the count of ReleaseSegments applies
+	// that tombstoned a segment — and each node's purge confirmation against it.
+	releases tombstoneLedger
 
 	// onSealedManifest fires after SealOpenChunkManifest transitions open →
 	// sealed manifest awaiting local GLCB build (outside the FSM lock).
@@ -392,43 +394,13 @@ type FSM struct {
 func New() *FSM {
 	return &FSM{
 		chunks:            make(map[chunk.ChunkID]*ManifestEntry),
-		tombstones:        make(map[chunk.ChunkID]time.Time),
+		tombstones:        make(map[chunk.ChunkID]uint64),
 		pendingDeletes:    make(map[chunk.ChunkID]*PendingDelete),
 		completedSegments: make(map[glid.GLID]*CompletedSegmentEntry),
 		segmentResume:     make(map[glid.GLID]uint32),
 		segmentChunks:     make(map[glid.GLID][]chunk.ChunkID),
-		releasedSegments:  make(map[glid.GLID]struct{}),
+		releasedSegments:  make(map[glid.GLID]uint64),
 	}
-}
-
-// IsTombstoned reports whether a chunk has been deleted and is still
-// within the tombstone retention window. Used by the replication receiver
-// to reject late commands that would otherwise recreate a deleted chunk.
-func (f *FSM) IsTombstoned(id chunk.ChunkID) bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	_, ok := f.tombstones[id]
-	return ok
-}
-
-// PruneTombstones removes tombstone entries whose delete time is older
-// than the given cutoff. Returns the number of entries pruned. Intended
-// to be called periodically from a non-Raft path on the leader — this
-// mutation is local only (not raft-replicated) because every node
-// independently applies identical tombstones via the delete command
-// and can safely prune them independently once the replication window
-// has elapsed.
-func (f *FSM) PruneTombstones(before time.Time) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	n := 0
-	for id, ts := range f.tombstones {
-		if ts.Before(before) {
-			delete(f.tombstones, id)
-			n++
-		}
-	}
-	return n
 }
 
 var _ hraft.FSM = (*FSM)(nil)
@@ -1072,13 +1044,15 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 	case *gastrologv1.VaultCtlCommand_FinalizeDelete:
 		fx.finalizedDeleteID, result = f.applyFinalizeDelete(c.FinalizeDelete)
 	case *gastrologv1.VaultCtlCommand_PruneNode:
-		var (
-			node        string
-			finalizable []chunk.ChunkID
-		)
-		node, finalizable, result = f.applyPruneNode(c.PruneNode)
-		fx.prunedNode = node
-		fx.prunedFinalizable = finalizable
+		var pruned pruneResult
+		pruned, result = f.applyPruneNode(c.PruneNode)
+		fx.prunedNode = pruned.nodeID
+		fx.prunedFinalizable = pruned.finalizable
+		fx.holdersChangedEntries = f.captureEntries(result, pruned.holdersChanged)
+	case *gastrologv1.VaultCtlCommand_ConfirmChunkPurge:
+		result = f.applyConfirmChunkPurge(c.ConfirmChunkPurge)
+	case *gastrologv1.VaultCtlCommand_PruneChunkTombstones:
+		result = f.applyPruneChunkTombstones(c.PruneChunkTombstones)
 	case *gastrologv1.VaultCtlCommand_AttachOffsets:
 		result = f.applyAttachOffsets(c.AttachOffsets)
 	case *gastrologv1.VaultCtlCommand_BeginSeal:
@@ -1179,6 +1153,10 @@ func (f *FSM) tryApplySegmentPipelineLocked(cmd *gastrologv1.VaultCtlCommand) (a
 			fx.releasedSegmentIDs = released
 		}
 		return nil, fx, true
+	case *gastrologv1.VaultCtlCommand_ConfirmSegmentPurge:
+		return f.applyConfirmSegmentPurge(c.ConfirmSegmentPurge), fx, true
+	case *gastrologv1.VaultCtlCommand_PruneReleasedSegments:
+		return f.applyPruneReleasedSegments(c.PruneReleasedSegments), fx, true
 	case *gastrologv1.VaultCtlCommand_DiscardUnbuildableManifests:
 		discarded, err := f.applyDiscardUnbuildableManifests(c.DiscardUnbuildableManifests)
 		if err != nil {
@@ -1315,34 +1293,22 @@ func (f *FSM) SnapshotProto() *gastrologv1.VaultCtlSnapshot {
 // and round-trip equality checks sane.
 func (f *FSM) snapshotProtoLocked() *gastrologv1.VaultCtlSnapshot {
 	snap := &gastrologv1.VaultCtlSnapshot{
-		Entries:           make([]*gastrologv1.ManifestEntry, 0, len(f.chunks)),
-		Tombstones:        make([]*gastrologv1.Tombstone, 0, len(f.tombstones)),
-		PendingDeletes:    make([]*gastrologv1.PendingDelete, 0, len(f.pendingDeletes)),
-		CompletedSegments: f.snapshotCompletedSegmentsLocked(),
-		OpenChunk:         f.snapshotOpenChunkLocked(),
-		SealedManifests:   f.snapshotSealedManifestsLocked(),
-		SegmentResume:     f.snapshotSegmentResumeLocked(),
-		SegmentChunks:     f.snapshotSegmentChunksLocked(),
+		Entries:              make([]*gastrologv1.ManifestEntry, 0, len(f.chunks)),
+		PendingDeletes:       make([]*gastrologv1.PendingDelete, 0, len(f.pendingDeletes)),
+		CompletedSegments:    f.snapshotCompletedSegmentsLocked(),
+		OpenChunk:            f.snapshotOpenChunkLocked(),
+		SealedManifests:      snapshotManifests(f.sealedManifests),
+		SealedChunkManifests: snapshotManifests(f.sealedChunkManifests),
+		SegmentResume:        f.snapshotSegmentResumeLocked(),
+		SegmentChunks:        f.snapshotSegmentChunksLocked(),
 	}
 
-	releasedIDs := slices.SortedFunc(maps.Keys(f.releasedSegments), glid.Compare)
-	for _, id := range releasedIDs {
-		idCopy := id
-		snap.ReleasedSegmentIds = append(snap.ReleasedSegmentIds, idCopy[:])
-	}
+	f.snapshotReleasedSegmentsLocked(snap)
+	f.snapshotChunkTombstonesLocked(snap)
 
 	entryIDs := slices.SortedFunc(maps.Keys(f.chunks), chunk.ChunkID.Compare)
 	for _, id := range entryIDs {
 		snap.Entries = append(snap.Entries, entryToProto(f.chunks[id]))
-	}
-
-	tombIDs := slices.SortedFunc(maps.Keys(f.tombstones), chunk.ChunkID.Compare)
-	for _, id := range tombIDs {
-		idCopy := id
-		snap.Tombstones = append(snap.Tombstones, &gastrologv1.Tombstone{
-			ChunkId:        idCopy[:],
-			DeletedAtNanos: f.tombstones[id].UnixNano(),
-		})
 	}
 
 	pdIDs := slices.SortedFunc(maps.Keys(f.pendingDeletes), chunk.ChunkID.Compare)
@@ -1389,20 +1355,14 @@ func (f *FSM) restoreFromProtoLocked(snap *gastrologv1.VaultCtlSnapshot) {
 		e := entryFromProto(pe)
 		f.chunks[e.ID] = &e
 	}
-	f.tombstones = make(map[chunk.ChunkID]time.Time, len(snap.GetTombstones()))
-	for _, ts := range snap.GetTombstones() {
-		f.tombstones[chunkIDFromProto(ts.GetChunkId())] = time.Unix(0, ts.GetDeletedAtNanos())
-	}
+	f.restoreChunkTombstonesLocked(snap)
 	f.pendingDeletes = make(map[chunk.ChunkID]*PendingDelete, len(snap.GetPendingDeletes()))
 	for _, pp := range snap.GetPendingDeletes() {
 		p := pendingDeleteFromProto(pp)
 		f.pendingDeletes[p.ChunkID] = &p
 	}
 	f.restoreCompletedSegmentsLocked(snap.GetCompletedSegments())
-	f.releasedSegments = make(map[glid.GLID]struct{}, len(snap.GetReleasedSegmentIds()))
-	for _, raw := range snap.GetReleasedSegmentIds() {
-		f.releasedSegments[glid.FromBytes(raw)] = struct{}{}
-	}
+	f.restoreReleasedSegmentsLocked(snap)
 	f.restoreOpenChunkLocked(snap)
 	f.repairSealedManifestChunkEntryLocked()
 	f.ready = true
@@ -1461,6 +1421,17 @@ func (f *FSM) applySeal(c *gastrologv1.SealChunkCommand) error {
 	if e == nil {
 		return fmt.Errorf("seal chunk: %s not found", id)
 	}
+	digest := c.GetBlobDigest()
+	if len(digest) != 0 && len(digest) != len(e.Hash) {
+		return fmt.Errorf("seal chunk %s: blob digest is %d bytes, want %d", id, len(digest), len(e.Hash))
+	}
+	// The first digest recorded is the agreed one and homes verify their
+	// copies against it, so a later seal of other bytes — a new leader
+	// proposing its own, different build — is refused whole rather than
+	// left to rewrite the entry's metadata under a digest it does not match.
+	if len(digest) != 0 && e.Hash != ([32]byte{}) && !bytes.Equal(digest, e.Hash[:]) {
+		return fmt.Errorf("seal chunk %s: blob digest %x differs from the sealed digest %x", id, digest, e.Hash[:])
+	}
 	e.WriteEnd = time.Unix(0, c.GetWriteEndNanos())
 	e.RecordCount = c.GetRecordCount()
 	e.Bytes = c.GetBytes()
@@ -1474,7 +1445,12 @@ func (f *FSM) applySeal(c *gastrologv1.SealChunkCommand) error {
 		sealedAt = e.WriteEnd
 	}
 	e.SealedAt = sealedAt
-	f.popSealedManifestHeadIfIDLocked(id)
+	if len(digest) != 0 {
+		copy(e.Hash[:], digest)
+	}
+	if m := f.popSealedManifestHeadIfIDLocked(id); m != nil && len(m.Refs) > 0 {
+		f.sealedChunkManifests = append(f.sealedChunkManifests, m)
+	}
 	return nil
 }
 
@@ -1580,8 +1556,7 @@ func MarshalArchiveChunk(id chunk.ChunkID, cloudStorageClass string) []byte {
 
 // AttachOffsets: [16 ChunkID][8 IngestIdxOff][8 IngestIdxSize][8 SourceIdxOff][8 SourceIdxSize]
 //
-// Fired after sealToGLCB on the leader (and after finalizeImportedChunk
-// on import paths) so every sealed chunk's section-offset metadata
+// Fired after sealToGLCB on the leader so every sealed chunk's section-offset metadata
 // reaches the FSM, not just cloud-uploaded ones. The histogram's GLCB
 // section-reader uses these offsets to mmap the IngestTS index out of
 // data.glcb directly, eliminating the .ts-cache download path.
@@ -1599,13 +1574,22 @@ func (f *FSM) applyAttachOffsets(c *gastrologv1.AttachOffsetsCommand) error {
 	return nil
 }
 
-// UploadChunk records cloud-upload metadata and integrity fields.
+// UploadChunk records cloud-upload metadata and integrity fields. Hash has
+// one meaning, the digest of the agreed GLCB: an upload whose digest differs
+// from the sealed one is refused rather than allowed to redefine it, and an
+// upload that does not know its digest (all zero) leaves the sealed one in
+// place.
 func (f *FSM) applyUpload(c *gastrologv1.UploadChunkCommand) error {
 	id := chunkIDFromProto(c.GetId())
 
 	e := f.chunks[id]
 	if e == nil {
 		return fmt.Errorf("upload chunk: %s not found", id)
+	}
+	h := c.GetHash()
+	known := len(h) == len(e.Hash) && !bytes.Equal(h, make([]byte, len(e.Hash)))
+	if known && e.Hash != ([32]byte{}) && !bytes.Equal(h, e.Hash[:]) {
+		return fmt.Errorf("upload chunk %s: uploaded blob digest %x differs from the sealed digest %x", id, h, e.Hash[:])
 	}
 	e.CloudBytes = c.GetCloudBytes()
 	e.IngestIdxOffset = c.GetIngestIdxOffset()
@@ -1615,8 +1599,10 @@ func (f *FSM) applyUpload(c *gastrologv1.UploadChunkCommand) error {
 	e.CloudBacked = true
 
 	// Integrity fields — present only on the extended form.
-	if h := c.GetHash(); len(h) > 0 {
-		copy(e.Hash[:], h)
+	if len(h) > 0 {
+		if known && e.Hash == ([32]byte{}) {
+			copy(e.Hash[:], h)
+		}
 		e.CloudServiceID = glid.FromBytes(c.GetCloudServiceId())
 		e.KeyScheme = uint8(c.GetKeyScheme()) //nolint:gosec // G115: key scheme is a small enum; round-trips a uint8
 	}
@@ -1664,8 +1650,14 @@ func MarshalCreateChunk(id chunk.ChunkID, writeStart, ingestStart, sourceStart t
 	return mustMarshalCommand(NewCreateChunk(id, writeStart, ingestStart, sourceStart))
 }
 
-// NewSealChunk builds a SealChunk command message.
-func NewSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool, sealedAt time.Time) *gastrologv1.VaultCtlCommand {
+// NewSealChunk builds a SealChunk command message. blobDigest is the
+// whole-blob digest of the GLCB the sealing leader built; the zero digest
+// means the sealer has none, and the command then carries no digest.
+func NewSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool, sealedAt time.Time, blobDigest [32]byte) *gastrologv1.VaultCtlCommand {
+	var digest []byte
+	if blobDigest != ([32]byte{}) {
+		digest = blobDigest[:]
+	}
 	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_SealChunk{SealChunk: &gastrologv1.SealChunkCommand{
 		Id:                id[:],
 		WriteEndNanos:     writeEnd.UnixNano(),
@@ -1676,12 +1668,13 @@ func NewSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64
 		IngestStartNanos:  ingestStart.UnixNano(),
 		IngestTsMonotonic: ingestTSMonotonic,
 		SealedAtNanos:     sealedAt.UnixNano(),
+		BlobDigest:        digest,
 	}}}
 }
 
 // MarshalSealChunk builds the Raft log data for a SealChunk command.
-func MarshalSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool, sealedAt time.Time) []byte {
-	return mustMarshalCommand(NewSealChunk(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic, sealedAt))
+func MarshalSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool, sealedAt time.Time, blobDigest [32]byte) []byte {
+	return mustMarshalCommand(NewSealChunk(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic, sealedAt, blobDigest))
 }
 
 // NewBeginSeal builds a BeginSeal command message.

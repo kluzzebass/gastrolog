@@ -138,10 +138,10 @@ type vaultCtlLeaderManager struct {
 
 	// onMemberRemoved fires after a successful RemoveServer call from
 	// the leader's reconcile pass. The orchestrator wires this to
-	// propose CmdPruneNode on every instance sub-FSM in the vault so
-	// pendingDeletes ExpectedFrom obligations from the decommissioned
-	// node don't block finalization. Nil leaves the prune as a no-op
-	// (single-node tests, etc.).
+	// propose CmdPruneNode on the vault's chunk FSM so the decommissioned
+	// node's pendingDeletes ExpectedFrom obligations don't block
+	// finalization and its holder claims are dropped. Nil leaves the
+	// prune as a no-op (single-node tests, etc.).
 	onMemberRemoved func(vaultID glid.GLID, removedNodeID string)
 
 	// leadGained fires at the start of each vault-ctl leader epoch. The

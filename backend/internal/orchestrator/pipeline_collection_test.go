@@ -582,7 +582,7 @@ func TestPipelineSegmentLogReaderSkipsSupersededSegment(t *testing.T) {
 		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 0, SliceBytes: 1, RefAddedAt: now,
 	}))
 	mustApply(vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, now.Add(time.Minute)))
-	mustApply(vaultctlfsm.MarshalSealChunk(chunkID, now.Add(time.Minute), 1, 1, now, now, now, true, now.Add(time.Minute)))
+	mustApply(vaultctlfsm.MarshalSealChunk(chunkID, now.Add(time.Minute), 1, 1, now, now, now, true, now.Add(time.Minute), [32]byte{}))
 	for _, node := range []string{"chunk-holder-a", "chunk-holder-b"} {
 		data, err := vaultctlfsm.MarshalAckChunkHolders([]chunk.ChunkID{chunkID}, node)
 		if err != nil {
@@ -615,6 +615,17 @@ func TestPipelineSegmentLogReaderSkipsSupersededSegment(t *testing.T) {
 	}
 	if len(assigned) != 1 || assigned[0].SegmentID != segID {
 		t.Fatalf("Roll (no placement) = %+v, want the segment assigned", assigned)
+	}
+
+	// chunk-holder-b leaves the placement: one placed chunk holder is below
+	// RF, so the segment is no longer superseded and this home pulls it.
+	reader.placement = func() []string { return []string{"chunk-holder-a", testHomeNode} }
+	assigned, err = reader.Roll(context.Background(), vaultID)
+	if err != nil {
+		t.Fatalf("Roll (re-placed): %v", err)
+	}
+	if len(assigned) != 1 || assigned[0].SegmentID != segID {
+		t.Fatalf("Roll (re-placed) = %+v, want the segment assigned — a chunk holder outside the placement does not supersede it", assigned)
 	}
 }
 
@@ -707,7 +718,7 @@ func TestSegmentPullClientReadsLocalOriginBeforeRPC(t *testing.T) {
 		vaultRoot:   root,
 	}
 	var dest writeCounter
-	if err := client.Pull(context.Background(), vaultID, segID, &dest); err != nil {
+	if _, err := client.Pull(context.Background(), vaultID, segID, nil, &dest); err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
 	if len(fake.order) != 0 {
@@ -752,7 +763,7 @@ func TestPipelineSegmentPullClientResolvesSourcesAndBuffers(t *testing.T) {
 	client := &segmentPullClient{lookup: func() *vaultctlfsm.FSM { return fsm }, puller: fake, localNodeID: testHomeNode}
 
 	var dest writeCounter
-	if err := client.Pull(context.Background(), vaultID, segID, &dest); err != nil {
+	if _, err := client.Pull(context.Background(), vaultID, segID, nil, &dest); err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
 	// Origin attempted first (and failed), then node-holder; local node skipped.
@@ -802,7 +813,7 @@ func TestPipelineSegmentPullClientStreamsToFileTruncatingFailures(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if err := client.Pull(context.Background(), vaultID, segID, f); err != nil {
+	if _, err := client.Pull(context.Background(), vaultID, segID, nil, f); err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
 	want := []string{testOriginNode, "node-holder"}
@@ -846,7 +857,7 @@ func TestPipelineSegmentPullClientAllSourcesFailLeavesEmptyFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if err := client.Pull(context.Background(), vaultID, segID, f); err == nil {
+	if _, err := client.Pull(context.Background(), vaultID, segID, nil, f); err == nil {
 		t.Fatal("Pull succeeded, want error (all sources fail)")
 	}
 	info, err := os.Stat(path)
@@ -940,7 +951,7 @@ func TestSegmentPullClientAttachesUnavailableSentinel(t *testing.T) {
 
 	// Segment not yet in the vault-ctl registry (local FSM behind the publish).
 	var dest writeCounter
-	err := client.Pull(context.Background(), vaultID, glid.New(), &dest)
+	_, err := client.Pull(context.Background(), vaultID, glid.New(), nil, &dest)
 	if !errors.Is(err, collection.ErrSegmentUnavailable) {
 		t.Fatalf("registry miss must carry ErrSegmentUnavailable, got: %v", err)
 	}
@@ -955,7 +966,7 @@ func TestSegmentPullClientAttachesUnavailableSentinel(t *testing.T) {
 	})); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	err = client.Pull(context.Background(), vaultID, segID, &dest)
+	_, err = client.Pull(context.Background(), vaultID, segID, nil, &dest)
 	if !errors.Is(err, collection.ErrSegmentUnavailable) {
 		t.Fatalf("no-remote-holder must carry ErrSegmentUnavailable, got: %v", err)
 	}

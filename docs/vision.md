@@ -126,19 +126,19 @@ Storage should be a budget, not a cliff. The cluster expresses layered storage a
 
 A vault is the **only abstraction over the chunk layer**. It carries its full storage shape directly: a **type** (memory, file, jsonl), a **storage class**, an optional **cloud service** binding, a **rotation policy**, **retention rules**, a **replication factor**, and cache tuning for cloud-backed reads. The simpler the unit, the simpler the failure modes.
 
-A cloud-backed vault is a file vault with a `CloudServiceID` set: sealed chunks upload to the cloud service, while the active chunk and a warm cache stay on local disk. This is the only "fancy" storage shape — every other vault is straightforwardly a memory, file, or JSONL container.
+A cloud-backed vault is a file vault with a `CloudServiceID` set: sealed chunks upload to the cloud service, while not-yet-sealed records (segments) and a warm cache stay on local disk. This is the only "fancy" storage shape — every other vault is straightforwardly a memory, file, or JSONL container.
 
 ### Storage building blocks
 
 Three separate concepts make up the storage model:
 
-**FileStorage** — per-node declaration of locally-attached storage. Each has a path, a **storage class** (numeric — lower is faster), and a capacity. A node can declare multiple file storages. Two NVMe drives can both be class 1; a NAS at class 3.
+**FileStorage** — per-node declaration of locally-attached storage. Each has a name, a path, a **storage class** (numeric — lower is faster), and disk-guard free-space thresholds (`DiskFreeWarn` / `DiskFreeFloor`, a size or a percentage of the volume; empty inherits the node defaults). A node can declare multiple file storages. Two NVMe drives can both be class 1; a NAS at class 3.
 
 ```
 Node-1 file storages:
-  class 1: label=NVMe-1, path=/data/nvme0, capacity=200GB
-  class 1: label=NVMe-2, path=/data/nvme1, capacity=200GB
-  class 3: label=NAS, path=/mnt/nas, capacity=10TB
+  class 1: name=NVMe-1, path=/data/nvme0
+  class 1: name=NVMe-2, path=/data/nvme1
+  class 3: name=NAS,    path=/mnt/nas, disk-free-floor=5%
 ```
 
 **CloudService** — cluster-wide definition of a cloud storage service. S3 bucket, credentials, region, storage class. Multiple can exist (production S3, archival Glacier, etc.). Not tied to any node — any node can access it.
@@ -171,61 +171,50 @@ Each vault is a full chunk manager. The operator designs the layering by composi
 
 ### Per-vault leader nodes
 
-Each vault has an **elected leader node** via the vault-ctl Raft group. The leader is the single authority — it receives all writes, decides chunk boundaries, and handles rotation. Follower nodes for the same vault receive replicated records with chunk assignment metadata, producing identical chunks (same boundaries, same content, same IDs). No independent chunking decisions on replicas.
+Each vault has an **elected leader node** via the vault-ctl Raft group. The vault-ctl leader is the chunking planner: it decides chunk boundaries by opening and sealing open chunk manifests over the vault's published segments, handles rotation, and alone commits each chunk seal. Records do not pass through the leader — whichever node receives a record writes it into segments. Every home of the vault builds the chunk from the same sealed manifest, producing identical chunks (same boundaries, same content, same IDs). No independent chunking decisions on homes.
 
 ### Replication
 
-The leader replicates to its followers per vault. How replication works depends on the vault type:
+Replication is segment distribution followed by a per-home build:
 
-- **Memory vaults**: the leader mirrors writes to follower nodes' memory buffers. Followers receive records tagged with chunk assignment. If the leader dies, a follower is promoted — it has identical data.
-- **File vaults**: the leader replicates sealed chunks (post-indexing) to followers. A sealed chunk is stable and self-contained, so replication is a file copy.
-- **Cloud-backed file vaults**: no cluster-level replication of sealed chunks needed — the cloud provider handles AZ redundancy. Only chunk metadata is shared via the vault-ctl Raft so every node knows what exists. The active chunk (on local disk) is replicated the same way as a non-cloud file vault.
+- **Segments.** The receiving node (the **origin**) completes a segment and publishes its metadata to the vault's vault-ctl group. Collection on each **home** of the vault pulls the bytes it lacks from a holder, verifies them, promotes them into `head/`, and commits a holder receipt. Bytes move by pull; the vault-ctl log carries only metadata.
+- **Chunks.** Every home builds its own GLCB and secondary indexes from the sealed manifest and commits a chunk holder receipt. A home that missed a build — down or wedged while the segments were released — pulls the GLCB from a peer home.
+- **Release.** The chunking leader releases a segment from the vault-ctl registry only once the chunks holding its records are held by the required homes; segment bytes are purged after that.
+- **Cloud-backed vaults.** The vault's placement leader uploads the sealed GLCB to the cloud service and commits the upload to the vault-ctl FSM; the cloud provider handles redundancy for the uploaded object. Records travel as segments until the seal, the same as in any other vault.
 
 ### The golden thread
 
-Records flow through the cluster on a single authoritative path: the leader of the receiving vault. When a vault's retention disposition is `route`, expired chunks stream their records back through the routing engine — which delivers them to the leader of the next vault. There is exactly one authoritative path through every vault — the golden thread:
+Every record takes one path through the cluster. The node that receives it routes it and, as origin, appends it to a segment for each destination vault. Collection carries the segment to every home of that vault; the vault-ctl leader plans the chunk, and every home builds it. When a vault's retention disposition is `route`, the expiring chunk's records re-enter routing through `SubmitDrain` with `_source = "retention"`, and the next vault takes them through the same path — the golden thread:
 
 ```mermaid
 flowchart TB
-    I([fa:fa-plug Ingester]) --> RT[Routing engine]
+    I([fa:fa-plug Ingester]) --> RT[Routing<br/>receiving node]
+    RT --> SEG[Segmentation<br/>origin: working → completed]
+    SEG -->|publish metadata| CTL[vault-ctl leader<br/>plans open chunk manifest]
+    SEG -.->|pull| H1
+    SEG -.->|pull| H2
 
-    RT -->|route| RECENT
-    RECENT -->|retention=route| RT2[Routing engine<br/>_source=retention]
-    RT2 -->|route| LOCAL
-    LOCAL -->|retention=route| RT3[Routing engine<br/>_source=retention]
-    RT3 -->|route| ARCHIVE
-
-    subgraph node1recent [Node-1: recent vault leader]
-        RECENT[fa:fa-bolt Memory vault<br/>active + sealed chunks]
+    subgraph homeA [Home A]
+        H1[Collection<br/>head/] --> C1[Chunking<br/>GLCB + indexes]
     end
 
-    subgraph node2recent [Node-2: recent vault follower]
-        RECENT_R[fa:fa-bolt Memory<br/>replica]
+    subgraph homeB [Home B]
+        H2[Collection<br/>head/] --> C2[Chunking<br/>GLCB + indexes]
     end
 
-    subgraph node3local [Node-3: local vault leader]
-        LOCAL[fa:fa-hard-drive File vault<br/>active + sealed chunks]
-    end
+    CTL -.->|sealed manifest| C1
+    CTL -.->|sealed manifest| C2
 
-    subgraph node1local [Node-1: local vault follower]
-        LOCAL_R[fa:fa-hard-drive File<br/>replica]
-    end
+    C1 -->|retention=route<br/>SubmitDrain| RT2[Routing<br/>_source=retention]
+    RT2 --> NEXT[Next vault:<br/>same path]
 
-    subgraph clouds3 [Node-N: archive vault leader]
-        ARCHIVE[fa:fa-cloud File vault<br/>cloud-backed]
-    end
-
-    RECENT -.->|mirror writes| RECENT_R
-    LOCAL -.->|chunk copy| LOCAL_R
-
-    style RECENT fill:#c4956a,color:#1a1a1a
-    style LOCAL fill:#a07850,color:#1a1a1a
-    style ARCHIVE fill:#6a5040,color:#f0e8e0
-    style RECENT_R fill:#c4956a33,color:#c4956a,stroke:#c4956a,stroke-dasharray:5
-    style LOCAL_R fill:#a0785033,color:#a07850,stroke:#a07850,stroke-dasharray:5
+    style SEG fill:#c4956a,color:#1a1a1a
+    style C1 fill:#a07850,color:#1a1a1a
+    style C2 fill:#a07850,color:#1a1a1a
+    style NEXT fill:#6a5040,color:#f0e8e0
 ```
 
-No duplicate writes. No coordination questions about who does what. The leader for each vault is the single decision-maker. If a leader dies, a follower is promoted and the golden thread reconnects — the new leader picks up where the old one left off.
+No duplicate writes. No coordination questions about who does what: the origin owns the segment, the vault-ctl leader owns chunk boundaries, and every home builds its own copy. If the vault-ctl leader dies, the next elected leader continues planning from the open manifest and chunk build cursors in the vault-ctl FSM.
 
 ### Durability and retention
 
@@ -233,8 +222,9 @@ Each vault retires chunks per its retention policy. The **retention disposition*
 
 - **`delete`** (default): records drop, storage frees, the routing engine is never invoked. The safe default — no risk of accidental cascades.
 - **`route`**: records stream through the routing engine with synthetic `_source = "retention"` and `_vault = "<id>"` so operator-configured routes can deliver them to the next vault in the chain. The chunk is destroyed after the records have been routed.
+- **`transfer`**: the sealed chunk is re-homed to a named target vault unchanged — no record decode, no re-route, no re-ingest. See [retention-transfer-disposition-design.md](./retention-transfer-disposition-design.md).
 
-The receiving vault's leader appends records to its active chunk; durability comes from that vault's own replication factor. The hand-off is **explicit and per-record**: the source chunk is destroyed only after its records have been routed, and the destination vault writes them through its normal append path with full replication. There is no special inter-vault chunk transfer protocol.
+Under `route`, the destination vault takes the records through its normal write path — segments on the node running the retention sweep, distributed to that vault's homes — and durability comes from that vault's own replication factor. The hand-off is **explicit and per-record**: the sweep waits for each record's durable ack (`SubmitRetentionRecord`), and a destination that refuses admission aborts the fan-out and keeps the source chunk.
 
 ### Resolved: chunk metadata in Raft
 
@@ -283,29 +273,30 @@ Different vaults produce different chunks from the same records. A memory vault 
 
 ```mermaid
 flowchart LR
-    subgraph node1mem [Node-1: recent vault leader]
-        I([fa:fa-plug Ingester]) --> MT[Active + sealed chunks<br/>seals every ~5 min]
+    subgraph recent [Recent vault]
+        I([fa:fa-plug Ingester]) --> MT[Open chunk manifest over segments<br/>seals every ~5 min] -->|seal| MTS[Sealed chunks]
     end
 
-    MT -->|retention=route| LT
+    MTS -->|retention=route| LT
 
-    subgraph node3local [Node-3: local vault leader]
-        LT[Active chunk<br/>seals every ~1h or ~500MB] -->|seal| LTS[Sealed chunks<br/>indexed]
+    subgraph local [Local vault]
+        LT[Open chunk manifest over segments<br/>seals every ~1h or ~500MB] -->|seal| LTS[Sealed chunks<br/>indexed]
     end
 
     LTS -->|retention=route| CT
 
     subgraph clouds3 [Archive vault: cloud-backed]
-        CT[Active chunk on local disk<br/>seals into large objects] -->|seal + upload| CTS[(Sealed chunks in S3)]
+        CT[Open chunk manifest over segments<br/>seals into large objects] -->|seal + upload| CTS[(Sealed chunks in S3)]
     end
 
     style MT fill:#c4956a,color:#1a1a1a
+    style MTS fill:#c4956a,color:#1a1a1a
     style LT fill:#a07850,color:#1a1a1a
     style LTS fill:#a07850,color:#1a1a1a
     style CT fill:#6a5040,color:#f0e8e0
 ```
 
-When a sealed chunk reaches its retention threshold, its records (per the disposition) stream through the routing engine into the next vault's active chunk. Each vault just does what it already knows how to do: accept records, chunk them, seal them. No compaction, no merge logic.
+When a sealed chunk reaches its retention threshold, its records (per the disposition) stream through the routing engine into the next vault, where they become segments and land in that vault's next open chunk manifest. Each vault just does what it already knows how to do: accept records, chunk them, seal them. No compaction, no merge logic.
 
 The only exception to "every chunk produced is a full local seal" is the archival transition (e.g. S3 Standard → Glacier): a storage class change on the same object, not a re-chunking.
 
@@ -373,7 +364,7 @@ The cluster should not need an operator for steady-state operations. It should h
 
 **Storage pressure management.** When local storage approaches capacity, the cluster responds along the route chain automatically — accelerating retention on the upstream vault so records flow into the downstream vault sooner, evicting cache entries on cloud-backed vaults, and tightening rotation thresholds. The operator sets the budget; the routes-and-retention layer manages within it.
 
-**Graceful degradation.** When a node goes down, its vaults' sealed data is already durable in cloud-backed vaults further down the chain. Another node picks up ingestion for the affected vaults, and queries against cloud-backed chunks continue to work (they're in S3, not on the dead node's disk). The only data at risk is the active memory-vault chunk — minutes of records, recoverable from the peer mirror if configured, or re-ingested from source. The cluster never refuses to answer a query because a node is down — it answers with what's durable and tells you what's missing.
+**Graceful degradation.** When a node goes down, its vaults' sealed data is already durable in cloud-backed vaults further down the chain. Another node picks up ingestion for the affected vaults, and queries against cloud-backed chunks continue to work (they're in S3, not on the dead node's disk). The only records at risk are those whose segments no surviving node holds yet. The cluster never refuses to answer a query because a node is down — it answers with what's durable and tells you what's missing.
 
 **Capacity planning signals.** The cluster exposes forward-looking metrics: "At current ingestion rate, local storage will be full in 14 days." "Adding one node would reduce average query latency by 30%." These are not alerts — they are planning signals visible in the inspector, available when you need them, invisible when you don't.
 
@@ -443,7 +434,7 @@ Performance is not a feature to appreciate — it is the absence of friction you
 
 **Full-text scan of a terabyte takes seconds.** When indexes can't help (regex search, substring match), the scan is parallelized across all nodes and all cores. Compressed data is decompressed and scanned in streaming fashion — the first results appear while the scan is still running.
 
-**Follow mode has sub-100ms latency.** From the moment a record is ingested to the moment it appears on screen, less than 100 milliseconds. This is the latency budget for the entire pipeline: network, parsing, indexing, query evaluation, WebSocket push, and rendering. It requires careful engineering at every layer, but the result is that follow mode feels like `tail -f` — immediate and alive.
+**Follow mode has sub-100ms latency.** From the moment a record is ingested to the moment it appears on screen, less than 100 milliseconds. This is the latency budget for the entire pipeline: network, parsing, indexing, query evaluation, the Connect server-streaming push, and rendering. It requires careful engineering at every layer, but the result is that follow mode feels like `tail -f` — immediate and alive.
 
 **Query result streaming.** Results are not batched and sent as a single response. They stream as they are found, oldest first or newest first depending on sort order. The UI renders incrementally — you see the first results while the query is still scanning. For large result sets, this means the first result appears in milliseconds even if the full result takes seconds.
 
@@ -481,7 +472,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 
 | Capability | Status | Notes |
 |---|---|---|
-| OTLP span ingestion | Done | trace_id, span_id, parent_span_id stored as attributes |
+| OTLP ingestion | Partial | Logs only (HTTP `POST /v1/logs`, gRPC `LogsService`); a log record's trace_id and span_id are stored as attributes. No traces endpoint |
 | Automatic shape detection | Not started | UI doesn't auto-render waterfall when span fields present |
 | Span-aware query operators | Not started | No `children`, `critical_path`, `correlate` operators |
 | Implicit time-window correlation | Not started | No automatic grouping by shared field values |
@@ -502,14 +493,14 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | Capability | Status | Notes |
 |---|---|---|
 | Memory chunk manager | Done | In-memory chunks with rotation/retention |
-| File chunk manager | Done | Local SSD, mmap'd reads, sealed chunk compression |
+| File chunk manager | Done | Local SSD, mmap'd reads; the local GLCB is uncompressed |
 | Cloud-backed chunk manager | Done | S3/GCS/Azure for sealed chunks and indexes |
 | FileStorage model | Done | Per-node local storage declarations with storage classes |
 | CloudService model | Done | Cluster-wide cloud service definitions with archival lifecycle |
 | Vault types | Done | Memory, file (optionally cloud-backed), JSONL — each a full chunk manager |
 | Vault as the storage unit | Done | One storage shape per vault; layering expressed via routes between vaults |
 | Per-vault leader election | Done | Vault-ctl Raft group per vault with leader/follower election |
-| Replication | Done | Leader replicates to followers via ChunkReplicator; ack-gated durability |
+| Replication | Done | Segment distribution to every home with holder receipts; every home builds its own GLCB; homes missing a GLCB pull it from a peer home |
 | Inter-vault record routing on retention | Done | Vault `disposition=route` re-emits expiring chunks' records through the routing engine for delivery to the next vault |
 | Budget-driven retention | Not started | Retention is time/count/size-based only |
 | Cloud-backed chunk cache eviction | Done | LRU and TTL eviction on warm cache, gated by `CacheBudget` and `CacheTTL` |
@@ -558,14 +549,14 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 |---|---|---|
 | Raft consensus | Done | Cluster-ctl Raft + per-vault vault-ctl Raft groups (chunk-FSM sub-state per vault) |
 | Cross-node query fan-out | Done | ForwardSearch, collectRemote, GetFields, GetContext |
-| Config push (WatchConfig) | Done | Real-time config propagation via server stream |
+| Config push (WatchSystem) | Done | Real-time config propagation via server stream |
 | Chunk push (WatchChunks) | Done | Real-time chunk metadata notifications via server stream |
 | Ingest pipeline backpressure | Done | PressureGate with hysteresis, per-ingester throttling |
-| Forward backpressure | Done | ForwardSync for ack-gated records, PressureGate probes on forward channels |
+| Pipeline backpressure | Done | Per-vault admission refuses while the vault's pipeline backlog is at its budget (until chunking drains it) or its storage is below its free-space floor |
 | Operational alerting | Done | Rotation/retention rate alerts, self-ingester drop visibility, ingest pressure |
 | Automatic vault rebalancing | Not started | Vaults stay on their assigned node |
 | Storage pressure management | Not started | No automatic retention acceleration along the route chain under pressure |
-| Graceful degradation | Partial | Queries fan out but don't indicate missing data |
+| Graceful degradation | Partial | Explain and the inspector's chunk listing report peers that did not contribute (`ContributionReport`, rendered by `DegradedPeersBadge`); the search result stream does not |
 | Capacity planning signals | Not started | No forward-looking metrics |
 
 ### Compliance
@@ -597,5 +588,5 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | Streaming results | Done | Server-streaming RPC, incremental rendering |
 | Follow mode latency | Done | Sub-second ingestion to screen |
 | Mmap reads | Done | Zero-copy for sealed file chunks |
-| Seekable zstd compression | Done | Random-access reads on compressed sealed chunks |
+| Cloud transport compression | Done | Cloud-backed chunks upload as separately zstd-framed body and index sections; ranged reads fetch one section |
 | Startup time | Not measured | No benchmark target enforced |

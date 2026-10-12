@@ -49,33 +49,6 @@ proto3.util.setEnumType(AlarmPriority, "gastrolog.v1.AlarmPriority", [
 ]);
 
 /**
- * ImportRejection classifies a failed chunk replication command so the
- * sender can act on the cause without reading the error text.
- *
- * @generated from enum gastrolog.v1.ImportRejection
- */
-export enum ImportRejection {
-  /**
-   * a failure with no classification
-   *
-   * @generated from enum value: IMPORT_REJECTION_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * the vault has no instance on the receiver yet; retry later
-   *
-   * @generated from enum value: IMPORT_REJECTION_VAULT_NOT_READY = 1;
-   */
-  VAULT_NOT_READY = 1,
-}
-// Retrieve enum metadata with: proto3.getEnumType(ImportRejection)
-proto3.util.setEnumType(ImportRejection, "gastrolog.v1.ImportRejection", [
-  { no: 0, name: "IMPORT_REJECTION_UNSPECIFIED" },
-  { no: 1, name: "IMPORT_REJECTION_VAULT_NOT_READY" },
-]);
-
-/**
  * ForwardApplyRequest carries a pre-marshaled ConfigCommand for the leader
  * to apply via raft.Apply(). Used by followers to proxy config writes.
  *
@@ -279,6 +252,10 @@ export class EnrollResponse extends Message<EnrollResponse> {
  * certificate enrolment just issued it, which is what proves it holds the
  * key rather than merely a copy of the join token.
  *
+ * The request carries no suffrage. A node outside the configuration enters
+ * as a nonvoter, and a member is re-added at the suffrage it already has:
+ * the vote is granted by the cluster, never claimed by the caller.
+ *
  * @generated from message gastrolog.v1.RequestMembershipRequest
  */
 export class RequestMembershipRequest extends Message<RequestMembershipRequest> {
@@ -292,11 +269,6 @@ export class RequestMembershipRequest extends Message<RequestMembershipRequest> 
    */
   nodeAddr = "";
 
-  /**
-   * @generated from field: bool voter = 3;
-   */
-  voter = false;
-
   constructor(data?: PartialMessage<RequestMembershipRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -307,7 +279,6 @@ export class RequestMembershipRequest extends Message<RequestMembershipRequest> 
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "node_addr", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "voter", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RequestMembershipRequest {
@@ -1515,379 +1486,9 @@ export class ForwardVaultApplyResponse extends Message<ForwardVaultApplyResponse
 }
 
 /**
- * ChunkReplicationCommand is sent leader → follower. The vault_id
- * identifies the target vault; the oneof command determines the
- * operation. New command types can be added without changing framing.
- *
- * @generated from message gastrolog.v1.ChunkReplicationCommand
- */
-export class ChunkReplicationCommand extends Message<ChunkReplicationCommand> {
-  /**
-   * @generated from field: bytes vault_id = 1;
-   */
-  vaultId = new Uint8Array(0);
-
-  /**
-   * @generated from oneof gastrolog.v1.ChunkReplicationCommand.command
-   */
-  command: {
-    /**
-     * Sealed-chunk import is a three-phase sequence on the same stream:
-     * ImportBegin → 1..N ImportRecords frames → ImportCommit. Replaces
-     * a legacy single-frame ChunkReplicationImport that packed the whole
-     * chunk into one message; chunks past the gRPC receive cap wedged
-     * the catchup path forever. See gastrolog-4yvhh.
-     *
-     * @generated from field: gastrolog.v1.ChunkReplicationImportBegin import_begin = 10;
-     */
-    value: ChunkReplicationImportBegin;
-    case: "importBegin";
-  } | {
-    /**
-     * @generated from field: gastrolog.v1.ChunkReplicationImportRecords import_records = 11;
-     */
-    value: ChunkReplicationImportRecords;
-    case: "importRecords";
-  } | {
-    /**
-     * @generated from field: gastrolog.v1.ChunkReplicationImportCommit import_commit = 12;
-     */
-    value: ChunkReplicationImportCommit;
-    case: "importCommit";
-  } | { case: undefined; value?: undefined } = { case: undefined };
-
-  constructor(data?: PartialMessage<ChunkReplicationCommand>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ChunkReplicationCommand";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 10, name: "import_begin", kind: "message", T: ChunkReplicationImportBegin, oneof: "command" },
-    { no: 11, name: "import_records", kind: "message", T: ChunkReplicationImportRecords, oneof: "command" },
-    { no: 12, name: "import_commit", kind: "message", T: ChunkReplicationImportCommit, oneof: "command" },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationCommand {
-    return new ChunkReplicationCommand().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationCommand {
-    return new ChunkReplicationCommand().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationCommand {
-    return new ChunkReplicationCommand().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ChunkReplicationCommand | PlainMessage<ChunkReplicationCommand> | undefined, b: ChunkReplicationCommand | PlainMessage<ChunkReplicationCommand> | undefined): boolean {
-    return proto3.util.equals(ChunkReplicationCommand, a, b);
-  }
-}
-
-/**
- * ChunkReplicationImportBegin opens a streaming sealed-chunk import.
- * The follower stages an import context keyed by chunk_id and ack's
- * success; subsequent ImportRecords frames push batches of records
- * into that staged context until ImportCommit finalizes the import.
- * Each (vault, follower) stream allows at most one import in flight.
- *
- * @generated from message gastrolog.v1.ChunkReplicationImportBegin
- */
-export class ChunkReplicationImportBegin extends Message<ChunkReplicationImportBegin> {
-  /**
-   * @generated from field: bytes chunk_id = 1;
-   */
-  chunkId = new Uint8Array(0);
-
-  constructor(data?: PartialMessage<ChunkReplicationImportBegin>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ChunkReplicationImportBegin";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationImportBegin {
-    return new ChunkReplicationImportBegin().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationImportBegin {
-    return new ChunkReplicationImportBegin().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationImportBegin {
-    return new ChunkReplicationImportBegin().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ChunkReplicationImportBegin | PlainMessage<ChunkReplicationImportBegin> | undefined, b: ChunkReplicationImportBegin | PlainMessage<ChunkReplicationImportBegin> | undefined): boolean {
-    return proto3.util.equals(ChunkReplicationImportBegin, a, b);
-  }
-}
-
-/**
- * ChunkReplicationImportRecords carries one bounded batch of records
- * for the in-flight import. Frame size is capped on the leader side so
- * no individual gRPC message exceeds the receive limit regardless of
- * chunk size. The follower consumes records record-by-record and
- * applies backpressure: the ack is not sent until the importer has
- * pulled every record in the frame.
- *
- * @generated from message gastrolog.v1.ChunkReplicationImportRecords
- */
-export class ChunkReplicationImportRecords extends Message<ChunkReplicationImportRecords> {
-  /**
-   * @generated from field: repeated gastrolog.v1.ExportRecord records = 1;
-   */
-  records: ExportRecord[] = [];
-
-  constructor(data?: PartialMessage<ChunkReplicationImportRecords>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ChunkReplicationImportRecords";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "records", kind: "message", T: ExportRecord, repeated: true },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationImportRecords {
-    return new ChunkReplicationImportRecords().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationImportRecords {
-    return new ChunkReplicationImportRecords().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationImportRecords {
-    return new ChunkReplicationImportRecords().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ChunkReplicationImportRecords | PlainMessage<ChunkReplicationImportRecords> | undefined, b: ChunkReplicationImportRecords | PlainMessage<ChunkReplicationImportRecords> | undefined): boolean {
-    return proto3.util.equals(ChunkReplicationImportRecords, a, b);
-  }
-}
-
-/**
- * ChunkReplicationImportCommit finalizes the in-flight import. The
- * follower closes its record-source channel, waits for the importer
- * goroutine to drain and return, and acks with the importer's result.
- * chunk_id is echoed for sanity-checking against ImportBegin.
- *
- * @generated from message gastrolog.v1.ChunkReplicationImportCommit
- */
-export class ChunkReplicationImportCommit extends Message<ChunkReplicationImportCommit> {
-  /**
-   * @generated from field: bytes chunk_id = 1;
-   */
-  chunkId = new Uint8Array(0);
-
-  constructor(data?: PartialMessage<ChunkReplicationImportCommit>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ChunkReplicationImportCommit";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationImportCommit {
-    return new ChunkReplicationImportCommit().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationImportCommit {
-    return new ChunkReplicationImportCommit().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationImportCommit {
-    return new ChunkReplicationImportCommit().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ChunkReplicationImportCommit | PlainMessage<ChunkReplicationImportCommit> | undefined, b: ChunkReplicationImportCommit | PlainMessage<ChunkReplicationImportCommit> | undefined): boolean {
-    return proto3.util.equals(ChunkReplicationImportCommit, a, b);
-  }
-}
-
-/**
- * ChunkReplicationAck is sent follower → leader after each command.
- *
- * @generated from message gastrolog.v1.ChunkReplicationAck
- */
-export class ChunkReplicationAck extends Message<ChunkReplicationAck> {
-  /**
-   * @generated from field: bool ok = 1;
-   */
-  ok = false;
-
-  /**
-   * @generated from field: string error = 2;
-   */
-  error = "";
-
-  /**
-   * echoes the chunk_id from the command
-   *
-   * @generated from field: bytes chunk_id = 3;
-   */
-  chunkId = new Uint8Array(0);
-
-  /**
-   * set when ok is false and the cause is known
-   *
-   * @generated from field: gastrolog.v1.ImportRejection rejection = 4;
-   */
-  rejection = ImportRejection.UNSPECIFIED;
-
-  constructor(data?: PartialMessage<ChunkReplicationAck>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ChunkReplicationAck";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "ok", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 2, name: "error", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 4, name: "rejection", kind: "enum", T: proto3.getEnumType(ImportRejection) },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationAck {
-    return new ChunkReplicationAck().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationAck {
-    return new ChunkReplicationAck().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationAck {
-    return new ChunkReplicationAck().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ChunkReplicationAck | PlainMessage<ChunkReplicationAck> | undefined, b: ChunkReplicationAck | PlainMessage<ChunkReplicationAck> | undefined): boolean {
-    return proto3.util.equals(ChunkReplicationAck, a, b);
-  }
-}
-
-/**
- * RequestReplicaCatchupRequest is sent follower → placement leader. The
- * follower computes the local FSM-vs-disk diff in its lifecycle reconciler
- * (SweepMissingReplicas) and asks the leader to re-push specific sealed
- * chunks via the streaming ChunkReplicationImport{Begin,Records,Commit}
- * path. Used to recover from replication pushes that failed during a
- * follower pause / partition / rejoin window — see gastrolog-2dgvj.
- *
- * @generated from message gastrolog.v1.RequestReplicaCatchupRequest
- */
-export class RequestReplicaCatchupRequest extends Message<RequestReplicaCatchupRequest> {
-  /**
-   * @generated from field: bytes vault_id = 1;
-   */
-  vaultId = new Uint8Array(0);
-
-  /**
-   * 16-byte ChunkIDs
-   *
-   * @generated from field: repeated bytes chunk_ids = 2;
-   */
-  chunkIds: Uint8Array[] = [];
-
-  /**
-   * utf-8 node ID of the requesting follower
-   *
-   * @generated from field: bytes requester_node_id = 3;
-   */
-  requesterNodeId = new Uint8Array(0);
-
-  constructor(data?: PartialMessage<RequestReplicaCatchupRequest>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.RequestReplicaCatchupRequest";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "chunk_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
-    { no: 3, name: "requester_node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RequestReplicaCatchupRequest {
-    return new RequestReplicaCatchupRequest().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RequestReplicaCatchupRequest {
-    return new RequestReplicaCatchupRequest().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RequestReplicaCatchupRequest {
-    return new RequestReplicaCatchupRequest().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: RequestReplicaCatchupRequest | PlainMessage<RequestReplicaCatchupRequest> | undefined, b: RequestReplicaCatchupRequest | PlainMessage<RequestReplicaCatchupRequest> | undefined): boolean {
-    return proto3.util.equals(RequestReplicaCatchupRequest, a, b);
-  }
-}
-
-/**
- * RequestReplicaCatchupResponse acknowledges receipt of the catchup
- * request. The leader fans the actual pushes out asynchronously via
- * existing replicateToFollower machinery, so success here means
- * "request accepted, pushes scheduled" — not "all chunks delivered".
- * The follower will re-request anything still missing on its next
- * sweep tick if the leader's pushes fail.
- *
- * @generated from message gastrolog.v1.RequestReplicaCatchupResponse
- */
-export class RequestReplicaCatchupResponse extends Message<RequestReplicaCatchupResponse> {
-  /**
-   * number of chunk pushes scheduled (after leader-side filtering)
-   *
-   * @generated from field: uint32 scheduled = 1;
-   */
-  scheduled = 0;
-
-  constructor(data?: PartialMessage<RequestReplicaCatchupResponse>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.RequestReplicaCatchupResponse";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "scheduled", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RequestReplicaCatchupResponse {
-    return new RequestReplicaCatchupResponse().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RequestReplicaCatchupResponse {
-    return new RequestReplicaCatchupResponse().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RequestReplicaCatchupResponse {
-    return new RequestReplicaCatchupResponse().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: RequestReplicaCatchupResponse | PlainMessage<RequestReplicaCatchupResponse> | undefined, b: RequestReplicaCatchupResponse | PlainMessage<RequestReplicaCatchupResponse> | undefined): boolean {
-    return proto3.util.equals(RequestReplicaCatchupResponse, a, b);
-  }
-}
-
-/**
- * ForwardSearchRequest is sent to a replica holder node to execute a
- * scoped search locally and return matching records. When sealed_chunk_ids
- * is empty and search_pipeline_chunks is false, the holder runs a legacy
- * leader-only full-vault search (backward compatible).
+ * ForwardSearchRequest is sent to the node leading vault_id to run the query
+ * against that vault: a record stream, a pipeline's table, or — with a
+ * histogram_grid — the vault's page histogram.
  *
  * @generated from message gastrolog.v1.ForwardSearchRequest
  */
@@ -1918,6 +1519,15 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
    */
   partialAggregates = false;
 
+  /**
+   * When set, answer with the vault's page histogram on this grid and no
+   * records. The coordinator asks for it beside the record stream, so a record
+   * stream never waits on the histogram's scan of the window.
+   *
+   * @generated from field: gastrolog.v1.HistogramGrid histogram_grid = 5;
+   */
+  histogramGrid?: HistogramGrid;
+
   constructor(data?: PartialMessage<ForwardSearchRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1930,6 +1540,7 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
     { no: 2, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 4, name: "partial_aggregates", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 5, name: "histogram_grid", kind: "message", T: HistogramGrid },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSearchRequest {
@@ -1946,6 +1557,65 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
 
   static equals(a: ForwardSearchRequest | PlainMessage<ForwardSearchRequest> | undefined, b: ForwardSearchRequest | PlainMessage<ForwardSearchRequest> | undefined): boolean {
     return proto3.util.equals(ForwardSearchRequest, a, b);
+  }
+}
+
+/**
+ * HistogramGrid is the one bucket grid a search's page histogram is counted
+ * on. The coordinator chooses it and every node counts its vaults' share on
+ * it, so the shares sum bucket by bucket.
+ *
+ * @generated from message gastrolog.v1.HistogramGrid
+ */
+export class HistogramGrid extends Message<HistogramGrid> {
+  /**
+   * first bucket's start, inclusive
+   *
+   * @generated from field: int64 start_nanos = 1;
+   */
+  startNanos = protoInt64.zero;
+
+  /**
+   * last bucket's end, exclusive
+   *
+   * @generated from field: int64 end_nanos = 2;
+   */
+  endNanos = protoInt64.zero;
+
+  /**
+   * equal-width buckets between start and end
+   *
+   * @generated from field: int32 buckets = 3;
+   */
+  buckets = 0;
+
+  constructor(data?: PartialMessage<HistogramGrid>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.HistogramGrid";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "start_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 2, name: "end_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "buckets", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): HistogramGrid {
+    return new HistogramGrid().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): HistogramGrid {
+    return new HistogramGrid().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): HistogramGrid {
+    return new HistogramGrid().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: HistogramGrid | PlainMessage<HistogramGrid> | undefined, b: HistogramGrid | PlainMessage<HistogramGrid> | undefined): boolean {
+    return proto3.util.equals(HistogramGrid, a, b);
   }
 }
 
@@ -1976,7 +1646,7 @@ export class ForwardSearchResponse extends Message<ForwardSearchResponse> {
   tableResult?: TableResult;
 
   /**
-   * Volume histogram from this node's vaults
+   * The vault's page histogram, answering histogram_grid
    *
    * @generated from field: repeated gastrolog.v1.HistogramBucket histogram = 5;
    */
@@ -2202,80 +1872,6 @@ export class ForwardListChunksResponse extends Message<ForwardListChunksResponse
 
   static equals(a: ForwardListChunksResponse | PlainMessage<ForwardListChunksResponse> | undefined, b: ForwardListChunksResponse | PlainMessage<ForwardListChunksResponse> | undefined): boolean {
     return proto3.util.equals(ForwardListChunksResponse, a, b);
-  }
-}
-
-/**
- * ForwardWaitVaultReadyRequest asks a remote node to block until the named
- * vault is registered and ready to accept transferred records, or the RPC
- * deadline / cancellation fires. Replaces the source-side ForwardListChunks
- * poll used by DrainVault to synchronize with the target node's AddVault.
- * See gastrolog-3sdnn.
- *
- * @generated from message gastrolog.v1.ForwardWaitVaultReadyRequest
- */
-export class ForwardWaitVaultReadyRequest extends Message<ForwardWaitVaultReadyRequest> {
-  /**
-   * @generated from field: bytes vault_id = 1;
-   */
-  vaultId = new Uint8Array(0);
-
-  constructor(data?: PartialMessage<ForwardWaitVaultReadyRequest>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ForwardWaitVaultReadyRequest";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardWaitVaultReadyRequest {
-    return new ForwardWaitVaultReadyRequest().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardWaitVaultReadyRequest {
-    return new ForwardWaitVaultReadyRequest().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardWaitVaultReadyRequest {
-    return new ForwardWaitVaultReadyRequest().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ForwardWaitVaultReadyRequest | PlainMessage<ForwardWaitVaultReadyRequest> | undefined, b: ForwardWaitVaultReadyRequest | PlainMessage<ForwardWaitVaultReadyRequest> | undefined): boolean {
-    return proto3.util.equals(ForwardWaitVaultReadyRequest, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.ForwardWaitVaultReadyResponse
- */
-export class ForwardWaitVaultReadyResponse extends Message<ForwardWaitVaultReadyResponse> {
-  constructor(data?: PartialMessage<ForwardWaitVaultReadyResponse>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ForwardWaitVaultReadyResponse";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardWaitVaultReadyResponse {
-    return new ForwardWaitVaultReadyResponse().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardWaitVaultReadyResponse {
-    return new ForwardWaitVaultReadyResponse().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardWaitVaultReadyResponse {
-    return new ForwardWaitVaultReadyResponse().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ForwardWaitVaultReadyResponse | PlainMessage<ForwardWaitVaultReadyResponse> | undefined, b: ForwardWaitVaultReadyResponse | PlainMessage<ForwardWaitVaultReadyResponse> | undefined): boolean {
-    return proto3.util.equals(ForwardWaitVaultReadyResponse, a, b);
   }
 }
 
@@ -3049,76 +2645,6 @@ export class ForwardAnalyzeChunkResponse extends Message<ForwardAnalyzeChunkResp
 }
 
 /**
- * ForwardSealVaultRequest asks a remote node to seal the active chunk of a vault.
- *
- * @generated from message gastrolog.v1.ForwardSealVaultRequest
- */
-export class ForwardSealVaultRequest extends Message<ForwardSealVaultRequest> {
-  /**
-   * @generated from field: bytes vault_id = 1;
-   */
-  vaultId = new Uint8Array(0);
-
-  constructor(data?: PartialMessage<ForwardSealVaultRequest>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ForwardSealVaultRequest";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSealVaultRequest {
-    return new ForwardSealVaultRequest().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardSealVaultRequest {
-    return new ForwardSealVaultRequest().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardSealVaultRequest {
-    return new ForwardSealVaultRequest().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ForwardSealVaultRequest | PlainMessage<ForwardSealVaultRequest> | undefined, b: ForwardSealVaultRequest | PlainMessage<ForwardSealVaultRequest> | undefined): boolean {
-    return proto3.util.equals(ForwardSealVaultRequest, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.ForwardSealVaultResponse
- */
-export class ForwardSealVaultResponse extends Message<ForwardSealVaultResponse> {
-  constructor(data?: PartialMessage<ForwardSealVaultResponse>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ForwardSealVaultResponse";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSealVaultResponse {
-    return new ForwardSealVaultResponse().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardSealVaultResponse {
-    return new ForwardSealVaultResponse().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardSealVaultResponse {
-    return new ForwardSealVaultResponse().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ForwardSealVaultResponse | PlainMessage<ForwardSealVaultResponse> | undefined, b: ForwardSealVaultResponse | PlainMessage<ForwardSealVaultResponse> | undefined): boolean {
-    return proto3.util.equals(ForwardSealVaultResponse, a, b);
-  }
-}
-
-/**
  * ForwardReindexVaultRequest asks a remote node to rebuild all indexes for a vault.
  *
  * @generated from message gastrolog.v1.ForwardReindexVaultRequest
@@ -3447,7 +2973,9 @@ export class ForwardRemoveNodeResponse extends Message<ForwardRemoveNodeResponse
 
 /**
  * ForwardSetNodeSuffrageRequest is sent by a follower to the leader to
- * promote or demote a node's voting status.
+ * promote or demote a node's voting status, or, when node_addr is set, to
+ * carry a membership request on behalf of the node at that address. A
+ * membership request takes no suffrage, so voter is not read for one.
  *
  * @generated from message gastrolog.v1.ForwardSetNodeSuffrageRequest
  */

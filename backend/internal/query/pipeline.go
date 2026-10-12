@@ -166,10 +166,10 @@ func (e *Engine) runStreamingAggregation(ctx context.Context, it iter.Seq2[chunk
 // Without stats, returns records; with stats, returns a table.
 // The raw operator forces all results into a flat table.
 func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.Pipeline) (*PipelineResult, error) {
-	// Every materializing path charges what it retains against this budget, so
-	// a pipeline whose working set outgrows the node fails with a named limit
-	// instead of allocating until the process dies.
-	return e.runPipeline(ctx, q, pipeline, nil, e.newBudget())
+	// Every materializing path charges what it retains against the query's
+	// budget, so a pipeline whose working set outgrows the node fails with a
+	// named limit instead of allocating until the process dies.
+	return e.runPipeline(ctx, q, pipeline, nil, e.budgetFor(q))
 }
 
 // RunPipelineWithRemote executes a pipeline over the union of this node's
@@ -184,7 +184,8 @@ func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.P
 //
 // The caller supplies the budget so its own share of the query and the
 // pipeline's stay on one ledger instead of two that each allow the full
-// ceiling.
+// ceiling. It replaces any budget q carries: the pipeline's scan, sort keys
+// included, charges it too.
 func (e *Engine) RunPipelineWithRemote(ctx context.Context, q Query, pipeline *querylang.Pipeline, remote iter.Seq2[chunk.Record, error], budget *Budget) (*PipelineResult, error) {
 	return e.runPipeline(ctx, q, pipeline, remote, budget)
 }
@@ -195,29 +196,17 @@ func (e *Engine) runPipeline(ctx context.Context, q Query, pipeline *querylang.P
 		return nil, err
 	}
 	ctx = lookup.EnsureOutboundBudget(ctx)
+	q.budget = budget
 
 	if ph.timechartOp != nil {
 		return e.runTimechartPipeline(ctx, q, ph, remote, budget)
 	}
 
-	// Pipeline operators control their own result limits (head, tail, slice).
-	// A limit applied to the scan would cut the aggregator's or the sort's
-	// input, not its output: "| stats count" over a limited scan counts the
-	// first N records and reports a wrong total, and "| sort" would order an
-	// arbitrary prefix. Save the incoming limit so we can reapply it to the
-	// final records if the pipeline has no cap of its own; then clear it so
-	// Search returns all matching records. What bounds the work is the memory
-	// budget, which bounds retained bytes without changing the answer.
+	// The incoming limit bounds the records this pipeline returns, never the
+	// records it reads; it is reapplied to the output below when the pipeline
+	// has no cap of its own.
 	origLimit := q.Limit
-	q.Limit = 0
-
-	// Head optimization: when the pipeline is just filters + head (no sort,
-	// no stats), set q.Limit to avoid a full scan.
-	if ph.statsOp == nil {
-		if n := headOnlyLimit(ph.preOps); n > 0 {
-			q.Limit = n
-		}
-	}
+	q.Limit = ph.scanLimit()
 
 	it, _ := e.Search(ctx, q, nil)
 	if remote != nil {
@@ -274,24 +263,36 @@ func hasExplicitCap(ops []querylang.PipeOp) bool {
 	return false
 }
 
-// headOnlyLimit returns the head N limit if the pipeline consists only of
-// where/eval/rename/fields operators followed by a head (no sort).
-// Returns 0 if head optimization cannot be applied.
-func headOnlyLimit(ops []querylang.PipeOp) int {
-	var headN int
-	for _, op := range ops {
+// PipelineScanLimit is the limit the record scan feeding pipeline runs
+// under, on every node that scans for it. A limit on the scan cuts an
+// operator's input, not its output: "| stats count" over a limited scan
+// counts the first N records, and "| sort" orders an arbitrary prefix. So the
+// scan reads every match (0) unless a head is reached through operators that
+// keep every record, when the head's N records are all it can consume. What
+// bounds the work instead is the memory budget, which bounds retained bytes
+// without changing the answer.
+func PipelineScanLimit(pipeline *querylang.Pipeline) int {
+	ph, err := classifyPipes(pipeline)
+	if err != nil {
+		return 0
+	}
+	return ph.scanLimit()
+}
+
+func (ph *pipelinePhases) scanLimit() int {
+	if ph.statsOp != nil || ph.timechartOp != nil {
+		return 0
+	}
+	for _, op := range ph.preOps {
 		switch o := op.(type) {
 		case *querylang.HeadOp:
-			headN = o.N
-		case *querylang.SortOp, *querylang.TailOp, *querylang.SliceOp:
-			return 0 // sort, tail, and slice require all records
-		case *querylang.WhereOp, *querylang.EvalOp, *querylang.RenameOp, *querylang.FieldsOp, *querylang.LookupOp, *querylang.DedupOp:
-			// these are fine
+			return o.N
+		case *querylang.EvalOp, *querylang.RenameOp, *querylang.FieldsOp, *querylang.LookupOp:
 		default:
 			return 0
 		}
 	}
-	return headN
+	return 0
 }
 
 // PipelineNeedsGlobalRecords reports whether a pipeline query must see every

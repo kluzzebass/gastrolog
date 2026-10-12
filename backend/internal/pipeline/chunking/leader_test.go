@@ -732,8 +732,7 @@ func TestLeaderPlannerSecondManifestSkipsConsumedSegments(t *testing.T) {
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(
 		first.ChunkID, base.Add(time.Minute), 2, 1024,
 		base, base.Add(time.Second), base.Add(time.Second), true,
-		base.Add(time.Minute),
-	))
+		base.Add(time.Minute), [32]byte{}))
 
 	second := planUntilSealed(t, mgr, vaultID, fsm)
 	if second.ChunkID == first.ChunkID {

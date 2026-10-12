@@ -112,14 +112,15 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 	// chunking is gated cluster-wide for want of second holders.
 	o.groupMgr = factories.GroupManager
 	o.peerConns = factories.PeerConns
+	o.vaultCtlReplicated = factories.GroupManager != nil && factories.NodeAddressResolver != nil
 	if factories.PeerConns != nil && o.segmentPuller == nil {
 		o.segmentPuller = cluster.NewSegmentPuller(factories.PeerConns)
 		o.chunkGLCBPuller = cluster.NewChunkGLCBPuller(factories.PeerConns)
 	}
 
-	// Root the per-vault segment areas under the node home unless already
-	// configured. Origin vaults are registered during applyVaults→route reload,
-	// so this must be set first. See originRoot.
+	// The node home's segments directory, unless already configured. Origin
+	// vaults are registered during applyVaults→route reload, so this must be
+	// set first. See pipelineRootFor.
 	if o.segmentsDir == "" && factories.HomeDir != "" {
 		o.homeDir = factories.HomeDir
 		o.segmentsDir = home.New(factories.HomeDir).SegmentsDir()
@@ -243,6 +244,7 @@ func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig
 	vault.Enabled = vaultCfg.Enabled
 	vault.StorageType = string(vaultCfg.Type)
 	o.RegisterVault(vault)
+	o.scheduleHomeIndexSweep(vaultCfg.ID, instance)
 	if o.alerts != nil {
 		o.alerts.Clear("vault-init", vaultCfg.ID.String())
 	}

@@ -41,10 +41,12 @@ func pipelineVaultWithSealedGLCB(t *testing.T, ctx context.Context, withBuilders
 	if withBuilders {
 		cm.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
 	}
-	if err := cm.RegisterExternalGLCB(fx.sealed.ID, fx.glcbPath, externalInfoFromEntry(fx.sealed)); err != nil {
+	orch := newTestOrch(t, Config{LocalNodeID: "node-home"})
+	registerPipelineHome(orch, fx.vaultID, false)
+	glcbPath := placeGLCBOnHome(t, orch, fx.vaultID, fx)
+	if err := cm.RegisterExternalGLCB(fx.sealed.ID, glcbPath, externalInfoFromEntry(fx.sealed)); err != nil {
 		t.Fatalf("RegisterExternalGLCB: %v", err)
 	}
-	orch := newTestOrch(t, Config{LocalNodeID: "node-home"})
 	orch.RegisterVault(NewVaultFromComponents(fx.vaultID, cm, im, query.New(cm, im, nil)))
 	if complete, err := im.IndexesComplete(fx.sealed.ID); err != nil || complete {
 		t.Fatalf("premise: a freshly built pipeline chunk has no secondary indexes yet (complete=%v err=%v)", complete, err)

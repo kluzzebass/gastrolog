@@ -9,11 +9,12 @@ import (
 )
 
 // This file is the single corrupt-GLCB recovery story shared by the build
-// pass (adoptExistingGLCBIfPresent) and restart recovery (recoverBuiltGLCB).
+// pass (adoptExistingGLCBIfPresent) and restart recovery (recoverBuiltGLCB),
+// which both read an existing GLCB through existingGLCBBuildOf.
 //
 // The unified story: detect → quarantine → alert → heal.
 //
-//   - Detect: BuildResultFromExistingGLCB fails on an existing data.glcb.
+//   - Detect: an existing data.glcb's header or TOC footer cannot be read.
 //   - Quarantine: rename the file aside to data.glcb + GLCBCorruptSuffix.
 //     The rename degrades corrupt to EXACTLY the missing-GLCB state — a
 //     stat on the canonical path now fails — so every existing missing-GLCB
@@ -55,6 +56,14 @@ const glcbCorruptAlarmType = "chunking-glcb-corrupt"
 // and flags the chunk corrupt (alert + one Warn per episode). See the file
 // header for the full story. Safe to call again while already flagged.
 func (v *vaultChunking) quarantineCorruptGLCB(chunkID chunk.ChunkID, glcbPath string, readErr error) {
+	v.corruptMu.Lock()
+	defer v.corruptMu.Unlock()
+	v.quarantineCorruptGLCBLocked(chunkID, glcbPath, readErr)
+}
+
+// quarantineCorruptGLCBLocked is quarantineCorruptGLCB for a caller already
+// holding corruptMu.
+func (v *vaultChunking) quarantineCorruptGLCBLocked(chunkID chunk.ChunkID, glcbPath string, readErr error) {
 	quarantine := glcbPath + GLCBCorruptSuffix
 	if err := os.Rename(glcbPath, quarantine); err != nil {
 		// A failed rename does not block local healing — BuildGLCBFile
@@ -63,8 +72,6 @@ func (v *vaultChunking) quarantineCorruptGLCB(chunkID chunk.ChunkID, glcbPath st
 		v.logger().Warn("corrupt GLCB quarantine rename failed — peer re-pull stays blocked until the canonical path is clear",
 			"chunk", chunkID, "path", glcbPath, "error", err)
 	}
-	v.corruptMu.Lock()
-	defer v.corruptMu.Unlock()
 	if _, seen := v.corruptGLCBs[chunkID]; !seen {
 		v.logger().Warn("sealed GLCB unreadable — quarantined; heals via rebuild from source segments or peer re-pull",
 			"chunk", chunkID, "quarantine", quarantine, "error", readErr)
@@ -97,27 +104,37 @@ func (v *vaultChunking) clearCorruptGLCB(chunkID chunk.ChunkID, via string) {
 	v.updateCorruptGLCBAlertLocked()
 }
 
-// pruneCorruptGLCBs drops corrupt state for chunks that left the vault-ctl
-// FSM entirely (retention deleted the chunk; the chunk-dir RemoveAll took
-// the quarantine file with it) so a deleted chunk cannot pin the alert
-// forever. Called from the build and recovery passes; cheap — the map is
-// empty outside an active corruption episode.
+// pruneCorruptGLCBs drops corrupt and divergent state for chunks that left
+// the vault-ctl FSM entirely (retention deleted the chunk; the chunk-dir
+// RemoveAll took the quarantine file with it) so a deleted chunk cannot pin
+// an alarm forever. Called from the build and recovery passes; cheap — both
+// maps are empty outside an active episode.
 func (v *vaultChunking) pruneCorruptGLCBs() {
 	v.corruptMu.Lock()
 	defer v.corruptMu.Unlock()
-	if len(v.corruptGLCBs) == 0 {
+	if len(v.corruptGLCBs) == 0 && len(v.divergentGLCBs) == 0 {
 		return
 	}
 	fsm := v.fsm()
-	changed := false
+	corruptChanged := false
 	for id := range v.corruptGLCBs {
 		if fsm.Get(id) == nil {
 			delete(v.corruptGLCBs, id)
-			changed = true
+			corruptChanged = true
 		}
 	}
-	if changed {
+	if corruptChanged {
 		v.updateCorruptGLCBAlertLocked()
+	}
+	divergentChanged := false
+	for id := range v.divergentGLCBs {
+		if fsm.Get(id) == nil {
+			delete(v.divergentGLCBs, id)
+			divergentChanged = true
+		}
+	}
+	if divergentChanged {
+		v.updateDivergentGLCBAlarmLocked()
 	}
 }
 
@@ -147,14 +164,18 @@ func (v *vaultChunking) updateCorruptGLCBAlertLocked() {
 
 // NoteGLCBRestored tells chunking that a chunk's canonical GLCB became
 // readable again through a path outside this package — the orchestrator's
-// GLCB catch-up sweep re-pulled a verified copy from a peer home. Clears the
-// chunk's corrupt-GLCB state (quarantine file + operator alert) when it was
-// flagged; no-op otherwise.
+// GLCB catch-up sweep re-pulled a copy from a peer home, verified against the
+// sealed digest. Clears the chunk's corrupt-GLCB and divergent-GLCB state
+// (quarantine files + alarms) when it was flagged; no-op otherwise.
 func (m *Manager) NoteGLCBRestored(vaultID glid.GLID, chunkID chunk.ChunkID) {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
 	m.mu.Unlock()
-	if ok {
-		v.clearCorruptGLCB(chunkID, "re-pulled from a peer home")
+	if !ok {
+		return
 	}
+	v.clearCorruptGLCB(chunkID, "re-pulled from a peer home")
+	v.corruptMu.Lock()
+	defer v.corruptMu.Unlock()
+	v.clearDivergentGLCBLocked(chunkID, "re-pulled from a peer home")
 }

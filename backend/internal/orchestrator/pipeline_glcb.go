@@ -23,9 +23,15 @@ import (
 // lazy resolution serves a chunk you already name but hides it from
 // enumeration, so a restarted home answers a match-all with zero records
 // until some other path happens to register the chunk.
+//
+// The locator answers where this node's pipeline GLCB for a chunk lives, with
+// no disk or FSM read: a cloud-backed chunk resolves from the cloud index
+// before the resolver is consulted, so the read and warm-cache eviction paths
+// find its pipeline copy through the locator instead.
 type externalGLCBResolverSetter interface {
 	SetExternalGLCBResolver(func(chunk.ChunkID) (string, chunk.ExternalGLCBInfo, bool))
 	SetExternalGLCBLister(func() []chunk.ChunkID)
+	SetExternalGLCBLocator(func(chunk.ChunkID) (string, bool))
 }
 
 // pipelineGLCBSource answers, at lookup time, whether this node serves the
@@ -37,14 +43,18 @@ type externalGLCBResolverSetter interface {
 // manager (ABBA).
 func (o *Orchestrator) pipelineGLCBSource(vaultID glid.GLID) (*vaultctlfsm.FSM, string, bool) {
 	reg, ok := o.lookupPipelineVault(vaultID)
-	if !ok || !reg.home || !reg.hasHandle || o.segmentsDir == "" {
+	if !ok || !reg.home || !reg.hasHandle {
+		return nil, "", false
+	}
+	root, err := o.registeredRoot(vaultID, reg)
+	if err != nil {
 		return nil, "", false
 	}
 	f, _, _, ok := o.vaultCtlHandle(vaultID)
 	if !ok || f == nil {
 		return nil, "", false
 	}
-	return f, pipelineChunkRoot(pipelineVaultRoot(o.segmentsDir, vaultID)), true
+	return f, pipelineChunkRoot(root), true
 }
 
 // installPipelineGLCBResolver installs the on-miss external-GLCB resolver on
@@ -91,6 +101,11 @@ func installGLCBResolverOn(inst *VaultInstance, source func() (*vaultctlfsm.FSM,
 			return "", chunk.ExternalGLCBInfo{}, false
 		}
 		glcbPath := chunking.ChunkGLCBPath(chunkRoot, id)
+		// Only the agreed copy is served: a divergent copy that has not yet
+		// met its landing check must not be memoized as this chunk's bytes.
+		if _, agrees, err := chunking.GLCBAgreesWithSeal(glcbPath, *e); err != nil || !agrees {
+			return "", chunk.ExternalGLCBInfo{}, false
+		}
 		// File-enriched info: the memoized registration must be COMPLETE at
 		// first resolution — there is no eager re-registration pass to upgrade
 		// it afterward. For a Sealed entry the FSM already carries index
@@ -106,6 +121,13 @@ func installGLCBResolverOn(inst *VaultInstance, source func() (*vaultctlfsm.FSM,
 			return "", chunk.ExternalGLCBInfo{}, false
 		}
 		return glcbPath, info, true
+	})
+	setter.SetExternalGLCBLocator(func(id chunk.ChunkID) (string, bool) {
+		_, chunkRoot, ok := source()
+		if !ok {
+			return "", false
+		}
+		return chunking.ChunkGLCBPath(chunkRoot, id), true
 	})
 	// Enumeration companion to the resolver: the sealed chunk IDs of this
 	// vault's committed manifest. List() calls the resolver on each ID it

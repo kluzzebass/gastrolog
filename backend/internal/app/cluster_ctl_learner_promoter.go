@@ -3,17 +3,9 @@ package app
 import (
 	"log/slog"
 	"strconv"
-	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/cluster"
-)
-
-const (
-	// clusterCtlLearnerPromoteTimeout bounds each AddVoter membership-change
-	// commit. The change is small (one config entry) so this is mostly
-	// a quorum-loss guard; a healthy cluster commits in milliseconds.
-	clusterCtlLearnerPromoteTimeout = 5 * time.Second
 )
 
 // raftMembership is the subset of cluster.Server methods the
@@ -22,7 +14,6 @@ const (
 type raftMembership interface {
 	IsLeader() bool
 	Servers() ([]cluster.RaftServer, error)
-	AddVoter(id, addr string, timeout time.Duration) error
 	LocalStats() map[string]string
 }
 
@@ -38,9 +29,10 @@ type peerStatsReader interface {
 // promotable once its broadcast RaftAppliedIndex reaches the leader's
 // applied index exactly.
 type clusterCtlPromotionGroup struct {
-	cluster   raftMembership
-	peerState peerStatsReader
-	logger    *slog.Logger
+	cluster      raftMembership
+	peerState    peerStatsReader
+	promoteVoter func(nodeID string) error
+	logger       *slog.Logger
 }
 
 func (g *clusterCtlPromotionGroup) label() string         { return "cluster-ctl" }
@@ -77,7 +69,7 @@ func (g *clusterCtlPromotionGroup) observedApplied(nodeID string) (uint64, bool)
 }
 
 func (g *clusterCtlPromotionGroup) promote(m learnerMember) error {
-	return g.cluster.AddVoter(m.nodeID, m.addr, clusterCtlLearnerPromoteTimeout)
+	return g.promoteVoter(m.nodeID)
 }
 
 // newClusterCtlLearnerPromoter builds the event-driven promoter for the
@@ -88,8 +80,12 @@ func (g *clusterCtlPromotionGroup) promote(m learnerMember) error {
 // up. The single-element group provider means evaluate() consults the one
 // cluster-ctl group; the isLeader() gate inside makes non-leader nodes
 // no-ops.
-func newClusterCtlLearnerPromoter(c raftMembership, ps peerStatsReader, logger *slog.Logger) *learnerPromoter {
-	g := &clusterCtlPromotionGroup{cluster: c, peerState: ps, logger: logger}
+//
+// promoteVoter makes a learner a voter. In production it is the gated
+// member-suffrage change, so a promotion can never re-add a node whose
+// removal committed after the promoter listed it.
+func newClusterCtlLearnerPromoter(c raftMembership, ps peerStatsReader, promoteVoter func(nodeID string) error, logger *slog.Logger) *learnerPromoter {
+	g := &clusterCtlPromotionGroup{cluster: c, peerState: ps, promoteVoter: promoteVoter, logger: logger}
 	return newLearnerPromoter("cluster-ctl", func() []promotionGroup {
 		return []promotionGroup{g}
 	}, logger)

@@ -1,0 +1,62 @@
+package orchestrator_test
+
+// Multi-node coverage for a vault-ctl group whose creation deferred on one
+// node: the rest of the cluster forms the group, the deferred node builds its
+// instance without it, and the group appears there only when the missing
+// peer resolves. From then on the node must act on the replicated manifest —
+// a delete obligation naming it must be acked by it, or retention stalls
+// cluster-wide.
+
+import (
+	"fmt"
+	"testing"
+	"time"
+
+	"gastrolog/internal/chunk"
+	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
+)
+
+func TestOrchRel_DeferredVaultCtlGroupBindsInstanceWhenPeerResolves(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node vault-ctl convergence test")
+	}
+	t.Parallel()
+	h := newOrchRelHarness(t, 4, withVaultCtlPeerHidden(3, 0))
+	v := h.vaults[0]
+	gid := raftgroup.VaultControlPlaneGroupID(v.id)
+	deferred := h.nodes[h.nodeIDs[3]]
+
+	if deferred.groupMgr.GetGroup(gid) != nil {
+		t.Fatal("precondition: the node that cannot resolve a peer deferred group creation")
+	}
+	inst := deferred.orch.FindLocalVaultInstance(v.id)
+	if inst == nil {
+		t.Fatal("precondition: the deferred node built its local instance")
+	}
+	if inst.IsFSMReady == nil || inst.IsFSMReady() {
+		t.Fatal("the deferred node reports the vault ready while its vault-ctl group does not exist")
+	}
+
+	h.resolveVaultCtlPeers(deferred.id)
+	if deferred.groupMgr.GetGroup(gid) == nil {
+		t.Fatal("the group was not created once every peer resolved")
+	}
+	h.waitForAllReady()
+
+	chunkID := chunk.NewChunkID()
+	h.applyOnVaultCtlLeader(v, vaultctlfsm.MarshalRequestDelete(chunkID, time.Now(), "test", []string{deferred.id}))
+
+	h.waitProgress("the deferred node acks the delete obligation naming it", 50*time.Millisecond, func() (string, bool) {
+		var views []string
+		done := true
+		for _, id := range h.nodeIDs {
+			acks := h.nodes[id].orch.PendingDeleteAcks(v.id)
+			if expected, pending := acks[chunkID]; pending {
+				done = false
+				views = append(views, fmt.Sprintf("%s:%v", h.nodes[id].label, expected))
+			}
+		}
+		return fmt.Sprintf("pending=%v", views), done
+	}, nil)
+}

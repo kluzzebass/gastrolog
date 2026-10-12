@@ -97,7 +97,7 @@ func TestFSM_AwaitingBuildClearsOnSeal(t *testing.T) {
 	now := time.Now()
 
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(
-		building, now, 10, 100, now, now, now, true, now)}); err != nil {
+		building, now, 10, 100, now, now, now, true, now, [32]byte{})}); err != nil {
 		t.Fatalf("seal chunk: %v", err)
 	}
 	if fsm.AwaitingBuild(building) {
@@ -112,7 +112,7 @@ func TestResumeSealingFromFSM_RecoversTheStrandOnly(t *testing.T) {
 	fsm, stranded, building := fsmWithBothSealingPopulations(t)
 
 	r := newResumeReconciler(t)
-	r.fsm = fsm
+	r.fsm.Store(fsm)
 	var scheduled []chunk.ChunkID
 	r.postSealHook = func(_ glid.GLID, _ chunk.ChunkManager, id chunk.ChunkID) {
 		scheduled = append(scheduled, id)

@@ -2,6 +2,7 @@ package query
 
 import (
 	"fmt"
+	"sync/atomic"
 
 	"gastrolog/internal/chunk"
 )
@@ -96,27 +97,47 @@ func (e *MemoryLimitError) Error() string {
 // maintain. Each node protects itself, which is the property that keeps any
 // node from dying.
 //
-// A Budget belongs to a single query execution and is used from the goroutine
-// running it. It is not safe for concurrent use.
+// One query's structures run concurrently — the page-1 histogram beside the
+// record scan — so a Budget is safe for concurrent use. The ledger is a single
+// atomic counter: charging takes no lock.
 type Budget struct {
 	limit int64
-	used  int64
+	used  atomic.Int64
+
+	// parent is set on a sub-account: every charge and release passes
+	// through to it, and the ceiling is the parent's.
+	parent *Budget
 }
 
-// NewBudget returns a budget at the standard ceiling. Callers that accumulate
-// records before handing them to the engine create one here and pass it in, so
-// the pre-pass and the pipeline share a single account.
-func NewBudget() *Budget {
-	return &Budget{limit: MaxQueryMemoryBytes}
-}
-
-// newBudget returns a budget at this engine's ceiling.
-func (e *Engine) newBudget() *Budget {
+// NewBudget returns a budget at this engine's ceiling: the ledger one query
+// runs on, on this node. Callers that drive several parts of one query — a
+// search and its histogram, a pipeline and the records it gathers from peers —
+// create it once and hand it to every part, through Query.WithBudget or
+// RunPipelineWithRemote.
+func (e *Engine) NewBudget() *Budget {
 	limit := e.memLimit
 	if limit <= 0 {
 		limit = MaxQueryMemoryBytes
 	}
 	return &Budget{limit: limit}
+}
+
+// SetMemoryLimit lowers this engine's per-query ceiling. Production engines
+// run at MaxQueryMemoryBytes; tests use it to drive the overflow path without
+// building hundreds of megabytes of working set.
+func (e *Engine) SetMemoryLimit(limit int64) {
+	e.memLimit = limit
+}
+
+// budgetFor returns the ledger q runs on, opening one at this engine's
+// ceiling when the caller attached none. Every engine entry point that scans
+// resolves its budget here once, so all the chunks of one query charge the
+// same ledger.
+func (e *Engine) budgetFor(q Query) *Budget {
+	if q.budget != nil {
+		return q.budget
+	}
+	return e.NewBudget()
 }
 
 // Charge accounts n bytes against the budget and fails when the ceiling is
@@ -126,18 +147,21 @@ func (e *Engine) newBudget() *Budget {
 // carry one, so arriving here without a budget is a wiring bug, and running
 // the query unbounded is precisely the failure this type exists to prevent.
 // A zero-value Budget resolves to the standard ceiling rather than rejecting
-// everything, so an engine assembled without going through newBudget is
+// everything, so an engine assembled without going through NewBudget is
 // bounded rather than broken.
 func (b *Budget) Charge(consumer string, n int64) error {
 	if b == nil {
 		return &MemoryLimitError{Consumer: consumer}
 	}
+	used := b.used.Add(n)
+	if b.parent != nil {
+		return b.parent.Charge(consumer, n)
+	}
 	limit := b.limit
 	if limit <= 0 {
 		limit = MaxQueryMemoryBytes
 	}
-	b.used += n
-	if b.used > limit {
+	if used > limit {
 		return &MemoryLimitError{Consumer: consumer, Limit: limit}
 	}
 	return nil
@@ -145,15 +169,42 @@ func (b *Budget) Charge(consumer string, n int64) error {
 
 // Release returns n bytes to the budget when a working set drops what it was
 // holding — an evicted ring-buffer slot, a record trimmed out of a top-N sort,
-// a latched value replaced by a newer one.
+// a latched value replaced by a newer one. The ledger never goes below zero.
 func (b *Budget) Release(n int64) {
 	if b == nil {
 		return
 	}
-	b.used -= n
-	if b.used < 0 {
-		b.used = 0
+	released := b.drop(n)
+	if b.parent != nil {
+		b.parent.Release(released)
 	}
+}
+
+// drop lowers used by up to n, never below zero, and returns how much it
+// lowered it by.
+func (b *Budget) drop(n int64) int64 {
+	for {
+		cur := b.used.Load()
+		d := min(n, cur)
+		if b.used.CompareAndSwap(cur, cur-d) {
+			return d
+		}
+	}
+}
+
+// subAccount returns a ledger whose charges land on b, for a part of the
+// query that finishes before the query does and must hand back everything it
+// held when it ends. close returns what it still holds.
+func (b *Budget) subAccount() *Budget {
+	return &Budget{parent: b}
+}
+
+// close returns everything a sub-account still holds to its parent.
+func (b *Budget) close() {
+	if b == nil || b.parent == nil {
+		return
+	}
+	b.parent.Release(b.used.Swap(0))
 }
 
 // ChargeRecord accounts one buffered record.

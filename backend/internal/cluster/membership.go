@@ -39,8 +39,10 @@ const (
 // MembershipHandler adds a node to the Raft configuration on behalf of a
 // caller that asked to join. Registered via Server.SetMembershipHandler; the
 // implementation forwards to the leader when this node does not lead, which
-// is what lets a joiner address any member.
-type MembershipHandler func(ctx context.Context, nodeID, nodeAddr string, voter bool) error
+// is what lets a joiner address any member. It decides the suffrage itself:
+// the caller has no say in it. A node the cluster removed is refused with an
+// error wrapping ErrNodeRemoved.
+type MembershipHandler func(ctx context.Context, nodeID, nodeAddr string) error
 
 // SetMembershipHandler registers the callback invoked when a node asks to be
 // put in the configuration.
@@ -69,14 +71,18 @@ func (s *Server) requestMembership(ctx context.Context, req *gastrologv1.Request
 				"certificate names node %s; membership may only be requested for it, not %s", certID, nodeID)
 		}
 	}
-	if err := s.membershipHandler(ctx, nodeID, req.GetNodeAddr(), req.GetVoter()); err != nil {
+	if err := s.membershipHandler(ctx, nodeID, req.GetNodeAddr()); err != nil {
+		switch {
 		// A cluster mid-election has no leader to forward to yet. Saying
 		// Unavailable rather than Internal is what tells the joiner to keep
 		// asking instead of giving up on a condition that resolves itself.
-		if errors.Is(err, ErrNoLeader) {
+		case errors.Is(err, ErrNoLeader):
 			return nil, status.Errorf(codes.Unavailable, "membership change: %v", err)
+		case errors.Is(err, ErrNodeRemoved):
+			return nil, status.Error(codes.PermissionDenied, err.Error())
+		default:
+			return nil, status.Errorf(codes.Internal, "membership change: %v", err)
 		}
-		return nil, status.Errorf(codes.Internal, "membership change: %v", err)
 	}
 	return &gastrologv1.RequestMembershipResponse{}, nil
 }
@@ -133,7 +139,7 @@ func membershipCredentials(ctls *ClusterTLS) (credentials.TransportCredentials, 
 // returns immediately, because waiting will not change it.
 //
 // logger may be nil, in which case retry attempts are silent.
-func JoinCluster(ctx context.Context, logger *slog.Logger, addr, nodeID, nodeAddr string, ctls *ClusterTLS, voter bool) error {
+func JoinCluster(ctx context.Context, logger *slog.Logger, addr, nodeID, nodeAddr string, ctls *ClusterTLS) error {
 	creds, err := membershipCredentials(ctls)
 	if err != nil {
 		return fmt.Errorf("join %s: %w", addr, err)
@@ -143,7 +149,7 @@ func JoinCluster(ctx context.Context, logger *slog.Logger, addr, nodeID, nodeAdd
 	attempt := 0
 	for {
 		attempt++
-		err := tryRequestMembership(ctx, addr, nodeID, nodeAddr, creds, voter)
+		err := tryRequestMembership(ctx, addr, nodeID, nodeAddr, creds)
 		if err == nil {
 			return nil
 		}
@@ -179,7 +185,7 @@ func isTransientMembershipErr(err error) bool {
 	return status.Code(err) == codes.Unavailable || errors.Is(err, syscall.ECONNREFUSED)
 }
 
-func tryRequestMembership(ctx context.Context, addr, nodeID, nodeAddr string, creds credentials.TransportCredentials, voter bool) error {
+func tryRequestMembership(ctx context.Context, addr, nodeID, nodeAddr string, creds credentials.TransportCredentials) error {
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(creds))
 	if err != nil {
 		return fmt.Errorf("dial %s: %w", addr, err)
@@ -189,7 +195,6 @@ func tryRequestMembership(ctx context.Context, addr, nodeID, nodeAddr string, cr
 	req := &gastrologv1.RequestMembershipRequest{
 		NodeId:   []byte(nodeID),
 		NodeAddr: nodeAddr,
-		Voter:    voter,
 	}
 	out := &gastrologv1.RequestMembershipResponse{}
 	return conn.Invoke(ctx, "/gastrolog.v1.ClusterService/RequestMembership", req, out)

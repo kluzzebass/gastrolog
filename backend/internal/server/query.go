@@ -6,9 +6,11 @@ import (
 	"gastrolog/internal/glid"
 	"iter"
 	"log/slog"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
@@ -26,18 +28,21 @@ import (
 // Nil in single-node mode.
 type RemoteSearcher interface {
 	// Search collects a full streamed ForwardSearch response. Used by
-	// collectRemotePipeline which needs the complete TableResult.
+	// collectRemotePipeline, which needs the complete TableResult, and by
+	// collectRemoteHistogram.
 	Search(ctx context.Context, nodeID string, req *apiv1.ForwardSearchRequest) (*apiv1.ForwardSearchResponse, error)
+	// ListChunks lists a vault's chunks on the node leading it, from which a
+	// window-less search learns where the vault's data lies.
+	ListChunks(ctx context.Context, nodeID string, req *apiv1.ForwardListChunksRequest) (*apiv1.ForwardListChunksResponse, error)
 	// SearchStream opens a streaming ForwardSearch.
-	// Returns record batches channel, tableResult, error channel, resume-token
-	// getter, and histogram getter. The stream opens without blocking on the
-	// first remote batch so the coordinator can merge as holders produce data.
+	// Returns record batches channel, tableResult, error channel, and
+	// resume-token getter. The stream opens without blocking on the first
+	// remote batch so the coordinator can merge as holders produce data.
 	SearchStream(ctx context.Context, nodeID string, req *apiv1.ForwardSearchRequest) (
 		records <-chan []*apiv1.ExportRecord,
 		tableResult *apiv1.TableResult,
 		errCh <-chan error,
 		getResumeToken func() []byte,
-		getHistogram func() []*apiv1.HistogramBucket,
 	)
 	GetContext(ctx context.Context, nodeID string, req *apiv1.ForwardGetContextRequest) (*apiv1.ForwardGetContextResponse, error)
 	Explain(ctx context.Context, nodeID string, req *apiv1.ForwardExplainRequest) (*apiv1.ForwardExplainResponse, error)
@@ -94,15 +99,11 @@ func (s *QueryServer) Search(
 	// streaming transform path never enters the engine's pipeline entry points.
 	ctx = lookup.EnsureOutboundBudget(ctx)
 
-	// Resolve unbounded queries (last=all, no time directive) to concrete
-	// bounds on the coordinator before fan-out. Without this, every node
-	// independently calls deriveTimeRange against its own local chunk view
-	// and produces non-overlapping bucket grids that mergeHistogramBuckets
-	// cannot reconcile — the histogram ends up split between two unrelated
-	// time ranges. last=5m / last=1h already pre-resolve via applyDirective
-	// (using the coordinator's clock), so they get aligned grids for free;
-	// this closes the gap for the unbounded case.
-	q = s.resolveUnboundedQuery(ctx, q)
+	// A later page runs in the window the first page resolved, which its
+	// resume token carries.
+	if len(req.Msg.ResumeToken) == 0 {
+		q = s.resolveUnboundedQuery(ctx, q)
+	}
 
 	err = s.dispatchSearch(ctx, eng, q, pipeline, req.Msg.ResumeToken, serverStart, stream)
 	NoteSearchOutcome(s.orch.Alerts(), err, func() []glid.GLID { return s.selectedOrAllVaults(ctx, q) })
@@ -179,6 +180,10 @@ func (s *QueryServer) searchDirect(
 	// records as the user scrolls.
 	frozenStart, frozenEnd := q.Start, q.End
 
+	// One ledger for this node's share of the query: the scan and the page-1
+	// histogram running beside it charge the same budget.
+	q = q.WithBudget(eng.NewBudget())
+
 	// Bound this page's search (not the histogram) at the previous page's
 	// highwater, and let the cursor skip what that page already emitted at
 	// the boundary timestamp. This is what makes pagination survive
@@ -190,7 +195,7 @@ func (s *QueryServer) searchDirect(
 
 	localResume := s.localResumePositions(resume)
 	localIter, getLocalToken := eng.Search(ctx, q, localResume)
-	remoteIter, remoteHist, contributingVaults := s.collectRemote(ctx, q)
+	remoteIter, contributingVaults := s.collectRemote(ctx, q)
 
 	// Histogram is computed only on the FIRST page of a paginated search.
 	var histCh chan []*apiv1.HistogramBucket
@@ -198,7 +203,7 @@ func (s *QueryServer) searchDirect(
 		histCh = make(chan []*apiv1.HistogramBucket, 1)
 		go func() {
 			histCh <- s.guardedHistogram(func() []*apiv1.HistogramBucket {
-				return s.computePageHistogram(ctx, eng, histogramQ, remoteHist)
+				return s.computePageHistogram(ctx, eng, histogramQ)
 			})
 		}()
 	}
@@ -249,19 +254,62 @@ func (s *QueryServer) guardedHistogram(compute func() []*apiv1.HistogramBucket) 
 	return compute()
 }
 
-// computePageHistogram builds the page-1 volume histogram for a search.
-// Counts only — level breakdown is omitted so histogram work stays on the
-// ITSI fast path and cannot block search completion.
-func (s *QueryServer) computePageHistogram(ctx context.Context, eng *query.Engine, histogramQ query.Query, remoteHist []*apiv1.HistogramBucket) []*apiv1.HistogramBucket {
+// computePageHistogram builds the page-1 volume histogram for a search: this
+// node's share from the vaults it leads, merged with every remote vault's
+// share. Counts only — level breakdown is omitted so histogram work stays on
+// the ITSI fast path where the query has no filter.
+func (s *QueryServer) computePageHistogram(ctx context.Context, eng *query.Engine, histogramQ query.Query) []*apiv1.HistogramBucket {
 	if s.histogramFullyLocal(ctx, histogramQ) {
 		localEng := s.orch.LocalVaultQueryEngine()
 		if s.lookupResolver != nil {
 			localEng.SetLookupResolver(s.lookupResolver)
 		}
-		return HistogramToProto(localEng.ComputeSearchPageHistogram(ctx, histogramQ, 50))
+		return HistogramToProto(localEng.ComputeSearchPageHistogram(ctx, histogramQ, pageHistogramBuckets))
 	}
-	localHist := HistogramToProto(eng.ComputeSearchPageHistogram(ctx, histogramQ, 50))
+	return s.mergeRemoteHistogram(ctx, histogramQ, func(q query.Query, buckets int) []*apiv1.HistogramBucket {
+		return HistogramToProto(eng.ComputeSearchPageHistogram(ctx, q, buckets))
+	})
+}
+
+// mergeRemoteHistogram counts a histogram over this node's vaults with local
+// while every remote vault in scope counts its own, and sums them. With a
+// remote vault in scope, every share is counted on q's page histogram grid:
+// there is no histogram when q has no window to cut into one, or when any
+// share is missing.
+func (s *QueryServer) mergeRemoteHistogram(ctx context.Context, q query.Query, local func(q query.Query, buckets int) []*apiv1.HistogramBucket) []*apiv1.HistogramBucket {
+	remote := s.remoteHistogramVaults(ctx, q)
+	if len(remote) == 0 {
+		return s.localHistogram(q, pageHistogramBuckets, local)
+	}
+	grid, ok := pageHistogramGrid(q)
+	if !ok {
+		return nil
+	}
+	q.Start, q.End = time.Unix(0, grid.StartNanos).UTC(), time.Unix(0, grid.EndNanos).UTC()
+
+	var localHist []*apiv1.HistogramBucket
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		localHist = s.localHistogram(q, int(grid.Buckets), local)
+	})
+	remoteHist, remoteOK := s.collectRemoteHistogram(ctx, q, grid, remote)
+	wg.Wait()
+	if localHist == nil || !remoteOK {
+		return nil
+	}
 	return mergeHistogramBuckets(localHist, remoteHist)
+}
+
+// localHistogram runs local, yielding no buckets if it panics.
+func (s *QueryServer) localHistogram(q query.Query, buckets int, local func(q query.Query, buckets int) []*apiv1.HistogramBucket) []*apiv1.HistogramBucket {
+	var hist []*apiv1.HistogramBucket
+	if err := panicguard.Call(s.logger, "search histogram", func() error {
+		hist = local(q, buckets)
+		return nil
+	}); err != nil {
+		return nil
+	}
+	return hist
 }
 
 // localResumePositions returns the resume positions for the vaults this node
@@ -367,6 +415,8 @@ func mapSearchError(err error) error {
 		return connect.NewError(connect.CodeCanceled, err)
 	case errors.Is(err, query.ErrInvalidResumeToken):
 		return errInvalidArg(err)
+	case resourceExhausted(err):
+		return connect.NewError(connect.CodeResourceExhausted, err)
 	default:
 		return errInternal(err)
 	}
@@ -727,50 +777,33 @@ func normalizedRange(start, end time.Time) (time.Time, time.Time, bool) {
 	return start, end, true
 }
 
-// resolveUnboundedQuery fills in zero q.Start / q.End from the replicated
-// vault-ctl Raft FSM so all nodes (coordinator + remotes) bucket histograms
-// on the same grid.
+// resolveUnboundedQuery fills in a zero q.Start or q.End from the bounds of
+// every vault in q's scope, so the query reaches every node with one window:
+// each node's record search runs in it, and the page histogram is cut from it
+// into the one grid every node counts on.
 //
-// Each node's ComputeHistogram independently calls deriveTimeRange when q.Start
-// or q.End is zero, walking its LOCAL chunk view to pick min(IngestStart) and
-// max(IngestEnd). With remotes seeing different chunk sets, the resulting
-// bucket grids don't align and mergeHistogramBuckets — which matches by
-// exact TimestampMs — emits a fragmented histogram split across unrelated
-// time ranges. Resolving here, before q.String() is forwarded, makes the
-// remotes parse concrete start=/end= directives and skip deriveTimeRange.
-//
-// Bounded queries (last=5m, explicit start=/end=) are no-ops.
-//
-// Reads from VaultManifestEntriesIncludingOpen, which goes directly through the
-// vault-ctl Raft group's FSM rather than per-vault-instance state. Every node
-// is a voter of every vault-ctl group, so the FSM is authoritative
-// cluster-wide regardless of which node hosts the vault — a coordinator
-// that runs no vault replicas still sees the full sealed manifest.
-// Falls back to ListLocalChunkMetas for the legacy memory-mode path (no
-// GroupManager, no FSM); that path also picks up the active chunk for vaults
-// that have not yet sealed any data.
+// The window's start is the oldest record in scope. Its end takes in the
+// newest record and runs to the coordinator's now, which covers records
+// arriving while the query runs. When some vault's bounds cannot be learned,
+// q stays unbounded: a window derived without that vault could cut its
+// records out of the search.
 func (s *QueryServer) resolveUnboundedQuery(ctx context.Context, q query.Query) query.Query {
 	if !q.Start.IsZero() && !q.End.IsZero() {
 		return q
 	}
-	selectedVaults := s.selectedOrAllVaults(ctx, q)
-	earliest, latest := s.aggregateVaultBounds(selectedVaults)
-	if earliest.IsZero() {
-		// No visible chunks anywhere. Leave bounds zero so per-node
-		// derivation runs — bucketing may still be misaligned in that
-		// degenerate setup, but we have no better anchor.
+	bounds, ok := s.vaultsBounds(ctx, s.selectedOrAllVaults(ctx, q))
+	if !ok || bounds.empty() {
 		return q
 	}
-	// Bump latest to coordinator-now so the active chunk's tail is captured
-	// even when its IngestEnd lags real time.
-	if now := time.Now(); latest.Before(now) {
-		latest = now
+	end := bounds.latest.Add(time.Nanosecond)
+	if now := time.Now(); end.Before(now) {
+		end = now
 	}
 	if q.Start.IsZero() {
-		q.Start = earliest
+		q.Start = bounds.earliest
 	}
 	if q.End.IsZero() {
-		q.End = latest
+		q.End = end
 	}
 	return q
 }
@@ -795,41 +828,124 @@ func (s *QueryServer) selectedOrAllVaults(ctx context.Context, q query.Query) []
 	return out
 }
 
-// aggregateVaultBounds returns (min IngestStart, max IngestEnd) across every
-// chunk visible for the given vaults. Walks both the cluster-replicated
-// vault-ctl FSM (sealed manifest, visible on every voter) and the local
-// chunk manager (active + memory-mode vaults). Either source contributing
-// nothing is fine — the function only collapses to (zero, zero) when neither
-// has anything to say.
-func (s *QueryServer) aggregateVaultBounds(vaults []glid.GLID) (time.Time, time.Time) {
-	var earliest, latest time.Time
-	track := func(start, end time.Time) {
-		if !start.IsZero() && (earliest.IsZero() || start.Before(earliest)) {
-			earliest = start
-		}
-		if !end.IsZero() && (latest.IsZero() || end.After(latest)) {
-			latest = end
-		}
+// ingestBounds is the oldest and newest ingest timestamp across a set of
+// chunks holding records.
+type ingestBounds struct {
+	earliest, latest time.Time
+}
+
+func (b ingestBounds) empty() bool { return b.earliest.IsZero() }
+
+func (b *ingestBounds) track(recordCount int64, start, end time.Time) {
+	if recordCount == 0 {
+		return
 	}
+	if !start.IsZero() && (b.earliest.IsZero() || start.Before(b.earliest)) {
+		b.earliest = start
+	}
+	if !end.IsZero() && (b.latest.IsZero() || end.After(b.latest)) {
+		b.latest = end
+	}
+}
+
+func (b *ingestBounds) merge(o ingestBounds) {
+	b.track(1, o.earliest, o.latest)
+}
+
+// protoTime is ts as a time, or the zero time when ts is absent.
+func protoTime(ts *timestamppb.Timestamp) time.Time {
+	if ts == nil {
+		return time.Time{}
+	}
+	return ts.AsTime()
+}
+
+// vaultsBounds returns the ingest bounds of every record in vaults. A vault
+// is read from this node's view of its chunks — the replicated vault-ctl
+// FSM, which every node holds, and any chunks held locally. A vault with no
+// records in that view is asked of its leader, which holds every chunk the
+// vault has. ok is false when such a leader cannot answer.
+func (s *QueryServer) vaultsBounds(ctx context.Context, vaults []glid.GLID) (ingestBounds, bool) {
+	var bounds ingestBounds
+	var unseen []glid.GLID
 	for _, vid := range vaults {
-		for _, e := range s.orch.VaultManifestEntriesIncludingOpen(vid) {
-			if e.RecordCount == 0 {
-				continue
-			}
-			track(e.IngestStart, e.IngestEnd)
-		}
-		metas, err := s.orch.ListLocalChunkMetas(vid)
-		if err != nil {
+		vb := s.localVaultBounds(vid)
+		if vb.empty() {
+			unseen = append(unseen, vid)
 			continue
 		}
-		for _, m := range metas {
-			if m.RecordCount == 0 {
-				continue
-			}
-			track(m.IngestStart, m.IngestEnd)
+		bounds.merge(vb)
+	}
+	remote, ok := s.leaderVaultBounds(ctx, unseen)
+	if !ok {
+		return ingestBounds{}, false
+	}
+	bounds.merge(remote)
+	return bounds, true
+}
+
+// localVaultBounds returns the ingest bounds of the records this node sees in
+// vaultID: the chunks in its vault-ctl FSM, open ones included, and the
+// chunks it holds locally.
+func (s *QueryServer) localVaultBounds(vaultID glid.GLID) ingestBounds {
+	var b ingestBounds
+	for _, e := range s.orch.VaultManifestEntriesIncludingOpen(vaultID) {
+		b.track(e.RecordCount, e.IngestStart, e.IngestEnd)
+	}
+	metas, err := s.orch.ListLocalChunkMetas(vaultID)
+	if err != nil {
+		return b
+	}
+	for _, m := range metas {
+		b.track(m.RecordCount, m.IngestStart, m.IngestEnd)
+	}
+	return b
+}
+
+// leaderVaultBounds asks the leader of each remote vault in vaults for the
+// vault's chunks and returns their ingest bounds. ok is false when any leader
+// cannot answer.
+func (s *QueryServer) leaderVaultBounds(ctx context.Context, vaults []glid.GLID) (ingestBounds, bool) {
+	if len(vaults) == 0 || s.remoteSearcher == nil || s.cfgStore == nil {
+		return ingestBounds{}, true
+	}
+	type leaderBounds struct {
+		nodeID  string
+		vaultID glid.GLID
+		bounds  ingestBounds
+		err     error
+	}
+	var asks []*leaderBounds
+	for nodeID, vaultIDs := range s.remoteVaultsByNode(ctx, vaults) {
+		for _, vid := range vaultIDs {
+			asks = append(asks, &leaderBounds{nodeID: nodeID, vaultID: vid})
 		}
 	}
-	return earliest, latest
+	var wg sync.WaitGroup
+	for _, a := range asks {
+		wg.Go(func() {
+			resp, err := s.remoteSearcher.ListChunks(ctx, a.nodeID, &apiv1.ForwardListChunksRequest{VaultId: a.vaultID.ToProto()})
+			if err != nil {
+				a.err = err
+				return
+			}
+			for _, c := range resp.GetChunks() {
+				a.bounds.track(c.GetRecordCount(), protoTime(c.GetIngestStart()), protoTime(c.GetIngestEnd()))
+			}
+		})
+	}
+	wg.Wait()
+
+	var bounds ingestBounds
+	for _, a := range asks {
+		if a.err != nil {
+			s.logger.Warn("search window left unbounded: a vault leader did not report the vault's chunks",
+				"vault", a.vaultID, "node", a.nodeID, "error", a.err)
+			return ingestBounds{}, false
+		}
+		bounds.merge(a.bounds)
+	}
+	return bounds, true
 }
 
 // histogramFullyLocal returns true when this node is the leader of every

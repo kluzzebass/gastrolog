@@ -21,13 +21,18 @@ var _ chunk.GLCBSectionReader = (*Manager)(nil)
 // a caller receiving it and pinning it. A pinned mapping is never evicted, so
 // a search holding cursors on more chunks than glcbMappedCap simply keeps
 // them all mapped instead of losing the newest one.
+//
+// A cached mapping is served only while it maps the file now on the path: a
+// copy quarantined aside and replaced by another keeps its path, so the path
+// alone would keep serving the bytes that left it.
 func (m *Manager) mappedGLCB(id chunk.ChunkID) (*glcb.MappedBlob, error) {
 	path := m.glcbPath(id)
-	if _, err := os.Stat(path); err != nil {
+	onPath, err := os.Stat(path)
+	if err != nil {
 		m.evictMappedGLCB(id)
 		return nil, err
 	}
-	if blob := m.pinMappedGLCB(id, path); blob != nil {
+	if blob := m.pinMappedGLCB(id, path, onPath); blob != nil {
 		return blob, nil
 	}
 	fresh, err := glcb.OpenMappedBlob(path)
@@ -36,7 +41,7 @@ func (m *Manager) mappedGLCB(id chunk.ChunkID) (*glcb.MappedBlob, error) {
 	}
 	m.glcbMapMu.Lock()
 	defer m.glcbMapMu.Unlock()
-	if blob := m.pinMappedGLCBLocked(id, path); blob != nil {
+	if blob := m.pinMappedGLCBLocked(id, path, fresh.FileInfo()); blob != nil {
 		// Another caller mapped the same file first; share that mapping.
 		_ = fresh.Close()
 		return blob, nil
@@ -47,22 +52,22 @@ func (m *Manager) mappedGLCB(id chunk.ChunkID) (*glcb.MappedBlob, error) {
 	return fresh, nil
 }
 
-func (m *Manager) pinMappedGLCB(id chunk.ChunkID, path string) *glcb.MappedBlob {
+func (m *Manager) pinMappedGLCB(id chunk.ChunkID, path string, onPath os.FileInfo) *glcb.MappedBlob {
 	m.glcbMapMu.Lock()
 	defer m.glcbMapMu.Unlock()
-	return m.pinMappedGLCBLocked(id, path)
+	return m.pinMappedGLCBLocked(id, path, onPath)
 }
 
-// pinMappedGLCBLocked pins and returns the cached mapping for id when it is
-// for the given path; a mapping of a stale path is closed and dropped. Caller
-// holds glcbMapMu.
-func (m *Manager) pinMappedGLCBLocked(id chunk.ChunkID, path string) *glcb.MappedBlob {
+// pinMappedGLCBLocked pins and returns the cached mapping for id when it maps
+// the file onPath describes at path; a mapping of any other file is closed
+// and dropped. Caller holds glcbMapMu.
+func (m *Manager) pinMappedGLCBLocked(id chunk.ChunkID, path string, onPath os.FileInfo) *glcb.MappedBlob {
 	v, ok := m.glcbMapped.Load(id)
 	if !ok {
 		return nil
 	}
 	e := v.(*mappedGLCBEntry)
-	if e.path != path {
+	if e.path != path || !e.blob.IsFile(onPath) {
 		m.closeMappedGLCB(id)
 		m.dropGLCBMapEntryLocked(id)
 		return nil

@@ -102,15 +102,10 @@ type mockOrch struct {
 	reloadRetentionErr error
 	disableVaultErr    error
 	enableVaultErr     error
-	drainVaultErr      error
-	cancelDrainErr     error
-	isDraining         bool
 	reconcileErr       error
 	updateMaxJobsErr   error
 	currentMaxJobs     int
 
-	drainCalls         []glid.GLID // IDs passed to DrainVault
-	cancelDrainIDs     []glid.GLID // IDs passed to CancelDrain
 	forceRemoveIDs     []glid.GLID // IDs passed to ForceRemoveVault
 	unregisterIDs      []glid.GLID // IDs passed to UnregisterVault
 	unregisterErr      error
@@ -118,8 +113,7 @@ type mockOrch struct {
 	addVaultCalls      []glid.GLID   // IDs passed to AddVault
 	reloadFiltersCalls int           // number of ReloadFilters calls
 
-	// Vault drain tracking.
-	vaultDrainCalls       []glid.GLID                                         // vault IDs passed to DrainInstance
+	// Vault instance tracking.
 	removeInstanceCalls   []glid.GLID                                         // vault IDs passed to RemoveVaultInstance
 	localInstanceExported func(vaultID glid.GLID) *orchestrator.VaultInstance // configurable return
 
@@ -172,10 +166,6 @@ func (m *mockOrch) DeleteVaultInstance(vaultID glid.GLID) bool {
 	m.removeInstanceCalls = append(m.removeInstanceCalls, vaultID)
 	return true
 }
-func (m *mockOrch) DrainInstance(_ context.Context, vaultID glid.GLID, _ orchestrator.DrainMode, _ string) error {
-	m.vaultDrainCalls = append(m.vaultDrainCalls, vaultID)
-	return nil
-}
 func (m *mockOrch) UnregisterVault(id glid.GLID) error {
 	m.unregisterIDs = append(m.unregisterIDs, id)
 	return m.unregisterErr
@@ -184,15 +174,6 @@ func (m *mockOrch) MissingVaultInstance(_ glid.GLID, _ []glid.GLID) bool { retur
 func (m *mockOrch) LocalInstanceIDs(_ glid.GLID) []glid.GLID             { return nil }
 func (m *mockOrch) AddVaultInstance(_ context.Context, _ glid.GLID, _ orchestrator.Factories) error {
 	return nil
-}
-func (m *mockOrch) DrainVault(_ context.Context, id glid.GLID, _ string) error {
-	m.drainCalls = append(m.drainCalls, id)
-	return m.drainVaultErr
-}
-func (m *mockOrch) IsDraining(glid.GLID) bool { return m.isDraining }
-func (m *mockOrch) CancelDrain(_ context.Context, id glid.GLID) error {
-	m.cancelDrainIDs = append(m.cancelDrainIDs, id)
-	return m.cancelDrainErr
 }
 func (m *mockOrch) UpdateMaxConcurrentJobs(n int) error {
 	if m.updateMaxJobsErr == nil {
@@ -967,67 +948,6 @@ func TestHandle_ConfigSignal(t *testing.T) {
 	})
 }
 
-func TestHandle_VaultDrain(t *testing.T) {
-	id := glid.New()
-
-	// reassign_triggers_drain and drain_error_logged were removed:
-	// they tested NodeID-based vault reassignment which no longer exists.
-	// With vault storage, handleVaultPut no longer calls maybeStartDrain.
-
-	t.Run("already_draining_cancels", func(t *testing.T) {
-		h := &captureHandler{}
-		mo := &mockOrch{
-			vaults:     []glid.GLID{id},
-			isDraining: true,
-		}
-		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &system.VaultConfig{ID: id, Enabled: true},
-		}, h)
-
-		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
-
-		// Draining vault on put → cancel drain and apply changes.
-		if len(mo.cancelDrainIDs) != 1 || mo.cancelDrainIDs[0] != id {
-			t.Fatalf("expected CancelDrain(%s), got %v", id, mo.cancelDrainIDs)
-		}
-	})
-
-	t.Run("reassign_back_cancels_drain", func(t *testing.T) {
-		h := &captureHandler{}
-		mo := &mockOrch{
-			vaults:     []glid.GLID{id},
-			isDraining: true,
-		}
-		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &system.VaultConfig{ID: id, Enabled: true},
-		}, h)
-
-		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
-
-		if len(mo.cancelDrainIDs) != 1 || mo.cancelDrainIDs[0] != id {
-			t.Fatalf("expected CancelDrain(%s), got %v", id, mo.cancelDrainIDs)
-		}
-	})
-
-	t.Run("cancel_drain_error_logged", func(t *testing.T) {
-		h := &captureHandler{}
-		mo := &mockOrch{
-			vaults:         []glid.GLID{id},
-			isDraining:     true,
-			cancelDrainErr: errors.New("boom"),
-		}
-		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &system.VaultConfig{ID: id, Enabled: true},
-		}, h)
-
-		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
-
-		if !h.hasErrorContaining("cancel drain") {
-			t.Fatal("expected obligation error for CancelDrain failure")
-		}
-	})
-}
-
 func (m *mockOrch) FindLocalVaultInstance(vaultID glid.GLID) *orchestrator.VaultInstance {
 	if m.localInstanceExported != nil {
 		return m.localInstanceExported(vaultID)
@@ -1114,9 +1034,8 @@ func TestHandle_NodeConfigChange_RefreshesVaultCtlMembers(t *testing.T) {
 }
 
 // When the placement leader transfers but this node stays a follower, the
-// local VaultInstance.LeaderNodeID must be refreshed so the lifecycle
-// reconciler's RequestReplicaCatchup targets the new leader instead of looping
-// forever against the old (stale) one. That refresh lives in the
+// local VaultInstance.LeaderNodeID must be refreshed so leader-directed work
+// targets the new leader instead of the old (stale) one. That refresh lives in the
 // orchestrator's guarded ReconcileVaultPlacement; the dispatcher's job is to
 // DELEGATE that reconcile on NotifyVaultPlacementsSet. The pointer refresh
 // itself is covered by TestReconcileInstanceRole in the orchestrator package.

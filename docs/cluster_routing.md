@@ -223,7 +223,7 @@ All inter-node communication runs over a single gRPC server per node
 | Stats | Broadcast |
 | Ingestion | ForwardRecords |
 | Inspector | ForwardListChunks, ForwardGetIndexes, ForwardGetChunk, ForwardAnalyzeChunk, ForwardValidateVault |
-| Operations | ForwardSealVault, ForwardReindexVault, ForwardExportToVault |
+| Operations | ForwardReindexVault, ForwardExportToVault |
 | Context | ForwardGetContext, ForwardExplain |
 | Membership | NotifyEviction, ForwardRemoveNode, ForwardSetNodeSuffrage |
 | Files | ListPeerManagedFiles |

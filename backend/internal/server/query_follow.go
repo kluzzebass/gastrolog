@@ -95,7 +95,7 @@ func (s *QueryServer) startRemoteFollows(ctx context.Context, q query.Query) <-c
 		return nil
 	}
 
-	queryExpr := q.String()
+	queryExpr := forwardedQueryExpression(q)
 	merged := make(chan *apiv1.Record, 64)
 	var wg sync.WaitGroup
 
@@ -272,6 +272,9 @@ func drainLocalFollow(localCh <-chan localFollowMsg, stream *connect.ServerStrea
 func followError(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil
+	}
+	if resourceExhausted(err) {
+		return connect.NewError(connect.CodeResourceExhausted, err)
 	}
 	return errInternal(err)
 }

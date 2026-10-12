@@ -83,10 +83,12 @@ func (e *Engine) GetContext(ctx context.Context, ref ContextRef, before, after i
 
 	// Fetch records before: search backward from anchor timestamp.
 	// Request extra to account for deduplication of the anchor itself.
+	budget := e.NewBudget()
 	beforeQuery := Query{
 		End:       anchorTS,
 		Limit:     before + 1,
 		IsReverse: true,
+		budget:    budget,
 	}
 	beforeIter, _ := e.Search(ctx, beforeQuery, nil)
 	var beforeRecs []chunk.Record
@@ -110,8 +112,9 @@ func (e *Engine) GetContext(ctx context.Context, ref ContextRef, before, after i
 
 	// Fetch records after: search forward from anchor timestamp.
 	afterQuery := Query{
-		Start: anchorTS,
-		Limit: after + 1,
+		Start:  anchorTS,
+		Limit:  after + 1,
+		budget: budget,
 	}
 	afterIter, _ := e.Search(ctx, afterQuery, nil)
 	var afterRecs []chunk.Record

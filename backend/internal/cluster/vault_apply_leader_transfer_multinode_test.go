@@ -69,7 +69,7 @@ func TestFourNodeVaultCtlForwardSurvivesLeadershipTransfer(t *testing.T) {
 		now := time.Now()
 		fwd := cluster.NewVaultCtlChunkApplyForwarder(
 			stale.raft, gid, vaultID, stale.fsm.ApplyWait(),
-			stale.node.srv.PeerConns(), cluster.ReplicationTimeout)
+			stale.node.srv.PeerConns(), cluster.RaftApplyTimeout)
 		// The forwarder absorbs the transfer inside its own budget; an
 		// ErrNoRaftLeader here means that budget ended mid-election, which a
 		// caller may retry. Any other error during a healthy transfer means

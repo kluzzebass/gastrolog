@@ -1,7 +1,9 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -211,7 +213,7 @@ func TestVerifyAndPromoteGLCBTruncated(t *testing.T) {
 }
 
 // glcbDigest reads the whole-blob digest a built GLCB carries in its TOC
-// footer, which is what the manifest records at upload time.
+// footer, which is what the manifest records at seal.
 func glcbDigest(t *testing.T, path string) [32]byte {
 	t.Helper()
 	f, err := os.Open(filepath.Clean(path))
@@ -279,20 +281,52 @@ func TestVerifyAndPromoteGLCBAcceptsAMatchingDigest(t *testing.T) {
 	}
 }
 
-// A chunk that has never been uploaded carries no digest. The pull still
-// proceeds, and says which case it is rather than passing over it silently.
-func TestVerifyAndPromoteGLCBRecordsAnAbsentDigest(t *testing.T) {
+// A copy altered after it was written still parses, still carries the record
+// count, and still carries its original footer — so its footer digest matches
+// the manifest. Only hashing the bytes rejects it.
+func TestVerifyAndPromoteGLCBRejectsAlteredBytesUnderAnIntactFooter(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		name        string
-		cloudBacked bool
-		wantLevel   slog.Level
-	}{
-		{"never uploaded", false, slog.LevelDebug},
-		{"cloud-backed with no recorded digest", true, slog.LevelWarn},
+	src, count := buildCatchupTestGLCB(t, 3)
+	agreed := glcbDigest(t, src)
+	dir := t.TempDir()
+	tmp := copyToTemp(t, src, dir)
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+	altered := bytes.Index(data, []byte("catchup-record"))
+	if altered < 0 {
+		t.Fatal("premise: the record payload is in the blob")
+	}
+	data[altered] ^= 0x01
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(dir, "data.glcb")
+
+	e := vaultctlfsm.ManifestEntry{ID: chunk.NewChunkID(), State: chunk.ChunkStateSealed, RecordCount: count, Hash: agreed}
+	if res, err := chunking.BuildResultFromExistingGLCB(tmp, time.Time{}); err != nil || int64(res.RecordCount) != count {
+		t.Fatalf("premise: the altered copy parses with the manifest's record count (count=%d err=%v)", res.RecordCount, err)
+	}
+	if glcbDigest(t, tmp) != agreed {
+		t.Fatal("premise: the altered copy's footer still records the agreed digest")
+	}
+
+	if err := verifyAndPromoteGLCB(tmp, dest, e, slog.New(slog.DiscardHandler)); err == nil {
+		t.Fatal("a copy whose bytes no longer hash to the agreed digest was promoted")
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("the altered copy reached the canonical path (err=%v)", err)
+	}
+}
+
+// Every seal records the leader's digest, so a sealed chunk without one was
+// sealed by a path that built no GLCB. The pull still checks the bytes against
+// their own footer and proceeds, and says so at warn.
+func TestVerifyAndPromoteGLCBWarnsOnAnAbsentDigest(t *testing.T) {
+	t.Parallel()
+	for _, cloudBacked := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cloud_backed=%v", cloudBacked), func(t *testing.T) {
 			t.Parallel()
 			src, count := buildCatchupTestGLCB(t, 3)
 			dir := t.TempDir()
@@ -301,7 +335,7 @@ func TestVerifyAndPromoteGLCBRecordsAnAbsentDigest(t *testing.T) {
 
 			rec := &levelRecorder{}
 			e := vaultctlfsm.ManifestEntry{
-				ID: chunk.NewChunkID(), RecordCount: count, CloudBacked: tc.cloudBacked,
+				ID: chunk.NewChunkID(), RecordCount: count, CloudBacked: cloudBacked,
 			}
 			if err := verifyAndPromoteGLCB(tmp, dest, e, slog.New(rec)); err != nil {
 				t.Fatalf("verifyAndPromoteGLCB: %v", err)
@@ -309,9 +343,8 @@ func TestVerifyAndPromoteGLCBRecordsAnAbsentDigest(t *testing.T) {
 			if _, err := os.Stat(dest); err != nil {
 				t.Fatalf("promoted GLCB missing: %v", err)
 			}
-			if !rec.sawLevel(tc.wantLevel) {
-				t.Fatalf("accepting a blob with no digest recorded nothing at %v (levels seen: %v)",
-					tc.wantLevel, rec.levels)
+			if !rec.sawLevel(slog.LevelWarn) {
+				t.Fatalf("accepting a blob with no agreed digest recorded nothing at WARN (levels seen: %v)", rec.levels)
 			}
 		})
 	}

@@ -30,9 +30,9 @@ func (o *Orchestrator) ApplyVaultControlPlane(vaultID glid.GLID, data []byte) er
 		return fmt.Errorf("vault control-plane raft group %q not running on this node", gid)
 	}
 	if o.peerConns == nil {
-		return g.Raft.Apply(data, cluster.ReplicationTimeout).Error()
+		return g.Raft.Apply(data, cluster.RaftApplyTimeout).Error()
 	}
-	fwd := cluster.NewVaultApplyForwarder(g.Raft, gid, groupApplyWait(g), o.peerConns, cluster.ReplicationTimeout)
+	fwd := cluster.NewVaultApplyForwarder(g.Raft, gid, groupApplyWait(g), o.peerConns, cluster.RaftApplyTimeout)
 	return fwd.Apply(data)
 }
 

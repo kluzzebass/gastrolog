@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"connectrpc.com/connect"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
@@ -68,10 +70,20 @@ func errUnauthenticated(err error) *connect.Error {
 // query asked for more than a node will give it, which the caller can act on
 // by narrowing the query, and which monitoring should not read as a node fault.
 func errQueryExecution(err error) *connect.Error {
-	if _, ok := errors.AsType[*query.MemoryLimitError](err); ok {
+	if resourceExhausted(err) {
 		return connect.NewError(connect.CodeResourceExhausted, err)
 	}
 	return connect.NewError(connect.CodeInternal, err)
+}
+
+// resourceExhausted reports whether err is a query outgrowing its memory
+// budget — on this node, or on the peer that ran its share and said so with a
+// ResourceExhausted status.
+func resourceExhausted(err error) bool {
+	if _, ok := errors.AsType[*query.MemoryLimitError](err); ok {
+		return true
+	}
+	return status.Code(err) == codes.ResourceExhausted || connect.CodeOf(err) == connect.CodeResourceExhausted
 }
 
 // errRequiredMsg returns an InvalidArgument error with a custom message.

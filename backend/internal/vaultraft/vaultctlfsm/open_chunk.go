@@ -106,15 +106,15 @@ func (f *FSM) OpenChunk() *OpenChunkManifest {
 	return copyOpenChunkManifest(f.openChunk)
 }
 
-// SealedManifest returns a copy of the oldest sealed manifest awaiting local
-// GLCB build, or nil when the queue is empty.
+// SealedManifest returns a copy of the seal-queue head — the oldest sealed
+// manifest awaiting the leader's CmdSealChunk — or nil when the queue is empty.
 func (f *FSM) SealedManifest() *OpenChunkManifest {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return copyOpenChunkManifest(f.sealedManifestHeadLocked())
 }
 
-// SealedManifestCount returns how many manifests are awaiting local GLCB build.
+// SealedManifestCount returns how many manifests are in the seal queue.
 func (f *FSM) SealedManifestCount() int {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -146,6 +146,14 @@ func (f *FSM) AwaitingBuild(id chunk.ChunkID) bool {
 	return f.sealedManifestByIDLocked(id) != nil
 }
 
+// SealQueueManifest returns a copy of id's manifest in the seal queue, or nil
+// when id is not queued.
+func (f *FSM) SealQueueManifest(id chunk.ChunkID) *OpenChunkManifest {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return copyOpenChunkManifest(f.sealedManifestByIDLocked(id))
+}
+
 func (f *FSM) sealedManifestByIDLocked(id chunk.ChunkID) *OpenChunkManifest {
 	for _, m := range f.sealedManifests {
 		if m != nil && m.ChunkID == id {
@@ -168,12 +176,56 @@ func (f *FSM) appendSealedManifestLocked(m *OpenChunkManifest) {
 	f.sealedManifests = append(f.sealedManifests, m)
 }
 
-func (f *FSM) popSealedManifestHeadIfIDLocked(id chunk.ChunkID) bool {
+// popSealedManifestHeadIfIDLocked removes and returns the seal-queue head when
+// it is id's manifest, or returns nil. Caller MUST hold f.mu.
+func (f *FSM) popSealedManifestHeadIfIDLocked(id chunk.ChunkID) *OpenChunkManifest {
 	if len(f.sealedManifests) == 0 || f.sealedManifests[0].ChunkID != id {
-		return false
+		return nil
 	}
+	head := f.sealedManifests[0]
 	f.sealedManifests = f.sealedManifests[1:]
-	return true
+	return head
+}
+
+// SealedChunkManifestIDs returns, in seal order, the chunk IDs of sealed
+// manifests whose CmdSealChunk has committed and whose refs are still
+// retained for homes that have not built the chunk.
+func (f *FSM) SealedChunkManifestIDs() []chunk.ChunkID {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if len(f.sealedChunkManifests) == 0 {
+		return nil
+	}
+	out := make([]chunk.ChunkID, len(f.sealedChunkManifests))
+	for i, m := range f.sealedChunkManifests {
+		out[i] = m.ChunkID
+	}
+	return out
+}
+
+// SealedChunkManifest returns a copy of the retained manifest of a chunk whose
+// CmdSealChunk has committed, or nil when none is retained.
+func (f *FSM) SealedChunkManifest(id chunk.ChunkID) *OpenChunkManifest {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	for _, m := range f.sealedChunkManifests {
+		if m.ChunkID == id {
+			return copyOpenChunkManifest(m)
+		}
+	}
+	return nil
+}
+
+// dropSealedChunkManifestsLocked forgets the retained manifests of the given
+// chunks. Caller MUST hold f.mu.
+func (f *FSM) dropSealedChunkManifestsLocked(ids map[chunk.ChunkID]struct{}) {
+	if len(ids) == 0 || len(f.sealedChunkManifests) == 0 {
+		return
+	}
+	f.sealedChunkManifests = slices.DeleteFunc(f.sealedChunkManifests, func(m *OpenChunkManifest) bool {
+		_, drop := ids[m.ChunkID]
+		return drop
+	})
 }
 
 func (f *FSM) removeSealedManifestByIDLocked(id chunk.ChunkID) {
@@ -239,9 +291,10 @@ func (s *ReleaseScan) Entry(id glid.GLID) *CompletedSegmentEntry {
 }
 
 // SnapshotReleaseScan builds a ReleaseScan under a single read lock.
-// minChunkHolders parameterizes the supersession precompute; <= 0 disables it
-// (placement wiring absent), leaving Superseded empty.
-func (f *FSM) SnapshotReleaseScan(minChunkHolders int) *ReleaseScan {
+// placement is the vault's current placement node set and parameterizes the
+// supersession precompute; an empty placement disables it (placement wiring
+// absent or unresolved), leaving Superseded empty.
+func (f *FSM) SnapshotReleaseScan(placement []string) *ReleaseScan {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
@@ -263,11 +316,11 @@ func (f *FSM) SnapshotReleaseScan(minChunkHolders int) *ReleaseScan {
 		}
 	}
 	maps.Copy(scan.Resume, f.segmentResume)
-	if minChunkHolders > 0 {
+	if len(placement) > 0 {
 		scan.Superseded = make(map[glid.GLID]struct{})
 		for i := range scan.Entries {
 			id := scan.Entries[i].SegmentID
-			if f.segmentSupersededLocked(id, minChunkHolders) {
+			if f.segmentSupersededLocked(id, placement) {
 				scan.Superseded[id] = struct{}{}
 			}
 		}
@@ -276,31 +329,32 @@ func (f *FSM) SnapshotReleaseScan(minChunkHolders int) *ReleaseScan {
 }
 
 // SegmentSuperseded reports whether segID's records now live in chunks
-// replicated to at least minChunkHolders nodes — the release/purge signal that
-// supersedes the raw segment (design-notes 39, refined R3: RF, not home-set, so
-// a dead home never pins the segment; the dead home catches up at the chunk
-// level). True only when the segment has been chunked (≥1 containing chunk) and
-// every containing chunk is sealed and held by ≥ minChunkHolders nodes, or has
-// already aged out (tombstoned/expired — the records are gone by retention, so
-// the segment is equally free to drop). minChunkHolders ≤ 0 means placement
-// wiring is absent (single-node/test); return false so release falls back to
-// the holders⊇homes fast path.
-func (f *FSM) SegmentSuperseded(segID glid.GLID, minChunkHolders int) bool {
-	if minChunkHolders <= 0 {
+// replicated to HolderQuorum(placement) placed holders — the release/purge
+// signal that supersedes the raw segment (design-notes 39, refined R3: RF, not
+// home-set, so a dead home never pins the segment; the dead home catches up at
+// the chunk level). True only when the segment has been chunked (≥1 containing
+// chunk) and every containing chunk is sealed and either held by enough members
+// of placement or cloud-backed, or has already aged out (tombstoned/expired —
+// the records are gone by retention, so the segment is equally free to drop).
+// An empty placement means placement wiring is absent or unresolved
+// (single-node/test); return false so release falls back to the holders⊇homes
+// fast path.
+func (f *FSM) SegmentSuperseded(segID glid.GLID, placement []string) bool {
+	if len(placement) == 0 {
 		return false
 	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.segmentSupersededLocked(segID, minChunkHolders)
+	return f.segmentSupersededLocked(segID, placement)
 }
 
-func (f *FSM) segmentSupersededLocked(segID glid.GLID, minChunkHolders int) bool {
+func (f *FSM) segmentSupersededLocked(segID glid.GLID, placement []string) bool {
 	chunkIDs := f.segmentChunks[segID]
 	if len(chunkIDs) == 0 {
 		return false
 	}
 	for _, id := range chunkIDs {
-		if !f.chunkReplicatedLocked(id, minChunkHolders) {
+		if !f.chunkReplicatedLocked(id, placement) {
 			return false
 		}
 	}
@@ -308,9 +362,12 @@ func (f *FSM) segmentSupersededLocked(segID glid.GLID, minChunkHolders int) bool
 }
 
 // chunkReplicatedLocked reports whether chunk id is durable enough to supersede
-// a segment: sealed and held by ≥ minChunkHolders nodes, or already gone (its
-// records aged out under retention, which only deletes sealed chunks).
-func (f *FSM) chunkReplicatedLocked(id chunk.ChunkID, minChunkHolders int) bool {
+// a segment: sealed and held by HolderQuorum(placement) members of placement,
+// sealed and cloud-backed, or already gone (its records aged out under
+// retention, which only deletes sealed chunks). A cloud-backed chunk's durable
+// copy is the uploaded object; its holders are warm caches that eviction
+// withdraws, and counting them would re-pin a segment every time a home evicts.
+func (f *FSM) chunkReplicatedLocked(id chunk.ChunkID, placement []string) bool {
 	entry := f.chunks[id]
 	if entry == nil {
 		return true
@@ -318,7 +375,10 @@ func (f *FSM) chunkReplicatedLocked(id chunk.ChunkID, minChunkHolders int) bool 
 	if entry.State != chunk.ChunkStateSealed {
 		return false
 	}
-	return len(entry.Holders) >= minChunkHolders
+	if entry.CloudBacked {
+		return true
+	}
+	return PlacedHolderCount(entry.Holders, placement) >= HolderQuorum(placement)
 }
 
 func copyOpenChunkManifest(m *OpenChunkManifest) *OpenChunkManifest {
@@ -545,6 +605,7 @@ func (f *FSM) ensureManifestChunkEntryLocked(m *OpenChunkManifest, state chunk.C
 // Caller MUST hold f.mu.
 func (f *FSM) clearOpenManifestStateIfChunkIDLocked(id chunk.ChunkID) {
 	f.removeSealedManifestByIDLocked(id)
+	f.dropSealedChunkManifestsLocked(map[chunk.ChunkID]struct{}{id: {}})
 	if f.openChunk != nil && f.openChunk.ChunkID == id {
 		f.openChunk = nil
 	}
@@ -614,7 +675,8 @@ func (f *FSM) applySealOpenChunkManifestLocked(c *gastrologv1.SealOpenChunkManif
 }
 
 // SegmentReferencedInManifest reports whether segmentID appears in the open
-// or sealed (awaiting build) chunk manifest.
+// manifest or a sealed manifest in the seal queue. Sealed-chunk manifests do
+// not count: they never hold a segment back from release.
 func (f *FSM) SegmentReferencedInManifest(segmentID glid.GLID) bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -623,11 +685,12 @@ func (f *FSM) SegmentReferencedInManifest(segmentID glid.GLID) bool {
 
 // SegmentReleased reports whether segmentID was dropped from the registry
 // by a ReleaseSegments apply. This is positive, replicated, snapshot-
-// persisted evidence of release — the staging-orphan sweep uses it to
-// delete local segment files whose release effect this node missed while
-// offline. Registry absence alone is NOT evidence: a completed segment
+// persisted evidence of release — the released-segment catch-up uses it to
+// delete local segment files whose release event this node did not consume. Registry absence alone is NOT evidence: a completed segment
 // awaiting its distribution publish is also registry-absent, and deleting
-// it would lose ingested records.
+// it would lose ingested records. The tombstone is pruned only after every
+// vault-ctl member has confirmed purging it, so no node is left holding bytes
+// it can no longer recognise as released.
 func (f *FSM) SegmentReleased(segmentID glid.GLID) bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -672,6 +735,11 @@ func (f *FSM) segmentRangeReferencedLocked(segID glid.GLID, first, last uint32) 
 
 func (f *FSM) applyReleaseSegments(c *gastrologv1.ReleaseSegmentsCommand) []glid.GLID {
 	var released []glid.GLID
+	seq := f.releases.seq + 1
+	// A sealed chunk whose segment is released can no longer be built from
+	// segments on any home; a home still missing it pulls the GLCB from a
+	// peer instead.
+	unbuildable := make(map[chunk.ChunkID]struct{})
 	for _, raw := range c.GetSegmentIds() {
 		segID := glid.FromBytes(raw)
 		if segID == glid.Nil {
@@ -688,14 +756,21 @@ func (f *FSM) applyReleaseSegments(c *gastrologv1.ReleaseSegmentsCommand) []glid
 			released = append(released, segID)
 		}
 		if f.releasedSegments == nil {
-			f.releasedSegments = make(map[glid.GLID]struct{})
+			f.releasedSegments = make(map[glid.GLID]uint64)
 		}
-		f.releasedSegments[segID] = struct{}{}
+		if _, tombstoned := f.releasedSegments[segID]; !tombstoned {
+			f.releasedSegments[segID] = seq
+			f.releases.seq = seq
+		}
 		delete(f.completedSegments, segID)
 		f.removeCompletedSegmentOrder(segID)
 		delete(f.segmentResume, segID)
+		for _, chunkID := range f.segmentChunks[segID] {
+			unbuildable[chunkID] = struct{}{}
+		}
 		delete(f.segmentChunks, segID)
 	}
+	f.dropSealedChunkManifestsLocked(unbuildable)
 	return released
 }
 
@@ -770,13 +845,23 @@ func (f *FSM) snapshotOpenChunkLocked() *gastrologv1.OpenChunkManifestState {
 	return openChunkManifestToProto(f.openChunk)
 }
 
-func (f *FSM) snapshotSealedManifestsLocked() []*gastrologv1.OpenChunkManifestState {
-	if len(f.sealedManifests) == 0 {
+func snapshotManifests(manifests []*OpenChunkManifest) []*gastrologv1.OpenChunkManifestState {
+	if len(manifests) == 0 {
 		return nil
 	}
-	out := make([]*gastrologv1.OpenChunkManifestState, 0, len(f.sealedManifests))
-	for _, m := range f.sealedManifests {
+	out := make([]*gastrologv1.OpenChunkManifestState, 0, len(manifests))
+	for _, m := range manifests {
 		out = append(out, openChunkManifestToProto(m))
+	}
+	return out
+}
+
+func manifestsFromProto(states []*gastrologv1.OpenChunkManifestState) []*OpenChunkManifest {
+	var out []*OpenChunkManifest
+	for _, st := range states {
+		if m := openChunkManifestFromProto(st); m != nil {
+			out = append(out, m)
+		}
 	}
 	return out
 }
@@ -821,12 +906,8 @@ func (f *FSM) snapshotSegmentChunksLocked() []*gastrologv1.SegmentChunkIDs {
 
 func (f *FSM) restoreOpenChunkLocked(snap *gastrologv1.VaultCtlSnapshot) {
 	f.openChunk = openChunkManifestFromProto(snap.GetOpenChunk())
-	f.sealedManifests = nil
-	for _, sm := range snap.GetSealedManifests() {
-		if m := openChunkManifestFromProto(sm); m != nil {
-			f.sealedManifests = append(f.sealedManifests, m)
-		}
-	}
+	f.sealedManifests = manifestsFromProto(snap.GetSealedManifests())
+	f.sealedChunkManifests = manifestsFromProto(snap.GetSealedChunkManifests())
 	f.segmentResume = make(map[glid.GLID]uint32, len(snap.GetSegmentResume()))
 	for _, entry := range snap.GetSegmentResume() {
 		f.segmentResume[glid.FromBytes(entry.GetSegmentId())] = entry.GetNextRecordNumber()

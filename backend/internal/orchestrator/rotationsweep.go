@@ -65,7 +65,7 @@ func (o *Orchestrator) pipelineConfigReconcile() {
 }
 
 // ReconcilePlacements aligns every local vault instance's role and (for
-// leaders) sealed-chunk replication targets with the current placement
+// leaders) follower targets with the current placement
 // config, then republishes the pipeline routing table. This is the
 // event-driven successor to the retired 15s placement sweep:
 // the FSM config dispatcher calls it when a change lands that can move roles
@@ -115,7 +115,7 @@ func (o *Orchestrator) ReconcilePlacements(ctx context.Context) {
 	}
 	o.mu.RUnlock()
 
-	o.wakeStalePendingAckReconcile(moved)
+	o.wakeOutsidePlacementPrune(moved)
 
 	// A vault whose placements resolve to no leader is beyond self-healing —
 	// sustained, that is an operator problem (alarm after the catalog's
@@ -127,7 +127,7 @@ func (o *Orchestrator) ReconcilePlacements(ctx context.Context) {
 }
 
 // ReconcileVaultPlacement aligns ONE local vault instance's role and (for a
-// leader) sealed-chunk replication targets with the current placement config.
+// leader) follower targets with the current placement config.
 // The FSM config dispatcher calls it on every single-vault placement change
 // (NotifyVaultPlacementsSet, NotifyVaultPut) so role and FollowerTargets move
 // the instant placements change — the two edges the retired sweep used to
@@ -173,14 +173,14 @@ func (o *Orchestrator) ReconcileVaultPlacement(ctx context.Context, vaultID glid
 	}
 	o.mu.RUnlock()
 
-	o.wakeStalePendingAckReconcile(moved)
+	o.wakeOutsidePlacementPrune(moved)
 
 	if hasInstance {
 		o.updateLeaderlessAlarm(vaultID, vaultCfg.Name, !leaderResolved)
 	}
 }
 
-// wakeStalePendingAckReconcile fires the reconciler's stale-pending-delete-ack
+// wakeOutsidePlacementPrune fires the reconciler's outside-placement prune
 // category for every instance whose placement membership just moved — a role
 // flip, a leader-pointer change, or a FollowerTargets reassignment.
 //
@@ -189,18 +189,18 @@ func (o *Orchestrator) ReconcileVaultPlacement(ctx context.Context, vaultID glid
 // with a leadership change; it does NOT cover a rebalance under a STABLE leader
 // — placements move a follower from node A to node B, the leader keeps both its
 // placement role and its vault-ctl Raft leadership, and no lead-gained edge
-// fires. The leader's pendingDeletes still name A in ExpectedFrom, so those
-// deletes stay stuck until the periodic backstop tick notices. The reassignment
-// IS the event; wake on it.
+// fires. The leader's pendingDeletes still name A in ExpectedFrom and the
+// chunk and segment holder sets still name A, so those deletes stay stuck and
+// those claims linger until the periodic backstop tick notices. The
+// reassignment IS the event; wake on it.
 //
-// Deliberately ONLY the ack category, not the whole ReconcileMembershipCatchup
-// set. A placement move directly invalidates ExpectedFrom — that set is
-// literally derived from FollowerTargets, so the reassignment is its exact
-// upstream edge. The other three categories in that set are not this event's:
-// missing-replica catchup for a newly added follower is already dispatcher-owned
-// (catchupScheduler / newFollowersForInstance) and, on pipeline vaults, carries
-// holder-receipt ack/revoke that must not race a GLCB build that is merely
-// mid-flight; stale-leader-FSM and abandoned-transfer are grace-period GCs whose
+// Deliberately ONLY the prune category, not the whole ReconcileMembershipCatchup
+// set. A placement move directly invalidates ExpectedFrom and the holder sets
+// — ExpectedFrom is literally derived from FollowerTargets, and a holder
+// outside them has no vault instance left to maintain its claim — so the
+// reassignment is their exact upstream edge. The other three categories in that set are not this event's:
+// missing-replica catchup carries holder-receipt ack/revoke that must not race
+// a GLCB build that is merely mid-flight; stale-leader-FSM and abandoned-transfer are grace-period GCs whose
 // edge is elapsed time, not membership. They keep their existing lead-gained
 // wake and the periodic backstop.
 //
@@ -213,9 +213,9 @@ func (o *Orchestrator) ReconcileVaultPlacement(ctx context.Context, vaultID glid
 // Dispatched on auxWg for the same reason as onVaultCtlLeadGained: it proposes
 // Raft applies, and the callers run under o.mu (and, via the config dispatcher,
 // on the FSM apply path) where a synchronous Apply would deadlock.
-func (o *Orchestrator) wakeStalePendingAckReconcile(moved []*VaultLifecycleReconciler) {
+func (o *Orchestrator) wakeOutsidePlacementPrune(moved []*VaultLifecycleReconciler) {
 	for _, rec := range moved {
-		o.auxWg.Go(rec.SweepStalePendingDeleteAcks)
+		o.auxWg.Go(rec.SweepNodesOutsidePlacement)
 	}
 }
 
@@ -261,8 +261,8 @@ func replicationTargetsEqual(a, b []system.ReplicationTarget) bool {
 //
 // Reports changed=true when the instance's placement membership actually moved
 // — a role flip, or a follower's leader pointer moving to a different node.
-// Callers use it to wake the reconciler's stale-pending-ack reconcile on the
-// placement event (wakeStalePendingAckReconcile) instead of leaving it to the
+// Callers use it to wake the reconciler's outside-placement prune on the
+// placement event (wakeOutsidePlacementPrune) instead of leaving it to the
 // backstop tick.
 func (o *Orchestrator) reconcileInstanceRole(sys *system.System, vaultCfg system.VaultConfig, vaultInst *VaultInstance) (leaderResolved, changed bool) {
 	leaderNodeID := system.LeaderNodeID(sys.PlacementsFor(vaultCfg.ID), sys.Runtime.NodeStorageConfigs)
@@ -307,14 +307,15 @@ func replicationTargetNodes(targets []system.ReplicationTarget) []string {
 	return ids
 }
 
-// refreshFollowerTargets refreshes a leader instance's sealed-chunk replication
-// targets from the current placement config. Called from ReconcileVaultPlacement
-// / ReconcilePlacements on the placement event (caller holds o.mu.RLock). Logs
+// refreshFollowerTargets refreshes a leader instance's follower targets from
+// the current placement config. Called from ReconcileVaultPlacement /
+// ReconcilePlacements on the placement event (caller holds o.mu.RLock). Logs
 // only on change so reconfiguration is auditable without noise, and reports
 // whether the target set moved so the caller can wake the reconciler's
-// stale-pending-ack reconcile (wakeStalePendingAckReconcile) — a leader whose
+// outside-placement prune (wakeOutsidePlacementPrune) — a leader whose
 // follower set shrank holds pendingDeletes naming the departed node in
-// ExpectedFrom, which nothing else unsticks under a stable leader.
+// ExpectedFrom and holder sets naming it, which nothing else cleans under a
+// stable leader.
 func (o *Orchestrator) refreshFollowerTargets(sys *system.System, vaultCfg system.VaultConfig, vaultInst *VaultInstance) (changed bool) {
 	newTargets := system.FollowerTargets(sys.PlacementsFor(vaultCfg.ID), sys.Runtime.NodeStorageConfigs)
 	if !replicationTargetsEqual(vaultInst.FollowerTargets, newTargets) {

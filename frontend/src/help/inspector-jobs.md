@@ -38,13 +38,13 @@ Some scheduled work is created per vault or chunk. Names follow predictable patt
 
 | Pattern | Example | Meaning |
 |---------|---------|---------|
-| `pipeline-rotation-*` | `pipeline-rotation-<vault-id>` | Pipeline chunk cron rotation for a vault |
-| `post-seal-*` | `post-seal-<chunk-id>` | Post-seal pipeline for a chunk |
-| `cloud-upload-*` | `cloud-upload:<vault-id>:<chunk-id>` | Upload sealed chunk to cloud storage — one job per chunk, shared by the live seal effect and the catch-up sweep |
-| `replicate-*` | `replicate-<chunk-id>` | Replicate a sealed chunk to followers |
-| `replication-catchup-*` | `replication-catchup-<node>` | Catch up sealed chunks to a follower |
-| `rebuild-index-*` | `rebuild-index-<chunk-id>` | Rebuild missing indexes for one chunk |
-| `rebuild-all-*` | `rebuild-all-<vault-id>` | Rebuild all indexes for a vault |
-| `drain-vault-*` | `drain-vault-<vault-id>` | Drain a vault off this node |
+| `pipeline-chunk-cron:*` | `pipeline-chunk-cron:<vault-id>` | Pipeline chunk cron rotation for a vault |
+| `post-seal:*` | `post-seal:<vault-id>:<chunk-id>` | Post-seal pipeline for a chunk |
+| `cloud-upload:*` | `cloud-upload:<vault-id>:<chunk-id>` | Upload sealed chunk to cloud storage — one job per chunk, shared by the live seal effect and the catch-up sweep |
+| `glcb-catchup:*` | `glcb-catchup:<vault-id>:<chunk-id>` | Pull this home's missing copy of a sealed chunk from a peer home |
+| `index-rebuild:*` | `index-rebuild:<vault-id>:<chunk-id>` | Build missing indexes for one chunk |
+| `home-index-sweep:*` | `home-index-sweep:<vault-id>` | Build missing indexes for the chunks this home holds of a vault, once its vault instance and home registration both exist |
+
+Tearing a vault down on a node — deleting it, unregistering it, or removing its placement — cancels that vault's pending `post-seal`, `index-rebuild`, `home-index-sweep`, `glcb-catchup` and `cloud-upload` jobs on that node.
 
 Task rows (one-time jobs) still show a human description in the card header when the scheduler has one.

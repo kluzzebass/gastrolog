@@ -59,7 +59,7 @@ func TestPostSealPurgeLoggingDoesNotRaceWorkerStart(t *testing.T) {
 
 	// The leader's seal reaches this follower home: the cleared callback
 	// spawns the post-seal goroutine, which purges and logs.
-	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt.Add(time.Second), 1, 100, base, base, base, true, sealedAt.Add(time.Second)))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt.Add(time.Second), 1, 100, base, base, base, true, sealedAt.Add(time.Second), [32]byte{}))
 	headPath := paths.HeadSegment(home, segID)
 	waittest.Progress(t, "post-seal goroutine purged the head copy", func() (string, bool) {
 		_, err := os.Stat(headPath)

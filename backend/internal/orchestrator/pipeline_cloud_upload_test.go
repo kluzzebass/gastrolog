@@ -70,7 +70,7 @@ func TestSchedulePipelineCloudUpload_LeaderUploadsExternalGLCB(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(sealedID, now, now, now)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(sealedID, now, 8, 512, now, now, now, false, now)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(sealedID, now, 8, 512, now, now, now, false, now, [32]byte{})}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -252,7 +252,7 @@ func TestSchedulePipelineCloudUpload_LeaderUploadsWithoutEagerRegistration(t *te
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(sealedID, now, now, now)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(sealedID, now, 8, 512, now, now, now, false, now)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(sealedID, now, 8, 512, now, now, now, false, now, [32]byte{})}); err != nil {
 		t.Fatal(err)
 	}
 

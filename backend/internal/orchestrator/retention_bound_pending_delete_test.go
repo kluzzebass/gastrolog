@@ -248,7 +248,7 @@ func (c *boundCluster) startNode(n *boundClusterNode, fsm *vaultctlfsm.FSM) {
 		Chunks:  cm,
 		Indexes: indexfile.NewManager(n.dir, nil, nil, cm),
 	}
-	inst.applyRaftCallbacks(buildVaultRaftCallbacks(nil, fsm, c.log))
+	inst.applyRaftCallbacks(buildVaultRaftCallbacks(nil, nil, func() *vaultctlfsm.FSM { return fsm }, c.log))
 	inst.RaftLeadershipFacet = RaftLeadershipFacet{
 		HasRaftLeader: func() bool { return true },
 		IsRaftLeader:  func() bool { return isLeader },
@@ -359,7 +359,7 @@ func (c *boundCluster) seedAt(starts []time.Time, sealedAt time.Time, onLeader f
 			}
 		}
 		c.log.mustCommit(vaultctlfsm.MarshalCreateChunk(id, start, start, start))
-		c.log.mustCommit(vaultctlfsm.MarshalSealChunk(id, end, int64(len(recs)), 100, start, end, end, true, sealedAt))
+		c.log.mustCommit(vaultctlfsm.MarshalSealChunk(id, end, int64(len(recs)), 100, start, end, end, true, sealedAt, [32]byte{}))
 		ids = append(ids, id)
 	}
 	return ids
@@ -722,8 +722,7 @@ func TestBoundRecheckEdgeCases(t *testing.T) {
 		if e == nil {
 			t.Fatal("fixture: the pending chunk must still be in the manifest")
 		}
-		c.log.mustCommit(vaultctlfsm.MarshalSealChunk(e.ID, e.WriteEnd, e.RecordCount, e.Bytes,
-			e.IngestStart, e.IngestEnd, e.SourceEnd, e.IngestTSMonotonic, time.Now()))
+		c.log.mustCommit(vaultctlfsm.MarshalSealChunk(e.ID, e.WriteEnd, e.RecordCount, e.Bytes, e.IngestStart, e.IngestEnd, e.SourceEnd, e.IngestTSMonotonic, time.Now(), [32]byte{}))
 
 		c.runner.sweep(rules)
 		c.assertUncapped("pending chunk sealed again")

@@ -14,6 +14,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/pipeline/collection"
+	"gastrolog/internal/query"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
@@ -43,12 +44,6 @@ type ContextExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.
 
 // ListChunksExecutor lists chunks in a local vault for remote requests.
 type ListChunksExecutor func(ctx context.Context, vaultID glid.GLID) ([]*gastrologv1.ChunkMeta, error)
-
-// WaitVaultReadyExecutor blocks until a local vault is registered and ready to
-// accept transferred records, or ctx is cancelled. Used by the
-// ForwardWaitVaultReady handler so a draining source node can block on the
-// target's vault-ready signal instead of polling ForwardListChunks.
-type WaitVaultReadyExecutor func(ctx context.Context, vaultID glid.GLID) error
 
 // PipelineBacklogDiskExecutor returns local on-disk segment counts for remote
 // GetPipelineBacklog fan-out.
@@ -84,9 +79,6 @@ type GetChunkExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk
 // AnalyzeChunkExecutor runs index analysis on a local vault (or specific chunk).
 type AnalyzeChunkExecutor func(ctx context.Context, vaultID glid.GLID, chunkID string) ([]*gastrologv1.ChunkAnalysis, error)
 
-// SealVaultExecutor seals the active chunk of a local vault.
-type SealVaultExecutor func(ctx context.Context, vaultID glid.GLID) error
-
 // ReindexVaultExecutor rebuilds all indexes for a local vault.
 type ReindexVaultExecutor func(ctx context.Context, vaultID glid.GLID) (string, error)
 
@@ -97,10 +89,6 @@ type ExportToVaultExecutor func(ctx context.Context, expression string, targetVa
 // RecordImporter imports records as a new sealed chunk in a vault.
 // Used by the ForwardImportRecords handler for cross-node chunk migration.
 type RecordImporter func(ctx context.Context, vaultID glid.GLID, next chunk.RecordIterator) error
-
-// VaultRecordImporter imports records as a sealed chunk in a vault,
-// preserving the original chunk ID. Used for sealed-chunk replication.
-type VaultRecordImporter func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
 
 // ManagedFileReader opens a managed file for streaming to a peer.
 // Returns the original filename, a ReadCloser for the content, and the SHA256 hex hash.
@@ -139,11 +127,6 @@ func (s *Server) SetRecordImporter(fn RecordImporter) {
 	s.recordImporter = fn
 }
 
-// SetVaultRecordImporter injects the callback for chunk-ID-preserving sealed-chunk imports.
-func (s *Server) SetVaultRecordImporter(fn VaultRecordImporter) {
-	s.vaultRecordImporter = fn
-}
-
 // SetSearchExecutor injects the callback for handling remote search requests.
 func (s *Server) SetSearchExecutor(fn SearchExecutor) {
 	s.searchExecutor = fn
@@ -176,12 +159,6 @@ func (s *Server) SetContextExecutor(fn ContextExecutor) {
 // SetListChunksExecutor injects the callback for handling remote ListChunks requests.
 func (s *Server) SetListChunksExecutor(fn ListChunksExecutor) {
 	s.listChunksExecutor = fn
-}
-
-// SetWaitVaultReadyExecutor injects the callback for handling remote
-// WaitVaultReady requests (drain synchronization).
-func (s *Server) SetWaitVaultReadyExecutor(fn WaitVaultReadyExecutor) {
-	s.waitVaultReadyExecutor = fn
 }
 
 // SetPipelineBacklogDiskExecutor injects the callback for remote pipeline backlog disk counts.
@@ -229,11 +206,6 @@ func (s *Server) SetGetChunkExecutor(fn GetChunkExecutor) {
 // SetAnalyzeChunkExecutor injects the callback for handling remote AnalyzeChunk requests.
 func (s *Server) SetAnalyzeChunkExecutor(fn AnalyzeChunkExecutor) {
 	s.analyzeChunkExecutor = fn
-}
-
-// SetSealVaultExecutor injects the callback for handling remote SealVault requests.
-func (s *Server) SetSealVaultExecutor(fn SealVaultExecutor) {
-	s.sealVaultExecutor = fn
 }
 
 // SetReindexVaultExecutor injects the callback for handling remote ReindexVault requests.
@@ -355,12 +327,12 @@ func forwardFollowStreamHandler(srv any, stream grpc.ServerStream) error {
 
 	records, err := s.followExecutor(stream.Context(), vaultIDs, req.GetQuery())
 	if err != nil {
-		return status.Errorf(codes.Internal, "follow: %v", err)
+		return queryFailure("follow", err)
 	}
 
 	for rec, err := range records {
 		if err != nil {
-			return status.Errorf(codes.Internal, "follow record: %v", err)
+			return queryFailure("follow record", err)
 		}
 		resp := &gastrologv1.ForwardFollowResponse{
 			Records: []*gastrologv1.ExportRecord{convert.RecordToExport(rec)},
@@ -418,14 +390,15 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 
 	searchIter, getToken, tableResult, histogram, err := s.searchExecutor(stream.Context(), req)
 	if err != nil {
-		return status.Errorf(codes.Internal, "search: %v", err)
+		return queryFailure("search", err)
 	}
 
 	if tableResult != nil {
 		return sendForwardedTable(stream, tableResult, histogram)
 	}
 
-	// No results (vault has no leader instance on this node).
+	// No record stream: a histogram answer, or a vault with no leader
+	// instance on this node.
 	if searchIter == nil {
 		return stream.SendMsg(&gastrologv1.ForwardSearchResponse{Histogram: histogram})
 	}
@@ -433,13 +406,12 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 	batch := newForwardSearchBatch(histogram)
 	for rec, iterErr := range searchIter {
 		if iterErr != nil {
-			// EOF can occur when a chunk is deleted mid-read (e.g., ImportToVault
-			// replacing a forwarded-record chunk on a follower). Treat as
+			// EOF can occur when a chunk is deleted mid-read. Treat as
 			// end-of-results — the data is still available via retry.
 			if errors.Is(iterErr, io.EOF) || errors.Is(iterErr, fs.ErrNotExist) {
 				break
 			}
-			return status.Errorf(codes.Internal, "search record: %v", iterErr)
+			return queryFailure("search record", iterErr)
 		}
 		er := convert.RecordToExport(rec)
 		n := repeatedEntrySize(forwardSearchRecordsField, er)
@@ -463,6 +435,17 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 		batch.resp.HasMore = len(batch.resp.ResumeToken) > 0
 	}
 	return sendForwarded(stream, batch.resp)
+}
+
+// queryFailure is the status a failed forwarded query returns. A share of the
+// query that outgrew this node's memory budget leaves as ResourceExhausted, so
+// the coordinator reports the query as too large rather than as a fault here.
+func queryFailure(what string, err error) error {
+	code := codes.Internal
+	if _, ok := errors.AsType[*query.MemoryLimitError](err); ok {
+		code = codes.ResourceExhausted
+	}
+	return status.Errorf(code, "%s: %v", what, err)
 }
 
 // forwardBatchMaxRecords and forwardBatchMaxBytes bound one ForwardSearch
@@ -571,7 +554,7 @@ func (s *Server) forwardGetContext(ctx context.Context, req *gastrologv1.Forward
 
 	before, anchor, after, err := s.contextExecutor(ctx, vaultID, chunkID, req.GetPos(), int(req.GetBefore()), int(req.GetAfter()))
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "get context: %v", err)
+		return nil, queryFailure("get context", err)
 	}
 
 	resp := &gastrologv1.ForwardGetContextResponse{
@@ -603,34 +586,6 @@ func (s *Server) forwardListChunks(ctx context.Context, req *gastrologv1.Forward
 		return nil, status.Errorf(codes.Internal, "list chunks: %v", err)
 	}
 	return &gastrologv1.ForwardListChunksResponse{Chunks: chunks}, nil
-}
-
-// forwardWaitVaultReady handles the ForwardWaitVaultReady RPC. Blocks until
-// the named local vault is registered and ready to accept transferred
-// records, or the RPC's context is cancelled (the caller's drain context, or
-// its deadline). Replaces the source-side ForwardListChunks poll used by
-// DrainVault.
-func (s *Server) forwardWaitVaultReady(ctx context.Context, req *gastrologv1.ForwardWaitVaultReadyRequest) (*gastrologv1.ForwardWaitVaultReadyResponse, error) {
-	if s.waitVaultReadyExecutor == nil {
-		return nil, status.Error(codes.Unavailable, "wait vault ready executor not configured")
-	}
-	vaultID, err := parseVaultID(req.GetVaultId())
-	if err != nil {
-		return nil, err
-	}
-	if err := s.waitVaultReadyExecutor(ctx, vaultID); err != nil {
-		// Context cancellation/deadline is the caller's own timeout expiring;
-		// surface it as Canceled/DeadlineExceeded so the source classifies it
-		// as "gave up waiting", not a server fault.
-		if errors.Is(err, context.Canceled) {
-			return nil, status.Error(codes.Canceled, err.Error())
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, status.Error(codes.DeadlineExceeded, err.Error())
-		}
-		return nil, status.Errorf(codes.Internal, "wait vault ready: %v", err)
-	}
-	return &gastrologv1.ForwardWaitVaultReadyResponse{}, nil
 }
 
 // forwardGetPipelineBacklog handles ForwardGetPipelineBacklog RPCs.
@@ -765,22 +720,6 @@ func (s *Server) forwardAnalyzeChunk(ctx context.Context, req *gastrologv1.Forwa
 	return &gastrologv1.ForwardAnalyzeChunkResponse{Analyses: analyses}, nil
 }
 
-// forwardSealVault handles the ForwardSealVault RPC. Seals the active chunk
-// of a local vault.
-func (s *Server) forwardSealVault(ctx context.Context, req *gastrologv1.ForwardSealVaultRequest) (*gastrologv1.ForwardSealVaultResponse, error) {
-	if s.sealVaultExecutor == nil {
-		return nil, status.Error(codes.Unavailable, "seal vault executor not configured")
-	}
-	vaultID, err := parseVaultID(req.GetVaultId())
-	if err != nil {
-		return nil, err
-	}
-	if err := s.sealVaultExecutor(ctx, vaultID); err != nil {
-		return nil, status.Errorf(codes.Internal, "seal vault: %v", err)
-	}
-	return &gastrologv1.ForwardSealVaultResponse{}, nil
-}
-
 // forwardReindexVault handles the ForwardReindexVault RPC. Rebuilds all indexes
 // for a local vault.
 func (s *Server) forwardReindexVault(ctx context.Context, req *gastrologv1.ForwardReindexVaultRequest) (*gastrologv1.ForwardReindexVaultResponse, error) {
@@ -883,44 +822,6 @@ func (s *Server) forwardVaultApply(ctx context.Context, req *gastrologv1.Forward
 	return &gastrologv1.ForwardVaultApplyResponse{AppliedIndex: appliedIndex}, nil
 }
 
-// requestReplicaCatchup handles the RequestReplicaCatchup RPC. Sent
-// follower → placement leader: the follower's lifecycle reconciler has
-// computed its FSM-vs-disk diff (SweepMissingReplicas) and is asking
-// the leader to re-push specific sealed chunks via the existing
-// replicateToFollower machinery. The leader-side handler returns the
-// number of chunks for which a push was actually scheduled (after
-// filtering tombstoned / cloud-backed / locally-missing). Pushes
-// happen asynchronously inside the orchestrator handler — this RPC
-// returns as soon as the requests are scheduled, not when delivery
-// completes.
-func (s *Server) requestReplicaCatchup(ctx context.Context, req *gastrologv1.RequestReplicaCatchupRequest) (*gastrologv1.RequestReplicaCatchupResponse, error) {
-	if s.replicaCatchupFn == nil {
-		return nil, status.Error(codes.Unavailable, "replica catchup function not configured")
-	}
-	if len(req.GetVaultId()) != glid.Size {
-		return nil, status.Errorf(codes.InvalidArgument, "vault_id: expected %d bytes, got %d", glid.Size, len(req.GetVaultId()))
-	}
-	vaultID := glid.FromBytes(req.GetVaultId())
-	chunkIDs := make([]chunk.ChunkID, 0, len(req.GetChunkIds()))
-	for i, raw := range req.GetChunkIds() {
-		if len(raw) != 16 {
-			return nil, status.Errorf(codes.InvalidArgument, "chunk_ids[%d]: expected 16 bytes, got %d", i, len(raw))
-		}
-		var id chunk.ChunkID
-		copy(id[:], raw)
-		chunkIDs = append(chunkIDs, id)
-	}
-	requesterNodeID := string(req.GetRequesterNodeId())
-	if requesterNodeID == "" {
-		return nil, status.Error(codes.InvalidArgument, "requester_node_id is required")
-	}
-	scheduled, err := s.replicaCatchupFn(ctx, vaultID, chunkIDs, requesterNodeID)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "replica catchup: %v", err)
-	}
-	return &gastrologv1.RequestReplicaCatchupResponse{Scheduled: uint32(scheduled)}, nil //nolint:gosec // G115: bounded by request slice length
-}
-
 // forwardRemoveNode handles the ForwardRemoveNode RPC on the leader.
 // Followers call this to proxy node removal through the leader.
 func (s *Server) forwardRemoveNode(ctx context.Context, req *gastrologv1.ForwardRemoveNodeRequest) (*gastrologv1.ForwardRemoveNodeResponse, error) {
@@ -960,6 +861,9 @@ func (s *Server) forwardSetNodeSuffrage(ctx context.Context, req *gastrologv1.Fo
 		return nil, status.Error(codes.Unavailable, "set node suffrage not configured")
 	}
 	if err := s.setNodeSuffrageFn(ctx, string(req.GetNodeId()), req.GetNodeAddr(), req.GetVoter()); err != nil {
+		if errors.Is(err, ErrNodeRemoved) {
+			return nil, status.Error(codes.PermissionDenied, err.Error())
+		}
 		return nil, status.Errorf(codes.Internal, "set node suffrage: %v", err)
 	}
 	return &gastrologv1.ForwardSetNodeSuffrageResponse{}, nil
@@ -1254,10 +1158,6 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:    forwardListChunksHandler,
 		},
 		{
-			MethodName: "ForwardWaitVaultReady",
-			Handler:    forwardWaitVaultReadyHandler,
-		},
-		{
 			MethodName: "ForwardGetPipelineBacklog",
 			Handler:    forwardGetPipelineBacklogHandler,
 		},
@@ -1302,10 +1202,6 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:    forwardAnalyzeChunkHandler,
 		},
 		{
-			MethodName: "ForwardSealVault",
-			Handler:    forwardSealVaultHandler,
-		},
-		{
 			MethodName: "ForwardReindexVault",
 			Handler:    forwardReindexVaultHandler,
 		},
@@ -1321,18 +1217,8 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			MethodName: "ForwardVaultApply",
 			Handler:    forwardVaultApplyHandler,
 		},
-		{
-			MethodName: "RequestReplicaCatchup",
-			Handler:    requestReplicaCatchupHandler,
-		},
 	},
 	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "ChunkReplication",
-			Handler:       chunkReplicationStreamHandler,
-			ClientStreams: true,
-			ServerStreams: true,
-		},
 		{
 			StreamName:    "ForwardImportRecords",
 			Handler:       forwardImportRecordsStreamHandler,
@@ -1385,7 +1271,6 @@ type clusterServiceServer interface {
 	broadcast(context.Context, *gastrologv1.BroadcastRequest) (*gastrologv1.BroadcastResponse, error)
 	forwardGetContext(context.Context, *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error)
 	forwardListChunks(context.Context, *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error)
-	forwardWaitVaultReady(context.Context, *gastrologv1.ForwardWaitVaultReadyRequest) (*gastrologv1.ForwardWaitVaultReadyResponse, error)
 	forwardGetPipelineBacklog(context.Context, *gastrologv1.ForwardGetPipelineBacklogRequest) (*gastrologv1.ForwardGetPipelineBacklogResponse, error)
 	forwardGetIndexes(context.Context, *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error)
 	forwardValidateVault(context.Context, *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error)
@@ -1397,7 +1282,6 @@ type clusterServiceServer interface {
 	forwardExplain(context.Context, *gastrologv1.ForwardExplainRequest) (*gastrologv1.ForwardExplainResponse, error)
 	forwardGetChunk(context.Context, *gastrologv1.ForwardGetChunkRequest) (*gastrologv1.ForwardGetChunkResponse, error)
 	forwardAnalyzeChunk(context.Context, *gastrologv1.ForwardAnalyzeChunkRequest) (*gastrologv1.ForwardAnalyzeChunkResponse, error)
-	forwardSealVault(context.Context, *gastrologv1.ForwardSealVaultRequest) (*gastrologv1.ForwardSealVaultResponse, error)
 	forwardReindexVault(context.Context, *gastrologv1.ForwardReindexVaultRequest) (*gastrologv1.ForwardReindexVaultResponse, error)
 	forwardExportToVault(context.Context, *gastrologv1.ForwardExportToVaultRequest) (*gastrologv1.ForwardExportToVaultResponse, error)
 	listPeerManagedFiles(context.Context, *gastrologv1.ListPeerManagedFilesRequest) (*gastrologv1.ListPeerManagedFilesResponse, error)
@@ -1475,25 +1359,6 @@ func forwardListChunksHandler(srv any, ctx context.Context, dec func(any) error,
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardListChunks(ctx, req.(*gastrologv1.ForwardListChunksRequest))
-	}
-	return interceptor(ctx, req, info, handler)
-}
-
-func forwardWaitVaultReadyHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	req := &gastrologv1.ForwardWaitVaultReadyRequest{}
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-	s := srv.(*Server)
-	if interceptor == nil {
-		return s.forwardWaitVaultReady(ctx, req)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/gastrolog.v1.ClusterService/ForwardWaitVaultReady",
-	}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return s.forwardWaitVaultReady(ctx, req.(*gastrologv1.ForwardWaitVaultReadyRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }
@@ -1612,25 +1477,6 @@ func forwardRemoveNodeHandler(srv any, ctx context.Context, dec func(any) error,
 	return interceptor(ctx, req, info, handler)
 }
 
-func requestReplicaCatchupHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	req := &gastrologv1.RequestReplicaCatchupRequest{}
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-	s := srv.(*Server)
-	if interceptor == nil {
-		return s.requestReplicaCatchup(ctx, req)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/gastrolog.v1.ClusterService/RequestReplicaCatchup",
-	}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return s.requestReplicaCatchup(ctx, req.(*gastrologv1.RequestReplicaCatchupRequest))
-	}
-	return interceptor(ctx, req, info, handler)
-}
-
 func forwardSetNodeSuffrageHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	req := &gastrologv1.ForwardSetNodeSuffrageRequest{}
 	if err := dec(req); err != nil {
@@ -1703,25 +1549,6 @@ func forwardAnalyzeChunkHandler(srv any, ctx context.Context, dec func(any) erro
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardAnalyzeChunk(ctx, req.(*gastrologv1.ForwardAnalyzeChunkRequest))
-	}
-	return interceptor(ctx, req, info, handler)
-}
-
-func forwardSealVaultHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	req := &gastrologv1.ForwardSealVaultRequest{}
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-	s := srv.(*Server)
-	if interceptor == nil {
-		return s.forwardSealVault(ctx, req)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/gastrolog.v1.ClusterService/ForwardSealVault",
-	}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return s.forwardSealVault(ctx, req.(*gastrologv1.ForwardSealVaultRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }
@@ -1871,6 +1698,28 @@ func ForwardRemoveNode(ctx context.Context, peers *PeerConnManager, leaderID, no
 		return &translatedRefusal{msg: st.Message(), sentinel: ErrRemovalRefused}
 	}
 	return fmt.Errorf("forward remove node to leader %s: %w", leaderID, err)
+}
+
+// ForwardSetNodeSuffrage asks the leader to apply a suffrage change, or, with
+// a nodeAddr, to admit the node at that address, and translates the leader's
+// refusal of a removed node back into ErrNodeRemoved so the follower answers
+// the caller exactly as the leader would have.
+func ForwardSetNodeSuffrage(ctx context.Context, peers *PeerConnManager, leaderID, nodeID, nodeAddr string, voter bool) error {
+	req := &gastrologv1.ForwardSetNodeSuffrageRequest{
+		NodeId:   []byte(nodeID),
+		NodeAddr: nodeAddr,
+		Voter:    voter,
+	}
+	out := &gastrologv1.ForwardSetNodeSuffrageResponse{}
+	err := peers.InvokeService(ctx, leaderID, PurposeSuffrage,
+		"/gastrolog.v1.ClusterService/ForwardSetNodeSuffrage", req, out)
+	if err == nil {
+		return nil
+	}
+	if st, _ := status.FromError(err); st.Code() == codes.PermissionDenied {
+		return &translatedRefusal{msg: st.Message(), sentinel: ErrNodeRemoved}
+	}
+	return fmt.Errorf("forward suffrage to leader %s: %w", leaderID, err)
 }
 
 // translatedRefusal is a leader's refusal rebuilt after the hop: the

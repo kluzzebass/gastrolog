@@ -8,26 +8,34 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // BuildResultFromExistingGLCB reads seal metadata from a pipeline GLCB that
-// already exists on disk. Header-only: IngestTSMonotonic is persisted in the
-// blob layout meta at build time, so no record frame is ever touched. Used
-// on the hot build path and after restart when local materialization
-// finished but CmdSealChunk did not apply before shutdown.
+// already exists on disk: header and TOC footer only — IngestTSMonotonic is
+// persisted in the blob layout meta at build time, so no record frame is ever
+// touched. Used on the hot build path and after restart when local
+// materialization finished but CmdSealChunk did not apply before shutdown;
+// BlobDigest is the footer's, so a seal proposed from it records the digest
+// the blob was written with.
 func BuildResultFromExistingGLCB(glcbPath string, sealedAt time.Time) (BuildResult, error) {
-	meta, fileBytes, err := readGLCBSealMeta(glcbPath)
+	meta, digest, fileBytes, err := readGLCBSealMeta(glcbPath)
 	if err != nil {
 		return BuildResult{}, err
 	}
+	return buildResultFromSealMeta(glcbPath, meta, digest, fileBytes, sealedAt), nil
+}
+
+func buildResultFromSealMeta(glcbPath string, meta glcb.BlobMeta, digest [32]byte, fileBytes int64, sealedAt time.Time) BuildResult {
 	writeEnd := sealedAt
 	if writeEnd.IsZero() {
 		writeEnd = meta.WriteEnd
 	}
 	return BuildResult{
 		GLCBPath:          glcbPath,
+		BlobDigest:        digest,
 		RecordCount:       meta.RecordCount,
 		Bytes:             fileBytes,
 		WriteEnd:          writeEnd,
@@ -35,7 +43,7 @@ func BuildResultFromExistingGLCB(glcbPath string, sealedAt time.Time) (BuildResu
 		IngestEnd:         meta.IngestEnd,
 		SourceEnd:         meta.SourceEnd,
 		IngestTSMonotonic: meta.IngestTSMonotonic,
-	}, nil
+	}
 }
 
 // RecoverOnce seals any pipeline chunks on this home whose local GLCB is
@@ -101,12 +109,18 @@ func (v *vaultChunking) recoverOnce(ctx context.Context) error {
 			// 30k-chunk registry target.
 			continue
 		}
-		glcbPath := ChunkGLCBPath(v.cfg.ChunkRoot, e.ID)
-		if _, err := os.Stat(glcbPath); err != nil {
+		// Only a seal-queue manifest's record set is final. The open
+		// manifest still grows, and after a restart this FSM can lag what
+		// this node built before it stopped, so a GLCB is judged once its
+		// chunk reaches the seal queue — by the build pass if not here.
+		queued := v.fsm().SealQueueManifest(e.ID)
+		if queued == nil {
 			continue
 		}
-		manifest := &vaultctlfsm.OpenChunkManifest{ChunkID: e.ID}
-		if err := v.recoverBuiltGLCB(ctx, manifest); err != nil {
+		if _, err := os.Stat(ChunkGLCBPath(v.cfg.ChunkRoot, e.ID)); err != nil {
+			continue
+		}
+		if err := v.recoverBuiltGLCB(ctx, queued); err != nil {
 			lastErr = err
 		}
 	}
@@ -168,32 +182,22 @@ func (v *vaultChunking) recoverBuiltGLCB(ctx context.Context, pending *vaultctlf
 	if entry != nil && entry.IsSealed() {
 		return nil
 	}
-	glcbPath := ChunkGLCBPath(v.cfg.ChunkRoot, pending.ChunkID)
-	if _, err := os.Stat(glcbPath); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
 	sealedAt := pending.SealedAt
 	if sealedAt.IsZero() && entry != nil && !entry.WriteEnd.IsZero() {
 		sealedAt = entry.WriteEnd
 	}
-	result, err := BuildResultFromExistingGLCB(glcbPath, sealedAt)
-	if err != nil {
-		// Unified corrupt-GLCB story (glcb_corrupt.go): quarantine + alert,
-		// then degrade to EXACTLY the missing-GLCB case this function
-		// already handles (return nil, nothing recovered here). The worker's
-		// build pass rebuilds the pending sealed manifest from source
-		// segments (collection pulls any this home lacks), and a chunk
-		// sealed cluster-wide whose segments are long released is re-pulled
-		// from a peer home by the orchestrator's GLCB catch-up sweep on
-		// stat-miss.
-		v.quarantineCorruptGLCB(pending.ChunkID, glcbPath, err)
-		return nil
+	// Under buildMu: a quarantine decided from a read that raced a live
+	// build would rename that build's GLCB aside.
+	v.buildMu.Lock()
+	result, adopted, err := v.existingGLCBBuildOf(pending, sealedAt)
+	v.buildMu.Unlock()
+	if err != nil || !adopted {
+		// Missing, or quarantined as corrupt or mismatched: nothing to
+		// recover here. The build pass builds the seal-queue head from its
+		// segments, and the GLCB catch-up pull supplies a sealed chunk whose
+		// segments are released.
+		return err
 	}
-	// Readable existing GLCB: heals any corrupt flag from a prior pass.
-	v.clearCorruptGLCB(pending.ChunkID, "existing GLCB readable")
 	key := buildKey{chunkID: pending.ChunkID, sealedAt: sealedAt}
 	if key.sealedAt.IsZero() {
 		key.sealedAt = result.WriteEnd

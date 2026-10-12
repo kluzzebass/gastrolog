@@ -128,8 +128,8 @@ type supervisorPull struct {
 	sup *Supervisor
 }
 
-func (p *supervisorPull) Pull(_ context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
-	return p.sup.ServePull(distribution.PullRequest{
+func (p *supervisorPull) Pull(_ context.Context, vaultID, segmentID glid.GLID, _ []string, dest io.Writer) (string, error) {
+	return "supervisor", p.sup.ServePull(distribution.PullRequest{
 		VaultID:   vaultID,
 		SegmentID: segmentID,
 		Dest:      dest,
@@ -256,6 +256,50 @@ func TestSupervisorOriginIngestToPublish(t *testing.T) {
 	}
 
 	waittest.For(t, "published segment", func() bool { return pub.count() >= 1 })
+}
+
+// TestSupervisorQuietVaultPublishesOnAge: a burst far below the size bound,
+// then no further input. The segment holding it is still completed and
+// published once its age expires.
+func TestSupervisorQuietVaultPublishesOnAge(t *testing.T) {
+	nodeID := glid.New()
+	vaultID := glid.New()
+
+	sup := New(Config{
+		NodeID:                nodeID,
+		Table:                 allRoute(t, vaultID),
+		SegmentCompletePolicy: segmentation.CompletePolicy{MaxBytes: 1 << 30, MaxAge: time.Second},
+	})
+	if err := sup.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = sup.Stop() })
+
+	pub := &recordingPublisher{}
+	if err := sup.RegisterVault(VaultSpec{
+		VaultID:    vaultID,
+		Origin:     true,
+		OriginRoot: t.TempDir(),
+		Publisher:  pub,
+	}); err != nil {
+		t.Fatalf("RegisterVault: %v", err)
+	}
+
+	if err := sup.ReconcileIngesters([]ingestion.IngesterSpec{
+		{ID: glid.New(), Ingester: &emitIngester{msgs: batch(3, "quiet vault line")}, Name: "t", Type: "mock"},
+	}); err != nil {
+		t.Fatalf("ReconcileIngesters: %v", err)
+	}
+
+	waittest.For(t, "every record published in an aged segment", func() bool {
+		pub.mu.Lock()
+		defer pub.mu.Unlock()
+		var records uint32
+		for _, meta := range pub.published {
+			records += meta.RecordCount
+		}
+		return records == 3
+	})
 }
 
 // TestSupervisorFullVaultHome registers a vault as both Origin and Home on one
@@ -394,6 +438,7 @@ func TestSupervisorReleasePurgesOriginAndHomeHead(t *testing.T) {
 	if err := os.WriteFile(paths.HeadSegment(homeRoot, segID), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	writeCompleted(t, originRoot, segID)
 
 	sup := New(Config{NodeID: glid.New(), Table: allRoute(t, vaultID)})
 	if err := sup.Start(context.Background()); err != nil {
@@ -435,14 +480,15 @@ func TestSupervisorReleasePurgesOriginAndHomeHead(t *testing.T) {
 	if _, err := os.Stat(paths.HeadSegment(homeRoot, segID)); !os.IsNotExist(err) {
 		t.Fatalf("home head should be purged, stat err=%v", err)
 	}
+	assertCompleted(t, originRoot, segID, false)
 }
 
-func TestStagingHeadPurgeRootsDedupesSharedRoot(t *testing.T) {
+func TestStagingRootsDedupesSharedRoot(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	got := stagingHeadPurgeRoots(root, root, true, true)
+	got := stagingRoots(root, root, true, true)
 	if len(got) != 1 || got[0] != root {
-		t.Fatalf("stagingHeadPurgeRoots = %v, want [%s]", got, root)
+		t.Fatalf("stagingRoots = %v, want [%s]", got, root)
 	}
 }
 

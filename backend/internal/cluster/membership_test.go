@@ -22,26 +22,24 @@ func TestRequestMembershipServesTheCallerThatReachedANonLeader(t *testing.T) {
 	t.Parallel()
 
 	var gotID, gotAddr string
-	var gotVoter bool
 	s := &Server{}
 	// The handler app registers routes to the leader by itself. Whether this
 	// node leads is therefore invisible from here, which is the property the
 	// joiner depends on.
-	s.SetMembershipHandler(func(_ context.Context, nodeID, nodeAddr string, voter bool) error {
-		gotID, gotAddr, gotVoter = nodeID, nodeAddr, voter
+	s.SetMembershipHandler(func(_ context.Context, nodeID, nodeAddr string) error {
+		gotID, gotAddr = nodeID, nodeAddr
 		return nil
 	})
 
 	_, err := s.requestMembership(context.Background(), &gastrologv1.RequestMembershipRequest{
 		NodeId:   []byte("node-2"),
 		NodeAddr: "node-2:4566",
-		Voter:    false,
 	})
 	if err != nil {
 		t.Fatalf("a member refused a membership request: %v", err)
 	}
-	if gotID != "node-2" || gotAddr != "node-2:4566" || gotVoter {
-		t.Fatalf("the request reached the cluster altered: id=%q addr=%q voter=%v", gotID, gotAddr, gotVoter)
+	if gotID != "node-2" || gotAddr != "node-2:4566" {
+		t.Fatalf("the request reached the cluster altered: id=%q addr=%q", gotID, gotAddr)
 	}
 }
 
@@ -62,7 +60,7 @@ func TestRequestMembershipRefusesAnIncompleteRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			s := &Server{}
-			s.SetMembershipHandler(func(context.Context, string, string, bool) error {
+			s.SetMembershipHandler(func(context.Context, string, string) error {
 				t.Fatal("an incomplete request reached the configuration")
 				return nil
 			})
@@ -81,7 +79,7 @@ func TestRequestMembershipTellsAJoinerToRetryDuringAnElection(t *testing.T) {
 	t.Parallel()
 
 	s := &Server{}
-	s.SetMembershipHandler(func(context.Context, string, string, bool) error {
+	s.SetMembershipHandler(func(context.Context, string, string) error {
 		return fmt.Errorf("forward suffrage: %w", ErrNoLeader)
 	})
 
@@ -103,7 +101,7 @@ func TestRequestMembershipSurfacesARefusalAsFinal(t *testing.T) {
 	t.Parallel()
 
 	s := &Server{}
-	s.SetMembershipHandler(func(context.Context, string, string, bool) error {
+	s.SetMembershipHandler(func(context.Context, string, string) error {
 		return errors.New("node id already in the configuration at another address")
 	})
 
@@ -116,6 +114,30 @@ func TestRequestMembershipSurfacesARefusalAsFinal(t *testing.T) {
 	}
 	if isTransientMembershipErr(err) {
 		t.Fatalf("the joiner would retry a refusal until its deadline: %v", err)
+	}
+}
+
+// A node the cluster removed is refused for good. The refusal has to read as
+// one — PermissionDenied, not an internal failure an operator would chase —
+// and the joiner has to stop asking, because no amount of waiting brings a
+// removed identity back.
+func TestRequestMembershipRefusesARemovedNodeAsFinal(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{}
+	s.SetMembershipHandler(func(_ context.Context, nodeID, _ string) error {
+		return fmt.Errorf("%s: %w", nodeID, ErrNodeRemoved)
+	})
+
+	_, err := s.requestMembership(context.Background(), &gastrologv1.RequestMembershipRequest{
+		NodeId:   []byte("node-gone"),
+		NodeAddr: "node-gone:4566",
+	})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("got %v, want PermissionDenied", err)
+	}
+	if isTransientMembershipErr(err) {
+		t.Fatalf("the joiner would keep asking to be let back in: %v", err)
 	}
 }
 

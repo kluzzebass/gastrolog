@@ -24,9 +24,9 @@ flowchart TD
 ## Expression Parsing
 
 The expression string (e.g. `level=error last=5m limit=10`) is parsed in
-`server/query.go → parseExpression()`. Whitespace-separated tokens are classified
-as either **directives** (key=value pairs the engine understands) or **filter
-predicates** (fed to the query language parser).
+`server/query_convert.go → parseExpression()`. Whitespace-separated tokens are
+classified by `applyDirective()` as either **directives** (key=value pairs the
+engine understands) or **filter predicates** (fed to the query language parser).
 
 ```mermaid
 flowchart LR
@@ -40,7 +40,7 @@ flowchart LR
 | Directive | Effect |
 |-----------|--------|
 | `last=<dur>` | Sets `Start = now-dur`, `End = now` |
-| `start=<t>` / `end=<t>` | Explicit IngestTS bounds (RFC3339 or relative) |
+| `start=<t>` / `end=<t>` | Explicit IngestTS bounds (RFC3339, RFC3339Nano, or Unix seconds — `parseTime()`) |
 | `source_start=` / `source_end=` | SourceTS bounds: the seek key under `order=source_ts`, a runtime filter otherwise. `start=`/`end=` stay ingest bounds under every ordering |
 | `limit=<n>` | Max records to return |
 | `reverse=true` | Newest-first ordering |
@@ -58,56 +58,78 @@ flowchart TD
     VF --> CF["ExtractChunkFilter()"]
     CF --> CV["collectVaultChunks()"]
 
-    CV --> ListLocal["cm.List() per vault"]
-    ListLocal --> SC["selectChunks()"]
-
-    SC --> TimeCheck{"IngestTS overlap?"}
-    TimeCheck -->|Yes| Include["Include chunk"]
-    TimeCheck -->|No| Skip["Skip chunk"]
+    CV --> ListMetas["vaultChunkMetas() per vault (FSM manifest)"]
+    ListMetas --> SC["selectChunks()"]
 
     SC --> ArchiveCheck{"Archived?"}
-    ArchiveCheck -->|Yes| Skip
-    ArchiveCheck -->|No| TimeCheck
+    ArchiveCheck -->|Yes| Skip["Skip chunk"]
+    ArchiveCheck -->|No| TimeCheck{"IngestTS overlap?"}
+    TimeCheck -->|Yes| Include["Include chunk"]
+    TimeCheck -->|No| Skip
 
-    SC --> Sort["Sort by WriteStart"]
+    Include --> Sort["Sort across vaults (chunkCmp)"]
 ```
 
-**`selectChunks`** filters chunks by time overlap. A chunk is included if its
-`[IngestStart, IngestEnd]` range intersects the query's `[lower, upper]` bounds.
-Unsealed (active) chunks are always included since their WriteEnd is not final.
+**Chunk listing.** `vaultChunkMetas()` (`query/histogram.go`) reads chunk
+metadata from the vault-ctl FSM manifest: the registry's `SearchChunkMetas`
+resolves to the orchestrator's `SearchChunkMetasForVault`
+(`orchestrator/pipeline_search.go`), which returns every manifest entry —
+sealed chunks and the active and sealing pipeline chunks — with timestamp
+bounds overlaid. On a node with no vault-ctl FSM for the vault it falls back to
+the manifest reader's sealed entries plus the chunk manager's active chunk; with
+no registry wired at all, to `cm.List()`. For **memory vaults**, all chunks are
+in-memory.
 
-For **file vaults**, `cm.List()` returns both in-memory metadata (local chunks)
-and B+ tree entries (cloud-backed chunks). For **memory vaults**, all chunks are in-memory.
+**`selectChunks`** filters chunks by time overlap. A chunk is included if its
+`[IngestStart, IngestEnd]` range intersects the query's `[lower, upper]` bounds;
+`source_start=`/`source_end=` bounds apply the same test to
+`[SourceStart, SourceEnd]`. Active chunks get the same test as sealed ones. A
+bound that is still zero does not exclude a chunk, except that under a
+time-bounded query a Sealed or Sealing chunk with neither `IngestStart` nor
+`IngestEnd` known is excluded rather than treated as matching everything.
+
+**Sort order** (`chunkCmp`, `query/query.go`) is global across vaults, because
+lazy priming assumes adjacent chunks are time-ordered. Forward: ascending
+start (`IngestStart`, or `SourceStart` under `order=source_ts`). Reverse:
+unsealed chunks first — they may hold records newer than their metadata —
+then descending end, then descending start.
 
 ## Merge Heap Priming
 
 The engine uses a min-heap to merge records from multiple chunks in timestamp
-order. Priming opens a scanner per chunk and pushes its first record onto the heap.
+order. Priming opens a scanner for a chunk and pushes its first record onto the
+heap. Chunks are primed **lazily, in planner order**: `lazyOpenCompeting()`
+opens the next pending chunk only while it can still compete for the next
+merge record.
 
 ```mermaid
 flowchart TD
-    AllChunks["All matching chunks"] --> Classify{"Cloud-backed?"}
-
-    Classify -->|Local| Prime["openAndPrimeScanner()"]
-    Classify -->|Cloud| Defer["Add to deferred list"]
-
-    Prime --> Heap["Push first record onto heap"]
-
-    Heap --> Check{"heapLen > 0 AND limit > 0?"}
-    Check -->|Yes| DeferCloud["Skip cloud-backed chunks"]
-    Check -->|No| PrimeCloud["Prime cloud-backed chunks too"]
-
-    DeferCloud --> MergeLoop
-    PrimeCloud --> MergeLoop
-
-    MergeLoop["runMergeLoop()"]
+    AllChunks["Matching chunks in planner order"] --> Lazy["lazyOpenCompeting()"]
+    Lazy --> HeapEmpty{"Heap empty?"}
+    HeapEmpty -->|Yes| Open["openAndPrimeScanner(next chunk)"]
+    HeapEmpty -->|No| Overlap{"Next chunk can hold a record at or ahead of the heap top?"}
+    Overlap -->|Yes| Open
+    Overlap -->|No| MergeLoop["runMergeLoop()"]
+    Open --> Heap["Push first record onto heap"]
+    Heap --> Lazy
+    MergeLoop -->|"after each pop"| Lazy
 ```
 
-**Cloud deferral**: local chunks are primed first. If any local chunk produces
-a record and the query has a limit, cloud-backed chunks are deferred entirely — they're
-never downloaded. This is why a `last=5m limit=10` query with an active chunk
-serving data does zero cloud I/O. (The `limit=` directive works in both the UI
-query input and the CLI's `--limit` flag.)
+A pending chunk competes when its range on the ordering axis can hold a record
+at or ahead of the heap top: forward, its range starts at or before the top;
+reverse, its range ends at or after it. A timestamp equal to the top competes,
+because records sharing a timestamp across chunks are ordered by EventID. The
+chunk's own range is what counts, never the query bounds clipped to it — a
+resumed page bounds every chunk at the cursor, and a chunk whose range ends
+before a neighbour's first surviving record can still hold records past the
+cursor. Planner order makes the first chunk that cannot compete the last one
+considered, so for chunks whose ranges do not overlap only one scanner is open
+at a time. `runMergeLoop()` calls `lazyOpenCompeting()` again
+as the heap advances, so a chunk is opened only when the merge reaches it. A
+`last=5m limit=10` query that fills its limit from the newest chunks never opens
+older ones — local or cloud-backed alike. There is no separate local/cloud
+priming pass. (The `limit=` directive works in both the UI query input and the
+CLI's `--limit` flag.)
 
 ## Scanner Pipeline
 
@@ -116,7 +138,7 @@ which records to read and in what order.
 
 ```mermaid
 flowchart TD
-    Build["buildScannerWithManagers()"] --> MinPos["setMinPositionsFromBounds()"]
+    Build["buildScannerWithManagers()"] --> MinPos["setMinPositionFromIngestBound()"]
     MinPos --> BoolExpr{"BoolExpr set?"}
 
     BoolExpr -->|Yes| DNF["Convert to DNF"]
@@ -130,23 +152,33 @@ flowchart TD
 
     BoolExpr -->|No| Sequential["Sequential scan"]
 
-    RuntimeFilters --> TSScanner["buildTSOrderedScanner()"]
+    RuntimeFilters --> TSScanner["Choose ordering path"]
     Sequential --> TSScanner
 
-    TSScanner --> TSCheck{"Rank view?"}
-    TSCheck -->|"Sealed: mmap'd ITSI/STSI"| TSIndex["Walk TS index rank-by-rank"]
-    TSCheck -->|"Active: B+ tree rank view"| TSIndex
+    TSScanner --> TSCheck{"TS index?"}
+    TSCheck -->|"Sealed or local GLCB: mmap'd ITSI/STSI"| TSIndex["buildTSOrderedScanner(): walk TS index rank-by-rank"]
+    TSCheck -->|"No local GLCB, ingest order"| SeqBuild["b.build() over segment spans"]
+    TSCheck -->|"No local GLCB, other order"| SortMem["buildSortedScanner(): sort in memory"]
     TSCheck -->|"None (locally materialized)"| Fail["Error: TS index required"]
-
-    TSIndex --> FinalBuild["b.build() → scanner"]
 ```
 
 ### Position Narrowing
 
 For **sealed chunks** with indexes, the engine narrows which records to read:
 
-1. **Time-based**: B+ tree (active) or flat index (sealed) finds the first
-   position with IngestTS ≥ lower bound → `setMinPosition()`
+1. **Time-based**: on a sealed chunk whose IngestTS never decreases in
+   physical order (`IngestTSMonotonic`), the records an ingest lower bound
+   excludes are exactly the leading positions, as many as the bound's rank in
+   the ITSI, so that rank becomes the minimum position → `setMinPosition()`.
+   Posting lists are pruned below it and the rank walk skips reading records
+   below it, which saves reads under `order=source_ts` (under the default
+   order the ingest rank range already starts past them). No other time bound
+   narrows by position: on a chunk whose records arrived out of IngestTS
+   order, and on every chunk for SourceTS (late, replayed and multi-source
+   logs arrive out of source order), an admitted record can sit at any
+   position, so those bounds act only as the rank range on the ordering axis
+   and a per-record check. Active chunks are not narrowed either; their
+   monotonicity can change while a scan runs.
 2. **Token index**: posting lists intersected for all required tokens
 3. **KV index**: positions of records matching key/value predicates
 4. **Glob index**: prefix-based positions, verified at runtime
@@ -158,18 +190,15 @@ filters.
 ### TS-Ordered Scanning
 
 Records are stored in physical write order (WriteTS) but must always be yielded
-in IngestTS order (the default) or SourceTS order. Every query goes through the
-TS-ordered scanning path:
+in IngestTS order (the default) or SourceTS order:
 
 | Chunk Type | Strategy |
 |------------|----------|
 | Sealed (local or warm-cached cloud) | Walk the embedded mmap'd ITSI/STSI rank-by-rank, seek to positions in TS order |
-| Active (unsealed) | Same rank-ordered path via the chunk manager's B+ tree rank view (`IngestTSRankView`) |
-| Locally materialized, no rank view | Query fails with `TS index required` — there is no buffer-and-sort fallback |
-| Not locally materialized, no TS index | Sequential scan (`b.build()`), yielded in write order |
-
-The old `reorderByTS` buffer-and-sort path was removed (gastrolog-2o9e9,
-gastrolog-1dg3i); rank-based TS index scanning is the only TS-ordered path.
+| Active or Sealing pipeline chunk with a local GLCB | Same rank-ordered path over the GLCB's embedded ITSI/STSI |
+| Active or Sealing pipeline chunk without a local GLCB, ingest order | Sequential scan (`b.build()`) of the manifest-listed segment spans, which already yield in ingest order |
+| Active or Sealing pipeline chunk without a local GLCB, any other ordering | Sorted in memory (`buildSortedScanner`, `query/order_sort_scanner.go`): one pass collects each surviving record's ordering key and position, charged against the memory budget, then the records are read back sorted |
+| Locally materialized, no rank view | Query fails with `TS index required` |
 
 ## Chunk Access Paths
 
@@ -181,7 +210,10 @@ flowchart TD
     IsCloud -->|Yes| CloudPath["Warm-cache fill: whole-blob download → mmap data.glcb"]
     IsCloud -->|No| IsSealed{"Sealed?"}
     IsSealed -->|Yes| MmapPath["mmap data.glcb (GLCB)"]
-    IsSealed -->|No| StdioPath["pread on raw.log / idx.log / attr.log"]
+    IsSealed -->|"No: ErrChunkNotFound"| Pipeline["OpenPipelineChunkCursor()"]
+    Pipeline --> HasGLCB{"Local GLCB built?"}
+    HasGLCB -->|Yes| GLCBCursor["GLCB cursor over local data.glcb"]
+    HasGLCB -->|No| SpanCursor["manifestRecordCursor over segment spans"]
 
     subgraph Memory Vault
         MemOpen["cm.OpenCursor()"] --> MemSlice["Direct slice access"]
@@ -192,12 +224,20 @@ flowchart TD
 
 | Chunk State | Cursor Type | I/O Method |
 |-------------|------------|------------|
-| Active (unsealed) | `stdioCursor` | `pread` on raw.log, idx.log, attr.log |
-| Sealing (local) | `stdioCursor` (no GLCB yet) or `mmapCursor` (GLCB committed) | Read path adapts to whichever artifacts are present; `OpenCursor` prefers `data.glcb` when it exists |
+| Active or Sealing (pipeline), local GLCB built | GLCB cursor (`chunking.OpenGLCBCursor`) | Memory-mapped local `data.glcb` |
+| Active or Sealing (pipeline), no local GLCB | `manifestRecordCursor` | Reads the manifest-listed segment spans; the first `Seek` switches to a positional reader |
 | Sealed (local) | `mmapCursor` | Memory-mapped GLCB, random access via record-index offsets |
 | Cloud-backed | `glcbCursor` (after warm-cache fill) | One whole-object download → reassemble GLCB → mmap; reads are local from then on. Histogram rank lookups on cold chunks skip the fill: the ITSI section arrives via KB-scale range GETs |
 
-For Phase 3 (gastrolog-1huz5) Sealing chunks, the query engine branches on the **local** `meta.Sealed` (active-form closed?) rather than the cluster `State == Sealed` (GLCB committed?). This is the one place where local truth is the right truth — the chunk is locally readable as soon as the active-form files are closed; whether the cluster has finished publishing its GLCB digest is irrelevant to the read path. If `PostSealProcess` hasn't built the embedded indexes yet, TS-ordered scanning has no rank view for the chunk (the B+ tree rank view serves only the live active chunk) and the query fails with `TS index required` — no buffer-and-sort fallback exists.
+Active and Sealing pipeline chunks come from the FSM manifest, not from the
+chunk manager. `openSearchChunkCursor()` (`query/query.go`) tries
+`cm.OpenCursor()` first; on `ErrChunkNotFound` it opens the chunk through
+`OpenPipelineChunkCursor()` (`orchestrator/pipeline_search.go`), which reads
+the local GLCB when this home has built it and the manifest-listed segment
+spans otherwise. A Sealing chunk without a local GLCB therefore does not fail:
+it is scanned sequentially or sorted in memory as described under TS-Ordered
+Scanning. A chunk the manifest lists but this node cannot open at all is
+skipped with a warning.
 
 ### Memory Vault Cursors
 
@@ -206,15 +246,15 @@ by direct slice indexing — no disk I/O, no file formats.
 
 ### Cloud-Backed Chunk Read Path
 
-Cloud-backed chunks are deferred during heap priming — if local chunks satisfy the
-query's limit, cloud cursors are never opened and zero cloud I/O occurs.
-Cloud cursors are opened when the query needs more records than local
-chunks can provide — typically for longer time ranges or unbounded queries.
+Cloud-backed chunks are primed lazily in planner order like every other chunk
+(see Merge Heap Priming): a cloud cursor opens only when the merge reaches the
+chunk, so a query whose limit fills from newer chunks does no cloud I/O. A
+cloud-backed chunk whose blob cannot be read is skipped with a warning
+(`handleCloudPrimeError`) instead of failing the query.
 
-Phase 6 (gastrolog-69fd5) replaced the per-record range-request path with
-a whole-blob download + warm-cache fill. The first cursor pays one
-download; every subsequent read on the same chunk goes through the local
-mmap fast path:
+Reads go through a whole-blob download and warm-cache fill. The first cursor
+pays one download; every subsequent read on the same chunk goes through the
+local mmap fast path:
 
 ```mermaid
 sequenceDiagram
@@ -238,8 +278,19 @@ sequenceDiagram
 ```
 
 The local cache is byte-for-byte equivalent to a freshly-sealed local
-chunk. Subsequent queries reuse the cache; eviction policy reclaims
-disk space under pressure (`gastrolog-2idw8`).
+chunk. Subsequent queries reuse the cache; the vault's cache policy
+(`CacheEviction` LRU on `CacheBudget`, or TTL on `CacheTTL`) reclaims it.
+
+Every home holds a second kind of local copy: the GLCB the pipeline built in
+its chunk root before the chunk was uploaded. Once the vault-ctl manifest
+records the upload, that GLCB is warm cache too — reads use it without any
+cloud I/O (also after a restart, when nothing has registered it), and the
+eviction sweep, which runs on every home rather than only the placement
+leader, counts it against the budget and removes it like the chunk-dir copy.
+Eviction considers only chunks the manifest marks cloud-backed; a local GLCB
+whose upload has not committed is never removed. An evicted pipeline GLCB
+withdraws the home's holder receipt, and the next read re-fetches into the
+chunk dir through the cold path above.
 
 ## Cloud Index Infrastructure
 
@@ -297,6 +348,21 @@ same predicate, values are quoted whenever the lexer could not take them as a
 bareword (the empty string included), and a pipeline without a filter prints
 with its leading `|`. A round-trip test and a fuzzer pin this.
 
+The directives travel in the same text, written by `forwardedQueryExpression`
+next to the parser that reads them back: the filter, then `start=`, `end=`,
+`source_start=`, `source_end=` (absolute, nanosecond timestamps), `reverse=`,
+`order=`, `limit=` and `pos=`. A peer therefore scans under exactly the bounds,
+ordering and position the coordinator's own scan uses — a vault led on another
+node honours a source-time window or a `pos=` address the same way a local one
+does. A legacy token/key-value query is folded into its filter first, so it
+never reaches a peer as an unfiltered scan. What the text does not carry
+travels in the request beside it: the resume cursor in `ResumeToken`, the
+partial-aggregate request in `PartialAggregates`, the histogram request and
+its grid in `HistogramGrid`. A test fails when a
+`query.Query` field is neither round-tripped through the wire form nor named
+with the channel that carries it instead. `Query.String()` is a display form
+for Explain, not the wire.
+
 The coordinator determines which vaults live on peer nodes via
 `remoteVaultsByNode()`. For each remote vault, a streaming `ForwardSearch` RPC
 is opened. Results flow back without buffering — `kWayMerge()` performs
@@ -318,14 +384,45 @@ which node the client connected to and on how routing fanned copies across
 vaults. EventID's fields are intrinsic to the event and identical on every copy
 of it, so every node ranks any two records the same way.
 
-**Histograms travel ahead of records.** Each remote vault's histogram arrives
-whole in its stream's first message, and `SearchStream`'s `getHistogram` must
-answer from that message alone. The coordinator reads every vault's histogram
-*before* it starts draining any vault's records, so a getter that waited for
-its stream to finish would deadlock the fan-out: the record channel fills, the
-peer's producer parks on a send nobody is reading, and the coordinator is still
-waiting on the histogram. It only bites past the channel's depth, which is why
-paged queries never showed it and an unlimited one did.
+**Histograms travel beside records, never inside them.** The page-1 histogram
+covers the whole window, while a vault's record stream stops at the page
+limit, so no record scan can produce it: a filtered histogram is its own scan
+of the window (`timechartScanPath`), an unfiltered one counts from the
+timestamp index. On the first page the coordinator computes its own leader
+vaults' share and, concurrently, `collectRemoteHistogram` sends every remote
+vault's leader a `ForwardSearch` carrying a `HistogramGrid`; the peer answers
+with `ComputeSearchPageHistogram` over the forwarded filter — the function the
+coordinator runs for its own vaults — and no records. Record streams carry no
+histogram, and later pages ask for none, so no record waits on a histogram's
+scan and the response's closing message is the only one that does. Pipeline
+searches merge the remote shares the same way. If any remote vault fails to
+answer, the response carries no histogram: a sum missing one vault's share
+would understate volume while looking authoritative. A remote vault whose
+record stream fails fails the search itself.
+
+**One grid, chosen by the coordinator.** The shares sum bucket by bucket only
+when every node counts on the same grid, so the coordinator chooses it — the
+search's window cut into the page histogram's 50 buckets (`pageHistogramGrid`)
+— and sends its start, end and bucket count in the `HistogramGrid`. A peer
+counts on exactly that grid and refuses one it cannot count on bucket for
+bucket (no buckets, more than `query.MaxHistogramBuckets`, an empty window or
+one narrower than a nanosecond per bucket); it never derives a window of its
+own, because its view of the chunks differs from every other node's.
+
+A search with no time window gets one before it fans out:
+`resolveUnboundedQuery` takes the oldest record across every vault in scope as
+the window's start, and the newest record or the coordinator's now, whichever
+is later, as its end. Each vault's bounds come from this node's view of its
+chunks — the vault-ctl FSM manifest every node holds, open chunks included,
+and any chunks held locally. A vault with no records in that view is asked of
+its leader with `ForwardListChunks`. The resolved window bounds the record
+search as well as the histogram, and later pages keep it through the resume
+token's frozen bounds rather than resolving again. When a leader cannot report
+its vault's chunks, the query stays unbounded — a window derived without that
+vault could cut its records out of the search — and with no window there is no
+grid, so the response carries no histogram. A search over vaults all led by
+the coordinator has no shares to align and counts on the window its own engine
+derives.
 
 **Resume tokens** carry the coordinator's local chunk positions plus one
 canonical cursor for the merged stream: the last emitted record's timestamp on
@@ -333,7 +430,12 @@ the ordering axis and its EventID. Remote vaults are not resumed by their own
 tokens; the next page bounds every source at the cursor's timestamp
 (inclusively) and the merge skips whatever sits at or before the cursor in
 canonical order, so a page boundary inside a group of records sharing a
-timestamp neither repeats nor drops any of them, from any node. Local positions
+timestamp neither repeats nor drops any of them, from any node, in either
+direction. A record without an ingester identity has no rank within its tie
+group — every identity-less record at one timestamp compares equal — so the
+cursor skips all of them along with the one it names; ingest mints an identity
+for every record, and only records appended straight to a chunk manager, as
+test fixtures are, lack one. Local positions
 advance only past records the page displayed: the merge reads one local record
 ahead to compare against the remote stream, so a page filled entirely by remote
 records hands on the local positions it received, and a page that displayed a
@@ -341,32 +443,45 @@ local record pins them to the last one shown. Positions are
 kept only for chunks scanned in physical order. A chunk scanned through its
 timestamp index (every sealed chunk, and any ordering other than the default)
 yields in index order, so no physical position can resume it; it carries none,
-and the next page restarts it under the cursor, which the narrowed time bound
+the engine ignores any position a token names for it (the coordinator pins the
+last displayed local record's position whatever chunk it came from), and the
+next page restarts it under the cursor, which the narrowed time bound
 lets the rank scan seek to directly. An open pipeline chunk has no source
 index yet; under `order=source_ts` it is put in canonical order in memory —
 one pass collects each surviving record's ordering key and position, charged
-against the memory budget, and the records are read back sorted. The engine applies its own token's cursor,
+against the query's memory budget until the chunk is done, and the records are
+read back sorted. The engine applies its own token's cursor,
 so pagination is exact at the engine boundary too, not only through the
 server. This is what makes `order=source_ts` pageable on the same terms as
 the default ordering.
 
 ## Query Memory Budget
 
-Pipeline operators control their own result limits, so `RunPipeline` clears the
-incoming `Limit` before scanning: a scan limit would cut an aggregator's or a
-sort's *input*, making `| stats count` report the count of an arbitrary prefix
-and `| sort` order one. What bounds the work instead is a per-query memory
+Pipeline operators control their own result limits, so the incoming `Limit`
+caps a pipeline's output and never its scan: a scan limit would cut an
+aggregator's or a sort's *input*, making `| stats count` report the count of an
+arbitrary prefix and `| sort` order one. The scan reads every match unless a
+`head` is reached through operators that keep every record (`eval`, `rename`,
+`fields`, `lookup`); then the head's N is all the pipeline can consume, and
+that N is the scan limit. A `where` or `dedup` ahead of the head drops records,
+so it scans every match. What bounds the work instead is a per-query memory
 budget (`query.MaxQueryMemoryBytes`, 256 MiB), which bounds retained bytes
 without changing the answer.
 
 Every path that retains data charges it: the record buffer behind an uncapped
 sort, the top-N working set behind a capped one, the slot array a `tail`/`slice`
-declares, the dedup seen-event set, stats group state, and the collections
-inside `dcount`, `median`, `values`, `first`, and `last`. Records are charged
+declares, the dedup seen-event set, stats group state, the collections
+inside `dcount`, `median`, `values`, `first`, and `last`, the sort keys of an
+unindexed chunk put in source order, and the histogram's working state. Records are charged
 *after* field extraction, since the JSON/logfmt fields that materialization
 moves into `Attrs` are most of what a buffered record retains. Exceeding the
 budget fails the query with a `query.MemoryLimitError` naming the structure that
 overflowed and the ceiling; the RPC layer surfaces it as `ResourceExhausted`.
+A peer whose share overflows answers its forwarded search, follow, or context
+request with a `ResourceExhausted` status, and the coordinator passes that code
+on to the client, so the same query fails the same way whichever node holds the
+data. The overflow is the query's size, not the vault's health: it is never
+reported as a vault read failure and raises no vault alarm.
 The budget never trims a result to fit.
 
 Two older caps do produce a partial table, and both label it: exceeding
@@ -377,11 +492,22 @@ result is flagged rather than silent — but it is still partial, which is a
 different contract from the budget's outright failure.
 
 The budget is **per query, per node**. Each node executing part of a fan-out
-gets its own, and the coordinator runs its whole share — the local scan and the
-records streaming back from peers — on one ledger. There is no cluster-wide
-total: the exhaustion being prevented is a node running out of memory, a
-per-node resource, and a shared counter would need a cluster round trip on the
-per-record path.
+gets its own, and runs its whole share on one ledger (`query.Budget`): the
+caller opens it with `Engine.NewBudget` and attaches it with
+`Query.WithBudget`, or hands it to `RunPipelineWithRemote`, and every engine
+entry point charges the ledger its query carries, opening one only when the
+caller attached none. On the coordinator that ledger covers the local scan,
+the page-1 histogram, and the records streaming back from peers. Every chunk
+the merge holds open charges the same ledger, so several unindexed chunks
+sorted at once are bounded together rather than each against its own ceiling.
+A structure that finishes before the query hands back what it held: a sorted
+scanner releases its keys when its chunk is drained or abandoned, and the
+histogram charges a sub-account it closes when its buckets are built. The
+page-1 histogram runs on its own goroutine beside the scan, so the ledger is a
+single atomic counter, safe for concurrent use without a lock on the charge
+path. There is no cluster-wide total: the exhaustion being prevented is a node
+running out of memory, a per-node resource, and a shared counter would need a
+cluster round trip on the per-record path.
 
 A pipeline that ends in `stats` or `timechart` with combinable aggregates
 (`count`, `sum`, `min`, `max`, `avg`) is split at the aggregating operator. Every node
@@ -400,7 +526,10 @@ A pipeline the cluster cannot answer by merging per-node results — a `head`,
 `tail`, or `slice` that would otherwise apply once per node, a `dedup` whose
 window spans nodes, or an aggregate like `dcount`/`median`/`values` that
 cannot be recombined from partials — runs once on the coordinator over every
-node's records. Those records are
+node's records. Every peer scans for it under the pipeline's scan limit
+(`query.PipelineScanLimit`), the same one the coordinator's local scan uses,
+never under the client's page size: the page size caps what the pipeline
+returns, not what it reads. Those records are
 *streamed* through it, merged with the local scan in query order, not collected
 first: the coordinator retains only what the pipeline's own operators hold, so
 memory tracks the answer rather than the match set. An uncapped `sort` is the

@@ -357,6 +357,10 @@ func TestOrchPipeline_TransferDispositionMultiNodeDestRF(t *testing.T) {
 		}
 	}
 
+	// Each destination home indexes the copy it pulled: any of them can
+	// become the destination vault's leader.
+	h.waitIndexesOnHomes(dest, destHomeIdxs, destEntries)
+
 	// Holder receipts converge to exactly the 3 destination homes — the
 	// gate fireTransferEvent's waitForDestHolders actually waited on.
 	h.waitChunkHolders(dest, e.ID, destHomeIdxs)

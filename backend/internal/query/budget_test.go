@@ -20,6 +20,12 @@ import (
 	"gastrolog/internal/querylang"
 )
 
+// testBudget is a ledger at the standard ceiling, for tests that drive a
+// materializing path without an engine.
+func testBudget() *Budget {
+	return &Budget{limit: MaxQueryMemoryBytes}
+}
+
 // newBudgetEngine builds a single-vault engine over n records, each carrying a
 // unique "id" and "latency" attribute plus a repeating "host". memLimit is the
 // working-set ceiling the engine hands to the query it runs.
@@ -365,9 +371,9 @@ func TestTopNCollectorReleasesDroppedItems(t *testing.T) {
 			for _, item := range col.items {
 				want += item.footprint()
 			}
-			if budget.used != want {
+			if budget.used.Load() != want {
 				t.Errorf("ledger holds %d bytes for a working set of %d bytes (drift %+d)",
-					budget.used, want, budget.used-want)
+					budget.used.Load(), want, budget.used.Load()-want)
 			}
 		})
 	}
@@ -440,8 +446,8 @@ func TestBudgetReleaseReturnsBytes(t *testing.T) {
 		t.Fatal("charge past the limit must fail")
 	}
 	b.Release(101)
-	if b.used != 0 {
-		t.Fatalf("used after release: got %d, want 0", b.used)
+	if b.used.Load() != 0 {
+		t.Fatalf("used after release: got %d, want 0", b.used.Load())
 	}
 	if err := b.Charge(consumerRecordBuffer, 100); err != nil {
 		t.Fatalf("released bytes must be reusable: %v", err)

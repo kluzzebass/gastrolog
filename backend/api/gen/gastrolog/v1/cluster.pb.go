@@ -78,54 +78,6 @@ func (AlarmPriority) EnumDescriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{0}
 }
 
-// ImportRejection classifies a failed chunk replication command so the
-// sender can act on the cause without reading the error text.
-type ImportRejection int32
-
-const (
-	ImportRejection_IMPORT_REJECTION_UNSPECIFIED     ImportRejection = 0 // a failure with no classification
-	ImportRejection_IMPORT_REJECTION_VAULT_NOT_READY ImportRejection = 1 // the vault has no instance on the receiver yet; retry later
-)
-
-// Enum value maps for ImportRejection.
-var (
-	ImportRejection_name = map[int32]string{
-		0: "IMPORT_REJECTION_UNSPECIFIED",
-		1: "IMPORT_REJECTION_VAULT_NOT_READY",
-	}
-	ImportRejection_value = map[string]int32{
-		"IMPORT_REJECTION_UNSPECIFIED":     0,
-		"IMPORT_REJECTION_VAULT_NOT_READY": 1,
-	}
-)
-
-func (x ImportRejection) Enum() *ImportRejection {
-	p := new(ImportRejection)
-	*p = x
-	return p
-}
-
-func (x ImportRejection) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (ImportRejection) Descriptor() protoreflect.EnumDescriptor {
-	return file_gastrolog_v1_cluster_proto_enumTypes[1].Descriptor()
-}
-
-func (ImportRejection) Type() protoreflect.EnumType {
-	return &file_gastrolog_v1_cluster_proto_enumTypes[1]
-}
-
-func (x ImportRejection) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use ImportRejection.Descriptor instead.
-func (ImportRejection) EnumDescriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{1}
-}
-
 // ForwardApplyRequest carries a pre-marshaled ConfigCommand for the leader
 // to apply via raft.Apply(). Used by followers to proxy config writes.
 type ForwardApplyRequest struct {
@@ -359,11 +311,14 @@ func (x *EnrollResponse) GetNodeCertPem() []byte {
 // Unlike Enroll, this call is mTLS-authenticated: the caller presents the
 // certificate enrolment just issued it, which is what proves it holds the
 // key rather than merely a copy of the join token.
+//
+// The request carries no suffrage. A node outside the configuration enters
+// as a nonvoter, and a member is re-added at the suffrage it already has:
+// the vote is granted by the cluster, never claimed by the caller.
 type RequestMembershipRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NodeId        []byte                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	NodeAddr      string                 `protobuf:"bytes,2,opt,name=node_addr,json=nodeAddr,proto3" json:"node_addr,omitempty"`
-	Voter         bool                   `protobuf:"varint,3,opt,name=voter,proto3" json:"voter,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -410,13 +365,6 @@ func (x *RequestMembershipRequest) GetNodeAddr() string {
 		return x.NodeAddr
 	}
 	return ""
-}
-
-func (x *RequestMembershipRequest) GetVoter() bool {
-	if x != nil {
-		return x.Voter
-	}
-	return false
 }
 
 type RequestMembershipResponse struct {
@@ -1842,456 +1790,9 @@ func (x *ForwardVaultApplyResponse) GetAppliedIndex() uint64 {
 	return 0
 }
 
-// ChunkReplicationCommand is sent leader → follower. The vault_id
-// identifies the target vault; the oneof command determines the
-// operation. New command types can be added without changing framing.
-type ChunkReplicationCommand struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	VaultId []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	// Types that are valid to be assigned to Command:
-	//
-	//	*ChunkReplicationCommand_ImportBegin
-	//	*ChunkReplicationCommand_ImportRecords
-	//	*ChunkReplicationCommand_ImportCommit
-	Command       isChunkReplicationCommand_Command `protobuf_oneof:"command"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ChunkReplicationCommand) Reset() {
-	*x = ChunkReplicationCommand{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[18]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ChunkReplicationCommand) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ChunkReplicationCommand) ProtoMessage() {}
-
-func (x *ChunkReplicationCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[18]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ChunkReplicationCommand.ProtoReflect.Descriptor instead.
-func (*ChunkReplicationCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{18}
-}
-
-func (x *ChunkReplicationCommand) GetVaultId() []byte {
-	if x != nil {
-		return x.VaultId
-	}
-	return nil
-}
-
-func (x *ChunkReplicationCommand) GetCommand() isChunkReplicationCommand_Command {
-	if x != nil {
-		return x.Command
-	}
-	return nil
-}
-
-func (x *ChunkReplicationCommand) GetImportBegin() *ChunkReplicationImportBegin {
-	if x != nil {
-		if x, ok := x.Command.(*ChunkReplicationCommand_ImportBegin); ok {
-			return x.ImportBegin
-		}
-	}
-	return nil
-}
-
-func (x *ChunkReplicationCommand) GetImportRecords() *ChunkReplicationImportRecords {
-	if x != nil {
-		if x, ok := x.Command.(*ChunkReplicationCommand_ImportRecords); ok {
-			return x.ImportRecords
-		}
-	}
-	return nil
-}
-
-func (x *ChunkReplicationCommand) GetImportCommit() *ChunkReplicationImportCommit {
-	if x != nil {
-		if x, ok := x.Command.(*ChunkReplicationCommand_ImportCommit); ok {
-			return x.ImportCommit
-		}
-	}
-	return nil
-}
-
-type isChunkReplicationCommand_Command interface {
-	isChunkReplicationCommand_Command()
-}
-
-type ChunkReplicationCommand_ImportBegin struct {
-	// Sealed-chunk import is a three-phase sequence on the same stream:
-	// ImportBegin → 1..N ImportRecords frames → ImportCommit. Replaces
-	// a legacy single-frame ChunkReplicationImport that packed the whole
-	// chunk into one message; chunks past the gRPC receive cap wedged
-	// the catchup path forever. See gastrolog-4yvhh.
-	ImportBegin *ChunkReplicationImportBegin `protobuf:"bytes,10,opt,name=import_begin,json=importBegin,proto3,oneof"`
-}
-
-type ChunkReplicationCommand_ImportRecords struct {
-	ImportRecords *ChunkReplicationImportRecords `protobuf:"bytes,11,opt,name=import_records,json=importRecords,proto3,oneof"`
-}
-
-type ChunkReplicationCommand_ImportCommit struct {
-	ImportCommit *ChunkReplicationImportCommit `protobuf:"bytes,12,opt,name=import_commit,json=importCommit,proto3,oneof"`
-}
-
-func (*ChunkReplicationCommand_ImportBegin) isChunkReplicationCommand_Command() {}
-
-func (*ChunkReplicationCommand_ImportRecords) isChunkReplicationCommand_Command() {}
-
-func (*ChunkReplicationCommand_ImportCommit) isChunkReplicationCommand_Command() {}
-
-// ChunkReplicationImportBegin opens a streaming sealed-chunk import.
-// The follower stages an import context keyed by chunk_id and ack's
-// success; subsequent ImportRecords frames push batches of records
-// into that staged context until ImportCommit finalizes the import.
-// Each (vault, follower) stream allows at most one import in flight.
-type ChunkReplicationImportBegin struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ChunkId       []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ChunkReplicationImportBegin) Reset() {
-	*x = ChunkReplicationImportBegin{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[19]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ChunkReplicationImportBegin) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ChunkReplicationImportBegin) ProtoMessage() {}
-
-func (x *ChunkReplicationImportBegin) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[19]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ChunkReplicationImportBegin.ProtoReflect.Descriptor instead.
-func (*ChunkReplicationImportBegin) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{19}
-}
-
-func (x *ChunkReplicationImportBegin) GetChunkId() []byte {
-	if x != nil {
-		return x.ChunkId
-	}
-	return nil
-}
-
-// ChunkReplicationImportRecords carries one bounded batch of records
-// for the in-flight import. Frame size is capped on the leader side so
-// no individual gRPC message exceeds the receive limit regardless of
-// chunk size. The follower consumes records record-by-record and
-// applies backpressure: the ack is not sent until the importer has
-// pulled every record in the frame.
-type ChunkReplicationImportRecords struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Records       []*ExportRecord        `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ChunkReplicationImportRecords) Reset() {
-	*x = ChunkReplicationImportRecords{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[20]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ChunkReplicationImportRecords) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ChunkReplicationImportRecords) ProtoMessage() {}
-
-func (x *ChunkReplicationImportRecords) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[20]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ChunkReplicationImportRecords.ProtoReflect.Descriptor instead.
-func (*ChunkReplicationImportRecords) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{20}
-}
-
-func (x *ChunkReplicationImportRecords) GetRecords() []*ExportRecord {
-	if x != nil {
-		return x.Records
-	}
-	return nil
-}
-
-// ChunkReplicationImportCommit finalizes the in-flight import. The
-// follower closes its record-source channel, waits for the importer
-// goroutine to drain and return, and acks with the importer's result.
-// chunk_id is echoed for sanity-checking against ImportBegin.
-type ChunkReplicationImportCommit struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ChunkId       []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ChunkReplicationImportCommit) Reset() {
-	*x = ChunkReplicationImportCommit{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[21]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ChunkReplicationImportCommit) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ChunkReplicationImportCommit) ProtoMessage() {}
-
-func (x *ChunkReplicationImportCommit) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[21]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ChunkReplicationImportCommit.ProtoReflect.Descriptor instead.
-func (*ChunkReplicationImportCommit) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{21}
-}
-
-func (x *ChunkReplicationImportCommit) GetChunkId() []byte {
-	if x != nil {
-		return x.ChunkId
-	}
-	return nil
-}
-
-// ChunkReplicationAck is sent follower → leader after each command.
-type ChunkReplicationAck struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
-	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
-	ChunkId       []byte                 `protobuf:"bytes,3,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`                         // echoes the chunk_id from the command
-	Rejection     ImportRejection        `protobuf:"varint,4,opt,name=rejection,proto3,enum=gastrolog.v1.ImportRejection" json:"rejection,omitempty"` // set when ok is false and the cause is known
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ChunkReplicationAck) Reset() {
-	*x = ChunkReplicationAck{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[22]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ChunkReplicationAck) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ChunkReplicationAck) ProtoMessage() {}
-
-func (x *ChunkReplicationAck) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[22]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ChunkReplicationAck.ProtoReflect.Descriptor instead.
-func (*ChunkReplicationAck) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{22}
-}
-
-func (x *ChunkReplicationAck) GetOk() bool {
-	if x != nil {
-		return x.Ok
-	}
-	return false
-}
-
-func (x *ChunkReplicationAck) GetError() string {
-	if x != nil {
-		return x.Error
-	}
-	return ""
-}
-
-func (x *ChunkReplicationAck) GetChunkId() []byte {
-	if x != nil {
-		return x.ChunkId
-	}
-	return nil
-}
-
-func (x *ChunkReplicationAck) GetRejection() ImportRejection {
-	if x != nil {
-		return x.Rejection
-	}
-	return ImportRejection_IMPORT_REJECTION_UNSPECIFIED
-}
-
-// RequestReplicaCatchupRequest is sent follower → placement leader. The
-// follower computes the local FSM-vs-disk diff in its lifecycle reconciler
-// (SweepMissingReplicas) and asks the leader to re-push specific sealed
-// chunks via the streaming ChunkReplicationImport{Begin,Records,Commit}
-// path. Used to recover from replication pushes that failed during a
-// follower pause / partition / rejoin window — see gastrolog-2dgvj.
-type RequestReplicaCatchupRequest struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	VaultId         []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	ChunkIds        [][]byte               `protobuf:"bytes,2,rep,name=chunk_ids,json=chunkIds,proto3" json:"chunk_ids,omitempty"`                        // 16-byte ChunkIDs
-	RequesterNodeId []byte                 `protobuf:"bytes,3,opt,name=requester_node_id,json=requesterNodeId,proto3" json:"requester_node_id,omitempty"` // utf-8 node ID of the requesting follower
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
-}
-
-func (x *RequestReplicaCatchupRequest) Reset() {
-	*x = RequestReplicaCatchupRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[23]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RequestReplicaCatchupRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RequestReplicaCatchupRequest) ProtoMessage() {}
-
-func (x *RequestReplicaCatchupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[23]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RequestReplicaCatchupRequest.ProtoReflect.Descriptor instead.
-func (*RequestReplicaCatchupRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{23}
-}
-
-func (x *RequestReplicaCatchupRequest) GetVaultId() []byte {
-	if x != nil {
-		return x.VaultId
-	}
-	return nil
-}
-
-func (x *RequestReplicaCatchupRequest) GetChunkIds() [][]byte {
-	if x != nil {
-		return x.ChunkIds
-	}
-	return nil
-}
-
-func (x *RequestReplicaCatchupRequest) GetRequesterNodeId() []byte {
-	if x != nil {
-		return x.RequesterNodeId
-	}
-	return nil
-}
-
-// RequestReplicaCatchupResponse acknowledges receipt of the catchup
-// request. The leader fans the actual pushes out asynchronously via
-// existing replicateToFollower machinery, so success here means
-// "request accepted, pushes scheduled" — not "all chunks delivered".
-// The follower will re-request anything still missing on its next
-// sweep tick if the leader's pushes fail.
-type RequestReplicaCatchupResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Scheduled     uint32                 `protobuf:"varint,1,opt,name=scheduled,proto3" json:"scheduled,omitempty"` // number of chunk pushes scheduled (after leader-side filtering)
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RequestReplicaCatchupResponse) Reset() {
-	*x = RequestReplicaCatchupResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[24]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RequestReplicaCatchupResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RequestReplicaCatchupResponse) ProtoMessage() {}
-
-func (x *RequestReplicaCatchupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[24]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RequestReplicaCatchupResponse.ProtoReflect.Descriptor instead.
-func (*RequestReplicaCatchupResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{24}
-}
-
-func (x *RequestReplicaCatchupResponse) GetScheduled() uint32 {
-	if x != nil {
-		return x.Scheduled
-	}
-	return 0
-}
-
-// ForwardSearchRequest is sent to a replica holder node to execute a
-// scoped search locally and return matching records. When sealed_chunk_ids
-// is empty and search_pipeline_chunks is false, the holder runs a legacy
-// leader-only full-vault search (backward compatible).
+// ForwardSearchRequest is sent to the node leading vault_id to run the query
+// against that vault: a record stream, a pipeline's table, or — with a
+// histogram_grid — the vault's page histogram.
 type ForwardSearchRequest struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	VaultId     []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
@@ -2301,13 +1802,17 @@ type ForwardSearchRequest struct {
 	// count) so the coordinator can merge per-node tables instead of gathering
 	// records.
 	PartialAggregates bool `protobuf:"varint,4,opt,name=partial_aggregates,json=partialAggregates,proto3" json:"partial_aggregates,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// When set, answer with the vault's page histogram on this grid and no
+	// records. The coordinator asks for it beside the record stream, so a record
+	// stream never waits on the histogram's scan of the window.
+	HistogramGrid *HistogramGrid `protobuf:"bytes,5,opt,name=histogram_grid,json=histogramGrid,proto3" json:"histogram_grid,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ForwardSearchRequest) Reset() {
 	*x = ForwardSearchRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[25]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2319,7 +1824,7 @@ func (x *ForwardSearchRequest) String() string {
 func (*ForwardSearchRequest) ProtoMessage() {}
 
 func (x *ForwardSearchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[25]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2332,7 +1837,7 @@ func (x *ForwardSearchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardSearchRequest.ProtoReflect.Descriptor instead.
 func (*ForwardSearchRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{25}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ForwardSearchRequest) GetVaultId() []byte {
@@ -2363,20 +1868,90 @@ func (x *ForwardSearchRequest) GetPartialAggregates() bool {
 	return false
 }
 
+func (x *ForwardSearchRequest) GetHistogramGrid() *HistogramGrid {
+	if x != nil {
+		return x.HistogramGrid
+	}
+	return nil
+}
+
+// HistogramGrid is the one bucket grid a search's page histogram is counted
+// on. The coordinator chooses it and every node counts its vaults' share on
+// it, so the shares sum bucket by bucket.
+type HistogramGrid struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	StartNanos    int64                  `protobuf:"varint,1,opt,name=start_nanos,json=startNanos,proto3" json:"start_nanos,omitempty"` // first bucket's start, inclusive
+	EndNanos      int64                  `protobuf:"varint,2,opt,name=end_nanos,json=endNanos,proto3" json:"end_nanos,omitempty"`       // last bucket's end, exclusive
+	Buckets       int32                  `protobuf:"varint,3,opt,name=buckets,proto3" json:"buckets,omitempty"`                         // equal-width buckets between start and end
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HistogramGrid) Reset() {
+	*x = HistogramGrid{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HistogramGrid) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HistogramGrid) ProtoMessage() {}
+
+func (x *HistogramGrid) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HistogramGrid.ProtoReflect.Descriptor instead.
+func (*HistogramGrid) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *HistogramGrid) GetStartNanos() int64 {
+	if x != nil {
+		return x.StartNanos
+	}
+	return 0
+}
+
+func (x *HistogramGrid) GetEndNanos() int64 {
+	if x != nil {
+		return x.EndNanos
+	}
+	return 0
+}
+
+func (x *HistogramGrid) GetBuckets() int32 {
+	if x != nil {
+		return x.Buckets
+	}
+	return 0
+}
+
 type ForwardSearchResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Records       []*ExportRecord        `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
 	ResumeToken   []byte                 `protobuf:"bytes,2,opt,name=resume_token,json=resumeToken,proto3" json:"resume_token,omitempty"`
 	HasMore       bool                   `protobuf:"varint,3,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
 	TableResult   *TableResult           `protobuf:"bytes,4,opt,name=table_result,json=tableResult,proto3" json:"table_result,omitempty"` // Pipeline results (timechart, stats)
-	Histogram     []*HistogramBucket     `protobuf:"bytes,5,rep,name=histogram,proto3" json:"histogram,omitempty"`                        // Volume histogram from this node's vaults
+	Histogram     []*HistogramBucket     `protobuf:"bytes,5,rep,name=histogram,proto3" json:"histogram,omitempty"`                        // The vault's page histogram, answering histogram_grid
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ForwardSearchResponse) Reset() {
 	*x = ForwardSearchResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[26]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2388,7 +1963,7 @@ func (x *ForwardSearchResponse) String() string {
 func (*ForwardSearchResponse) ProtoMessage() {}
 
 func (x *ForwardSearchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[26]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2401,7 +1976,7 @@ func (x *ForwardSearchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardSearchResponse.ProtoReflect.Descriptor instead.
 func (*ForwardSearchResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{26}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ForwardSearchResponse) GetRecords() []*ExportRecord {
@@ -2454,7 +2029,7 @@ type ForwardGetContextRequest struct {
 
 func (x *ForwardGetContextRequest) Reset() {
 	*x = ForwardGetContextRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[27]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2466,7 +2041,7 @@ func (x *ForwardGetContextRequest) String() string {
 func (*ForwardGetContextRequest) ProtoMessage() {}
 
 func (x *ForwardGetContextRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[27]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2479,7 +2054,7 @@ func (x *ForwardGetContextRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardGetContextRequest.ProtoReflect.Descriptor instead.
 func (*ForwardGetContextRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{27}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ForwardGetContextRequest) GetVaultId() []byte {
@@ -2528,7 +2103,7 @@ type ForwardGetContextResponse struct {
 
 func (x *ForwardGetContextResponse) Reset() {
 	*x = ForwardGetContextResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[28]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2540,7 +2115,7 @@ func (x *ForwardGetContextResponse) String() string {
 func (*ForwardGetContextResponse) ProtoMessage() {}
 
 func (x *ForwardGetContextResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[28]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2553,7 +2128,7 @@ func (x *ForwardGetContextResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardGetContextResponse.ProtoReflect.Descriptor instead.
 func (*ForwardGetContextResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{28}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ForwardGetContextResponse) GetBefore() []*ExportRecord {
@@ -2589,7 +2164,7 @@ type ForwardListChunksRequest struct {
 
 func (x *ForwardListChunksRequest) Reset() {
 	*x = ForwardListChunksRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[29]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2601,7 +2176,7 @@ func (x *ForwardListChunksRequest) String() string {
 func (*ForwardListChunksRequest) ProtoMessage() {}
 
 func (x *ForwardListChunksRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[29]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2614,7 +2189,7 @@ func (x *ForwardListChunksRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardListChunksRequest.ProtoReflect.Descriptor instead.
 func (*ForwardListChunksRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{29}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ForwardListChunksRequest) GetVaultId() []byte {
@@ -2633,7 +2208,7 @@ type ForwardListChunksResponse struct {
 
 func (x *ForwardListChunksResponse) Reset() {
 	*x = ForwardListChunksResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[30]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2645,7 +2220,7 @@ func (x *ForwardListChunksResponse) String() string {
 func (*ForwardListChunksResponse) ProtoMessage() {}
 
 func (x *ForwardListChunksResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[30]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2658,7 +2233,7 @@ func (x *ForwardListChunksResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardListChunksResponse.ProtoReflect.Descriptor instead.
 func (*ForwardListChunksResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{30}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ForwardListChunksResponse) GetChunks() []*ChunkMeta {
@@ -2666,91 +2241,6 @@ func (x *ForwardListChunksResponse) GetChunks() []*ChunkMeta {
 		return x.Chunks
 	}
 	return nil
-}
-
-// ForwardWaitVaultReadyRequest asks a remote node to block until the named
-// vault is registered and ready to accept transferred records, or the RPC
-// deadline / cancellation fires. Replaces the source-side ForwardListChunks
-// poll used by DrainVault to synchronize with the target node's AddVault.
-// See gastrolog-3sdnn.
-type ForwardWaitVaultReadyRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ForwardWaitVaultReadyRequest) Reset() {
-	*x = ForwardWaitVaultReadyRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[31]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ForwardWaitVaultReadyRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ForwardWaitVaultReadyRequest) ProtoMessage() {}
-
-func (x *ForwardWaitVaultReadyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[31]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ForwardWaitVaultReadyRequest.ProtoReflect.Descriptor instead.
-func (*ForwardWaitVaultReadyRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{31}
-}
-
-func (x *ForwardWaitVaultReadyRequest) GetVaultId() []byte {
-	if x != nil {
-		return x.VaultId
-	}
-	return nil
-}
-
-type ForwardWaitVaultReadyResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ForwardWaitVaultReadyResponse) Reset() {
-	*x = ForwardWaitVaultReadyResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[32]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ForwardWaitVaultReadyResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ForwardWaitVaultReadyResponse) ProtoMessage() {}
-
-func (x *ForwardWaitVaultReadyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[32]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ForwardWaitVaultReadyResponse.ProtoReflect.Descriptor instead.
-func (*ForwardWaitVaultReadyResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{32}
 }
 
 // ForwardGetPipelineBacklogRequest asks a remote node for its local
@@ -2764,7 +2254,7 @@ type ForwardGetPipelineBacklogRequest struct {
 
 func (x *ForwardGetPipelineBacklogRequest) Reset() {
 	*x = ForwardGetPipelineBacklogRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[33]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2776,7 +2266,7 @@ func (x *ForwardGetPipelineBacklogRequest) String() string {
 func (*ForwardGetPipelineBacklogRequest) ProtoMessage() {}
 
 func (x *ForwardGetPipelineBacklogRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[33]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2789,7 +2279,7 @@ func (x *ForwardGetPipelineBacklogRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardGetPipelineBacklogRequest.ProtoReflect.Descriptor instead.
 func (*ForwardGetPipelineBacklogRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{33}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ForwardGetPipelineBacklogRequest) GetVaultId() []byte {
@@ -2815,7 +2305,7 @@ type ForwardGetPipelineBacklogResponse struct {
 
 func (x *ForwardGetPipelineBacklogResponse) Reset() {
 	*x = ForwardGetPipelineBacklogResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[34]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2827,7 +2317,7 @@ func (x *ForwardGetPipelineBacklogResponse) String() string {
 func (*ForwardGetPipelineBacklogResponse) ProtoMessage() {}
 
 func (x *ForwardGetPipelineBacklogResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[34]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2840,7 +2330,7 @@ func (x *ForwardGetPipelineBacklogResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use ForwardGetPipelineBacklogResponse.ProtoReflect.Descriptor instead.
 func (*ForwardGetPipelineBacklogResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{34}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ForwardGetPipelineBacklogResponse) GetWorkingSegments() uint32 {
@@ -2914,7 +2404,7 @@ type ForwardWatchChunksRequest struct {
 
 func (x *ForwardWatchChunksRequest) Reset() {
 	*x = ForwardWatchChunksRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[35]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2926,7 +2416,7 @@ func (x *ForwardWatchChunksRequest) String() string {
 func (*ForwardWatchChunksRequest) ProtoMessage() {}
 
 func (x *ForwardWatchChunksRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[35]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2939,7 +2429,7 @@ func (x *ForwardWatchChunksRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardWatchChunksRequest.ProtoReflect.Descriptor instead.
 func (*ForwardWatchChunksRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{35}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{27}
 }
 
 // ForwardWatchChunksResponse mirrors the public WatchChunksResponse wire
@@ -2961,7 +2451,7 @@ type ForwardWatchChunksResponse struct {
 
 func (x *ForwardWatchChunksResponse) Reset() {
 	*x = ForwardWatchChunksResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[36]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2973,7 +2463,7 @@ func (x *ForwardWatchChunksResponse) String() string {
 func (*ForwardWatchChunksResponse) ProtoMessage() {}
 
 func (x *ForwardWatchChunksResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[36]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2986,7 +2476,7 @@ func (x *ForwardWatchChunksResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardWatchChunksResponse.ProtoReflect.Descriptor instead.
 func (*ForwardWatchChunksResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{36}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ForwardWatchChunksResponse) GetVaultId() []byte {
@@ -3043,7 +2533,7 @@ type ForwardGetIndexesRequest struct {
 
 func (x *ForwardGetIndexesRequest) Reset() {
 	*x = ForwardGetIndexesRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[37]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3055,7 +2545,7 @@ func (x *ForwardGetIndexesRequest) String() string {
 func (*ForwardGetIndexesRequest) ProtoMessage() {}
 
 func (x *ForwardGetIndexesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[37]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3068,7 +2558,7 @@ func (x *ForwardGetIndexesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardGetIndexesRequest.ProtoReflect.Descriptor instead.
 func (*ForwardGetIndexesRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{37}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ForwardGetIndexesRequest) GetVaultId() []byte {
@@ -3095,7 +2585,7 @@ type ForwardGetIndexesResponse struct {
 
 func (x *ForwardGetIndexesResponse) Reset() {
 	*x = ForwardGetIndexesResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[38]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3107,7 +2597,7 @@ func (x *ForwardGetIndexesResponse) String() string {
 func (*ForwardGetIndexesResponse) ProtoMessage() {}
 
 func (x *ForwardGetIndexesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[38]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3120,7 +2610,7 @@ func (x *ForwardGetIndexesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardGetIndexesResponse.ProtoReflect.Descriptor instead.
 func (*ForwardGetIndexesResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{38}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ForwardGetIndexesResponse) GetSealed() bool {
@@ -3148,7 +2638,7 @@ type ForwardValidateVaultRequest struct {
 
 func (x *ForwardValidateVaultRequest) Reset() {
 	*x = ForwardValidateVaultRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[39]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3160,7 +2650,7 @@ func (x *ForwardValidateVaultRequest) String() string {
 func (*ForwardValidateVaultRequest) ProtoMessage() {}
 
 func (x *ForwardValidateVaultRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[39]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3173,7 +2663,7 @@ func (x *ForwardValidateVaultRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardValidateVaultRequest.ProtoReflect.Descriptor instead.
 func (*ForwardValidateVaultRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{39}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ForwardValidateVaultRequest) GetVaultId() []byte {
@@ -3198,7 +2688,7 @@ type ForwardValidateVaultResponse struct {
 
 func (x *ForwardValidateVaultResponse) Reset() {
 	*x = ForwardValidateVaultResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[40]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3210,7 +2700,7 @@ func (x *ForwardValidateVaultResponse) String() string {
 func (*ForwardValidateVaultResponse) ProtoMessage() {}
 
 func (x *ForwardValidateVaultResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[40]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3223,7 +2713,7 @@ func (x *ForwardValidateVaultResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardValidateVaultResponse.ProtoReflect.Descriptor instead.
 func (*ForwardValidateVaultResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{40}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ForwardValidateVaultResponse) GetValid() bool {
@@ -3265,7 +2755,7 @@ type ForwardReconcileCloudIndexRequest struct {
 
 func (x *ForwardReconcileCloudIndexRequest) Reset() {
 	*x = ForwardReconcileCloudIndexRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[41]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3277,7 +2767,7 @@ func (x *ForwardReconcileCloudIndexRequest) String() string {
 func (*ForwardReconcileCloudIndexRequest) ProtoMessage() {}
 
 func (x *ForwardReconcileCloudIndexRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[41]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3290,7 +2780,7 @@ func (x *ForwardReconcileCloudIndexRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use ForwardReconcileCloudIndexRequest.ProtoReflect.Descriptor instead.
 func (*ForwardReconcileCloudIndexRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{41}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ForwardReconcileCloudIndexRequest) GetVaultId() []byte {
@@ -3309,7 +2799,7 @@ type ForwardReconcileCloudIndexResponse struct {
 
 func (x *ForwardReconcileCloudIndexResponse) Reset() {
 	*x = ForwardReconcileCloudIndexResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[42]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3321,7 +2811,7 @@ func (x *ForwardReconcileCloudIndexResponse) String() string {
 func (*ForwardReconcileCloudIndexResponse) ProtoMessage() {}
 
 func (x *ForwardReconcileCloudIndexResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[42]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3334,7 +2824,7 @@ func (x *ForwardReconcileCloudIndexResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use ForwardReconcileCloudIndexResponse.ProtoReflect.Descriptor instead.
 func (*ForwardReconcileCloudIndexResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{42}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ForwardReconcileCloudIndexResponse) GetRepair() *CloudIndexRepair {
@@ -3365,7 +2855,7 @@ type ForwardValidateIngesterRequest struct {
 
 func (x *ForwardValidateIngesterRequest) Reset() {
 	*x = ForwardValidateIngesterRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[43]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3377,7 +2867,7 @@ func (x *ForwardValidateIngesterRequest) String() string {
 func (*ForwardValidateIngesterRequest) ProtoMessage() {}
 
 func (x *ForwardValidateIngesterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[43]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3390,7 +2880,7 @@ func (x *ForwardValidateIngesterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardValidateIngesterRequest.ProtoReflect.Descriptor instead.
 func (*ForwardValidateIngesterRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{43}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ForwardValidateIngesterRequest) GetType() string {
@@ -3424,7 +2914,7 @@ type ForwardValidateIngesterResponse struct {
 
 func (x *ForwardValidateIngesterResponse) Reset() {
 	*x = ForwardValidateIngesterResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[44]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3436,7 +2926,7 @@ func (x *ForwardValidateIngesterResponse) String() string {
 func (*ForwardValidateIngesterResponse) ProtoMessage() {}
 
 func (x *ForwardValidateIngesterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[44]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3449,7 +2939,7 @@ func (x *ForwardValidateIngesterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardValidateIngesterResponse.ProtoReflect.Descriptor instead.
 func (*ForwardValidateIngesterResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{44}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ForwardValidateIngesterResponse) GetSuccess() bool {
@@ -3478,7 +2968,7 @@ type ForwardGetChunkRequest struct {
 
 func (x *ForwardGetChunkRequest) Reset() {
 	*x = ForwardGetChunkRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[45]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3490,7 +2980,7 @@ func (x *ForwardGetChunkRequest) String() string {
 func (*ForwardGetChunkRequest) ProtoMessage() {}
 
 func (x *ForwardGetChunkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[45]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3503,7 +2993,7 @@ func (x *ForwardGetChunkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardGetChunkRequest.ProtoReflect.Descriptor instead.
 func (*ForwardGetChunkRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{45}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ForwardGetChunkRequest) GetVaultId() []byte {
@@ -3529,7 +3019,7 @@ type ForwardGetChunkResponse struct {
 
 func (x *ForwardGetChunkResponse) Reset() {
 	*x = ForwardGetChunkResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[46]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3541,7 +3031,7 @@ func (x *ForwardGetChunkResponse) String() string {
 func (*ForwardGetChunkResponse) ProtoMessage() {}
 
 func (x *ForwardGetChunkResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[46]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3554,7 +3044,7 @@ func (x *ForwardGetChunkResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardGetChunkResponse.ProtoReflect.Descriptor instead.
 func (*ForwardGetChunkResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{46}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ForwardGetChunkResponse) GetChunk() *ChunkMeta {
@@ -3576,7 +3066,7 @@ type ForwardAnalyzeChunkRequest struct {
 
 func (x *ForwardAnalyzeChunkRequest) Reset() {
 	*x = ForwardAnalyzeChunkRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[47]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3588,7 +3078,7 @@ func (x *ForwardAnalyzeChunkRequest) String() string {
 func (*ForwardAnalyzeChunkRequest) ProtoMessage() {}
 
 func (x *ForwardAnalyzeChunkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[47]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3601,7 +3091,7 @@ func (x *ForwardAnalyzeChunkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardAnalyzeChunkRequest.ProtoReflect.Descriptor instead.
 func (*ForwardAnalyzeChunkRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{47}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ForwardAnalyzeChunkRequest) GetVaultId() []byte {
@@ -3627,7 +3117,7 @@ type ForwardAnalyzeChunkResponse struct {
 
 func (x *ForwardAnalyzeChunkResponse) Reset() {
 	*x = ForwardAnalyzeChunkResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[48]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3639,7 +3129,7 @@ func (x *ForwardAnalyzeChunkResponse) String() string {
 func (*ForwardAnalyzeChunkResponse) ProtoMessage() {}
 
 func (x *ForwardAnalyzeChunkResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[48]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3652,7 +3142,7 @@ func (x *ForwardAnalyzeChunkResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardAnalyzeChunkResponse.ProtoReflect.Descriptor instead.
 func (*ForwardAnalyzeChunkResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{48}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ForwardAnalyzeChunkResponse) GetAnalyses() []*ChunkAnalysis {
@@ -3660,87 +3150,6 @@ func (x *ForwardAnalyzeChunkResponse) GetAnalyses() []*ChunkAnalysis {
 		return x.Analyses
 	}
 	return nil
-}
-
-// ForwardSealVaultRequest asks a remote node to seal the active chunk of a vault.
-type ForwardSealVaultRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ForwardSealVaultRequest) Reset() {
-	*x = ForwardSealVaultRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[49]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ForwardSealVaultRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ForwardSealVaultRequest) ProtoMessage() {}
-
-func (x *ForwardSealVaultRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[49]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ForwardSealVaultRequest.ProtoReflect.Descriptor instead.
-func (*ForwardSealVaultRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{49}
-}
-
-func (x *ForwardSealVaultRequest) GetVaultId() []byte {
-	if x != nil {
-		return x.VaultId
-	}
-	return nil
-}
-
-type ForwardSealVaultResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ForwardSealVaultResponse) Reset() {
-	*x = ForwardSealVaultResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[50]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ForwardSealVaultResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ForwardSealVaultResponse) ProtoMessage() {}
-
-func (x *ForwardSealVaultResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[50]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ForwardSealVaultResponse.ProtoReflect.Descriptor instead.
-func (*ForwardSealVaultResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{50}
 }
 
 // ForwardReindexVaultRequest asks a remote node to rebuild all indexes for a vault.
@@ -3753,7 +3162,7 @@ type ForwardReindexVaultRequest struct {
 
 func (x *ForwardReindexVaultRequest) Reset() {
 	*x = ForwardReindexVaultRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[51]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3765,7 +3174,7 @@ func (x *ForwardReindexVaultRequest) String() string {
 func (*ForwardReindexVaultRequest) ProtoMessage() {}
 
 func (x *ForwardReindexVaultRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[51]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3778,7 +3187,7 @@ func (x *ForwardReindexVaultRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardReindexVaultRequest.ProtoReflect.Descriptor instead.
 func (*ForwardReindexVaultRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{51}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ForwardReindexVaultRequest) GetVaultId() []byte {
@@ -3797,7 +3206,7 @@ type ForwardReindexVaultResponse struct {
 
 func (x *ForwardReindexVaultResponse) Reset() {
 	*x = ForwardReindexVaultResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[52]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3809,7 +3218,7 @@ func (x *ForwardReindexVaultResponse) String() string {
 func (*ForwardReindexVaultResponse) ProtoMessage() {}
 
 func (x *ForwardReindexVaultResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[52]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3822,7 +3231,7 @@ func (x *ForwardReindexVaultResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardReindexVaultResponse.ProtoReflect.Descriptor instead.
 func (*ForwardReindexVaultResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{52}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ForwardReindexVaultResponse) GetJobId() []byte {
@@ -3844,7 +3253,7 @@ type ForwardExportToVaultRequest struct {
 
 func (x *ForwardExportToVaultRequest) Reset() {
 	*x = ForwardExportToVaultRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[53]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3856,7 +3265,7 @@ func (x *ForwardExportToVaultRequest) String() string {
 func (*ForwardExportToVaultRequest) ProtoMessage() {}
 
 func (x *ForwardExportToVaultRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[53]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3869,7 +3278,7 @@ func (x *ForwardExportToVaultRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardExportToVaultRequest.ProtoReflect.Descriptor instead.
 func (*ForwardExportToVaultRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{53}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *ForwardExportToVaultRequest) GetExpression() string {
@@ -3895,7 +3304,7 @@ type ForwardExportToVaultResponse struct {
 
 func (x *ForwardExportToVaultResponse) Reset() {
 	*x = ForwardExportToVaultResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[54]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3907,7 +3316,7 @@ func (x *ForwardExportToVaultResponse) String() string {
 func (*ForwardExportToVaultResponse) ProtoMessage() {}
 
 func (x *ForwardExportToVaultResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[54]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3920,7 +3329,7 @@ func (x *ForwardExportToVaultResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardExportToVaultResponse.ProtoReflect.Descriptor instead.
 func (*ForwardExportToVaultResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{54}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ForwardExportToVaultResponse) GetJobId() []byte {
@@ -3941,7 +3350,7 @@ type NotifyEvictionRequest struct {
 
 func (x *NotifyEvictionRequest) Reset() {
 	*x = NotifyEvictionRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[55]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3953,7 +3362,7 @@ func (x *NotifyEvictionRequest) String() string {
 func (*NotifyEvictionRequest) ProtoMessage() {}
 
 func (x *NotifyEvictionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[55]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3966,7 +3375,7 @@ func (x *NotifyEvictionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NotifyEvictionRequest.ProtoReflect.Descriptor instead.
 func (*NotifyEvictionRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{55}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *NotifyEvictionRequest) GetReason() string {
@@ -3984,7 +3393,7 @@ type NotifyEvictionResponse struct {
 
 func (x *NotifyEvictionResponse) Reset() {
 	*x = NotifyEvictionResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[56]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3996,7 +3405,7 @@ func (x *NotifyEvictionResponse) String() string {
 func (*NotifyEvictionResponse) ProtoMessage() {}
 
 func (x *NotifyEvictionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[56]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4009,7 +3418,7 @@ func (x *NotifyEvictionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NotifyEvictionResponse.ProtoReflect.Descriptor instead.
 func (*NotifyEvictionResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{56}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{46}
 }
 
 // ForwardRemoveNodeRequest is sent by a follower to the leader to remove
@@ -4033,7 +3442,7 @@ type ForwardRemoveNodeRequest struct {
 
 func (x *ForwardRemoveNodeRequest) Reset() {
 	*x = ForwardRemoveNodeRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[57]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4045,7 +3454,7 @@ func (x *ForwardRemoveNodeRequest) String() string {
 func (*ForwardRemoveNodeRequest) ProtoMessage() {}
 
 func (x *ForwardRemoveNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[57]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4058,7 +3467,7 @@ func (x *ForwardRemoveNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardRemoveNodeRequest.ProtoReflect.Descriptor instead.
 func (*ForwardRemoveNodeRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{57}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *ForwardRemoveNodeRequest) GetNodeId() []byte {
@@ -4090,7 +3499,7 @@ type ForwardRemoveNodeResponse struct {
 
 func (x *ForwardRemoveNodeResponse) Reset() {
 	*x = ForwardRemoveNodeResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[58]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4102,7 +3511,7 @@ func (x *ForwardRemoveNodeResponse) String() string {
 func (*ForwardRemoveNodeResponse) ProtoMessage() {}
 
 func (x *ForwardRemoveNodeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[58]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4115,11 +3524,13 @@ func (x *ForwardRemoveNodeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardRemoveNodeResponse.ProtoReflect.Descriptor instead.
 func (*ForwardRemoveNodeResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{58}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{48}
 }
 
 // ForwardSetNodeSuffrageRequest is sent by a follower to the leader to
-// promote or demote a node's voting status.
+// promote or demote a node's voting status, or, when node_addr is set, to
+// carry a membership request on behalf of the node at that address. A
+// membership request takes no suffrage, so voter is not read for one.
 type ForwardSetNodeSuffrageRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NodeId        []byte                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
@@ -4131,7 +3542,7 @@ type ForwardSetNodeSuffrageRequest struct {
 
 func (x *ForwardSetNodeSuffrageRequest) Reset() {
 	*x = ForwardSetNodeSuffrageRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[59]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4143,7 +3554,7 @@ func (x *ForwardSetNodeSuffrageRequest) String() string {
 func (*ForwardSetNodeSuffrageRequest) ProtoMessage() {}
 
 func (x *ForwardSetNodeSuffrageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[59]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4156,7 +3567,7 @@ func (x *ForwardSetNodeSuffrageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardSetNodeSuffrageRequest.ProtoReflect.Descriptor instead.
 func (*ForwardSetNodeSuffrageRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{59}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ForwardSetNodeSuffrageRequest) GetNodeId() []byte {
@@ -4188,7 +3599,7 @@ type ForwardSetNodeSuffrageResponse struct {
 
 func (x *ForwardSetNodeSuffrageResponse) Reset() {
 	*x = ForwardSetNodeSuffrageResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[60]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4200,7 +3611,7 @@ func (x *ForwardSetNodeSuffrageResponse) String() string {
 func (*ForwardSetNodeSuffrageResponse) ProtoMessage() {}
 
 func (x *ForwardSetNodeSuffrageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[60]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4213,7 +3624,7 @@ func (x *ForwardSetNodeSuffrageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardSetNodeSuffrageResponse.ProtoReflect.Descriptor instead.
 func (*ForwardSetNodeSuffrageResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{60}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{50}
 }
 
 // ForwardExplainRequest asks a remote node to return the explain plan for
@@ -4228,7 +3639,7 @@ type ForwardExplainRequest struct {
 
 func (x *ForwardExplainRequest) Reset() {
 	*x = ForwardExplainRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[61]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4240,7 +3651,7 @@ func (x *ForwardExplainRequest) String() string {
 func (*ForwardExplainRequest) ProtoMessage() {}
 
 func (x *ForwardExplainRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[61]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4253,7 +3664,7 @@ func (x *ForwardExplainRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardExplainRequest.ProtoReflect.Descriptor instead.
 func (*ForwardExplainRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{61}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *ForwardExplainRequest) GetQuery() string {
@@ -4280,7 +3691,7 @@ type ForwardExplainResponse struct {
 
 func (x *ForwardExplainResponse) Reset() {
 	*x = ForwardExplainResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[62]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4292,7 +3703,7 @@ func (x *ForwardExplainResponse) String() string {
 func (*ForwardExplainResponse) ProtoMessage() {}
 
 func (x *ForwardExplainResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[62]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4305,7 +3716,7 @@ func (x *ForwardExplainResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardExplainResponse.ProtoReflect.Descriptor instead.
 func (*ForwardExplainResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{62}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *ForwardExplainResponse) GetChunks() []*ChunkPlan {
@@ -4335,7 +3746,7 @@ type ForwardFollowRequest struct {
 
 func (x *ForwardFollowRequest) Reset() {
 	*x = ForwardFollowRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[63]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4347,7 +3758,7 @@ func (x *ForwardFollowRequest) String() string {
 func (*ForwardFollowRequest) ProtoMessage() {}
 
 func (x *ForwardFollowRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[63]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4360,7 +3771,7 @@ func (x *ForwardFollowRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardFollowRequest.ProtoReflect.Descriptor instead.
 func (*ForwardFollowRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{63}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *ForwardFollowRequest) GetVaultIds() [][]byte {
@@ -4387,7 +3798,7 @@ type ForwardFollowResponse struct {
 
 func (x *ForwardFollowResponse) Reset() {
 	*x = ForwardFollowResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[64]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4399,7 +3810,7 @@ func (x *ForwardFollowResponse) String() string {
 func (*ForwardFollowResponse) ProtoMessage() {}
 
 func (x *ForwardFollowResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[64]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4412,7 +3823,7 @@ func (x *ForwardFollowResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardFollowResponse.ProtoReflect.Descriptor instead.
 func (*ForwardFollowResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{64}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *ForwardFollowResponse) GetRecords() []*ExportRecord {
@@ -4434,7 +3845,7 @@ type ImportRecordMessage struct {
 
 func (x *ImportRecordMessage) Reset() {
 	*x = ImportRecordMessage{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[65]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4446,7 +3857,7 @@ func (x *ImportRecordMessage) String() string {
 func (*ImportRecordMessage) ProtoMessage() {}
 
 func (x *ImportRecordMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[65]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4459,7 +3870,7 @@ func (x *ImportRecordMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImportRecordMessage.ProtoReflect.Descriptor instead.
 func (*ImportRecordMessage) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{65}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *ImportRecordMessage) GetVaultId() []byte {
@@ -4488,7 +3899,7 @@ type ForwardImportRecordsResponse struct {
 
 func (x *ForwardImportRecordsResponse) Reset() {
 	*x = ForwardImportRecordsResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[66]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4500,7 +3911,7 @@ func (x *ForwardImportRecordsResponse) String() string {
 func (*ForwardImportRecordsResponse) ProtoMessage() {}
 
 func (x *ForwardImportRecordsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[66]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4513,7 +3924,7 @@ func (x *ForwardImportRecordsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardImportRecordsResponse.ProtoReflect.Descriptor instead.
 func (*ForwardImportRecordsResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{66}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *ForwardImportRecordsResponse) GetRecordsWritten() int64 {
@@ -4533,7 +3944,7 @@ type PullManagedFileRequest struct {
 
 func (x *PullManagedFileRequest) Reset() {
 	*x = PullManagedFileRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[67]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4545,7 +3956,7 @@ func (x *PullManagedFileRequest) String() string {
 func (*PullManagedFileRequest) ProtoMessage() {}
 
 func (x *PullManagedFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[67]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4558,7 +3969,7 @@ func (x *PullManagedFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullManagedFileRequest.ProtoReflect.Descriptor instead.
 func (*PullManagedFileRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{67}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *PullManagedFileRequest) GetFileId() []byte {
@@ -4581,7 +3992,7 @@ type PullManagedFileChunk struct {
 
 func (x *PullManagedFileChunk) Reset() {
 	*x = PullManagedFileChunk{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[68]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4593,7 +4004,7 @@ func (x *PullManagedFileChunk) String() string {
 func (*PullManagedFileChunk) ProtoMessage() {}
 
 func (x *PullManagedFileChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[68]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4606,7 +4017,7 @@ func (x *PullManagedFileChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullManagedFileChunk.ProtoReflect.Descriptor instead.
 func (*PullManagedFileChunk) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{68}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *PullManagedFileChunk) GetData() []byte {
@@ -4642,7 +4053,7 @@ type PullSegmentRequest struct {
 
 func (x *PullSegmentRequest) Reset() {
 	*x = PullSegmentRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[69]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4654,7 +4065,7 @@ func (x *PullSegmentRequest) String() string {
 func (*PullSegmentRequest) ProtoMessage() {}
 
 func (x *PullSegmentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[69]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4667,7 +4078,7 @@ func (x *PullSegmentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullSegmentRequest.ProtoReflect.Descriptor instead.
 func (*PullSegmentRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{69}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *PullSegmentRequest) GetVaultId() []byte {
@@ -4696,7 +4107,7 @@ type PullSegmentChunk struct {
 
 func (x *PullSegmentChunk) Reset() {
 	*x = PullSegmentChunk{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[70]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4708,7 +4119,7 @@ func (x *PullSegmentChunk) String() string {
 func (*PullSegmentChunk) ProtoMessage() {}
 
 func (x *PullSegmentChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[70]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4721,7 +4132,7 @@ func (x *PullSegmentChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullSegmentChunk.ProtoReflect.Descriptor instead.
 func (*PullSegmentChunk) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{70}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *PullSegmentChunk) GetData() []byte {
@@ -4745,7 +4156,7 @@ type PullChunkGLCBRequest struct {
 
 func (x *PullChunkGLCBRequest) Reset() {
 	*x = PullChunkGLCBRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[71]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4757,7 +4168,7 @@ func (x *PullChunkGLCBRequest) String() string {
 func (*PullChunkGLCBRequest) ProtoMessage() {}
 
 func (x *PullChunkGLCBRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[71]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4770,7 +4181,7 @@ func (x *PullChunkGLCBRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullChunkGLCBRequest.ProtoReflect.Descriptor instead.
 func (*PullChunkGLCBRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{71}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *PullChunkGLCBRequest) GetVaultId() []byte {
@@ -4799,7 +4210,7 @@ type PullChunkGLCBChunk struct {
 
 func (x *PullChunkGLCBChunk) Reset() {
 	*x = PullChunkGLCBChunk{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[72]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4811,7 +4222,7 @@ func (x *PullChunkGLCBChunk) String() string {
 func (*PullChunkGLCBChunk) ProtoMessage() {}
 
 func (x *PullChunkGLCBChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[72]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4824,7 +4235,7 @@ func (x *PullChunkGLCBChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullChunkGLCBChunk.ProtoReflect.Descriptor instead.
 func (*PullChunkGLCBChunk) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{72}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *PullChunkGLCBChunk) GetData() []byte {
@@ -4843,7 +4254,7 @@ type ListPeerManagedFilesRequest struct {
 
 func (x *ListPeerManagedFilesRequest) Reset() {
 	*x = ListPeerManagedFilesRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[73]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4855,7 +4266,7 @@ func (x *ListPeerManagedFilesRequest) String() string {
 func (*ListPeerManagedFilesRequest) ProtoMessage() {}
 
 func (x *ListPeerManagedFilesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[73]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4868,7 +4279,7 @@ func (x *ListPeerManagedFilesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPeerManagedFilesRequest.ProtoReflect.Descriptor instead.
 func (*ListPeerManagedFilesRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{73}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{63}
 }
 
 // ListPeerManagedFilesResponse returns the file IDs present on a peer.
@@ -4881,7 +4292,7 @@ type ListPeerManagedFilesResponse struct {
 
 func (x *ListPeerManagedFilesResponse) Reset() {
 	*x = ListPeerManagedFilesResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[74]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4893,7 +4304,7 @@ func (x *ListPeerManagedFilesResponse) String() string {
 func (*ListPeerManagedFilesResponse) ProtoMessage() {}
 
 func (x *ListPeerManagedFilesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[74]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4906,7 +4317,7 @@ func (x *ListPeerManagedFilesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPeerManagedFilesResponse.ProtoReflect.Descriptor instead.
 func (*ListPeerManagedFilesResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{74}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *ListPeerManagedFilesResponse) GetFileIds() [][]byte {
@@ -4937,7 +4348,7 @@ type ForwardRPCFrame struct {
 
 func (x *ForwardRPCFrame) Reset() {
 	*x = ForwardRPCFrame{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[75]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4949,7 +4360,7 @@ func (x *ForwardRPCFrame) String() string {
 func (*ForwardRPCFrame) ProtoMessage() {}
 
 func (x *ForwardRPCFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[75]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4962,7 +4373,7 @@ func (x *ForwardRPCFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardRPCFrame.ProtoReflect.Descriptor instead.
 func (*ForwardRPCFrame) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{75}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *ForwardRPCFrame) GetProcedure() string {
@@ -5009,11 +4420,10 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\acsr_pem\x18\x04 \x01(\fR\x06csrPem\"T\n" +
 	"\x0eEnrollResponse\x12\x1e\n" +
 	"\vca_cert_pem\x18\x01 \x01(\fR\tcaCertPem\x12\"\n" +
-	"\rnode_cert_pem\x18\x02 \x01(\fR\vnodeCertPem\"f\n" +
+	"\rnode_cert_pem\x18\x02 \x01(\fR\vnodeCertPem\"P\n" +
 	"\x18RequestMembershipRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12\x1b\n" +
-	"\tnode_addr\x18\x02 \x01(\tR\bnodeAddr\x12\x14\n" +
-	"\x05voter\x18\x03 \x01(\bR\x05voter\"\x1b\n" +
+	"\tnode_addr\x18\x02 \x01(\tR\bnodeAddr\"\x1b\n" +
 	"\x19RequestMembershipResponse\"L\n" +
 	"\x10BroadcastRequest\x128\n" +
 	"\amessage\x18\x01 \x01(\v2\x1e.gastrolog.v1.BroadcastMessageR\amessage\"\x13\n" +
@@ -5145,36 +4555,18 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\bgroup_id\x18\x01 \x01(\fR\agroupId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\fR\acommand\"@\n" +
 	"\x19ForwardVaultApplyResponse\x12#\n" +
-	"\rapplied_index\x18\x01 \x01(\x04R\fappliedIndex\"\xb8\x02\n" +
-	"\x17ChunkReplicationCommand\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12N\n" +
-	"\fimport_begin\x18\n" +
-	" \x01(\v2).gastrolog.v1.ChunkReplicationImportBeginH\x00R\vimportBegin\x12T\n" +
-	"\x0eimport_records\x18\v \x01(\v2+.gastrolog.v1.ChunkReplicationImportRecordsH\x00R\rimportRecords\x12Q\n" +
-	"\rimport_commit\x18\f \x01(\v2*.gastrolog.v1.ChunkReplicationImportCommitH\x00R\fimportCommitB\t\n" +
-	"\acommand\"8\n" +
-	"\x1bChunkReplicationImportBegin\x12\x19\n" +
-	"\bchunk_id\x18\x01 \x01(\fR\achunkId\"U\n" +
-	"\x1dChunkReplicationImportRecords\x124\n" +
-	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"9\n" +
-	"\x1cChunkReplicationImportCommit\x12\x19\n" +
-	"\bchunk_id\x18\x01 \x01(\fR\achunkId\"\x93\x01\n" +
-	"\x13ChunkReplicationAck\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x19\n" +
-	"\bchunk_id\x18\x03 \x01(\fR\achunkId\x12;\n" +
-	"\trejection\x18\x04 \x01(\x0e2\x1d.gastrolog.v1.ImportRejectionR\trejection\"\x82\x01\n" +
-	"\x1cRequestReplicaCatchupRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x1b\n" +
-	"\tchunk_ids\x18\x02 \x03(\fR\bchunkIds\x12*\n" +
-	"\x11requester_node_id\x18\x03 \x01(\fR\x0frequesterNodeId\"=\n" +
-	"\x1dRequestReplicaCatchupResponse\x12\x1c\n" +
-	"\tscheduled\x18\x01 \x01(\rR\tscheduled\"\x99\x01\n" +
+	"\rapplied_index\x18\x01 \x01(\x04R\fappliedIndex\"\xdd\x01\n" +
 	"\x14ForwardSearchRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x12!\n" +
 	"\fresume_token\x18\x03 \x01(\fR\vresumeToken\x12-\n" +
-	"\x12partial_aggregates\x18\x04 \x01(\bR\x11partialAggregates\"\x86\x02\n" +
+	"\x12partial_aggregates\x18\x04 \x01(\bR\x11partialAggregates\x12B\n" +
+	"\x0ehistogram_grid\x18\x05 \x01(\v2\x1b.gastrolog.v1.HistogramGridR\rhistogramGrid\"g\n" +
+	"\rHistogramGrid\x12\x1f\n" +
+	"\vstart_nanos\x18\x01 \x01(\x03R\n" +
+	"startNanos\x12\x1b\n" +
+	"\tend_nanos\x18\x02 \x01(\x03R\bendNanos\x12\x18\n" +
+	"\abuckets\x18\x03 \x01(\x05R\abuckets\"\x86\x02\n" +
 	"\x15ForwardSearchResponse\x124\n" +
 	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\x12!\n" +
 	"\fresume_token\x18\x02 \x01(\fR\vresumeToken\x12\x19\n" +
@@ -5194,10 +4586,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x18ForwardListChunksRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\"L\n" +
 	"\x19ForwardListChunksResponse\x12/\n" +
-	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"9\n" +
-	"\x1cForwardWaitVaultReadyRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\x1f\n" +
-	"\x1dForwardWaitVaultReadyResponse\"=\n" +
+	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"=\n" +
 	" ForwardGetPipelineBacklogRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\xff\x02\n" +
 	"!ForwardGetPipelineBacklogResponse\x12)\n" +
@@ -5254,10 +4643,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\fR\achunkId\"V\n" +
 	"\x1bForwardAnalyzeChunkResponse\x127\n" +
-	"\banalyses\x18\x01 \x03(\v2\x1b.gastrolog.v1.ChunkAnalysisR\banalyses\"4\n" +
-	"\x17ForwardSealVaultRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\x1a\n" +
-	"\x18ForwardSealVaultResponse\"7\n" +
+	"\banalyses\x18\x01 \x03(\v2\x1b.gastrolog.v1.ChunkAnalysisR\banalyses\"7\n" +
 	"\x1aForwardReindexVaultRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\"4\n" +
 	"\x1bForwardReindexVaultResponse\x12\x15\n" +
@@ -5328,10 +4714,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x1aALARM_PRIORITY_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12ALARM_PRIORITY_LOW\x10\x01\x12\x17\n" +
 	"\x13ALARM_PRIORITY_HIGH\x10\x02\x12\x1b\n" +
-	"\x17ALARM_PRIORITY_CRITICAL\x10\x03*Y\n" +
-	"\x0fImportRejection\x12 \n" +
-	"\x1cIMPORT_REJECTION_UNSPECIFIED\x10\x00\x12$\n" +
-	" IMPORT_REJECTION_VAULT_NOT_READY\x10\x01B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\x17ALARM_PRIORITY_CRITICAL\x10\x03B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_cluster_proto_rawDescOnce sync.Once
@@ -5345,156 +4728,141 @@ func file_gastrolog_v1_cluster_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_cluster_proto_rawDescData
 }
 
-var file_gastrolog_v1_cluster_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 77)
+var file_gastrolog_v1_cluster_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 67)
 var file_gastrolog_v1_cluster_proto_goTypes = []any{
 	(AlarmPriority)(0),                         // 0: gastrolog.v1.AlarmPriority
-	(ImportRejection)(0),                       // 1: gastrolog.v1.ImportRejection
-	(*ForwardApplyRequest)(nil),                // 2: gastrolog.v1.ForwardApplyRequest
-	(*ForwardApplyResponse)(nil),               // 3: gastrolog.v1.ForwardApplyResponse
-	(*EnrollRequest)(nil),                      // 4: gastrolog.v1.EnrollRequest
-	(*EnrollResponse)(nil),                     // 5: gastrolog.v1.EnrollResponse
-	(*RequestMembershipRequest)(nil),           // 6: gastrolog.v1.RequestMembershipRequest
-	(*RequestMembershipResponse)(nil),          // 7: gastrolog.v1.RequestMembershipResponse
-	(*BroadcastRequest)(nil),                   // 8: gastrolog.v1.BroadcastRequest
-	(*BroadcastResponse)(nil),                  // 9: gastrolog.v1.BroadcastResponse
-	(*BroadcastMessage)(nil),                   // 10: gastrolog.v1.BroadcastMessage
-	(*NodeJobs)(nil),                           // 11: gastrolog.v1.NodeJobs
-	(*NodeStats)(nil),                          // 12: gastrolog.v1.NodeStats
-	(*VaultPipelineNodeDisk)(nil),              // 13: gastrolog.v1.VaultPipelineNodeDisk
-	(*PeerConnStat)(nil),                       // 14: gastrolog.v1.PeerConnStat
-	(*PeerTrafficTotal)(nil),                   // 15: gastrolog.v1.PeerTrafficTotal
-	(*SystemAlert)(nil),                        // 16: gastrolog.v1.SystemAlert
-	(*IngesterNodeStats)(nil),                  // 17: gastrolog.v1.IngesterNodeStats
-	(*ForwardVaultApplyRequest)(nil),           // 18: gastrolog.v1.ForwardVaultApplyRequest
-	(*ForwardVaultApplyResponse)(nil),          // 19: gastrolog.v1.ForwardVaultApplyResponse
-	(*ChunkReplicationCommand)(nil),            // 20: gastrolog.v1.ChunkReplicationCommand
-	(*ChunkReplicationImportBegin)(nil),        // 21: gastrolog.v1.ChunkReplicationImportBegin
-	(*ChunkReplicationImportRecords)(nil),      // 22: gastrolog.v1.ChunkReplicationImportRecords
-	(*ChunkReplicationImportCommit)(nil),       // 23: gastrolog.v1.ChunkReplicationImportCommit
-	(*ChunkReplicationAck)(nil),                // 24: gastrolog.v1.ChunkReplicationAck
-	(*RequestReplicaCatchupRequest)(nil),       // 25: gastrolog.v1.RequestReplicaCatchupRequest
-	(*RequestReplicaCatchupResponse)(nil),      // 26: gastrolog.v1.RequestReplicaCatchupResponse
-	(*ForwardSearchRequest)(nil),               // 27: gastrolog.v1.ForwardSearchRequest
-	(*ForwardSearchResponse)(nil),              // 28: gastrolog.v1.ForwardSearchResponse
-	(*ForwardGetContextRequest)(nil),           // 29: gastrolog.v1.ForwardGetContextRequest
-	(*ForwardGetContextResponse)(nil),          // 30: gastrolog.v1.ForwardGetContextResponse
-	(*ForwardListChunksRequest)(nil),           // 31: gastrolog.v1.ForwardListChunksRequest
-	(*ForwardListChunksResponse)(nil),          // 32: gastrolog.v1.ForwardListChunksResponse
-	(*ForwardWaitVaultReadyRequest)(nil),       // 33: gastrolog.v1.ForwardWaitVaultReadyRequest
-	(*ForwardWaitVaultReadyResponse)(nil),      // 34: gastrolog.v1.ForwardWaitVaultReadyResponse
-	(*ForwardGetPipelineBacklogRequest)(nil),   // 35: gastrolog.v1.ForwardGetPipelineBacklogRequest
-	(*ForwardGetPipelineBacklogResponse)(nil),  // 36: gastrolog.v1.ForwardGetPipelineBacklogResponse
-	(*ForwardWatchChunksRequest)(nil),          // 37: gastrolog.v1.ForwardWatchChunksRequest
-	(*ForwardWatchChunksResponse)(nil),         // 38: gastrolog.v1.ForwardWatchChunksResponse
-	(*ForwardGetIndexesRequest)(nil),           // 39: gastrolog.v1.ForwardGetIndexesRequest
-	(*ForwardGetIndexesResponse)(nil),          // 40: gastrolog.v1.ForwardGetIndexesResponse
-	(*ForwardValidateVaultRequest)(nil),        // 41: gastrolog.v1.ForwardValidateVaultRequest
-	(*ForwardValidateVaultResponse)(nil),       // 42: gastrolog.v1.ForwardValidateVaultResponse
-	(*ForwardReconcileCloudIndexRequest)(nil),  // 43: gastrolog.v1.ForwardReconcileCloudIndexRequest
-	(*ForwardReconcileCloudIndexResponse)(nil), // 44: gastrolog.v1.ForwardReconcileCloudIndexResponse
-	(*ForwardValidateIngesterRequest)(nil),     // 45: gastrolog.v1.ForwardValidateIngesterRequest
-	(*ForwardValidateIngesterResponse)(nil),    // 46: gastrolog.v1.ForwardValidateIngesterResponse
-	(*ForwardGetChunkRequest)(nil),             // 47: gastrolog.v1.ForwardGetChunkRequest
-	(*ForwardGetChunkResponse)(nil),            // 48: gastrolog.v1.ForwardGetChunkResponse
-	(*ForwardAnalyzeChunkRequest)(nil),         // 49: gastrolog.v1.ForwardAnalyzeChunkRequest
-	(*ForwardAnalyzeChunkResponse)(nil),        // 50: gastrolog.v1.ForwardAnalyzeChunkResponse
-	(*ForwardSealVaultRequest)(nil),            // 51: gastrolog.v1.ForwardSealVaultRequest
-	(*ForwardSealVaultResponse)(nil),           // 52: gastrolog.v1.ForwardSealVaultResponse
-	(*ForwardReindexVaultRequest)(nil),         // 53: gastrolog.v1.ForwardReindexVaultRequest
-	(*ForwardReindexVaultResponse)(nil),        // 54: gastrolog.v1.ForwardReindexVaultResponse
-	(*ForwardExportToVaultRequest)(nil),        // 55: gastrolog.v1.ForwardExportToVaultRequest
-	(*ForwardExportToVaultResponse)(nil),       // 56: gastrolog.v1.ForwardExportToVaultResponse
-	(*NotifyEvictionRequest)(nil),              // 57: gastrolog.v1.NotifyEvictionRequest
-	(*NotifyEvictionResponse)(nil),             // 58: gastrolog.v1.NotifyEvictionResponse
-	(*ForwardRemoveNodeRequest)(nil),           // 59: gastrolog.v1.ForwardRemoveNodeRequest
-	(*ForwardRemoveNodeResponse)(nil),          // 60: gastrolog.v1.ForwardRemoveNodeResponse
-	(*ForwardSetNodeSuffrageRequest)(nil),      // 61: gastrolog.v1.ForwardSetNodeSuffrageRequest
-	(*ForwardSetNodeSuffrageResponse)(nil),     // 62: gastrolog.v1.ForwardSetNodeSuffrageResponse
-	(*ForwardExplainRequest)(nil),              // 63: gastrolog.v1.ForwardExplainRequest
-	(*ForwardExplainResponse)(nil),             // 64: gastrolog.v1.ForwardExplainResponse
-	(*ForwardFollowRequest)(nil),               // 65: gastrolog.v1.ForwardFollowRequest
-	(*ForwardFollowResponse)(nil),              // 66: gastrolog.v1.ForwardFollowResponse
-	(*ImportRecordMessage)(nil),                // 67: gastrolog.v1.ImportRecordMessage
-	(*ForwardImportRecordsResponse)(nil),       // 68: gastrolog.v1.ForwardImportRecordsResponse
-	(*PullManagedFileRequest)(nil),             // 69: gastrolog.v1.PullManagedFileRequest
-	(*PullManagedFileChunk)(nil),               // 70: gastrolog.v1.PullManagedFileChunk
-	(*PullSegmentRequest)(nil),                 // 71: gastrolog.v1.PullSegmentRequest
-	(*PullSegmentChunk)(nil),                   // 72: gastrolog.v1.PullSegmentChunk
-	(*PullChunkGLCBRequest)(nil),               // 73: gastrolog.v1.PullChunkGLCBRequest
-	(*PullChunkGLCBChunk)(nil),                 // 74: gastrolog.v1.PullChunkGLCBChunk
-	(*ListPeerManagedFilesRequest)(nil),        // 75: gastrolog.v1.ListPeerManagedFilesRequest
-	(*ListPeerManagedFilesResponse)(nil),       // 76: gastrolog.v1.ListPeerManagedFilesResponse
-	(*ForwardRPCFrame)(nil),                    // 77: gastrolog.v1.ForwardRPCFrame
-	nil,                                        // 78: gastrolog.v1.ForwardValidateIngesterRequest.ParamsEntry
-	(*timestamppb.Timestamp)(nil),              // 79: google.protobuf.Timestamp
-	(*Job)(nil),                                // 80: gastrolog.v1.Job
-	(*VaultStats)(nil),                         // 81: gastrolog.v1.VaultStats
-	(*VaultRouteStats)(nil),                    // 82: gastrolog.v1.VaultRouteStats
-	(*PerRouteStats)(nil),                      // 83: gastrolog.v1.PerRouteStats
-	(*ThroughputRate)(nil),                     // 84: gastrolog.v1.ThroughputRate
-	(*StorageState)(nil),                       // 85: gastrolog.v1.StorageState
-	(*ExportRecord)(nil),                       // 86: gastrolog.v1.ExportRecord
-	(*TableResult)(nil),                        // 87: gastrolog.v1.TableResult
-	(*HistogramBucket)(nil),                    // 88: gastrolog.v1.HistogramBucket
-	(*ChunkMeta)(nil),                          // 89: gastrolog.v1.ChunkMeta
-	(ChunkChangeOp)(0),                         // 90: gastrolog.v1.ChunkChangeOp
-	(*IndexInfo)(nil),                          // 91: gastrolog.v1.IndexInfo
-	(*ChunkValidation)(nil),                    // 92: gastrolog.v1.ChunkValidation
-	(*CloudIndexAudit)(nil),                    // 93: gastrolog.v1.CloudIndexAudit
-	(*CloudIndexRepair)(nil),                   // 94: gastrolog.v1.CloudIndexRepair
-	(*ChunkAnalysis)(nil),                      // 95: gastrolog.v1.ChunkAnalysis
-	(*ChunkPlan)(nil),                          // 96: gastrolog.v1.ChunkPlan
+	(*ForwardApplyRequest)(nil),                // 1: gastrolog.v1.ForwardApplyRequest
+	(*ForwardApplyResponse)(nil),               // 2: gastrolog.v1.ForwardApplyResponse
+	(*EnrollRequest)(nil),                      // 3: gastrolog.v1.EnrollRequest
+	(*EnrollResponse)(nil),                     // 4: gastrolog.v1.EnrollResponse
+	(*RequestMembershipRequest)(nil),           // 5: gastrolog.v1.RequestMembershipRequest
+	(*RequestMembershipResponse)(nil),          // 6: gastrolog.v1.RequestMembershipResponse
+	(*BroadcastRequest)(nil),                   // 7: gastrolog.v1.BroadcastRequest
+	(*BroadcastResponse)(nil),                  // 8: gastrolog.v1.BroadcastResponse
+	(*BroadcastMessage)(nil),                   // 9: gastrolog.v1.BroadcastMessage
+	(*NodeJobs)(nil),                           // 10: gastrolog.v1.NodeJobs
+	(*NodeStats)(nil),                          // 11: gastrolog.v1.NodeStats
+	(*VaultPipelineNodeDisk)(nil),              // 12: gastrolog.v1.VaultPipelineNodeDisk
+	(*PeerConnStat)(nil),                       // 13: gastrolog.v1.PeerConnStat
+	(*PeerTrafficTotal)(nil),                   // 14: gastrolog.v1.PeerTrafficTotal
+	(*SystemAlert)(nil),                        // 15: gastrolog.v1.SystemAlert
+	(*IngesterNodeStats)(nil),                  // 16: gastrolog.v1.IngesterNodeStats
+	(*ForwardVaultApplyRequest)(nil),           // 17: gastrolog.v1.ForwardVaultApplyRequest
+	(*ForwardVaultApplyResponse)(nil),          // 18: gastrolog.v1.ForwardVaultApplyResponse
+	(*ForwardSearchRequest)(nil),               // 19: gastrolog.v1.ForwardSearchRequest
+	(*HistogramGrid)(nil),                      // 20: gastrolog.v1.HistogramGrid
+	(*ForwardSearchResponse)(nil),              // 21: gastrolog.v1.ForwardSearchResponse
+	(*ForwardGetContextRequest)(nil),           // 22: gastrolog.v1.ForwardGetContextRequest
+	(*ForwardGetContextResponse)(nil),          // 23: gastrolog.v1.ForwardGetContextResponse
+	(*ForwardListChunksRequest)(nil),           // 24: gastrolog.v1.ForwardListChunksRequest
+	(*ForwardListChunksResponse)(nil),          // 25: gastrolog.v1.ForwardListChunksResponse
+	(*ForwardGetPipelineBacklogRequest)(nil),   // 26: gastrolog.v1.ForwardGetPipelineBacklogRequest
+	(*ForwardGetPipelineBacklogResponse)(nil),  // 27: gastrolog.v1.ForwardGetPipelineBacklogResponse
+	(*ForwardWatchChunksRequest)(nil),          // 28: gastrolog.v1.ForwardWatchChunksRequest
+	(*ForwardWatchChunksResponse)(nil),         // 29: gastrolog.v1.ForwardWatchChunksResponse
+	(*ForwardGetIndexesRequest)(nil),           // 30: gastrolog.v1.ForwardGetIndexesRequest
+	(*ForwardGetIndexesResponse)(nil),          // 31: gastrolog.v1.ForwardGetIndexesResponse
+	(*ForwardValidateVaultRequest)(nil),        // 32: gastrolog.v1.ForwardValidateVaultRequest
+	(*ForwardValidateVaultResponse)(nil),       // 33: gastrolog.v1.ForwardValidateVaultResponse
+	(*ForwardReconcileCloudIndexRequest)(nil),  // 34: gastrolog.v1.ForwardReconcileCloudIndexRequest
+	(*ForwardReconcileCloudIndexResponse)(nil), // 35: gastrolog.v1.ForwardReconcileCloudIndexResponse
+	(*ForwardValidateIngesterRequest)(nil),     // 36: gastrolog.v1.ForwardValidateIngesterRequest
+	(*ForwardValidateIngesterResponse)(nil),    // 37: gastrolog.v1.ForwardValidateIngesterResponse
+	(*ForwardGetChunkRequest)(nil),             // 38: gastrolog.v1.ForwardGetChunkRequest
+	(*ForwardGetChunkResponse)(nil),            // 39: gastrolog.v1.ForwardGetChunkResponse
+	(*ForwardAnalyzeChunkRequest)(nil),         // 40: gastrolog.v1.ForwardAnalyzeChunkRequest
+	(*ForwardAnalyzeChunkResponse)(nil),        // 41: gastrolog.v1.ForwardAnalyzeChunkResponse
+	(*ForwardReindexVaultRequest)(nil),         // 42: gastrolog.v1.ForwardReindexVaultRequest
+	(*ForwardReindexVaultResponse)(nil),        // 43: gastrolog.v1.ForwardReindexVaultResponse
+	(*ForwardExportToVaultRequest)(nil),        // 44: gastrolog.v1.ForwardExportToVaultRequest
+	(*ForwardExportToVaultResponse)(nil),       // 45: gastrolog.v1.ForwardExportToVaultResponse
+	(*NotifyEvictionRequest)(nil),              // 46: gastrolog.v1.NotifyEvictionRequest
+	(*NotifyEvictionResponse)(nil),             // 47: gastrolog.v1.NotifyEvictionResponse
+	(*ForwardRemoveNodeRequest)(nil),           // 48: gastrolog.v1.ForwardRemoveNodeRequest
+	(*ForwardRemoveNodeResponse)(nil),          // 49: gastrolog.v1.ForwardRemoveNodeResponse
+	(*ForwardSetNodeSuffrageRequest)(nil),      // 50: gastrolog.v1.ForwardSetNodeSuffrageRequest
+	(*ForwardSetNodeSuffrageResponse)(nil),     // 51: gastrolog.v1.ForwardSetNodeSuffrageResponse
+	(*ForwardExplainRequest)(nil),              // 52: gastrolog.v1.ForwardExplainRequest
+	(*ForwardExplainResponse)(nil),             // 53: gastrolog.v1.ForwardExplainResponse
+	(*ForwardFollowRequest)(nil),               // 54: gastrolog.v1.ForwardFollowRequest
+	(*ForwardFollowResponse)(nil),              // 55: gastrolog.v1.ForwardFollowResponse
+	(*ImportRecordMessage)(nil),                // 56: gastrolog.v1.ImportRecordMessage
+	(*ForwardImportRecordsResponse)(nil),       // 57: gastrolog.v1.ForwardImportRecordsResponse
+	(*PullManagedFileRequest)(nil),             // 58: gastrolog.v1.PullManagedFileRequest
+	(*PullManagedFileChunk)(nil),               // 59: gastrolog.v1.PullManagedFileChunk
+	(*PullSegmentRequest)(nil),                 // 60: gastrolog.v1.PullSegmentRequest
+	(*PullSegmentChunk)(nil),                   // 61: gastrolog.v1.PullSegmentChunk
+	(*PullChunkGLCBRequest)(nil),               // 62: gastrolog.v1.PullChunkGLCBRequest
+	(*PullChunkGLCBChunk)(nil),                 // 63: gastrolog.v1.PullChunkGLCBChunk
+	(*ListPeerManagedFilesRequest)(nil),        // 64: gastrolog.v1.ListPeerManagedFilesRequest
+	(*ListPeerManagedFilesResponse)(nil),       // 65: gastrolog.v1.ListPeerManagedFilesResponse
+	(*ForwardRPCFrame)(nil),                    // 66: gastrolog.v1.ForwardRPCFrame
+	nil,                                        // 67: gastrolog.v1.ForwardValidateIngesterRequest.ParamsEntry
+	(*timestamppb.Timestamp)(nil),              // 68: google.protobuf.Timestamp
+	(*Job)(nil),                                // 69: gastrolog.v1.Job
+	(*VaultStats)(nil),                         // 70: gastrolog.v1.VaultStats
+	(*VaultRouteStats)(nil),                    // 71: gastrolog.v1.VaultRouteStats
+	(*PerRouteStats)(nil),                      // 72: gastrolog.v1.PerRouteStats
+	(*ThroughputRate)(nil),                     // 73: gastrolog.v1.ThroughputRate
+	(*StorageState)(nil),                       // 74: gastrolog.v1.StorageState
+	(*ExportRecord)(nil),                       // 75: gastrolog.v1.ExportRecord
+	(*TableResult)(nil),                        // 76: gastrolog.v1.TableResult
+	(*HistogramBucket)(nil),                    // 77: gastrolog.v1.HistogramBucket
+	(*ChunkMeta)(nil),                          // 78: gastrolog.v1.ChunkMeta
+	(ChunkChangeOp)(0),                         // 79: gastrolog.v1.ChunkChangeOp
+	(*IndexInfo)(nil),                          // 80: gastrolog.v1.IndexInfo
+	(*ChunkValidation)(nil),                    // 81: gastrolog.v1.ChunkValidation
+	(*CloudIndexAudit)(nil),                    // 82: gastrolog.v1.CloudIndexAudit
+	(*CloudIndexRepair)(nil),                   // 83: gastrolog.v1.CloudIndexRepair
+	(*ChunkAnalysis)(nil),                      // 84: gastrolog.v1.ChunkAnalysis
+	(*ChunkPlan)(nil),                          // 85: gastrolog.v1.ChunkPlan
 }
 var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
-	10, // 0: gastrolog.v1.BroadcastRequest.message:type_name -> gastrolog.v1.BroadcastMessage
-	79, // 1: gastrolog.v1.BroadcastMessage.timestamp:type_name -> google.protobuf.Timestamp
-	12, // 2: gastrolog.v1.BroadcastMessage.node_stats:type_name -> gastrolog.v1.NodeStats
-	11, // 3: gastrolog.v1.BroadcastMessage.node_jobs:type_name -> gastrolog.v1.NodeJobs
-	80, // 4: gastrolog.v1.NodeJobs.jobs:type_name -> gastrolog.v1.Job
-	81, // 5: gastrolog.v1.NodeStats.vaults:type_name -> gastrolog.v1.VaultStats
-	17, // 6: gastrolog.v1.NodeStats.ingesters:type_name -> gastrolog.v1.IngesterNodeStats
-	82, // 7: gastrolog.v1.NodeStats.route_vault_stats:type_name -> gastrolog.v1.VaultRouteStats
-	83, // 8: gastrolog.v1.NodeStats.route_per_route_stats:type_name -> gastrolog.v1.PerRouteStats
-	16, // 9: gastrolog.v1.NodeStats.alerts:type_name -> gastrolog.v1.SystemAlert
-	14, // 10: gastrolog.v1.NodeStats.peer_connections:type_name -> gastrolog.v1.PeerConnStat
-	15, // 11: gastrolog.v1.NodeStats.peer_traffic_totals:type_name -> gastrolog.v1.PeerTrafficTotal
-	13, // 12: gastrolog.v1.NodeStats.vault_pipeline_disk:type_name -> gastrolog.v1.VaultPipelineNodeDisk
-	84, // 13: gastrolog.v1.NodeStats.route_routed:type_name -> gastrolog.v1.ThroughputRate
-	84, // 14: gastrolog.v1.NodeStats.route_matched:type_name -> gastrolog.v1.ThroughputRate
-	85, // 15: gastrolog.v1.NodeStats.storages:type_name -> gastrolog.v1.StorageState
+	9,  // 0: gastrolog.v1.BroadcastRequest.message:type_name -> gastrolog.v1.BroadcastMessage
+	68, // 1: gastrolog.v1.BroadcastMessage.timestamp:type_name -> google.protobuf.Timestamp
+	11, // 2: gastrolog.v1.BroadcastMessage.node_stats:type_name -> gastrolog.v1.NodeStats
+	10, // 3: gastrolog.v1.BroadcastMessage.node_jobs:type_name -> gastrolog.v1.NodeJobs
+	69, // 4: gastrolog.v1.NodeJobs.jobs:type_name -> gastrolog.v1.Job
+	70, // 5: gastrolog.v1.NodeStats.vaults:type_name -> gastrolog.v1.VaultStats
+	16, // 6: gastrolog.v1.NodeStats.ingesters:type_name -> gastrolog.v1.IngesterNodeStats
+	71, // 7: gastrolog.v1.NodeStats.route_vault_stats:type_name -> gastrolog.v1.VaultRouteStats
+	72, // 8: gastrolog.v1.NodeStats.route_per_route_stats:type_name -> gastrolog.v1.PerRouteStats
+	15, // 9: gastrolog.v1.NodeStats.alerts:type_name -> gastrolog.v1.SystemAlert
+	13, // 10: gastrolog.v1.NodeStats.peer_connections:type_name -> gastrolog.v1.PeerConnStat
+	14, // 11: gastrolog.v1.NodeStats.peer_traffic_totals:type_name -> gastrolog.v1.PeerTrafficTotal
+	12, // 12: gastrolog.v1.NodeStats.vault_pipeline_disk:type_name -> gastrolog.v1.VaultPipelineNodeDisk
+	73, // 13: gastrolog.v1.NodeStats.route_routed:type_name -> gastrolog.v1.ThroughputRate
+	73, // 14: gastrolog.v1.NodeStats.route_matched:type_name -> gastrolog.v1.ThroughputRate
+	74, // 15: gastrolog.v1.NodeStats.storages:type_name -> gastrolog.v1.StorageState
 	0,  // 16: gastrolog.v1.SystemAlert.priority:type_name -> gastrolog.v1.AlarmPriority
-	79, // 17: gastrolog.v1.SystemAlert.first_seen:type_name -> google.protobuf.Timestamp
-	79, // 18: gastrolog.v1.SystemAlert.last_seen:type_name -> google.protobuf.Timestamp
-	21, // 19: gastrolog.v1.ChunkReplicationCommand.import_begin:type_name -> gastrolog.v1.ChunkReplicationImportBegin
-	22, // 20: gastrolog.v1.ChunkReplicationCommand.import_records:type_name -> gastrolog.v1.ChunkReplicationImportRecords
-	23, // 21: gastrolog.v1.ChunkReplicationCommand.import_commit:type_name -> gastrolog.v1.ChunkReplicationImportCommit
-	86, // 22: gastrolog.v1.ChunkReplicationImportRecords.records:type_name -> gastrolog.v1.ExportRecord
-	1,  // 23: gastrolog.v1.ChunkReplicationAck.rejection:type_name -> gastrolog.v1.ImportRejection
-	86, // 24: gastrolog.v1.ForwardSearchResponse.records:type_name -> gastrolog.v1.ExportRecord
-	87, // 25: gastrolog.v1.ForwardSearchResponse.table_result:type_name -> gastrolog.v1.TableResult
-	88, // 26: gastrolog.v1.ForwardSearchResponse.histogram:type_name -> gastrolog.v1.HistogramBucket
-	86, // 27: gastrolog.v1.ForwardGetContextResponse.before:type_name -> gastrolog.v1.ExportRecord
-	86, // 28: gastrolog.v1.ForwardGetContextResponse.anchor:type_name -> gastrolog.v1.ExportRecord
-	86, // 29: gastrolog.v1.ForwardGetContextResponse.after:type_name -> gastrolog.v1.ExportRecord
-	89, // 30: gastrolog.v1.ForwardListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
-	90, // 31: gastrolog.v1.ForwardWatchChunksResponse.op:type_name -> gastrolog.v1.ChunkChangeOp
-	89, // 32: gastrolog.v1.ForwardWatchChunksResponse.meta:type_name -> gastrolog.v1.ChunkMeta
-	91, // 33: gastrolog.v1.ForwardGetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
-	92, // 34: gastrolog.v1.ForwardValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
-	93, // 35: gastrolog.v1.ForwardValidateVaultResponse.cloud_index_audit:type_name -> gastrolog.v1.CloudIndexAudit
-	94, // 36: gastrolog.v1.ForwardReconcileCloudIndexResponse.repair:type_name -> gastrolog.v1.CloudIndexRepair
-	78, // 37: gastrolog.v1.ForwardValidateIngesterRequest.params:type_name -> gastrolog.v1.ForwardValidateIngesterRequest.ParamsEntry
-	89, // 38: gastrolog.v1.ForwardGetChunkResponse.chunk:type_name -> gastrolog.v1.ChunkMeta
-	95, // 39: gastrolog.v1.ForwardAnalyzeChunkResponse.analyses:type_name -> gastrolog.v1.ChunkAnalysis
-	96, // 40: gastrolog.v1.ForwardExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
-	86, // 41: gastrolog.v1.ForwardFollowResponse.records:type_name -> gastrolog.v1.ExportRecord
-	86, // 42: gastrolog.v1.ImportRecordMessage.record:type_name -> gastrolog.v1.ExportRecord
-	43, // [43:43] is the sub-list for method output_type
-	43, // [43:43] is the sub-list for method input_type
-	43, // [43:43] is the sub-list for extension type_name
-	43, // [43:43] is the sub-list for extension extendee
-	0,  // [0:43] is the sub-list for field type_name
+	68, // 17: gastrolog.v1.SystemAlert.first_seen:type_name -> google.protobuf.Timestamp
+	68, // 18: gastrolog.v1.SystemAlert.last_seen:type_name -> google.protobuf.Timestamp
+	20, // 19: gastrolog.v1.ForwardSearchRequest.histogram_grid:type_name -> gastrolog.v1.HistogramGrid
+	75, // 20: gastrolog.v1.ForwardSearchResponse.records:type_name -> gastrolog.v1.ExportRecord
+	76, // 21: gastrolog.v1.ForwardSearchResponse.table_result:type_name -> gastrolog.v1.TableResult
+	77, // 22: gastrolog.v1.ForwardSearchResponse.histogram:type_name -> gastrolog.v1.HistogramBucket
+	75, // 23: gastrolog.v1.ForwardGetContextResponse.before:type_name -> gastrolog.v1.ExportRecord
+	75, // 24: gastrolog.v1.ForwardGetContextResponse.anchor:type_name -> gastrolog.v1.ExportRecord
+	75, // 25: gastrolog.v1.ForwardGetContextResponse.after:type_name -> gastrolog.v1.ExportRecord
+	78, // 26: gastrolog.v1.ForwardListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
+	79, // 27: gastrolog.v1.ForwardWatchChunksResponse.op:type_name -> gastrolog.v1.ChunkChangeOp
+	78, // 28: gastrolog.v1.ForwardWatchChunksResponse.meta:type_name -> gastrolog.v1.ChunkMeta
+	80, // 29: gastrolog.v1.ForwardGetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
+	81, // 30: gastrolog.v1.ForwardValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
+	82, // 31: gastrolog.v1.ForwardValidateVaultResponse.cloud_index_audit:type_name -> gastrolog.v1.CloudIndexAudit
+	83, // 32: gastrolog.v1.ForwardReconcileCloudIndexResponse.repair:type_name -> gastrolog.v1.CloudIndexRepair
+	67, // 33: gastrolog.v1.ForwardValidateIngesterRequest.params:type_name -> gastrolog.v1.ForwardValidateIngesterRequest.ParamsEntry
+	78, // 34: gastrolog.v1.ForwardGetChunkResponse.chunk:type_name -> gastrolog.v1.ChunkMeta
+	84, // 35: gastrolog.v1.ForwardAnalyzeChunkResponse.analyses:type_name -> gastrolog.v1.ChunkAnalysis
+	85, // 36: gastrolog.v1.ForwardExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
+	75, // 37: gastrolog.v1.ForwardFollowResponse.records:type_name -> gastrolog.v1.ExportRecord
+	75, // 38: gastrolog.v1.ImportRecordMessage.record:type_name -> gastrolog.v1.ExportRecord
+	39, // [39:39] is the sub-list for method output_type
+	39, // [39:39] is the sub-list for method input_type
+	39, // [39:39] is the sub-list for extension type_name
+	39, // [39:39] is the sub-list for extension extendee
+	0,  // [0:39] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_cluster_proto_init() }
@@ -5511,18 +4879,13 @@ func file_gastrolog_v1_cluster_proto_init() {
 		(*BroadcastMessage_NodeStats)(nil),
 		(*BroadcastMessage_NodeJobs)(nil),
 	}
-	file_gastrolog_v1_cluster_proto_msgTypes[18].OneofWrappers = []any{
-		(*ChunkReplicationCommand_ImportBegin)(nil),
-		(*ChunkReplicationCommand_ImportRecords)(nil),
-		(*ChunkReplicationCommand_ImportCommit)(nil),
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_cluster_proto_rawDesc), len(file_gastrolog_v1_cluster_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   77,
+			NumEnums:      1,
+			NumMessages:   67,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
