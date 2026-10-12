@@ -86,7 +86,7 @@ Each action on an expanded vault card runs against the live vault; the line besi
 
 Every node then removes what it keeps for the vault. The vault's data files — its sealed chunks and their indexes, and its staging segments — stay on disk, unreachable, unless **Delete data files** is ticked, which erases them on every node, along with a cloud-backed vault's cloud objects. Either way its control-plane state (its Raft group, lock file and cloud index) and the directories left empty are removed.
 
-From the CLI: `gastrolog config vault delete <name> --force`, adding `--delete-data` to erase the data files.
+From the CLI: `gastrolog config vault delete <name> --force`, adding `--delete-data` to erase the data files. `gastrolog config import --replace` deletes every existing vault the same way: their data files stay unless `--delete-data` is added there too.
 
 ## Rotation and Retention Policies
 
