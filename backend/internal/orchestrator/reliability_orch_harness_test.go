@@ -1191,12 +1191,13 @@ func (h *orchRelHarness) sealActiveOn(n *orchRelNode, v vaultSpec) {
 
 // sealOnLeaderForVault seals the active chunk for a specific vault on
 // that vault's vault-ctl Raft leader.
+//
+// Leadership can move between finding the leader and sealing; the node then
+// still seals its chunk-manager active chunk and refuses only the open
+// manifest's half, which sealActiveOn accepts.
 func (h *orchRelHarness) sealOnLeaderForVault(v vaultSpec) {
 	h.t.Helper()
-	leader := h.waitForVaultCtlLeaderForVault(v)
-	if _, err := leader.orch.SealActive(v.id); err != nil {
-		h.t.Fatalf("SealActiveChunk vault %s: %v", v.label, err)
-	}
+	h.sealActiveOn(h.waitForVaultCtlLeaderForVault(v), v)
 }
 
 // waitForVaultCtlLeaderForVault returns the node that currently holds
@@ -1386,10 +1387,7 @@ func (h *orchRelHarness) appendOnLeader(rec chunk.Record) error {
 // burst from appendBurst is sealed with sealActiveOn on the node it returned.
 func (h *orchRelHarness) sealOnLeader() {
 	h.t.Helper()
-	leader := h.waitForVaultCtlLeader()
-	if _, err := leader.orch.SealActive(h.vaultID); err != nil {
-		h.t.Fatalf("SealActiveChunk: %v", err)
-	}
+	h.sealOnLeaderForVault(h.vaults[0])
 }
 
 // waitForVaultCtlLeader waits until the default vault's vault-ctl Raft group
