@@ -56,13 +56,15 @@ func TestStorageIDForNodeMemoryVaultFallbacks(t *testing.T) {
 	nsc := nodeStorages(nodeID, 1)
 	memVault := system.VaultConfig{Type: system.VaultTypeMemory}
 
-	// Memory vaults have no class requirement: any storage works.
+	// A memory vault is placed on its node's synthetic storage even where the
+	// node has file storages: that is the only storage placement eligibility
+	// accepts for it, so a leader placed anywhere else is never eligible.
 	got := system.StorageIDForNode(nodeID, memVault, []system.NodeStorageConfig{nsc})
-	if got != nsc.FileStorages[0].ID.String() {
-		t.Fatalf("memory vault = %q, want first storage", got)
+	if got != system.SyntheticStorageID(nodeID) {
+		t.Fatalf("memory vault on a node with file storage = %q, want synthetic %q", got, system.SyntheticStorageID(nodeID))
 	}
 
-	// No storage config at all: synthetic ID keeps memory vaults placeable.
+	// No storage config at all: the same synthetic ID.
 	got = system.StorageIDForNode("node-bare", memVault, nil)
 	if got != system.SyntheticStorageID("node-bare") {
 		t.Fatalf("memory vault on bare node = %q, want synthetic", got)

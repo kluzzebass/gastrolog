@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/glid"
 	"log/slog"
 	"maps"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -87,7 +87,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 	vault.StorageType = string(vaultCfg.Type)
 	o.vaults[vaultCfg.ID] = vault
 	o.bindVaultInstanceToCtlLocked(vaultCfg.ID, instance)
-	o.scheduleHomeIndexSweep(vaultCfg.ID, instance)
+	o.scheduleHomeArrivalWork(vaultCfg.ID, instance)
 
 	// Recompile the routing table immediately so the vault can receive
 	// records right away. The rotation sweep also reconciles every 15s
@@ -281,7 +281,8 @@ func (o *Orchestrator) removeVaultJobs(_ glid.GLID, vault *Vault) {
 }
 
 // cancelPendingChunkJobs cancels a vault's pending per-chunk jobs — post-seal,
-// index rebuild, home index sweep, replica catch-up pull and cloud upload —
+// index rebuild, home index sweep, replica catch-up pull, cloud upload and
+// JSONL sink —
 // which read through its chunk and index managers: run after the vault closes,
 // they would act on closed managers. It also drops the vault's cloud-upload
 // backoff/alarm state, which no sweep on this node revisits once the vault is
@@ -290,6 +291,8 @@ func (o *Orchestrator) cancelPendingChunkJobs(vaultID glid.GLID) {
 	o.scheduler.RemoveJobsByPrefix(postSealJobPrefix(vaultID))
 	o.scheduler.RemoveJobsByPrefix(indexRebuildJobPrefix(vaultID))
 	o.scheduler.RemoveJob(homeIndexSweepJobName(vaultID))
+	o.scheduler.RemoveJob(jsonlSinkJobName(vaultID))
+	o.jsonlSinks.Delete(vaultID)
 	o.scheduler.RemoveJobsByPrefix(glcbCatchupVaultJobPrefix(vaultID))
 	o.scheduler.RemoveJobsByPrefix(cloudUploadJobPrefix(vaultID))
 	o.purgeBackfillFailuresForVault(vaultID)
@@ -583,42 +586,10 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 	// Every node is a vault-ctl voter, storage placement or not.
 	o.ensureVaultControlPlaneRaftGroup(vaultID, rt.Nodes, factories)
 
-	nscs := rt.NodeStorageConfigs
-	placements := sys.PlacementsFor(vaultCfg.ID)
-	leaderNodeID := system.LeaderNodeID(placements, nscs)
-	followerNodeIDs := system.FollowerNodeIDs(placements, nscs)
-	isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
-	isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
-	if !isLeader && !isFollower {
-		return nil
+	ti, err := o.buildLocalInstance(sys, *vaultCfg, factories)
+	if err != nil {
+		return fmt.Errorf("build vault %s: %w", vaultID, err)
 	}
-
-	var ti *VaultInstance
-	if isLeader {
-		t, err := o.buildLeaderInstance(sys, *vaultCfg, factories)
-		if err != nil {
-			return fmt.Errorf("build vault %s: %w", vaultID, err)
-		}
-		t.FollowerTargets = system.FollowerTargets(placements, nscs)
-		ti = t
-	} else {
-		for _, tgt := range system.FollowerTargets(placements, nscs) {
-			if tgt.NodeID != o.localNodeID {
-				continue
-			}
-			t, err := o.buildInstanceForStorage(sys, *vaultCfg, factories, tgt.StorageID, true)
-			if err != nil {
-				return fmt.Errorf("build vault %s storage %s: %w", vaultID, tgt.StorageID, err)
-			}
-			t.IsFollower = true
-			t.LeaderNodeID = leaderNodeID
-			t.StorageID = tgt.StorageID
-			t.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
-			ti = t
-			break
-		}
-	}
-
 	if ti == nil {
 		return nil
 	}
@@ -638,7 +609,7 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 	}
 	vault.Instance = ti
 	o.bindVaultInstanceToCtlLocked(vaultID, ti)
-	o.scheduleHomeIndexSweep(vaultID, ti)
+	o.scheduleHomeArrivalWork(vaultID, ti)
 	o.logger.Info("vault placement added", "vault", vaultID)
 	return nil
 }
@@ -709,45 +680,42 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 	// up while chunks load.
 	o.ensureVaultControlPlaneRaftGroup(vaultCfg.ID, rt.Nodes, factories)
 
-	vaultID := vaultCfg.ID
-
-	// Determine this node's role for this vault. With one-replica-per-node
-	// (Phase 2 invariant) the node is at most one of: leader, follower, neither.
-	nscs := rt.NodeStorageConfigs
-	placements := sys.PlacementsFor(vaultCfg.ID)
-	leaderNodeID := system.LeaderNodeID(placements, nscs)
-	followerNodeIDs := system.FollowerNodeIDs(placements, nscs)
-	isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
-	isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
-	if !isLeader && !isFollower {
+	ti, err := o.buildLocalInstance(sys, vaultCfg, factories)
+	if err != nil {
+		o.alertVaultInitFailed(vaultCfg.ID, vaultCfg.Name, err)
 		return nil, nil
 	}
+	return ti, nil
+}
 
-	if isLeader {
+// buildLocalInstance builds this node's VaultInstance for the vault: the
+// leader's or a follower's, on the storage its placement names. It returns
+// nil when the vault has no placement on this node. With one replica per node
+// a node is at most one of leader, follower, neither.
+func (o *Orchestrator) buildLocalInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories) (*VaultInstance, error) {
+	nscs := sys.Runtime.NodeStorageConfigs
+	placements := sys.PlacementsFor(vaultCfg.ID)
+	leaderNodeID := system.LeaderNodeID(placements, nscs)
+	if leaderNodeID == "" || leaderNodeID == o.localNodeID {
 		ti, err := o.buildLeaderInstance(sys, vaultCfg, factories)
 		if err != nil {
-			o.alertVaultInitFailed(vaultID, vaultCfg.Name, err)
-			return nil, nil
+			return nil, err
 		}
 		ti.FollowerTargets = system.FollowerTargets(placements, nscs)
 		return ti, nil
 	}
-
-	// Follower: build the instance for this node's placement.
 	for _, tgt := range system.FollowerTargets(placements, nscs) {
 		if tgt.NodeID != o.localNodeID {
 			continue
 		}
-		sti, err := o.buildInstanceForStorage(sys, vaultCfg, factories, tgt.StorageID, true)
+		ti, err := o.buildPlacedInstance(sys, vaultCfg, factories, tgt.StorageID, true)
 		if err != nil {
-			o.alertVaultInitFailed(vaultID, vaultCfg.Name, err)
-			return nil, nil
+			return nil, fmt.Errorf("storage %s: %w", tgt.StorageID, err)
 		}
-		sti.IsFollower = true
-		sti.LeaderNodeID = leaderNodeID
-		sti.StorageID = tgt.StorageID
-		sti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
-		return sti, nil
+		ti.IsFollower = true
+		ti.LeaderNodeID = leaderNodeID
+		ti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
+		return ti, nil
 	}
 	return nil, nil
 }
@@ -771,16 +739,24 @@ func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.V
 	// Read placements from VaultConfig (mirrored from vault placements via
 	// the FSM bridge).
 	storageID := system.LeaderStorageID(sys.PlacementsFor(vaultCfg.ID))
-	if storageID != "" && !strings.HasPrefix(storageID, system.SyntheticStoragePrefix) {
-		ti, err := o.buildInstanceForStorage(sys, vaultCfg, factories, storageID, false)
-		if err != nil {
-			return nil, err
-		}
-		ti.StorageID = storageID
-		return ti, nil
+	return o.buildPlacedInstance(sys, vaultCfg, factories, storageID, false)
+}
+
+// buildPlacedInstance creates the VaultInstance for a placement on storageID:
+// on that file storage when it is one, otherwise — a memory vault's synthetic
+// storage, or no placement yet — with class-based resolution under the vaults
+// directory. A JSONL vault's sink file is at its own path wherever it is
+// placed.
+func (o *Orchestrator) buildPlacedInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories, storageID string, isFollower bool) (*VaultInstance, error) {
+	var (
+		ti  *VaultInstance
+		err error
+	)
+	if storageID != "" && !strings.HasPrefix(storageID, system.SyntheticStoragePrefix) && vaultCfg.Type != system.VaultTypeJSONL {
+		ti, err = o.buildInstanceForStorage(sys, vaultCfg, factories, storageID, isFollower)
+	} else {
+		ti, err = o.buildInstance(sys, vaultCfg, factories, isFollower)
 	}
-	// Synthetic or unplaced — fall back to class-based resolution.
-	ti, err := o.buildInstance(sys, vaultCfg, factories, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1629,10 +1605,14 @@ func (o *Orchestrator) buildVaultRaftMembers(clusterNodes []system.NodeConfig, f
 	return members
 }
 
+// mapVaultTypeToFactory names the chunk and index manager factories for a
+// vault type. A memory vault is a pipeline vault like a file vault, served by
+// the same managers; its memory budget makes the chunk manager hold its
+// sealed GLCBs in RAM.
 func mapVaultTypeToFactory(t system.VaultType) string {
 	switch t {
 	case system.VaultTypeMemory:
-		return "memory"
+		return "file"
 	case system.VaultTypeFile:
 		return "file"
 	case system.VaultTypeJSONL:
@@ -1660,7 +1640,7 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNode
 		if system.IsQuantityUnset(budget) {
 			budget = system.DefaultVaultMemoryBudget
 		}
-		params["budgetBytes"] = budget
+		params[chunkfile.ParamMemoryBudget] = budget
 
 	case system.VaultTypeFile:
 		// Single storage class for all file vaults — local-only and

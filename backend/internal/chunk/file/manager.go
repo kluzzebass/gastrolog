@@ -144,6 +144,11 @@ type Config struct {
 	// their data.glcb is authoritative.
 	CacheTTL time.Duration
 
+	// MemoryBudgetBytes, when non-zero, makes this a memory vault's manager:
+	// its sealed GLCBs are held in RAM rather than mapped, and the bytes of
+	// its sealed chunks are bounded by this budget (BudgetExceeded).
+	MemoryBudgetBytes uint64
+
 	// Announcer, when non-nil, is called after each metadata state change
 	// (create, seal, compress, upload, delete) for cluster-wide visibility.
 	Announcer chunk.MetadataAnnouncer

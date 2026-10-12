@@ -23,7 +23,7 @@ The chain is wired with three [routes](help:routing): one per source/destination
 | Shape | What it does |
 |------|-------------|
 | [**File**](help:storage-file) | Persists chunks to local disk with memory-mapped reads |
-| [**Memory**](help:storage-memory) | Keeps chunks in RAM — fast but lost on restart |
+| [**Memory**](help:storage-memory) | Serves sealed chunks from RAM, bounded by a memory budget — records are durable and survive restarts |
 | [**Cloud-backed file**](help:storage-cloud) | File vault with a cloud service binding — active chunk on local disk, sealed chunks uploaded to S3/GCS/Azure |
 | **JSONL** | Append-only JSON lines file — write-only sink for debugging or export |
 

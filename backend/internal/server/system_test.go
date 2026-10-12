@@ -19,7 +19,6 @@ import (
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
-	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/ingester/syslog"
 	"gastrolog/internal/ingester/tail"
 	"gastrolog/internal/orchestrator"
@@ -111,12 +110,10 @@ func newConfigTestSetup(t *testing.T) (gastrologv1connect.SystemServiceClient, s
 	factories := orchestrator.Factories{
 		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
-			"file":   chunkfile.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
-			"file":   indexfile.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 	}
 
@@ -527,12 +524,10 @@ func newConfigTestSetupWithIngesters(t *testing.T) (gastrologv1connect.SystemSer
 	factories := orchestrator.Factories{
 		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
-			"file":   chunkfile.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
-			"file":   indexfile.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 		IngesterTypes: map[string]orchestrator.IngesterRegistration{
 			"syslog": {Factory: syslog.NewFactory(nil), Defaults: syslog.ParamDefaults, ListenAddrs: syslog.ListenAddrs},
@@ -1093,11 +1088,12 @@ func TestGetIngesterDefaultsModes(t *testing.T) {
 	}
 
 	factories := orchestrator.Factories{
+		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 		IngesterTypes: map[string]orchestrator.IngesterRegistration{
 			"syslog": {Factory: syslog.NewFactory(nil), Defaults: syslog.ParamDefaults, ListenAddrs: syslog.ListenAddrs},

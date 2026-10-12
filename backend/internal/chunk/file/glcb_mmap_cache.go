@@ -35,7 +35,7 @@ func (m *Manager) mappedGLCB(id chunk.ChunkID) (*glcb.MappedBlob, error) {
 	if blob := m.pinMappedGLCB(id, path, onPath); blob != nil {
 		return blob, nil
 	}
-	fresh, err := glcb.OpenMappedBlob(path)
+	fresh, err := m.openGLCBBlob(path)
 	if err != nil {
 		return nil, err
 	}
@@ -48,8 +48,21 @@ func (m *Manager) mappedGLCB(id chunk.ChunkID) (*glcb.MappedBlob, error) {
 	}
 	fresh.Retain()
 	m.glcbMapped.Store(id, &mappedGLCBEntry{path: path, blob: fresh})
-	m.noteGLCBMappedLocked(id)
+	if !fresh.Held() {
+		m.noteGLCBMappedLocked(id)
+	}
 	return fresh, nil
+}
+
+// openGLCBBlob maps the GLCB at path, or, for a memory vault, reads it into
+// RAM. A held GLCB stays out of the mapping LRU: it is resident until its
+// chunk is deleted or its copy is forgotten, and the memory budget, not the
+// mapping cap, bounds how many there are.
+func (m *Manager) openGLCBBlob(path string) (*glcb.MappedBlob, error) {
+	if m.cfg.MemoryBudgetBytes > 0 {
+		return glcb.OpenHeldBlob(path)
+	}
+	return glcb.OpenMappedBlob(path)
 }
 
 func (m *Manager) pinMappedGLCB(id chunk.ChunkID, path string, onPath os.FileInfo) *glcb.MappedBlob {
@@ -109,4 +122,28 @@ func (m *Manager) WithGLCBSection(id chunk.ChunkID, sectionType byte, fn func(ve
 		return fmt.Errorf("%w: type=0x%02x in %s", glcb.ErrSectionNotFound, sectionType, blob.Path())
 	}
 	return fn(entry.Version, section)
+}
+
+var _ chunk.ChunkBudgetMonitor = (*Manager)(nil)
+
+// BudgetExceeded implements chunk.ChunkBudgetMonitor: for a memory vault, the
+// bytes by which its sealed chunks exceed the memory budget. Every sealed
+// chunk counts, held yet or not, since each is held once it is read. A vault
+// without a memory budget is never over it.
+func (m *Manager) BudgetExceeded() int64 {
+	if m.cfg.MemoryBudgetBytes == 0 {
+		return 0
+	}
+	metas, err := m.List()
+	if err != nil {
+		return 0
+	}
+	var sealed int64
+	for _, meta := range metas {
+		if meta.Sealed {
+			sealed += meta.Bytes
+		}
+	}
+	budget := int64(m.cfg.MemoryBudgetBytes) //nolint:gosec // G115: a byte budget is far below int64's range
+	return max(sealed-budget, 0)
 }

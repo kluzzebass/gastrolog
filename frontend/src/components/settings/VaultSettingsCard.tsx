@@ -60,17 +60,12 @@ function vaultDeleteConsequences(vault: VaultConfig, holderNames: string[], dele
       ? `Removes "${name}" and its ${String(holderNames.length)} placement(s) on ${holderNames.join(", ")}; nothing routes to it afterwards`
       : `Removes "${name}", which has no placements`,
   ];
-  switch (vault.type) {
-    case VaultType.MEMORY:
-      lines.push("Its records live only in memory and are gone with it");
-      break;
-    case VaultType.JSONL:
-      lines.push("The JSONL file stays on disk");
-      break;
-    default:
-      lines.push(deleteData
-        ? "Its chunk files are erased from every placement node"
-        : "Its chunk files stay on disk, unreachable, until removed by hand");
+  if (vault.type === VaultType.JSONL) {
+    lines.push("The JSONL file stays on disk");
+  } else {
+    lines.push(deleteData
+      ? "Its chunk files are erased from every placement node"
+      : "Its chunk files stay on disk, unreachable, until removed by hand");
   }
   return lines;
 }
@@ -280,7 +275,7 @@ export function VaultSettingsCard({
       deleteConsequences={vaultDeleteConsequences(vault, holderNames, deleteData)}
       deleteConfirmExtra={
         <div className="flex items-center gap-1.5">
-          {vault.type === VaultType.FILE && (
+          {vault.type !== VaultType.JSONL && (
             <label className="flex items-center gap-1.5 text-[0.8em] opacity-70">
               <input
                 type="checkbox"

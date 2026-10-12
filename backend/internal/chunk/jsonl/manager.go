@@ -1,9 +1,17 @@
 // Package jsonl implements a write-only JSONL sink. Every record
 // is appended as a single JSON line to a file. No chunking, rotation,
-// indexing, or searching — purely for end-to-end verification.
+// indexing, or searching.
+//
+// A JSONL vault's records reach the sink one sealed chunk at a time
+// (WriteChunk). A ledger beside the sink file lists the chunks written, each
+// only after its lines are synced, so a restart writes every chunk the
+// ledger does not list — a crash can repeat one chunk's lines but never
+// lose them.
 package jsonl
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -29,6 +37,8 @@ type Manager struct {
 	mu       sync.Mutex
 	file     *os.File
 	encoder  *json.Encoder
+	ledger   *os.File
+	written  map[chunk.ChunkID]bool
 	id       chunk.ChunkID // single synthetic chunk ID
 	count    int64
 	earliest time.Time
@@ -45,20 +55,126 @@ type record struct {
 	Raw      string           `json:"raw"`
 }
 
+// LedgerSuffix names the ledger of written chunks beside the sink file.
+const LedgerSuffix = ".chunks"
+
 // NewManager creates a JSONL sink manager at the given file path.
 func NewManager(cfg Config) (*Manager, error) {
 	if err := os.MkdirAll(filepath.Dir(cfg.Path), 0o750); err != nil {
 		return nil, fmt.Errorf("create jsonl parent dir: %w", err)
 	}
+	if err := dropTornLine(cfg.Path); err != nil {
+		return nil, err
+	}
 	f, err := os.OpenFile(cfg.Path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open jsonl sink: %w", err)
 	}
+	written, err := readLedger(cfg.Path + LedgerSuffix)
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	ledger, err := os.OpenFile(cfg.Path+LedgerSuffix, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("open jsonl sink ledger: %w", err)
+	}
 	return &Manager{
 		file:    f,
 		encoder: json.NewEncoder(f),
+		ledger:  ledger,
+		written: written,
 		id:      chunk.NewChunkID(),
 	}, nil
+}
+
+// dropTornLine truncates a partly written last line off the sink file: it
+// belongs to a chunk the ledger does not list, which is written again whole.
+func dropTornLine(path string) error {
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read jsonl sink: %w", err)
+	}
+	if len(data) == 0 || data[len(data)-1] == '\n' {
+		return nil
+	}
+	keep := bytes.LastIndexByte(data, '\n') + 1
+	if err := os.Truncate(path, int64(keep)); err != nil {
+		return fmt.Errorf("drop torn jsonl line: %w", err)
+	}
+	return nil
+}
+
+// readLedger returns the chunks the ledger lists. A torn last entry lists
+// nothing: its chunk is written again.
+func readLedger(path string) (map[chunk.ChunkID]bool, error) {
+	written := make(map[chunk.ChunkID]bool)
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return written, nil
+		}
+		return nil, fmt.Errorf("open jsonl sink ledger: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		if id, err := chunk.ParseChunkID(sc.Text()); err == nil {
+			written[id] = true
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("read jsonl sink ledger: %w", err)
+	}
+	return written, nil
+}
+
+// Written reports whether the ledger lists chunk id as written.
+func (m *Manager) Written(id chunk.ChunkID) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.written[id]
+}
+
+// WriteChunk appends sealed chunk id's records to the sink and lists the chunk
+// in the ledger once its lines are synced. A chunk already listed is skipped.
+// Reports whether it wrote the chunk.
+func (m *Manager) WriteChunk(id chunk.ChunkID, next chunk.RecordIterator) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return false, errors.New("jsonl manager closed")
+	}
+	if m.written[id] {
+		return false, nil
+	}
+	for {
+		rec, err := next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			break
+		}
+		if err != nil {
+			return false, fmt.Errorf("read chunk %s: %w", id, err)
+		}
+		if err := m.encodeLocked(rec); err != nil {
+			return false, err
+		}
+	}
+	if err := m.file.Sync(); err != nil {
+		return false, fmt.Errorf("sync jsonl sink: %w", err)
+	}
+	if _, err := m.ledger.WriteString(id.String() + "\n"); err != nil {
+		return false, fmt.Errorf("write jsonl sink ledger: %w", err)
+	}
+	if err := m.ledger.Sync(); err != nil {
+		return false, fmt.Errorf("sync jsonl sink ledger: %w", err)
+	}
+	m.written[id] = true
+	return true, nil
 }
 
 // NewFactory returns a chunk.ManagerFactory for JSONL sinks.
@@ -78,7 +194,16 @@ func (m *Manager) Append(rec chunk.Record) (chunk.ChunkID, uint64, error) {
 	if m.closed {
 		return chunk.ChunkID{}, 0, errors.New("jsonl manager closed")
 	}
+	pos := uint64(m.count) //nolint:gosec // count is non-negative
+	if err := m.encodeLocked(rec); err != nil {
+		return chunk.ChunkID{}, 0, err
+	}
+	return m.id, pos, nil
+}
 
+// encodeLocked writes rec as one JSON line. A record's own write time is kept;
+// one without gets the time it is written here. Caller holds m.mu.
+func (m *Manager) encodeLocked(rec chunk.Record) error {
 	raw := rec.Raw
 	var rawStr string
 	if utf8.Valid(raw) {
@@ -86,18 +211,19 @@ func (m *Manager) Append(rec chunk.Record) (chunk.ChunkID, uint64, error) {
 	} else {
 		rawStr = base64.StdEncoding.EncodeToString(raw)
 	}
-
+	writeTS := rec.WriteTS
+	if writeTS.IsZero() {
+		writeTS = time.Now()
+	}
 	if err := m.encoder.Encode(record{
 		SourceTS: rec.SourceTS,
 		IngestTS: rec.IngestTS,
-		WriteTS:  time.Now(),
+		WriteTS:  writeTS,
 		Attrs:    rec.Attrs,
 		Raw:      rawStr,
 	}); err != nil {
-		return chunk.ChunkID{}, 0, fmt.Errorf("write jsonl: %w", err)
+		return fmt.Errorf("write jsonl: %w", err)
 	}
-
-	pos := uint64(m.count) //nolint:gosec // count is non-negative
 	m.count++
 	ts := rec.IngestTS
 	if m.earliest.IsZero() || ts.Before(m.earliest) {
@@ -106,7 +232,7 @@ func (m *Manager) Append(rec chunk.Record) (chunk.ChunkID, uint64, error) {
 	if ts.After(m.latest) {
 		m.latest = ts
 	}
-	return m.id, pos, nil
+	return nil
 }
 
 func (m *Manager) Seal() error { return nil }
@@ -188,8 +314,11 @@ func (m *Manager) ScanAttrs(_ chunk.ChunkID, _ uint64, _ func(time.Time, chunk.A
 func (m *Manager) ImportRecords(_ chunk.ChunkID, next chunk.RecordIterator) (chunk.ChunkMeta, error) {
 	for {
 		rec, err := next()
-		if err != nil {
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
 			break
+		}
+		if err != nil {
+			return chunk.ChunkMeta{}, err
 		}
 		if _, _, err := m.Append(rec); err != nil {
 			return chunk.ChunkMeta{}, err
@@ -209,8 +338,12 @@ func (m *Manager) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.closed = true
-	if m.file != nil {
-		return m.file.Close()
+	var errs []error
+	if m.ledger != nil {
+		errs = append(errs, m.ledger.Close())
 	}
-	return nil
+	if m.file != nil {
+		errs = append(errs, m.file.Close())
+	}
+	return errors.Join(errs...)
 }

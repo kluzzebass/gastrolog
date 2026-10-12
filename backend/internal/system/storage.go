@@ -354,7 +354,11 @@ func StorageIDForNode(nodeID string, v VaultConfig, nscs []NodeStorageConfig) st
 	idx := slices.IndexFunc(nscs, func(n NodeStorageConfig) bool { return n.NodeID == nodeID })
 
 	switch v.Type {
-	case VaultTypeMemory, VaultTypeJSONL:
+	case VaultTypeMemory:
+		// A memory vault is placed on its node's synthetic storage, the only
+		// storage placement eligibility accepts for it.
+		return SyntheticStorageID(nodeID)
+	case VaultTypeJSONL:
 		// No storage class — pick any storage, or synthetic if none.
 		if idx >= 0 && len(nscs[idx].FileStorages) > 0 {
 			return nscs[idx].FileStorages[0].ID.String()

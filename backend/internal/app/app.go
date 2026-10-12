@@ -31,14 +31,12 @@ import (
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	chunkjsonl "gastrolog/internal/chunk/jsonl"
-	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/cluster"
 	digestlevel "gastrolog/internal/digester/level"
 	digesttimestamp "gastrolog/internal/digester/timestamp"
 	"gastrolog/internal/home"
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
-	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/ingester/chatterbox"
 	ingestdocker "gastrolog/internal/ingester/docker"
 	ingestfluentfwd "gastrolog/internal/ingester/fluentfwd"
@@ -1802,13 +1800,11 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore sys
 	return orchestrator.Factories{
 		IngesterTypes: ingesterTypes,
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"file":   chunkfile.NewFactory(),
-			"memory": chunkmem.NewFactory(),
-			"jsonl":  chunkjsonl.NewFactory(),
+			"file":  chunkfile.NewFactory(),
+			"jsonl": chunkjsonl.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"file":   indexfile.NewFactory(),
-			"memory": indexmem.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 		Logger:              logger,
 		HomeDir:             homeDir,

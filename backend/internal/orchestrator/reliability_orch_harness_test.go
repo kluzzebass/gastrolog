@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	chunkjsonl "gastrolog/internal/chunk/jsonl"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -154,6 +155,10 @@ type vaultSpec struct {
 	// storageClass is the vault's storage class; zero means
 	// harnessStorageClass, the class of every node's default file storage.
 	storageClass uint32
+	// memoryBudget, when set, makes this a memory vault with that budget.
+	memoryBudget string
+	// jsonlPath, when set, makes this a JSONL vault writing to that path.
+	jsonlPath string
 }
 
 // class is the vault's storage class.
@@ -185,6 +190,45 @@ func withExtraVault(nodeIdxs []int) orchRelOption {
 			nodeIdxs: nodeIdxs,
 		})
 	}
+}
+
+// withMemoryVault registers a memory vault with the given budget, placed on
+// the given node indexes (first is the vault leader). Labeled like
+// withExtraVault.
+func withMemoryVault(nodeIdxs []int, budget string) orchRelOption {
+	return func(h *orchRelHarness) {
+		label := string(rune('B' + len(h.vaults) - 1))
+		h.vaults = append(h.vaults, vaultSpec{
+			label:        label,
+			id:           glid.New(),
+			nodeIdxs:     nodeIdxs,
+			memoryBudget: budget,
+		})
+	}
+}
+
+// withJSONLVault registers a JSONL vault writing to path, placed on the node
+// at nodeIdx. Labeled like withExtraVault.
+func withJSONLVault(nodeIdx int, path string) orchRelOption {
+	return func(h *orchRelHarness) {
+		label := string(rune('B' + len(h.vaults) - 1))
+		h.vaults = append(h.vaults, vaultSpec{
+			label:     label,
+			id:        glid.New(),
+			nodeIdxs:  []int{nodeIdx},
+			jsonlPath: path,
+		})
+	}
+}
+
+// placementStorageID is the storage a vault is placed on at n: a memory
+// vault's synthetic storage, otherwise the file storage of its class.
+func (h *orchRelHarness) placementStorageID(n *orchRelNode, v vaultSpec) string {
+	if v.memoryBudget != "" {
+		return system.SyntheticStorageID(n.id)
+	}
+	storageID, _ := h.storageFor(n, v)
+	return storageID.String()
 }
 
 // withStorageClassVault gives every node an additional file storage of the
@@ -697,13 +741,22 @@ func (h *orchRelHarness) seedSharedConfig() {
 	// Register every vault + instance + placement. vaults[0] is the default;
 	// additional entries come from withExtraVault options.
 	for _, v := range h.vaults {
-		if err := h.cfgStore.PutVault(ctx, system.VaultConfig{
+		vc := system.VaultConfig{
 			ID:               v.id,
 			Name:             "orch-rel-vault-" + v.label,
 			Type:             system.VaultTypeFile,
 			StorageClass:     v.class(),
 			RotationPolicyID: rotationPolicyID,
-		}); err != nil {
+		}
+		if v.memoryBudget != "" {
+			vc.Type = system.VaultTypeMemory
+			vc.MemoryBudget = v.memoryBudget
+		}
+		if v.jsonlPath != "" {
+			vc.Type = system.VaultTypeJSONL
+			vc.Path = v.jsonlPath
+		}
+		if err := h.cfgStore.PutVault(ctx, vc); err != nil {
 			h.t.Fatalf("PutVault %s: %v", v.label, err)
 		}
 		// Placements: one per participating node. First listed is leader.
@@ -713,9 +766,8 @@ func (h *orchRelHarness) seedSharedConfig() {
 				h.t.Fatalf("vault %s: invalid node index %d (have %d nodes)", v.label, idx, len(h.nodeIDs))
 			}
 			n := h.nodes[h.nodeIDs[idx]]
-			storageID, _ := h.storageFor(n, v)
 			placements = append(placements, system.VaultPlacement{
-				StorageID: storageID.String(),
+				StorageID: h.placementStorageID(n, v),
 				Leader:    pos == 0,
 			})
 		}
@@ -814,11 +866,15 @@ func (h *orchRelHarness) startNode(id string) {
 		NodeAddressResolver: resolver,
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			vaultTypeKey: h.chunkManagerFactory(),
+			"jsonl":      chunkjsonl.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
 			vaultTypeKey: indexfile.NewFactory(),
 		},
 		Logger: logger,
+		// Each node's own vaults directory, as in production: a vault placed
+		// on no file storage (a memory vault) lives under it.
+		VaultsDir: filepath.Join(n.home, "vaults"),
 	}
 	// Vault-ctl multiraft always dials through PeerConns (shared with
 	// ClusterService when pipeline mode is enabled).
@@ -895,9 +951,8 @@ func (h *orchRelHarness) setVaultPlacements(v vaultSpec, nodeIdxs []int) {
 	placements := make([]system.VaultPlacement, 0, len(nodeIdxs))
 	for pos, idx := range nodeIdxs {
 		n := h.nodes[h.nodeIDs[idx]]
-		storageID, _ := h.storageFor(n, v)
 		placements = append(placements, system.VaultPlacement{
-			StorageID: storageID.String(),
+			StorageID: h.placementStorageID(n, v),
 			Leader:    pos == 0,
 		})
 	}

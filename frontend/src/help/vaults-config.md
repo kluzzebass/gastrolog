@@ -14,9 +14,9 @@ Each vault has a **type** that determines how it stores data:
 
 | Type | Description |
 |------|-------------|
-| Memory | RAM-only. Fast, but lost on restart. |
+| Memory | Sealed chunks served from RAM, bounded by the vault's memory budget. Records are durable from the moment they are accepted and survive restarts. |
 | File | Local disk. Optionally cloud-backed by selecting a Cloud Storage. |
-| JSONL | Append-only JSON lines file. Write-only — cannot be searched or queried. Useful for exporting raw records to external tools. |
+| JSONL | Append-only JSON lines file. Write-only — cannot be searched or queried. Useful for exporting raw records to external tools. Each record is written once, when its chunk seals. |
 
 A **File** vault is local-only by default. Selecting a Cloud Storage on it makes the vault *cloud-backed* — sealed chunks upload to S3/GCS/Azure while the active chunk and a warm cache stay on local disk. There is no separate "Cloud" type; the binding is what makes the difference.
 
@@ -35,7 +35,7 @@ Transfer moves a sealed chunk's on-disk form between two file vaults' chunk dire
 | Reason shown | Rule |
 |--------------|------|
 | this vault | The target must be a different vault. A chunk transferred to its own vault would immediately qualify for the same retention rule again. |
-| memory vault, JSONL sink | The target must be a file vault. Memory vaults and JSONL sinks have no on-disk chunk form to receive. |
+| memory vault, JSONL sink | The target must be a file vault: transfer moves chunks between file vaults only. |
 | cloud-backed | The target must be a non-cloud file vault. A cloud-backed vault keeps sealed chunks in object storage, with its own upload and cache lifecycle. |
 | would create a transfer cycle | Following the target's own transfer target, and that vault's, must never lead back to this vault (or loop anywhere else) — a cycle would move the same chunks around forever. |
 
@@ -58,11 +58,11 @@ The cache fields are always shown and apply to cloud-backed vaults only — on a
 
 ### Memory Vault Settings
 
-- **Budget** — maximum memory for this vault. Leave empty for the system default.
+- **Budget** — the most RAM this vault's sealed chunks may take on each node. Leave empty for the system default. Over budget, retention retires the oldest sealed chunks with the vault's retention disposition, like any other retention trigger.
 
 ### JSONL Vault Settings
 
-- **Path** — file path, relative to the node's home directory.
+- **Path** — file path, relative to the node's home directory. A ledger of the chunks written sits beside it (`<path>.chunks`); a restart writes any sealed chunk the ledger does not list, so a crash can repeat one chunk's lines but never lose them.
 
 ## Editing a Vault
 
@@ -92,8 +92,7 @@ Each action on an expanded vault card runs against the live vault; the line besi
 
 What happens to the data depends on the storage type:
 
-- **File** — the chunk files stay on disk, unreachable, unless **Delete data files** is ticked, which erases the vault directory on every placement node.
-- **Memory** — the records live only in memory and are gone with the vault.
+- **File** and **Memory** — the chunk files stay on disk, unreachable, unless **Delete data files** is ticked, which erases the vault directory on every placement node.
 - **JSONL** — the sink file stays on disk.
 
 ## Rotation and Retention Policies

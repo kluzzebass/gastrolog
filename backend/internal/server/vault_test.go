@@ -2,7 +2,9 @@ package server_test
 
 import (
 	"context"
+	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/glid"
+	indexfile "gastrolog/internal/index/file"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -14,7 +16,6 @@ import (
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/index"
-	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
@@ -292,11 +293,12 @@ func newFullVaultTestSetup(t *testing.T, recordCount int) fullVaultTestClients {
 	defaultID := glid.New()
 
 	factories := orchestrator.Factories{
+		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 	}
 

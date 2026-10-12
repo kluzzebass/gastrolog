@@ -107,6 +107,17 @@ for append-heavy write patterns and time-ordered reads.
 - **Cloud-backed** — record bytes live in S3/Azure/GCS, not local disk; marked
   with `CloudBacked = true` in `ChunkMeta`. A cloud-backed vault is a file vault
   with `CloudServiceID` set; there is no separate "cloud" vault type.
+- **Memory vault** — a pipeline vault whose homes serve its sealed GLCBs from
+  RAM (held, not mapped) and whose **memory budget** bounds the bytes of its
+  sealed chunks on each node: over budget, retention retires the oldest
+  sealed chunks with the vault's disposition (reason `memory-budget`). Its
+  intake and GLCBs are durable on disk like a file vault's; it is served by
+  the file chunk manager with a memory budget set.
+- **JSONL sink** — a JSONL vault: a write-only pipeline vault whose home
+  appends each sealed chunk's records to the vault's `.jsonl` file once. The
+  **sink ledger** (`<path>.chunks`) lists the chunks written, each only after
+  its lines are synced; a restart writes every sealed chunk the ledger does
+  not list. Never searched.
 - **Archived** — in an offline cloud storage class (e.g. Glacier). Unreadable
   until `Restore` completes. Tracked via `Archived = true`.
 - **Retention-pending** — marked in the vault FSM for deletion on the next sweep.

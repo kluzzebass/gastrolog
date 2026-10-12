@@ -1011,13 +1011,13 @@ describe("VaultsSettings delete gates and consequences", () => {
     expect(getByText("Yes")).toBeTruthy();
   });
 
-  test("a memory vault's confirm step says its records go with it", () => {
+  test("a memory vault's confirm step offers to erase its chunk files, like a file vault's", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], new GetSystemResponse({
       ...gatedInit,
       vaults: [new VaultConfig({ id: testId(2), name: "vault-mem", enabled: true, type: VaultType.MEMORY, replicationFactor: 1 })],
     }));
-    const { getByText, queryByLabelText } = renderWritable(<VaultsSettings dark />, {
+    const { getByText, getByLabelText } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -1025,8 +1025,9 @@ describe("VaultsSettings delete gates and consequences", () => {
     fireEvent.click(getByText("Delete"));
 
     expect(getByText(/Removes "vault-mem", which has no placements/)).toBeTruthy();
-    expect(getByText(/live only in memory/)).toBeTruthy();
-    expect(queryByLabelText("Delete data files")).toBeNull();
+    expect(getByText(/chunk files stay on disk/)).toBeTruthy();
+    fireEvent.click(getByLabelText("Delete data files"));
+    expect(getByText(/chunk files are erased from every placement node/)).toBeTruthy();
   });
 });
 
