@@ -248,7 +248,7 @@ function CompactView({
                 label="Elections"
                 value={`${stats.raftElectionsTotal.toString()} (${stats.raftElectionsPerMin.toFixed(1)}/min)`}
                 mono
-                title="elections started on this node, total and per minute — above about 3/min sustained is an election storm"
+                title="elections started on this node in groups that already had a leader, total and over the last minute — 3 or more in a minute is an election storm"
                 dark={dark}
               />
               <CompactStatRow

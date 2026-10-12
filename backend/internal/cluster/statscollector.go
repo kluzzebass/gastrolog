@@ -265,7 +265,7 @@ type StatsCollector struct {
 	mu sync.Mutex
 	// rates holds every rolling rate/spark window keyed by role-namespaced
 	// string (peerconn:/peertotal:/append:/durable:/collect:/seal:/segstage:/
-	// chunkstage:/route:/clusterroute:/wal:/live:). Each entry is ONE honest
+	// chunkstage:/route:/clusterroute:/wal:). Each entry is ONE honest
 	// counter's series; the tx/rx-pair window it replaced is gone (each side is
 	// now its own series). See rateseries.go.
 	rates map[string]*rateSeries
@@ -276,6 +276,9 @@ type StatsCollector struct {
 	// walMaxNanos caches the last tick's WAL append max so snapshot reads
 	// between ticks see it without consuming the accumulator.
 	walMaxNanos uint64
+	// elections counts the Raft elections this node started over the last
+	// raftElectionWindow. Guarded by mu.
+	elections counterWindow
 	// electionStormActive is the storm/calm hysteresis state for the
 	// transition-edge logging in collectRaftLiveness. Guarded by mu.
 	electionStormActive bool
@@ -295,8 +298,9 @@ func NewStatsCollector(cfg StatsCollectorConfig) *StatsCollector {
 		cfg.Interval = 5 * time.Second
 	}
 	return &StatsCollector{
-		cfg:   cfg,
-		rates: make(map[string]*rateSeries),
+		cfg:       cfg,
+		rates:     make(map[string]*rateSeries),
+		elections: counterWindow{span: raftElectionWindow},
 	}
 }
 
@@ -711,13 +715,14 @@ func (c *StatsCollector) applyPublishedPurposeWindows(stats *gastrologv1.NodeSta
 	}
 }
 
-// Raft liveness logging thresholds. Storm: sustained
-// elections at a rate no healthy cluster shows (the 2026-07-04 incident ran
-// 7-13/min). Calm clears with hysteresis so a single quiet tick doesn't
-// flap the log. WAL max latency: one slow append is normal on shared
-// disks; above a second, Raft replication RTTs and lease checks are in the
-// danger zone.
+// Raft liveness logging thresholds. Storm: elections at a rate no healthy
+// cluster shows (a disk-starved cluster runs 7-13/min), counted over a
+// sliding window of observed elections rather than extrapolated from one
+// tick. Calm clears with hysteresis once the window holds no elections.
+// WAL max latency: one slow append is normal on shared disks; above a
+// second, Raft replication RTTs and lease checks are in the danger zone.
 const (
+	raftElectionWindow      = time.Minute
 	raftElectionStormPerMin = 3.0
 	raftElectionCalmPerMin  = 0.5
 	walAppendMaxDegradedMs  = 1000.0
@@ -745,10 +750,9 @@ func (c *StatsCollector) collectRaftLiveness(stats *gastrologv1.NodeStats, now t
 	if walAppendsPerSec > 0 {
 		stats.RaftWalAppendAvgMs = walNanosPerSec / walAppendsPerSec / 1e6
 	}
-	electionsPerSec := c.observeRateInstant(now, "live:elections", int64(elections), stepWindows) //nolint:gosec // counter < 2^63
-	stats.RaftElectionsPerMin = electionsPerSec * 60
-
 	c.mu.Lock()
+	inWindow := c.elections.observe(now, elections, stepWindows)
+	stats.RaftElectionsPerMin = float64(inWindow) * float64(time.Minute) / float64(raftElectionWindow)
 	if stepWindows {
 		c.walMaxNanos = c.cfg.RaftLiveness.TakeWALAppendMax()
 	}

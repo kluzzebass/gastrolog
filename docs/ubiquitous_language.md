@@ -489,6 +489,12 @@ gRPC transport:
   consistently; never "primary/secondary".
 - **Voter / Non-voter** — membership state. Voters participate in elections;
   non-voters just catch up.
+- **Initial leader election** — a Raft group's elections before this node
+  has seen it have a leader: on group creation (one per new vault-ctl group)
+  or node start. Not churn; the node's election counters skip it.
+- **Election storm** — three or more elections within the last minute in
+  groups that already had a leader. A diagnostic event (transition-edge log
+  + `NodeStats` rate), not an alarm.
 - **Snapshot** — FSM state serialized to disk; lets log be truncated.
 - **InstallSnapshot** — RPC for streaming a snapshot to a slow follower.
 

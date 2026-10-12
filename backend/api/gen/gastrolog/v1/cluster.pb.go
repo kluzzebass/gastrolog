@@ -698,7 +698,10 @@ type NodeStats struct {
 	// its own): count/total are cumulative, avg is the rolling-window average
 	// between stats ticks, max is the worst single append since the previous
 	// tick. Election counters aggregate hashicorp/raft observer events across
-	// all groups — elections_per_min > ~3 sustained is a storm.
+	// all groups and count only elections in groups that have had a leader
+	// since this node started them: a group's initial leader election is not
+	// counted. elections_per_min is the count over the last minute; 3 or more
+	// is a storm.
 	RaftWalAppendsTotal       uint64  `protobuf:"varint,41,opt,name=raft_wal_appends_total,json=raftWalAppendsTotal,proto3" json:"raft_wal_appends_total,omitempty"`
 	RaftWalAppendAvgMs        float64 `protobuf:"fixed64,42,opt,name=raft_wal_append_avg_ms,json=raftWalAppendAvgMs,proto3" json:"raft_wal_append_avg_ms,omitempty"`
 	RaftWalAppendMaxMs        float64 `protobuf:"fixed64,43,opt,name=raft_wal_append_max_ms,json=raftWalAppendMaxMs,proto3" json:"raft_wal_append_max_ms,omitempty"`

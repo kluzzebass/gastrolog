@@ -751,7 +751,10 @@ export class NodeStats extends Message<NodeStats> {
    * its own): count/total are cumulative, avg is the rolling-window average
    * between stats ticks, max is the worst single append since the previous
    * tick. Election counters aggregate hashicorp/raft observer events across
-   * all groups — elections_per_min > ~3 sustained is a storm.
+   * all groups and count only elections in groups that have had a leader
+   * since this node started them: a group's initial leader election is not
+   * counted. elections_per_min is the count over the last minute; 3 or more
+   * is a storm.
    *
    * @generated from field: uint64 raft_wal_appends_total = 41;
    */

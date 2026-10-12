@@ -156,7 +156,7 @@ func (s *rateSeries) emit() *gastrologv1.ThroughputRate {
 }
 
 // instant returns just the current per-second rate, for the non-ThroughputRate
-// consumers (Raft WAL average latency and elections-per-minute).
+// consumers (Raft WAL average latency).
 func (s *rateSeries) instant() float64 {
 	return s.curInstant
 }
@@ -180,7 +180,7 @@ func (c *StatsCollector) emitRateM(now time.Time, key string, counter int64, mem
 
 // observeRateInstant observes a series and returns just its instantaneous rate,
 // for the consumers that do not encode a ThroughputRate (Raft WAL average
-// latency, elections-per-minute).
+// latency).
 func (c *StatsCollector) observeRateInstant(now time.Time, key string, counter int64, step bool) float64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
