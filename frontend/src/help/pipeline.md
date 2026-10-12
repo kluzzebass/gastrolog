@@ -109,7 +109,7 @@ By default, `bin()` uses the record's write timestamp. To bucket by a different 
 * | stats count by bin(5m, source_ts)
 ```
 
-Built-in timestamp fields: `write_ts`, `ingest_ts`, `source_ts`.
+Built-in timestamp fields: `write_ts`, `ingest_ts`, `source_ts`. Binning by `source_ts` puts a record without a source timestamp in the bucket of its ingest timestamp.
 
 ## Expressions
 

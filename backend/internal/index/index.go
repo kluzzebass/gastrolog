@@ -233,12 +233,14 @@ type IndexManager interface {
 	// on non-monotonic chunks.
 	FindIngestEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error)
 
-	// FindSourceStartPosition returns the earliest record position with SourceTS >= ts.
+	// FindSourceStartPosition returns the earliest record position whose
+	// chunk.EffectiveSourceTS is >= ts.
 	// Returns (pos, true, nil) if found, (0, false, nil) if ts is after all records.
 	// Returns ErrIndexNotFound if the source index does not exist.
 	FindSourceStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error)
 
-	// FindSourceEntryIndex is the SourceTS equivalent of FindIngestEntryIndex.
+	// FindSourceEntryIndex is the chunk.EffectiveSourceTS equivalent of
+	// FindIngestEntryIndex.
 	FindSourceEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error)
 
 	// IngestIndexLen returns the number of entries in the ingest TS index.
@@ -254,7 +256,8 @@ type IndexManager interface {
 	// Returns ErrIndexNotFound if the source index does not exist.
 	SourceIndexLen(chunkID chunk.ChunkID) (uint64, error)
 
-	// SourceIndexEntryAt returns the (SourceTS, position) pair at the given rank.
+	// SourceIndexEntryAt returns the (chunk.EffectiveSourceTS, position) pair at
+	// the given rank.
 	SourceIndexEntryAt(chunkID chunk.ChunkID, rank uint64) (TSEntry, error)
 
 	// IndexSizes returns the size in bytes for each index.

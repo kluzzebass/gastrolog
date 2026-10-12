@@ -137,11 +137,36 @@ func chunkCompetes(meta chunk.ChunkMeta, top time.Time, orderBy OrderBy, reverse
 	return start.IsZero() || !start.After(top)
 }
 
+// effectiveSourceBounds returns a range holding every record's
+// chunk.EffectiveSourceTS in m: the SourceTS range widened by the IngestTS
+// range, where the records without a source timestamp fall. A chunk's
+// metadata does not say whether it holds such records, so the widening
+// always applies. A zero bound is unknown.
+func effectiveSourceBounds(m chunk.ChunkMeta) (start, end time.Time) {
+	ingestLo, ingestHi := m.IngestStart, m.IngestEnd
+	if !ingestHi.IsZero() && ingestHi.Before(ingestLo) {
+		ingestLo, ingestHi = ingestHi, ingestLo
+	}
+	if !ingestLo.IsZero() {
+		start = ingestLo
+		if !m.SourceStart.IsZero() && m.SourceStart.Before(start) {
+			start = m.SourceStart
+		}
+	}
+	if !ingestHi.IsZero() {
+		end = ingestHi
+		if m.SourceEnd.After(end) {
+			end = m.SourceEnd
+		}
+	}
+	return start, end
+}
+
 func chunkTimeBounds(orderBy OrderBy) (startTS, endTS func(chunk.ChunkMeta) time.Time) {
 	switch orderBy { //nolint:exhaustive // IngestTS is the default
 	case OrderBySourceTS:
-		return func(m chunk.ChunkMeta) time.Time { return m.SourceStart },
-			func(m chunk.ChunkMeta) time.Time { return m.SourceEnd }
+		return func(m chunk.ChunkMeta) time.Time { start, _ := effectiveSourceBounds(m); return start },
+			func(m chunk.ChunkMeta) time.Time { _, end := effectiveSourceBounds(m); return end }
 	default:
 		return func(m chunk.ChunkMeta) time.Time { return m.IngestStart },
 			func(m chunk.ChunkMeta) time.Time { return m.IngestEnd }

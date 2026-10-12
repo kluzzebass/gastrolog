@@ -1585,18 +1585,15 @@ func matchesValueExists(attrs chunk.Attributes, raw []byte, pred *querylang.Pred
 	return false
 }
 
-// sourceTimeFilter returns a filter that checks SourceTS bounds.
-// Records with zero SourceTS are excluded if any bound is set.
+// sourceTimeFilter keeps records whose chunk.EffectiveSourceTS lies in
+// [start, end); a zero bound is open.
 func sourceTimeFilter(start, end time.Time) recordFilter {
 	return func(rec chunk.Record) bool {
-		// If SourceTS is zero, we can't filter by it - exclude if bounds are set
-		if rec.SourceTS.IsZero() {
+		ts := chunk.EffectiveSourceTS(rec.SourceTS, rec.IngestTS)
+		if !start.IsZero() && ts.Before(start) {
 			return false
 		}
-		if !start.IsZero() && rec.SourceTS.Before(start) {
-			return false
-		}
-		if !end.IsZero() && !rec.SourceTS.Before(end) {
+		if !end.IsZero() && !ts.Before(end) {
 			return false
 		}
 		return true

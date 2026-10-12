@@ -118,7 +118,7 @@ func (m *Manager) WithGLCBSection(id chunk.ChunkID, sectionType byte, fn func(ve
 	defer blob.Release()
 
 	entry, section, ok := blob.Section(sectionType)
-	if !ok || len(section) == 0 {
+	if !ok {
 		return fmt.Errorf("%w: type=0x%02x in %s", glcb.ErrSectionNotFound, sectionType, blob.Path())
 	}
 	return fn(entry.Version, section)

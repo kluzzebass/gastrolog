@@ -1572,7 +1572,10 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
 - **Timestamp index** — the per-chunk ingest-TS and source-TS indexes. They
   are sections inside the GLCB, located from its TOC tail, never separate
   files: they cannot go missing on their own, the inspector lists them as
-  `ts-index embedded`, and `reindex` rebuilds only the other indexes.
+  `ts-index embedded`, and `reindex` rebuilds only the other indexes. Both
+  hold one entry per record; the source-TS index (STSI) keys each record by
+  its EffectiveSourceTS. An index with no entries (a chunk with no records)
+  is present and empty, never read as missing.
 
 - **Assignment log** — the vault-ctl log view Collection rolls
   (`collection.LogReader.Roll` → `AssignedSegment`) to learn which published
@@ -1745,6 +1748,13 @@ Every record carries three timestamps, and they mean different things:
 For user-facing features, **default to SourceTS**; fall back to IngestTS
 if SourceTS is absent or obviously bogus. For internal ordering
 (GetContext, catch-up, indexes), use **WriteTS**.
+
+- **EffectiveSourceTS** (`chunk.EffectiveSourceTS`) — the fallback above,
+  applied at read time: a record's SourceTS, or its IngestTS when SourceTS
+  is zero. It is the record's place on the **source axis**, which
+  `order=source_ts`, `source_start`/`source_end`, `bin(…, source_ts)` and
+  the STSI all use. It never becomes the record's SourceTS: ingest leaves
+  SourceTS zero when the source gave none, and results show it zero.
 
 ### ID conventions
 

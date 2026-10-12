@@ -57,6 +57,10 @@ func MapSection(blobPath string, sectionType byte) (TOCEntry, []byte, func() err
 		_ = f.Close()
 		return TOCEntry{}, nil, nil, fmt.Errorf("%w: type=0x%02x in %s", ErrSectionNotFound, sectionType, blobPath)
 	}
+	if entry.Size == 0 {
+		_ = f.Close()
+		return entry, nil, func() error { return nil }, nil
+	}
 
 	pageSize := int64(syscall.Getpagesize())
 	pageOffset := entry.Offset - (entry.Offset % pageSize)
