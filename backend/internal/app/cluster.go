@@ -53,6 +53,11 @@ func setupCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd ho
 	if found, err := clusterTLS.LoadFile(hd.ClusterTLSPath()); err != nil {
 		return nil, nil, fmt.Errorf("load cluster TLS file: %w", err)
 	} else if found {
+		if certID := tlsutil.NodeIDFromCert(clusterTLS.State().Cert.Leaf); certID != nodeID {
+			return nil, nil, fmt.Errorf("cluster certificate %s names node %s, not this home's node %s; "+
+				"start this machine from an empty home directory to join as a new node",
+				hd.ClusterTLSPath(), certID, nodeID)
+		}
 		logger.Info("cluster TLS loaded from local file")
 	}
 
@@ -591,89 +596,33 @@ func makeJoinClusterFunc(
 	}
 }
 
-// makeEvictionHandler creates the callback invoked when this node is evicted
-// from the cluster. Reinitializes as a fresh single-node cluster.
-func makeEvictionHandler(
-	proxy *system.StoreProxy,
-	clusterSrv *cluster.Server,
-	clusterTLS *cluster.ClusterTLS,
-	hd home.Dir,
-	nodeID string,
-	orch *orchestrator.Orchestrator,
-	disp *configDispatcher,
-	logger *slog.Logger,
-) func() {
-	return func() {
-		logger.Warn("evicted from cluster — reinitializing as single-node")
-
-		rcs, ok := proxy.Inner().(*raftClusterCtlStore)
-		if !ok {
-			logger.Error("eviction reinit: config store is not raft-backed, shutting down instead")
-			p, _ := os.FindProcess(os.Getpid())
-			_ = p.Signal(os.Interrupt)
-			return
-		}
-
-		proxy.SetJoining()
-
-		logger.Info("eviction reinit: closing old raft system store")
-		if err := rcs.Close(); err != nil {
-			logger.Error("eviction reinit: close old store failed, shutting down", "error", err)
-			proxy.ClearJoining()
-			p, _ := os.FindProcess(os.Getpid())
-			_ = p.Signal(os.Interrupt)
-			return
-		}
-
-		raftDir := hd.RaftDir()
-		backupDir := raftDir + ".bak." + strconv.FormatInt(time.Now().UnixMilli(), 10)
-		logger.Info("eviction reinit: backing up old raft directory", "from", raftDir, "to", backupDir)
-		if err := os.Rename(raftDir, backupDir); err != nil {
-			logger.Error("eviction reinit: rename raft dir failed, shutting down", "error", err)
-			proxy.ClearJoining()
-			p, _ := os.FindProcess(os.Getpid())
-			_ = p.Signal(os.Interrupt)
-			return
-		}
-		pruneRaftBackups(raftDir, logger)
-
-		logger.Info("eviction reinit: preparing cluster server for reinit")
-		newTransport, err := clusterSrv.PrepareRejoin()
-		if err != nil {
-			logger.Error("eviction reinit: prepare rejoin failed, shutting down", "error", err)
-			p, _ := os.FindProcess(os.Getpid())
-			_ = p.Signal(os.Interrupt)
-			return
-		}
-
-		logger.Info("eviction reinit: opening fresh raft system store")
-		newStore, err := openRaftClusterCtlStore(raftStoreOpts{
-			Home: hd, NodeID: nodeID,
-			ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
-			Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},
-			transport: newTransport,
+// makeEvictionHandler returns what the cluster server runs when the leader
+// tells this node it was removed. The removal is recorded beside the node's
+// identity, so every later start of this home finds it, and then membership
+// ends: Run shuts the member down in order and serves the removal from then
+// on.
+func makeEvictionHandler(proxy *system.StoreProxy, leave context.CancelCauseFunc, logger *slog.Logger) func(reason string) {
+	var once sync.Once
+	return func(reason string) {
+		once.Do(func() {
+			removal := nodeRemoval{At: time.Now(), Reason: reason}
+			if err := recordRemovalInHome(proxy, removal); err != nil {
+				logger.Error("could not record this node's removal in its home; the next start of this home runs it as a member the cluster refuses",
+					"error", err)
+			}
+			leave(&removedFromCluster{removal: removal})
 		})
-		if err != nil {
-			logger.Error("eviction reinit: open new store failed, shutting down", "error", err)
-			p, _ := os.FindProcess(os.Getpid())
-			_ = p.Signal(os.Interrupt)
-			return
-		}
-
-		proxy.Swap(newStore)
-		logger.Info("eviction reinit: config store swapped")
-
-		cleanOrchestrator(orch, logger)
-
-		if err := restartClusterWithStore(newStore, proxy, clusterSrv, logger); err != nil {
-			logger.Error("eviction reinit: restart cluster server failed, shutting down", "error", err)
-			p, _ := os.FindProcess(os.Getpid())
-			_ = p.Signal(os.Interrupt)
-			return
-		}
-
-		logger.Info("eviction reinit complete — running as single-node cluster")
 	}
+}
+
+// recordRemovalInHome persists the removal through the running cluster-ctl
+// store's WAL, the one that holds the node's identity.
+func recordRemovalInHome(proxy *system.StoreProxy, removal nodeRemoval) error {
+	rcs, ok := proxy.Inner().(*raftClusterCtlStore)
+	if !ok {
+		return errors.New("config store is not raft-backed")
+	}
+	return recordNodeRemoval(rcs.wal.GroupStore("cluster-ctl"), removal)
 }
 
 // nodeRemover is the leader-side removal serializer: one instance per

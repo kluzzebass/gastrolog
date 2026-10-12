@@ -422,6 +422,11 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		srvCfg.Cluster = &mockCluster{leaderID: coordinatorID, leaderAddr: coordinatorID + ":4566", servers: servers, isLeader: true}
 		srvCfg.PeerStats = &mnPeerNodeStats{collectors: statsCollectors}
 		srvCfg.LocalStats = statsCollectors[coordinatorID].CollectLocalSnapshot
+		// The same stand-in mnPeerNodeStats is for peers: collected live,
+		// in place of the last broadcast tick.
+		srvCfg.LastLocalStats = func() (*gastrologv1.NodeStats, time.Time) {
+			return statsCollectors[coordinatorID].CollectLocalSnapshot(), time.Now()
+		}
 	}
 
 	srv := server.New(coordNode.orch, cfgStore, orchestrator.Factories{VaultsDir: vaultsDir}, nil, srvCfg)

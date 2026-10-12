@@ -63,6 +63,7 @@ type LifecycleServer struct {
 	clusterAddress    string
 	peerStats         NodeStatsProvider
 	localStats        func() *apiv1.NodeStats
+	lastLocalStats    func() (*apiv1.NodeStats, time.Time)
 	clusterRouteRates func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)
 	joinClusterFn     func(ctx context.Context, memberAddr, joinToken string) error
 	removeNodeFn      cluster.RemoveNodeFunc
@@ -112,6 +113,12 @@ func (s *LifecycleServer) SetRemoveNodeFunc(fn cluster.RemoveNodeFunc) {
 // SetNodeSuffrageFunc sets the callback for the SetNodeSuffrage RPC.
 func (s *LifecycleServer) SetNodeSuffrageFunc(fn func(ctx context.Context, nodeID string, voter bool) error) {
 	s.setNodeSuffrageFn = fn
+}
+
+// SetLastLocalStats wires the local node's last collected stats, which
+// cluster status reports for it.
+func (s *LifecycleServer) SetLastLocalStats(fn func() (*apiv1.NodeStats, time.Time)) {
+	s.lastLocalStats = fn
 }
 
 // SetStatsSignal wires the notification signal for system status streaming.
@@ -214,17 +221,11 @@ func (s *LifecycleServer) buildClusterNode(srv cluster.RaftServer, leaderID stri
 	}
 
 	isLocal := srv.ID == s.nodeID
-	// Attach per-node stats: real-time for local, last broadcast for peers.
-	// StatsReceivedAt travels with Stats so the UI can show how old a
-	// broadcast value is instead of presenting it as a live reading.
-	if isLocal && s.localStats != nil {
-		node.Stats = s.localStats()
-		if node.Stats != nil {
-			node.StatsReceivedAt = timestamppb.New(time.Now())
-		}
-	} else if s.peerStats != nil {
-		node.Stats = s.peerStats.Get(srv.ID)
-		if received := s.peerStats.StatsReceivedAt(srv.ID); node.Stats != nil && !received.IsZero() {
+	// StatsReceivedAt travels with Stats so the UI can show how old a value
+	// is instead of presenting it as a live reading.
+	if stats, received := s.nodeStats(srv.ID, isLocal); stats != nil {
+		node.Stats = stats
+		if !received.IsZero() {
 			node.StatsReceivedAt = timestamppb.New(received)
 		}
 	}
@@ -244,6 +245,18 @@ func (s *LifecycleServer) buildClusterNode(srv cluster.RaftServer, leaderID stri
 		}
 	}
 	return node
+}
+
+// nodeStats returns a node's last broadcast stats and when this node got
+// them: the local node's as it collected them, a peer's as it received them.
+func (s *LifecycleServer) nodeStats(id string, isLocal bool) (*apiv1.NodeStats, time.Time) {
+	switch {
+	case isLocal && s.lastLocalStats != nil:
+		return s.lastLocalStats()
+	case !isLocal && s.peerStats != nil:
+		return s.peerStats.Get(id), s.peerStats.StatsReceivedAt(id)
+	}
+	return nil, time.Time{}
 }
 
 // GetClusterStatus returns the current cluster topology and Raft state.

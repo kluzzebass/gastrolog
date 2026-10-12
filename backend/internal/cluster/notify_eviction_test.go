@@ -18,18 +18,15 @@ func testServer() *Server {
 }
 
 // notifyEviction's eviction handler must NOT fire when the cluster server
-// is already shutting down. Without this gate, a k8s rolling restart races
-// the preStop hook against the cluster's RemoveNode → NotifyEviction
-// broadcast, the evicted node tries to re-bootstrap itself as a fresh
-// single-node cluster mid-shutdown, and the pod hangs in Terminating until
-// kubelet force-kills it — blocking the rollout.
+// is already shutting down: the handler records the removal through the
+// cluster-ctl WAL, which shutdown is closing under it.
 
 func TestNotifyEviction_SkipsHandlerWhenShuttingDown(t *testing.T) {
 	t.Parallel()
 
 	var fired atomic.Int32
 	s := testServer()
-	s.SetEvictionHandler(func() { fired.Add(1) })
+	s.SetEvictionHandler(func(string) { fired.Add(1) })
 	s.stopCancel() // simulate Stop() already called
 
 	_, err := s.notifyEviction(context.Background(), &gastrologv1.NotifyEvictionRequest{Reason: "test"})
@@ -50,7 +47,7 @@ func TestNotifyEviction_FiresHandlerWhenRunning(t *testing.T) {
 	done := make(chan struct{})
 	s := testServer()
 	defer s.stopCancel()
-	s.SetEvictionHandler(func() { close(done) })
+	s.SetEvictionHandler(func(string) { close(done) })
 
 	_, err := s.notifyEviction(context.Background(), &gastrologv1.NotifyEvictionRequest{Reason: "test"})
 	if err != nil {

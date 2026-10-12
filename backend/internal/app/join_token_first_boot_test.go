@@ -220,11 +220,11 @@ func identityOf(t *testing.T, hd home.Dir) string {
 	if err := hd.EnsureExists(); err != nil {
 		t.Fatal(err)
 	}
-	id, err := resolveNodeID(hd, discardLogger())
+	ident, err := resolveNodeID(hd, discardLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return id.String()
+	return ident.ID.String()
 }
 
 var homesWithoutACertificate = []homeWithoutACertificate{

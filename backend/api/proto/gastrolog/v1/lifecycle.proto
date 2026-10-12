@@ -117,6 +117,16 @@ message GetClusterStatusResponse {
   // node's stats older than this are no longer served, so a UI that still
   // shows them is showing a copy the cluster itself has let go of.
   string stats_ttl = 9;
+  // Set when the cluster removed the answering node. A removed node takes no
+  // part in the cluster, so it reports no topology and no Raft state.
+  NodeRemoval removal = 10;
+}
+
+// NodeRemoval is what a removed node knows about its own removal.
+message NodeRemoval {
+  google.protobuf.Timestamp removed_at = 1;
+  // The reason the leader gave when it told the node.
+  string reason = 2;
 }
 
 message CreateJoinTokenRequest {

@@ -874,10 +874,8 @@ func (s *Server) forwardSetNodeSuffrage(ctx context.Context, req *gastrologv1.Fo
 // asynchronously so the RPC can return before shutdown begins.
 //
 // If the server is already shutting down (stopCtx cancelled), the eviction
-// notification is ignored. Otherwise the handler races graceful shutdown:
-// it would re-bootstrap a fresh raft system on this node *while* the
-// process is exiting — which leaves the pod stuck in Terminating until
-// kubelet force-kills it, blocking k8s rolling restarts.
+// notification is acknowledged and ignored: the handler records the removal
+// through the cluster-ctl WAL, which shutdown is closing under it.
 func (s *Server) notifyEviction(_ context.Context, req *gastrologv1.NotifyEvictionRequest) (*gastrologv1.NotifyEvictionResponse, error) {
 	if s.stopCtx != nil && s.stopCtx.Err() != nil {
 		s.logger.Info("ignoring eviction notification — server already shutting down",
@@ -890,7 +888,7 @@ func (s *Server) notifyEviction(_ context.Context, req *gastrologv1.NotifyEvicti
 	}
 	s.logger.Warn("received eviction notification", "reason", req.GetReason())
 	if s.evictionHandler != nil {
-		go s.evictionHandler()
+		go s.evictionHandler(req.GetReason())
 	}
 	return &gastrologv1.NotifyEvictionResponse{}, nil
 }

@@ -204,6 +204,15 @@ empty configuration means the membership is unknown rather than empty — a
 node that has just started, or a joiner that has not replicated yet and whose
 peers must be able to reach it to deliver the configuration at all.
 
+Refusals that involve a removed identity are logged by the refusing node with
+the identity presented: a `RequestMembership` from a removed node, and one
+whose request names a different node than its certificate
+(`requested_node_id`, `certificate_node_id`), are logged on the member that
+received it; any other call from a node in the removal record is refused as
+"removed from this cluster" and logged once per node. A non-member that is
+not in the removal record — a joiner reaching a peer that has not applied its
+admission yet — is refused without a log line.
+
 ## Certificate Rotation
 
 What rotates is the CA. A node answers a new CA by issuing itself a
@@ -261,6 +270,30 @@ has a new node ID, enrolls with a join token like any new node, and is
 admitted as a learner. A removal whose configuration change fails after the
 record was written leaves the node in the configuration but unable to
 re-address itself; retrying the removal completes it.
+
+### The removed node's side
+
+After the configuration change the leader tells the removed node
+(`NotifyEviction`). The node records its removal in its home, in the
+cluster-ctl Raft stable store beside its node identity, so the two cannot be
+separated short of deleting both. It then shuts its member side down and
+serves only the account of the removal (see the Removed state in
+[node-lifecycle-design.md](node-lifecycle-design.md)). Every later start of
+that home finds the record before it opens Raft, loads a certificate or
+contacts a peer, and serves the removal again. The node keeps its
+certificate and its identity; neither buys it anything.
+
+A home that holds `cluster-tls.json` but no node identity — its raft
+directory deleted, or only the identity store in it — is refused at start.
+Minting a new identity there would pair it with a certificate naming the old
+one, which no member admits. A home whose certificate names a different node
+than its identity is refused the same way. Both are local refusals with an
+operator-facing reason; the cluster's own checks above are what deny the
+identity regardless of what the node runs.
+
+A node that was down when it was removed never receives the notification.
+When it starts again it believes itself a member, but every member refuses
+its calls as removed and logs that once.
 
 ## Constraints and Trade-offs
 

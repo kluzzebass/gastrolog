@@ -43,6 +43,8 @@ stateDiagram-v2
 
 **Removed** — the operator removed the node with `cluster remove-node`, which refuses a removal that would leave a vault without a copy or below its replication factor. Voter removed from cluster-ctl Raft and all vault-ctl groups; NodeConfig deleted from cluster-ctl FSM. Node is no longer addressable. Any files remaining on retained PVCs are orphaned and handled by the orphaned-PVC sweep (separate issue).
 
+The removed node does not come back on its own. The leader tells it it was removed; it records the removal beside its node identity in its home, shuts its member side down in order — vaults, Raft groups, cluster port — and from then on serves only the account of its removal: its log states it once at error level with the remedy, `cluster status` reports it (`GetClusterStatusResponse.removal`), `/readyz` answers 503 with it, `/healthz` stays 200 so the process is not restarted, `cluster yield-leadership` answers that nothing was transferred, and every other call is refused with it. Every later start of the same home comes up the same way, without opening Raft or contacting a peer. It never mints a new identity, never runs as a cluster of its own, and leaves its vault data where it was. The way back is the operator's: start the machine from an empty home, and it enrols as a new node under a new node ID. A home that holds the cluster certificate but has lost its node identity (its raft directory, or just the identity store in it) is refused at start rather than given a new identity the certificate does not name.
+
 ## Behavior gates by state
 
 | Concern | Live | Unreachable | Maintenance | Removed |
@@ -89,7 +91,7 @@ type NodeConfig struct {
 | Unreachable → Live | contact resumes | Event-driven, not the sweep: a peer's stats broadcast or PeerState's contact-resumed hook wakes `nodeLiveness.Run` (`backend/internal/app/node_liveness.go`), and the cluster-ctl leader proposes `CmdSetNodeState{node, Live}` for every Unreachable node whose contact is current again |
 | Unreachable → Maintenance | `cluster maintenance <node>` CLI | Operator commits to the offline state; auto-restore-on-contact behavior is replaced with sticky operator control |
 | Maintenance → Live | `cluster online <node>` CLI | Operator clears maintenance |
-| any → Removed | `cluster remove-node <node>` CLI | Refused when it would leave a vault without a copy or below its replication factor; otherwise the voter is removed from cluster-ctl Raft and every vault-ctl group and the NodeConfig deleted |
+| any → Removed | `cluster remove-node <node>` CLI | Refused when it would leave a vault without a copy or below its replication factor; otherwise the voter is removed from cluster-ctl Raft and every vault-ctl group, the NodeConfig deleted, and the node told; it records the removal in its home and serves only that from then on |
 
 `peerState.LastSeen` is the most recent moment this node had positive evidence a peer was alive: Raft contact on any group it shares with the peer, or the arrival of the peer's stats broadcast, whichever is newer. Raft contact is what makes it fresh — the cluster-ctl group spans every node, so the cluster-ctl leader, which is the node that runs the liveness sweep, is replicating to every peer several times a second.
 

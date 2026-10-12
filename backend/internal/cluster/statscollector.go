@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -287,6 +288,15 @@ type StatsCollector struct {
 	// read-only snapshots briefly after each tick so WatchSystemStatus still
 	// shows the completed interval after ResetPurposeWindows runs.
 	lastPublishedPurposeWindows map[string][]string
+	// lastLocal is the NodeStats the most recent tick collected, with the
+	// instant it was collected.
+	lastLocal atomic.Pointer[localStatsSample]
+}
+
+// localStatsSample is one tick's NodeStats and when it was collected.
+type localStatsSample struct {
+	stats *gastrologv1.NodeStats
+	at    time.Time
 }
 
 // NewStatsCollector creates a collector with the given system.
@@ -356,7 +366,22 @@ func (c *StatsCollector) CollectLocalSnapshot() *gastrologv1.NodeStats {
 // CollectLocalTick gathers NodeStats and advances rolling windows. Called
 // by the periodic stats broadcast loop.
 func (c *StatsCollector) CollectLocalTick(now time.Time) *gastrologv1.NodeStats {
-	return c.collectLocal(now, true)
+	stats := c.collectLocal(now, true)
+	c.lastLocal.Store(&localStatsSample{stats: stats, at: now})
+	return stats
+}
+
+// LastLocal returns the NodeStats the most recent tick collected — the ones
+// peers received — and when it collected them; nil before the first tick.
+// Reading them takes no lock the collection takes, so a reader is never
+// held up by a subsystem the collection waits on. Callers must not modify
+// the message: it is shared with the broadcast.
+func (c *StatsCollector) LastLocal() (*gastrologv1.NodeStats, time.Time) {
+	sample := c.lastLocal.Load()
+	if sample == nil {
+		return nil, time.Time{}
+	}
+	return sample.stats, sample.at
 }
 
 func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrologv1.NodeStats {

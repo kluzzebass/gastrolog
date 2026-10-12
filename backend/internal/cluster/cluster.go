@@ -124,9 +124,17 @@ type Server struct {
 	// subscribers receives broadcast messages from peers.
 	subscribers subscriberRegistry
 
-	// evictionHandler is called when this node receives a NotifyEviction RPC,
-	// meaning it has been removed from the cluster and should shut down.
-	evictionHandler func()
+	// removedNodeCheck reports whether the cluster's removal record names a
+	// node. Consulted only for a call that is already refused, to say why.
+	removedNodeCheck func(nodeID string) bool
+	// refusedRemoved holds the removed nodes whose calls this node has
+	// logged refusing, so a removed node that keeps calling is logged once.
+	refusedRemoved sync.Map
+
+	// evictionHandler is called with the leader's reason when this node
+	// receives a NotifyEviction RPC, meaning it has been removed from the
+	// cluster.
+	evictionHandler func(reason string)
 
 	// removeNodeFn handles the full node removal on the leader: gate
 	// evaluation, Raft membership change, and eviction notification. Set
@@ -483,9 +491,15 @@ func (s *Server) SetGroupApplyFn(fn func(ctx context.Context, groupID string, da
 	s.groupApplyFn = fn
 }
 
+// SetRemovedNodeCheck registers the removal-record lookup used to explain
+// refusing a node the cluster removed.
+func (s *Server) SetRemovedNodeCheck(fn func(nodeID string) bool) {
+	s.removedNodeCheck = fn
+}
+
 // SetEvictionHandler registers the callback invoked when this node receives
 // a NotifyEviction RPC (i.e., it has been removed from the cluster).
-func (s *Server) SetEvictionHandler(fn func()) {
+func (s *Server) SetEvictionHandler(fn func(reason string)) {
 	s.evictionHandler = fn
 }
 
@@ -815,7 +829,27 @@ func (s *Server) requirePeerAuthority(ctx context.Context, method string) error 
 	if strings.HasSuffix(method, "/RequestMembership") {
 		return nil
 	}
-	return s.requireCurrentMember(leaf)
+	if err := s.requireCurrentMember(leaf); err != nil {
+		return s.explainRefusal(err, leaf, method)
+	}
+	return nil
+}
+
+// explainRefusal turns the refusal of a node the cluster removed into one
+// that says so, and logs the first such refusal per node with the identity
+// the certificate presents. Refusing a node that is merely not in this
+// node's configuration yet stays quiet: a joiner reaches lagging peers
+// before they apply its admission.
+func (s *Server) explainRefusal(err error, leaf *x509.Certificate, method string) error {
+	nodeID := tlsutil.NodeIDFromCert(leaf)
+	if nodeID == "" || s.removedNodeCheck == nil || !s.removedNodeCheck(nodeID) {
+		return err
+	}
+	if _, logged := s.refusedRemoved.LoadOrStore(nodeID, struct{}{}); !logged {
+		logging.Default(s.logger).Warn("refusing cluster calls from a node the cluster removed",
+			"certificate_node_id", nodeID, "method", method)
+	}
+	return status.Errorf(codes.PermissionDenied, "node %s was removed from this cluster", nodeID)
 }
 
 // verifiedPeerLeaf returns the certificate the peer presented, once the TLS
