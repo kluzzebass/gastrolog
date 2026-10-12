@@ -641,7 +641,8 @@ one segmented file set, one batch-writer goroutine.
   and marks a sample older than the TTL as **stale**. The responding node
   reports its own stats as last collected for broadcast, dated by that
   collection, and the system status stream sends the last snapshot built off
-  the request path, so neither waits on the subsystems a collection reads.
+  the request path — rebuilt on each stats update only while someone
+  subscribes — so neither waits on the subsystems a collection reads.
 
 - **Responding node** — the node that answered a given RPC. The API has no
   session affinity, so behind a load balancer each request may be answered by

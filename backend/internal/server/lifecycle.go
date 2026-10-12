@@ -561,19 +561,20 @@ func (s *LifecycleServer) YieldLeadership(
 // WatchSystemStatus streams combined system status whenever stats update.
 // Replaces polling GetClusterStatus, Health, and GetRouteStats.
 //
-// It sends snapshots built off the request path (statusSnapshots), so a
-// subscriber is answered from the last one even while a build is held up.
-// Only a server that has never finished a build makes its first subscriber
-// wait for one.
+// It sends snapshots built off the request path (statusSnapshots), rebuilt
+// on each stats update while anyone subscribes, so a subscriber is answered
+// from the last one even while a build is held up. Only a server that has
+// never finished a build makes its first subscriber wait for one.
 func (s *LifecycleServer) WatchSystemStatus(
 	ctx context.Context,
 	req *connect.Request[apiv1.WatchSystemStatusRequest],
 	stream *connect.ServerStream[apiv1.WatchSystemStatusResponse],
 ) error {
 	snaps := s.snapshots
-	snaps.bind(s.buildSystemStatus)
+	snaps.bind(s.buildSystemStatus, s.statsSignal)
 	updated := snaps.updated.C()
-	snaps.refresh()
+	unsubscribe := snaps.subscribe()
+	defer unsubscribe()
 	if snaps.latest.Load() == nil {
 		select {
 		case <-ctx.Done():
@@ -587,15 +588,9 @@ func (s *LifecycleServer) WatchSystemStatus(
 
 	for {
 		updated = snaps.updated.C()
-		var stats <-chan struct{}
-		if s.statsSignal != nil {
-			stats = s.statsSignal.C()
-		}
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-stats:
-			snaps.refresh()
 		case <-updated:
 			if err := stream.Send(snaps.latest.Load()); err != nil {
 				return err

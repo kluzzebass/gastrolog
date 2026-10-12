@@ -343,11 +343,8 @@ type Server struct {
 	rlWG     sync.WaitGroup
 
 	// statusSnapshots is the system-status cache every lifecycle server of
-	// this server streams from, kept fresh on each stats update while the
-	// server serves.
+	// this server streams from.
 	statusSnapshots *statusSnapshots
-	statusCancel    context.CancelFunc
-	statusWG        sync.WaitGroup
 
 	// Dynamic TLS: HTTPS listener when enabled
 	httpsListener   net.Listener
@@ -772,7 +769,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		return storages
 	})
 	lifecycleServer.useStatusSnapshots(s.statusSnapshots)
-	s.statusSnapshots.bind(lifecycleServer.buildSystemStatus)
+	s.statusSnapshots.bind(lifecycleServer.buildSystemStatus, s.statsSignal)
 	authServer := NewAuthServer(s.cfgStore, s.tokens, s.logger, s.noAuth)
 	jobServer := NewJobServer(s.orch.Scheduler(), s.localNodeID, s.peerJobs, s.orch.Scheduler().Events())
 
@@ -850,14 +847,6 @@ func (s *Server) Serve(listener net.Listener) error {
 	// Build the core handler once — reused by both HTTP and HTTPS.
 	mux := s.buildMux()
 	handler := s.wrapMiddleware(mux)
-
-	if s.statsSignal != nil {
-		statusCtx, statusCancel := context.WithCancel(context.Background())
-		s.mu.Lock()
-		s.statusCancel = statusCancel
-		s.mu.Unlock()
-		s.statusWG.Go(func() { s.statusSnapshots.refreshOn(statusCtx, s.statsSignal) })
-	}
 	s.mu.Lock()
 	s.handler = handler
 	s.mu.Unlock()
@@ -992,7 +981,6 @@ func (s *Server) ServeTCP(addr string) error {
 func (s *Server) Stop(ctx context.Context) error {
 	s.mu.Lock()
 	rlCancel := s.rlCancel
-	statusCancel := s.statusCancel
 	server := s.server
 	httpsServer := s.httpsServer
 	s.httpsServer = nil
@@ -1008,10 +996,6 @@ func (s *Server) Stop(ctx context.Context) error {
 	if rlCancel != nil {
 		rlCancel()
 		s.rlWG.Wait()
-	}
-	if statusCancel != nil {
-		statusCancel()
-		s.statusWG.Wait()
 	}
 
 	if unixServer != nil {

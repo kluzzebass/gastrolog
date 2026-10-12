@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -215,7 +214,14 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 // cluster removed it.
 //
 //nolint:gocognit,gocyclo // composition root: wires every subsystem in dependency order
-func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg RunConfig, hd home.Dir, nodeID string) error {
+func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg RunConfig, hd home.Dir, nodeID string) (retErr error) {
+	td := &memberTeardown{logger: logger}
+	defer func() {
+		if err := td.run(); retErr == nil {
+			retErr = err
+		}
+	}()
+
 	// Raft failure-detector timing must be installed before ANY group or
 	// transport exists — openConfigStore below already starts cluster-ctl.
 	// Partial operator input resolves against the shipped defaults so
@@ -243,6 +249,7 @@ func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg
 	if err != nil {
 		return err
 	}
+	td.clusterSrv = clusterSrv
 	if clusterSrv != nil {
 		// Before Raft starts: a node that was down when the cluster removed
 		// it learns so from its first refused call, wherever startup is.
@@ -283,6 +290,7 @@ func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg
 	// Wrap in a proxy so runtime cluster join can swap the inner store.
 	// All consumers hold a reference to proxy; on join, only the inner changes.
 	proxy := system.NewStoreProxy(rawStore)
+	td.configStore = proxy
 	cfgStore := system.Store(proxy)
 	var groupMgr *raftgroup.GroupManager // set later if cluster mode
 
@@ -294,17 +302,11 @@ func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg
 	}
 
 	if err := startClusterServices(ctx, clusterSrv, clusterTLS, cfgStore, hd, nodeID, logger); err != nil {
-		_ = proxy.Close()
 		return err
 	}
-	// Shutdown order matters: cluster-ctl Raft must stop BEFORE the cluster
-	// server, because the Raft follower reads from the transport's rpcChan.
-	// Closing the transport first causes a nil-channel deadlock in Raft.
-	// Defers run LIFO, so cluster Stop is registered first (runs last).
-	if clusterSrv != nil {
-		defer clusterSrv.Stop()
+	if err := startupStage(ctx, "cluster services started", nodeID, end, td); err != nil {
+		return err
 	}
-	defer func() { _ = proxy.Close() }()
 
 	// Non-blocking: try local FSM, bootstrap, or return nil for replication cases.
 	appSys, fromLocalFSM, err := loadLocalConfig(ctx, logger, cfg, cfgStore, clusterSrv, clusterTLS, nodeID)
@@ -375,6 +377,7 @@ func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg
 	if err != nil {
 		return fmt.Errorf("create orchestrator: %w", err)
 	}
+	td.orch = orch
 
 	// Ingest-pipeline channel pressure was demoted from an alarm to a
 	// diagnostic; its transition edges are records of occurrence, and
@@ -427,6 +430,7 @@ func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg
 	var membershipChanges membershipGate
 
 	groupMgr, vaultWAL, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger, alertCollector)
+	td.groupMgr, td.vaultWAL = groupMgr, vaultWAL
 
 	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, groupMgr, nodeAddrResolver, nodeID)
 	if clusterSrv != nil {
@@ -458,6 +462,9 @@ func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg
 		return err
 	}
 	close(orchReady)
+	if err := startupStage(ctx, "orchestrator started", nodeID, end, td); err != nil {
+		return err
+	}
 
 	// Stale ingester "alive" entries from a crashed previous session are
 	// cleared by the ingester convergence sweep, not here: the clear is a
@@ -501,6 +508,7 @@ func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg
 	}
 
 	broadcaster, peerState, peerJobState, localStatsFn, lastLocalStatsFn, clusterRouteRatesFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, cfg.SlogCaptureHandler, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal, raftLive)
+	td.broadcaster = broadcaster
 	if peerState != nil {
 		// Per-vault admission verdicts are cluster-consistent: a storage
 		// below floor or an over-budget vault claim on any node suspends
@@ -672,6 +680,9 @@ func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg
 		// preStop hook doesn't already solve.
 	}
 
+	if err := startupStage(ctx, "ready to serve", nodeID, end, td); err != nil {
+		return err
+	}
 	return serveAndAwaitShutdown(ctx, serverDeps{
 		Logger:              logger,
 		ServerAddr:          cfg.ServerAddr,
@@ -690,7 +701,6 @@ func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg
 		ConfigSignal:        configSignal,
 		StatsSignal:         statsSignal,
 		ClusterSrv:          clusterSrv,
-		Broadcaster:         broadcaster,
 		PeerState:           peerState,
 		PeerJobState:        peerJobState,
 		LocalStats:          localStatsFn,
@@ -702,9 +712,6 @@ func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg
 		RemoveNodeFunc:      removeNodeFn,
 		SetNodeSuffrageFunc: setNodeSuffrageFn,
 		Dispatcher:          disp,
-		GroupMgr:            groupMgr,
-		WAL:                 vaultWAL,
-		ConfigStore:         proxy,
 		PlacementReconcile:  placementReconcileFn,
 
 		BootstrapTokenServeSecret: cfg.BootstrapTokenServeSecret,
@@ -714,7 +721,7 @@ func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg
 		EnvironmentColor: cfg.EnvironmentColor,
 
 		LogFilter: cfg.LogFilter,
-	})
+	}, td)
 }
 
 // wireClusterForwarding sets up cross-node record, search, context, vault,
@@ -1546,7 +1553,6 @@ type serverDeps struct {
 	ConfigSignal        *notify.Signal
 	StatsSignal         *notify.Signal
 	ClusterSrv          *cluster.Server
-	Broadcaster         *cluster.Broadcaster
 	PeerState           *cluster.PeerState
 	PeerJobState        *cluster.PeerJobState
 	LocalStats          func() *gastrologv1.NodeStats
@@ -1558,9 +1564,6 @@ type serverDeps struct {
 	RemoveNodeFunc      cluster.RemoveNodeFunc
 	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
 	Dispatcher          *configDispatcher
-	GroupMgr            *raftgroup.GroupManager
-	WAL                 *raftwal.WAL // vault-ctl raftwal at raft/groups/wal; closed after cluster-ctl raft
-	ConfigStore         io.Closer    // rawStore — closed before gRPC for clean Raft shutdown
 	PlacementReconcile  func(ctx context.Context)
 
 	// When non-empty, the server registers /cluster/bootstrap-token
@@ -1576,12 +1579,12 @@ type serverDeps struct {
 	LogFilter *logging.ComponentFilterHandler
 }
 
-func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
-	var srv *server.Server
-	var serverWg sync.WaitGroup
+// serveAndAwaitShutdown serves the API until ctx ends. The member's
+// teardown stops the server along with everything else.
+func serveAndAwaitShutdown(ctx context.Context, deps serverDeps, td *memberTeardown) error {
 	if deps.ServerAddr != "" {
 		//nolint:contextcheck // registration, not a call
-		srv = server.New(deps.Orch, deps.CfgStore, deps.Factories, deps.Tokens, server.Config{
+		srv := server.New(deps.Orch, deps.CfgStore, deps.Factories, deps.Tokens, server.Config{
 			Logger: deps.Logger, CertManager: deps.CertMgr, NoAuth: deps.NoAuth,
 			HomeDir: deps.HomeDir, NodeID: deps.NodeID, UnixSocket: deps.SocketPath,
 			AfterConfigApply: deps.AfterConfigApply, ConfigSignal: deps.ConfigSignal, StatsSignal: deps.StatsSignal,
@@ -1629,71 +1632,11 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 		// to peers. Must happen after server creation but before serving starts.
 		wireManagedFiles(ctx, deps, srv)
 
-		serverWg.Go(func() {
-			if err := srv.ServeTCP(deps.ServerAddr); err != nil {
-				deps.Logger.Error("server error", "error", err)
-			}
-		})
+		td.serveHTTP(srv, deps.ServerAddr)
 	}
 
 	<-ctx.Done()
-
-	var stopErr error
-
-	deps.Logger.Info("shutting down orchestrator")
-	if err := deps.Orch.Stop(); err != nil {
-		stopErr = err
-	}
-
-	if deps.Broadcaster != nil {
-		_ = deps.Broadcaster.Close()
-	}
-
-	// Shutdown order: vault multiraft → cluster-ctl Raft → vault WAL → cluster WAL (via ConfigStore) → gRPC.
-	// Cluster-ctl and vault groups use separate raftwal directories. Raft must
-	// shut down WHILE the transport is alive, otherwise the leader's replication goroutines block
-	// on dead gRPC connections.
-	if deps.GroupMgr != nil {
-		deps.Logger.Info("shutting down vault multiraft groups")
-		deps.GroupMgr.Shutdown()
-	}
-
-	if deps.ConfigStore != nil {
-		deps.Logger.Info("shutting down cluster-ctl raft")
-		_ = deps.ConfigStore.Close()
-	}
-
-	if deps.WAL != nil {
-		if err := deps.WAL.Close(); err != nil {
-			deps.Logger.Error("vault-ctl raftwal close failed", "error", err)
-		}
-	}
-
-	if deps.ClusterSrv != nil {
-		deps.Logger.Info("stopping cluster server")
-		deps.ClusterSrv.Stop()
-	}
-
-	if srv != nil {
-		deps.Logger.Info("stopping server")
-		// The root ctx is already cancelled by the time we get here (that
-		// is how we woke up). Pass srv.Stop a FRESH context with a bounded
-		// drain budget so it can finish in-flight HTTP requests cleanly
-		// instead of returning context.Canceled immediately.
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-		err := srv.Stop(stopCtx)
-		stopCancel()
-		// context.Canceled / DeadlineExceeded are expected outcomes when a
-		// peer holds a long-running request across shutdown — logged at
-		// Debug, not Error, so the shutdown trail stays clean.
-		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			deps.Logger.Error("server stop error", "error", err)
-		}
-		serverWg.Wait()
-	}
-
-	deps.Logger.Info("shutdown complete")
-	return stopErr
+	return nil
 }
 
 // setupMultiRaft creates the GroupManager and node address resolver for vault
