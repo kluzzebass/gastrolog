@@ -40,8 +40,8 @@ when used.
 | `GASTROLOG_PPROF_MUTEX_FRACTION` | `--pprof-mutex-fraction` | int | Mutex contention sample rate (`0`=off, `1`=all, `5`=one in five). Overrides `--pprof-debug` default when set. |
 | `GASTROLOG_PPROF_BLOCK_RATE` | `--pprof-block-rate` | int | Block profile sample period in nanoseconds (`0`=off, `1`=all events, `10000000`≈one per 10ms blocked). Overrides `--pprof-debug` default when set. |
 | `GASTROLOG_CONFIG_TYPE` | `--config-type` | string | Config store: `raft` (default) or `memory`. Use `memory` only for tests / ephemeral demos. |
-| `GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET` | `--bootstrap-token-serve-secret` | string | Bootstrap node only: serve the join token at `GET /cluster/bootstrap-token`, gated on this shared secret. Empty disables. |
-| `GASTROLOG_BOOTSTRAP_TOKEN_URL` | `--bootstrap-token-url` | string | Joiner only: fetch the join token from this URL, polling with backoff. Pair with `GASTROLOG_BOOTSTRAP_TOKEN_SECRET`. |
+| `GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET` | `--bootstrap-token-serve-secret` | string | Serve join tokens at `GET /cluster/bootstrap-token`, minting one for each request that carries this shared secret. Empty disables. |
+| `GASTROLOG_BOOTSTRAP_TOKEN_URL` | `--bootstrap-token-url` | string | Joiner only: on first boot, fetch a join token from this URL, polling with backoff. Unused once the node holds its cluster certificate. Pair with `GASTROLOG_BOOTSTRAP_TOKEN_SECRET`. |
 | `GASTROLOG_BOOTSTRAP_TOKEN_SECRET` | `--bootstrap-token-secret` | string | Joiner only: secret sent in the `X-Bootstrap-Token-Secret` header when fetching from `GASTROLOG_BOOTSTRAP_TOKEN_URL`. |
 | `GASTROLOG_INITIAL_ADMIN_FILE` | `--initial-admin-file` | string | Bootstrap node only: read initial admin credentials from this path. JSON `{"username": ..., "password": ...}` or single-line `username:password`. Wins over the env-var pair. No-op once any user exists. |
 | `GASTROLOG_INITIAL_ADMIN_USER` | `--initial-admin-user` | string | Bootstrap node only: initial admin username (paired with `GASTROLOG_INITIAL_ADMIN_PASSWORD`). No-op once any user exists. |
@@ -89,13 +89,13 @@ production you should mount these explicitly:
   for an ephemeral demo.
 
 Without persistent volumes, all cluster state — Raft logs, vault
-data, the join token — is lost on container removal.
+data, the node's cluster certificate — is lost on container removal.
 
 ## Bootstrap vs joiner
 
 A multi-node cluster has one bootstrap node and N joiners. The bootstrap
-node generates a join token at startup; joiners need to receive it
-before they can enroll. Three delivery paths exist:
+node generates the key join tokens are minted from; a joiner needs a
+minted token for its first enrollment. Two delivery paths exist:
 
 ### 1. Literal token (attended setup)
 
@@ -144,9 +144,14 @@ If both are set, precedence is:
 1. `GASTROLOG_JOIN_TOKEN` (literal) wins outright.
 2. `GASTROLOG_BOOTSTRAP_TOKEN_URL` is the fallback.
 
-A joiner without `GASTROLOG_JOIN_ADDR` set is a bootstrap node, even
-if a bootstrap-token source is configured (the bootstrap-token sources
-are joiner-side and are no-ops without `--join-addr`).
+Both are read only on a node's first boot, when its home holds no
+cluster certificate. On that boot, `GASTROLOG_BOOTSTRAP_TOKEN_URL`
+without `GASTROLOG_JOIN_ADDR` is refused at startup
+(`bootstrap-token-url set without --join-addr`); a literal
+`GASTROLOG_JOIN_TOKEN` without `GASTROLOG_JOIN_ADDR` is ignored and the
+node bootstraps a new cluster. A node that already holds its certificate
+reads neither, so both are unused there whether or not
+`GASTROLOG_JOIN_ADDR` is set.
 
 ## Initial admin user
 

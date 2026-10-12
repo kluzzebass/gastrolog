@@ -28,14 +28,14 @@ ingester-source containers. Service name = container name = hostname
 = `GASTROLOG_NAME`, so what you see in `docker ps` matches what's in
 the gastrolog UI.
 
-`gastrolog-0` is the bootstrap (writes the join token); the rest
+`gastrolog-0` is the bootstrap (serves join tokens); the rest
 enroll with it.
 
 ### Architecture
 
 | Service | Role | Host port | Cluster addr |
 |---|---|---|---|
-| gastrolog-0 | Cluster bootstrap (writes join token) | 4564 | gastrolog-0:4566 |
+| gastrolog-0 | Cluster bootstrap (serves join tokens) | 4564 | gastrolog-0:4566 |
 | gastrolog-1 | Joiner | 4574 | gastrolog-1:4566 |
 | gastrolog-2 | Joiner | 4584 | gastrolog-2:4566 |
 
@@ -84,8 +84,8 @@ the Raft leader can't route back to a specific container. Setting
 the address to the Compose service name lets the bridge network's
 DNS resolve it correctly.
 
-If you forget this setting, joiners enroll successfully (the join
-token is delivered via the shared volume) but get stuck at
+If you forget this setting, joiners enroll successfully (enrolment
+reaches `gastrolog-0` by its join address) but get stuck at
 "waiting to be added to cluster by leader" because the leader
 can't reach back. The compose file sets it explicitly so this
 doesn't bite you.
