@@ -751,6 +751,17 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   [`vault_readiness.go`](../backend/internal/orchestrator/vault_readiness.go).
   Checked by every read and write path before touching vault state.
 
+- **Not-ready answer** — how a node answers a forwarded query for a vault
+  that is not ready there: an `Unavailable` status carrying the
+  `VAULT_NOT_READY` `ErrorInfo` reason. On the calling node it matches
+  `ErrVaultNotReady` (the orchestrator's sentinel is the cluster package's),
+  so a coordinator handles a vault not ready on another node exactly as one
+  not ready on its own: a search, its histogram, a pipeline and Explain
+  leave it out. Distinct from a peer with no executor wired, which also
+  answers `Unavailable` but without the reason, and from a transport
+  failure; both of those still fail the query. See
+  [`vault_not_ready.go`](../backend/internal/cluster/vault_not_ready.go).
+
 ### Scheduler & Jobs
 
 - **Scheduler** — the cron/queue subsystem. Runs scheduled jobs
@@ -1189,8 +1200,11 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
 
 - **Contributing vaults** (`SearchResponse.contributing_vault_ids`) — the
   per-vault stream-health signal on a merged **search**: the remote vaults
-  the search fanned out to and merged. Distinct from a contribution report
-  because search is **fail-on-remote-failure** — a remote stream error
+  the search fanned out to and merged. A remote vault whose leader gave a
+  **not-ready answer** is left out of the search and of this set, as a vault
+  the coordinator leads is left out of its own engine's search while not
+  ready. Distinct from a contribution report
+  because search is **fail-on-remote-failure** — any other remote stream error
   aborts the whole search (there is no partial search), so every vault in
   this set contributed to any response the client actually receives. It is
   the positive record of the merge's cross-vault span, not a degraded

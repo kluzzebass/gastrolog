@@ -13,6 +13,8 @@ For the query syntax, see [Query Language](help:query-language). To aggregate re
 
 When no `vault_id=` filter is specified, all vaults are searched in parallel. In a [cluster](help:clustering), this includes vaults on remote [nodes](help:clustering-nodes) — searches are forwarded automatically and results are merged by timestamp.
 
+A vault that is not ready yet — just created, or still catching up on its replicated state after its node restarted — is left out of searches, histograms, [pipeline](help:pipeline) results and [Explain](help:explain) plans until it is ready, the same whichever node you are connected to. The results carry no mark that it was left out; run the search again once the vault is ready. Any other failure on a remote node still fails the search rather than returning results without that node's vaults.
+
 ## Pagination
 
 Results come back a page at a time. A **resume token** tracks where each vault left off, so the next page picks up exactly where the previous one stopped. Tokens stay valid as long as the referenced chunks still exist — if a retention policy deletes a chunk between pages, the search restarts from the beginning.

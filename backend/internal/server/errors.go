@@ -27,10 +27,14 @@ func errRequired(field string) *connect.Error {
 // A vault that is not on this node is not an internal failure: the caller
 // (usually a coordinator fanning out) gets NotFound, which crosses the
 // forwarding boundary as a code and lets it treat the answer as placement
-// churn rather than degradation.
+// churn rather than degradation. A vault that is not ready, on this node or on
+// the peer that answered for it, is Unavailable: the caller can retry.
 func errInternal(err error) *connect.Error {
 	if orchestrator.IsPlacementChurnErr(err) {
 		return connect.NewError(connect.CodeNotFound, err)
+	}
+	if errors.Is(err, orchestrator.ErrVaultNotReady) {
+		return connect.NewError(connect.CodeUnavailable, err)
 	}
 	return connect.NewError(connect.CodeInternal, err)
 }

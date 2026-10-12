@@ -443,7 +443,12 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 // queryFailure is the status a failed forwarded query returns. A share of the
 // query that outgrew this node's memory budget leaves as ResourceExhausted, so
 // the coordinator reports the query as too large rather than as a fault here.
+// A vault that is not ready leaves as a not-ready answer, which the
+// coordinator handles as it handles a vault of its own that is not ready.
 func queryFailure(what string, err error) error {
+	if errors.Is(err, ErrVaultNotReady) {
+		return vaultNotReadyStatus(what, err)
+	}
 	code := codes.Internal
 	if _, ok := errors.AsType[*query.MemoryLimitError](err); ok {
 		code = codes.ResourceExhausted
