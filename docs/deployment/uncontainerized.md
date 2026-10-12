@@ -113,6 +113,8 @@ For unattended joins, have an existing node serve tokens with
 `--bootstrap-token-serve-secret` and point joiners at it with
 `--bootstrap-token-url` and `--bootstrap-token-secret`; it mints a fresh
 token per request, so a joiner started much later still gets a live one.
+A joiner asks only on its first start; once it holds its certificate it
+restarts from it without contacting the URL.
 
 ## systemd unit example
 

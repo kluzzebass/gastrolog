@@ -97,22 +97,14 @@ This keeps pod-name = hostname = `GASTROLOG_NAME` consistent across
 `kubectl get pods`, the gastrolog UI, and CLI operations like
 `cluster remove-node gastrolog-3`.
 
-### Why HTTP token delivery instead of file-based?
+### Why the token is fetched over HTTP
 
-K8s pods don't natively share volumes between replicas. The
-file-based path (works in Compose and Swarm via shared named
-volumes) requires a `ReadWriteMany` storage class — uncommon, not
-portable to all K8s distros.
-
-The HTTP endpoint path (`gastrolog-o9z6o`) is the natural K8s fit:
-`gastrolog-0` serves the token at a known URL, joiners poll with
-backoff. The shared secret in the K8s Secret authenticates the
-request.
-
-There is no file-based alternative. Tokens expire, and one written to a
-shared volume at bootstrap would be read by pods that start arbitrarily
-later, so it would have to stay valid for every join the cluster ever
-sees. The endpoint mints a fresh token per request instead.
+Join tokens expire, so there is no token to put in a Secret or on a
+shared volume: one written at bootstrap would be read by pods that
+start arbitrarily later, so it would have to stay valid for every join
+the cluster ever sees. Instead `gastrolog-0` serves a known URL and
+mints a fresh token for each request that carries the shared secret
+from the K8s Secret; joiners poll it with backoff on their first boot.
 
 ### How the cluster forms
 
@@ -120,12 +112,13 @@ sees. The endpoint mints a fresh token per request instead.
    `GASTROLOG_CLUSTER_ADDR=auto` and resolves the pod's own IP via
    `hostname -i` (e.g. `10.244.1.17`). Binds + advertises on that
    IP:4566.
-2. `gastrolog-0` generates cluster TLS + the join token, mounts
+2. `gastrolog-0` generates cluster TLS and the key it mints join
+   tokens with (no token is stored anywhere), mounts
    the admin credentials from `/etc/gastrolog/admin_creds`,
    provisions the initial admin user, and starts serving:
    - `/healthz`, `/readyz` for K8s probes
-   - `/cluster/bootstrap-token` gated on the
-     `GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET`
+   - `/cluster/bootstrap-token`, minting a token for each request
+     that carries the `GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET`
    - The full Connect-RPC + UI on port 4564
 3. K8s schedules `gastrolog-1`, then `gastrolog-2`. Each polls
    `http://gastrolog-0.gastrolog-headless.gastrolog.svc.cluster.local:4564/cluster/bootstrap-token`
@@ -135,6 +128,12 @@ sees. The endpoint mints a fresh token per request instead.
    stable per-pod DNS (`gastrolog-0.gastrolog-headless...:4566`),
    join the Raft cluster.
 5. Both joiners settle as `FOLLOWER` / `VOTER` within ~10 seconds.
+
+The token fetch is first-boot only. A pod whose PVC already holds its
+cluster certificate restarts from it without contacting
+`/cluster/bootstrap-token`, which matters when every pod restarts at once
+(a Kubernetes node reboot): `gastrolog-0` opens port 4564 only after its
+Raft group has quorum, and that quorum needs the joiners' Raft ports up.
 
 ### Probes
 

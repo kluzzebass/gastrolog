@@ -103,8 +103,9 @@ type RunConfig struct {
 	//     `GET /cluster/bootstrap-token` on its HTTP listener (port
 	//     4564 by default), gated on this shared secret, minting a fresh
 	//     token per authorized request. Empty disables.
-	//   - BootstrapTokenURL: a joiner fetches the join token from this
-	//     URL, polling with backoff. Authenticates with
+	//   - BootstrapTokenURL: a joiner with no certificate in its home
+	//     fetches the join token from this URL, polling with backoff; a
+	//     node that already holds one never contacts it. Authenticates with
 	//     BootstrapTokenSecret. Mutually exclusive with JoinToken (the
 	//     literal flag wins if both are set).
 	//   - BootstrapTokenSecret: the secret sent by the joiner.
@@ -220,15 +221,6 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	nodeID, err := resolveIdentity(logger, cfg, hd)
 	if err != nil {
 		return err
-	}
-
-	// When running unattended (Docker, K8s), the operator may have
-	// configured --bootstrap-token-url instead
-	// of supplying --join-token directly. Resolve those into
-	// cfg.JoinToken before setupCluster reads it. No-op if --join-token
-	// is already set or if no source is configured.
-	if err := resolveJoinTokenFromSources(ctx, &cfg, logger); err != nil {
-		return fmt.Errorf("resolve bootstrap token: %w", err)
 	}
 
 	clusterSrv, clusterTLS, err := setupCluster(ctx, logger, cfg, hd, nodeID)
