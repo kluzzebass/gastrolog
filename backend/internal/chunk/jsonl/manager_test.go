@@ -223,3 +223,24 @@ func TestWriteChunkReadErrorLeavesTheChunkUnwritten(t *testing.T) {
 		t.Fatalf("sink lines %v, want the retried chunk's one line only", raws)
 	}
 }
+
+// The sink reports no chunk of its own: a JSONL vault's chunks are its
+// pipeline chunks, and a count of the lines it has written would be shown as
+// one more chunk beside them.
+func TestSinkReportsNoChunkOfItsOwn(t *testing.T) {
+	t.Parallel()
+	m, err := NewManager(Config{Path: filepath.Join(t.TempDir(), "sink.jsonl")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = m.Close() }()
+	if _, err := m.WriteChunk(chunk.NewChunkID(), chunkRecords("a", 3)); err != nil {
+		t.Fatal(err)
+	}
+	if active := m.Active(); active != nil {
+		t.Fatalf("Active = %+v, want none", *active)
+	}
+	if metas, err := m.List(); err != nil || len(metas) != 0 {
+		t.Fatalf("List = (%+v, %v), want none", metas, err)
+	}
+}

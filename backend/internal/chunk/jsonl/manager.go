@@ -294,48 +294,16 @@ func (m *Manager) encodeLocked(rec chunk.Record) error {
 
 func (m *Manager) Seal() error { return nil }
 
-func (m *Manager) meta() chunk.ChunkMeta {
-	var size int64
-	if info, err := m.file.Stat(); err == nil {
-		size = info.Size()
-	}
-	return chunk.ChunkMeta{
-		ID:          m.id,
-		RecordCount: m.count,
-		Bytes:       size,
-		DiskBytes:   size,
-		WriteStart:  m.earliest,
-		WriteEnd:    m.latest,
-	}
+// A JSONL vault's chunks are its pipeline chunks, which the vault-ctl FSM
+// owns; the sink holds none of its own, so it reports none.
+
+func (m *Manager) Active() *chunk.ChunkMeta { return nil }
+
+func (m *Manager) Meta(chunk.ChunkID) (chunk.ChunkMeta, error) {
+	return chunk.ChunkMeta{}, chunk.ErrChunkNotFound
 }
 
-func (m *Manager) Active() *chunk.ChunkMeta {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.closed || m.count == 0 {
-		return nil
-	}
-	meta := m.meta()
-	return &meta
-}
-
-func (m *Manager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if id != m.id {
-		return chunk.ChunkMeta{}, chunk.ErrChunkNotFound
-	}
-	return m.meta(), nil
-}
-
-func (m *Manager) List() ([]chunk.ChunkMeta, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.count == 0 {
-		return nil, nil
-	}
-	return []chunk.ChunkMeta{m.meta()}, nil
-}
+func (m *Manager) List() ([]chunk.ChunkMeta, error) { return nil, nil }
 
 func (m *Manager) Delete(chunk.ChunkID) error { return nil }
 func (m *Manager) OpenCursor(chunk.ChunkID) (chunk.RecordCursor, error) {
