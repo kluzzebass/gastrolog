@@ -2,12 +2,16 @@ package cli
 
 import (
 	"context"
+	"net/http/httptest"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/server"
 	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
 )
@@ -151,5 +155,69 @@ func TestVaultCreateAttachesEveryRetentionPolicy(t *testing.T) {
 	err := runVaultCreate(t, ts.URL, "--name", "bad", "--type", "memory", "--retention-policy", "keep-30d,nope")
 	if err == nil || !strings.Contains(err.Error(), `retention policy "nope" not found`) {
 		t.Fatalf("unknown policy in the list: err = %v, want the policy named", err)
+	}
+}
+
+// deleteRecordingStore records the delete_data flag each vault delete reaches
+// the config store with.
+type deleteRecordingStore struct {
+	*sysmem.Store
+	deleteData map[glid.GLID]bool
+}
+
+func (s *deleteRecordingStore) DeleteVault(ctx context.Context, id glid.GLID, deleteData bool) error {
+	s.deleteData[id] = deleteData
+	return s.Store.DeleteVault(ctx, id, deleteData)
+}
+
+// TestVaultDeleteCarriesDeleteData drives the genuine client→RPC→store path:
+// `vault delete --delete-data` asks for the vault's data files to be erased,
+// as the UI's "Delete data files" does, and without the flag they are kept.
+func TestVaultDeleteCarriesDeleteData(t *testing.T) {
+	cfgStore := &deleteRecordingStore{Store: sysmem.NewStore(), deleteData: map[glid.GLID]bool{}}
+	orch, err := orchestrator.New(orchestrator.Config{
+		SystemLoader: cfgStore,
+		SegmentsDir:  filepath.Join(t.TempDir(), "segments"),
+	})
+	if err != nil {
+		t.Fatalf("orchestrator.New: %v", err)
+	}
+	t.Cleanup(func() { _ = orch.Stop() })
+	srv := server.New(orch, cfgStore, orchestrator.Factories{VaultsDir: t.TempDir()}, nil, server.Config{NoAuth: true})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	ids := map[string]glid.GLID{}
+	for _, name := range []string{"kept", "erased"} {
+		id := glid.New()
+		ids[name] = id
+		if err := cfgStore.PutVault(context.Background(), system.VaultConfig{ID: id, Name: name, Type: system.VaultTypeMemory}); err != nil {
+			t.Fatalf("PutVault %s: %v", name, err)
+		}
+	}
+
+	run := func(extra ...string) error {
+		cmd := NewConfigCommand()
+		AddClientFlags(cmd)
+		cmd.SetArgs(append([]string{"vault", "delete", "--addr", ts.URL}, extra...))
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		return cmd.Execute()
+	}
+	if err := run("kept", "--force"); err != nil {
+		t.Fatalf("vault delete kept: %v", err)
+	}
+	if err := run("erased", "--force", "--delete-data"); err != nil {
+		t.Fatalf("vault delete erased --delete-data: %v", err)
+	}
+
+	for name, want := range map[string]bool{"kept": false, "erased": true} {
+		got, ok := cfgStore.deleteData[ids[name]]
+		if !ok {
+			t.Fatalf("vault %s: delete never reached the store", name)
+		}
+		if got != want {
+			t.Errorf("vault %s: delete_data = %t, want %t", name, got, want)
+		}
 	}
 }

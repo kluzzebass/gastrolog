@@ -1005,6 +1005,20 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 - **Drain** — move all of a vault's chunks off this node, then remove the
   local instance. Used for decommission.
 
+- **Vault deletion** — the operator removing a vault from the config; every
+  node then deletes its share (`Orchestrator.DeleteVault`, from the
+  vault-deleted notification), whether or not the vault is registered there:
+  it stops the vault's pipeline, closes the vault, decommissions its vault-ctl
+  group (WAL state and directory), and removes the vault's directories — each
+  **pipeline root** candidate and each chunk-manager directory, all named by
+  the vault's ID. **Delete data** decides the files holding records — staging
+  segments, sealed chunks and their indexes, a cloud-backed vault's cloud
+  objects: with it they go; without it they stay, unreachable, and only the
+  chunk-manager bookkeeping (lock file, cloud index) and the directories left
+  empty go. A vault's pipeline root is created only by its registration, so a
+  write in flight when the root is removed fails rather than recreating it
+  (`paths.MkdirBelow`).
+
 - **GLCB catch-up** — a home missing a sealed chunk's GLCB (it missed the
   build and the source segments are released) pulls the blob from a peer
   home, verifies its record count against the manifest entry and its bytes

@@ -1,8 +1,12 @@
 package paths
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gastrolog/internal/glid"
 )
@@ -88,12 +92,37 @@ func EnsureSegmentationDirs(root string) error {
 	return os.MkdirAll(CompletedDir(root), 0o750)
 }
 
-// EnsurePreHeadDir creates pre-head/ under root.
-func EnsurePreHeadDir(root string) error {
-	return os.MkdirAll(PreHeadDir(root), 0o750)
+// MkdirBelow creates the directories from root down to dir, never root
+// itself: a vault's root exists only while its registration does, so a write
+// still in flight when the vault is deleted fails instead of recreating the
+// root the deletion removed.
+func MkdirBelow(root, dir string) error {
+	rel, err := filepath.Rel(root, dir)
+	if err != nil {
+		return err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%s is not under %s", dir, root)
+	}
+	if rel == "." {
+		_, err := os.Stat(root)
+		return err
+	}
+	cur := root
+	for part := range strings.SplitSeq(rel, string(filepath.Separator)) {
+		cur = filepath.Join(cur, part)
+		if err := os.Mkdir(cur, 0o750); err != nil && !errors.Is(err, fs.ErrExist) {
+			return err
+		}
+	}
+	return nil
 }
 
-// EnsureHeadDir creates head/ under root.
+// EnsurePreHeadDir creates pre-head/ under an existing root.
+func EnsurePreHeadDir(root string) error {
+	return MkdirBelow(root, PreHeadDir(root))
+}
+
 // SyncDir fsyncs a directory so preceding renames into it survive power
 // loss. Rename-as-commit is durable only once the parent directory entry is
 // flushed; without it, files that cluster-visible Raft state references
@@ -111,8 +140,9 @@ func SyncDir(dir string) error {
 	return err
 }
 
+// EnsureHeadDir creates head/ under an existing root.
 func EnsureHeadDir(root string) error {
-	return os.MkdirAll(HeadDir(root), 0o750)
+	return MkdirBelow(root, HeadDir(root))
 }
 
 // ListSegmentIDs returns GLID filenames present in dir (non-directories only).

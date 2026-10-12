@@ -404,6 +404,7 @@ func newVaultDeleteCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			force, _ := cmd.Flags().GetBool("force")
+			deleteData, _ := cmd.Flags().GetBool("delete-data")
 			client := clientFromCmd(cmd)
 			r, err := newResolver(context.Background(), client)
 			if err != nil {
@@ -414,8 +415,9 @@ func newVaultDeleteCmd() *cobra.Command {
 				return err
 			}
 			_, err = client.System.DeleteVault(context.Background(), connect.NewRequest(&v1.DeleteVaultRequest{
-				Id:    idBytes,
-				Force: force,
+				Id:         idBytes,
+				Force:      force,
+				DeleteData: deleteData,
 			}))
 			if err != nil {
 				return err
@@ -425,5 +427,6 @@ func newVaultDeleteCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().Bool("force", false, "force delete even if vault has data")
+	cmd.Flags().Bool("delete-data", false, "also erase the vault's data files on every node; without it they stay on disk, unreachable")
 	return cmd
 }

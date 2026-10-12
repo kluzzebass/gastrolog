@@ -60,8 +60,8 @@ function vaultDeleteConsequences(vault: VaultConfig, holderNames: string[], dele
       ? `Removes "${name}" and its ${String(holderNames.length)} placement(s) on ${holderNames.join(", ")}; nothing routes to it afterwards`
       : `Removes "${name}", which has no placements`,
     deleteData
-      ? "Its chunk files are erased from every placement node"
-      : "Its chunk files stay on disk, unreachable, until removed by hand",
+      ? "Its data files — sealed chunks, their indexes and staging segments — are erased from every node, and a cloud-backed vault's cloud objects with them"
+      : "Its data files — sealed chunks, their indexes and staging segments — stay on disk, unreachable, until removed by hand",
   ];
 }
 

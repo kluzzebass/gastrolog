@@ -42,7 +42,7 @@ func pipelineVaultWithSealedGLCB(t *testing.T, ctx context.Context, withBuilders
 		cm.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
 	}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-home"})
-	registerPipelineHome(orch, fx.vaultID, false)
+	registerPipelineHome(t, orch, fx.vaultID, false)
 	glcbPath := placeGLCBOnHome(t, orch, fx.vaultID, fx)
 	if err := cm.RegisterExternalGLCB(fx.sealed.ID, glcbPath, externalInfoFromEntry(fx.sealed)); err != nil {
 		t.Fatalf("RegisterExternalGLCB: %v", err)

@@ -8,7 +8,6 @@ import (
 	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"maps"
-	"os"
 	"slices"
 	"sync"
 
@@ -32,7 +31,7 @@ type orchActions interface {
 	ReloadRetentionPolicies(ctx context.Context) error
 	DisableVault(id glid.GLID) error
 	EnableVault(id glid.GLID) error
-	ForceRemoveVault(id glid.GLID) error
+	DeleteVault(id glid.GLID, deleteData bool) error
 	RemoveVaultInstance(vaultID glid.GLID) bool
 	DeleteVaultInstance(vaultID glid.GLID) bool
 	AddVaultInstance(ctx context.Context, vaultID glid.GLID, f orchestrator.Factories) error
@@ -449,18 +448,11 @@ func (d *configDispatcher) applyExistingVaultChanges(ctx context.Context, id gli
 
 func (d *configDispatcher) handleVaultDeleted(ctx context.Context, n raftfsm.Notification) error {
 	var errs []error
-	if err := d.orch.ForceRemoveVault(n.ID); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
-		errs = append(errs, fmt.Errorf("force remove vault %q: %w", n.Name, err))
+	if err := d.orch.DeleteVault(n.ID, n.DeleteData); err != nil {
+		errs = append(errs, fmt.Errorf("delete vault %q: %w", n.Name, err))
 	}
-	if n.DeleteData && n.Dir != "" {
-		if err := os.RemoveAll(n.Dir); err != nil {
-			errs = append(errs, fmt.Errorf("remove vault directory %q: %w", n.Dir, err))
-		}
-	}
-	// Republish the routing table and Origin/Home registrations so the
-	// deleted vault drops out of the pipeline immediately. teardownVault
-	// leaves this to ReloadFilters "when the deletion lands in config"; with
-	// no periodic placement sweep, the delete event is where it lands.
+	// Republish the routing table so the deleted vault drops out of it on
+	// this node; DeleteVault already stopped the vault's pipeline.
 	if err := d.reloadFilters(ctx); err != nil {
 		errs = append(errs, err)
 	}

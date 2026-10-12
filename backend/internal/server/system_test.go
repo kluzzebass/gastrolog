@@ -59,7 +59,7 @@ func testAfterConfigApply(t *testing.T, orch *orchestrator.Orchestrator, cfgStor
 				_ = orch.AddVault(ctx, *cfg, factories)
 			}
 		case raftfsm.NotifyVaultDeleted:
-			_ = orch.ForceRemoveVault(n.ID)
+			_ = orch.DeleteVault(n.ID, n.DeleteData)
 		case raftfsm.NotifyRotationPolicyPut, raftfsm.NotifyRotationPolicyDeleted:
 			_ = orch.ReloadRotationPolicies(ctx)
 		case raftfsm.NotifyRetentionPolicyPut, raftfsm.NotifyRetentionPolicyDeleted:

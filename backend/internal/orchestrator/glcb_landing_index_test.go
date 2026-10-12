@@ -27,10 +27,21 @@ import (
 
 const landingHomeNode = "node-home"
 
-func registerPipelineHome(o *Orchestrator, vaultID glid.GLID, hasHandle bool) {
+// registerPipelineHome publishes a home registration for the vault and
+// creates its pipeline root, as the supervisor's registration does.
+func registerPipelineHome(t *testing.T, o *Orchestrator, vaultID glid.GLID, hasHandle bool) {
+	t.Helper()
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.setPipelineVaultLocked(vaultID, pipelineVaultReg{home: true, hasHandle: hasHandle})
+	reg := pipelineVaultReg{home: true, hasHandle: hasHandle}
+	o.setPipelineVaultLocked(vaultID, reg)
+	root, err := o.registeredRoot(vaultID, reg)
+	if err != nil {
+		t.Fatalf("pipeline root of vault %s: %v", vaultID, err)
+	}
+	if err := os.MkdirAll(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // placeGLCBOnHome copies a built GLCB into the vault's chunk root on o, where
@@ -106,7 +117,7 @@ func sealApplyHome(t *testing.T, ctx context.Context) (*Orchestrator, sealedGLCB
 	t.Helper()
 	fx := buildSealedPipelineGLCB(t, ctx, 12, e1Payload, record.Attributes{"service": "api", "level": "info"})
 	orch := newTestOrch(t, Config{LocalNodeID: landingHomeNode})
-	registerPipelineHome(orch, fx.vaultID, false)
+	registerPipelineHome(t, orch, fx.vaultID, false)
 	ti, cm, im := fileVaultInstance(t, fx.vaultID)
 	orch.RegisterVault(NewVault(fx.vaultID, ti))
 	fsm := vaultctlfsm.New()
@@ -161,8 +172,8 @@ func TestLocalTransferCopyIndexesTheTargetCopy(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: landingHomeNode})
 	sourceID := fx.vaultID
 	targetID := glid.New()
-	registerPipelineHome(orch, sourceID, false)
-	registerPipelineHome(orch, targetID, false)
+	registerPipelineHome(t, orch, sourceID, false)
+	registerPipelineHome(t, orch, targetID, false)
 	placeGLCBOnHome(t, orch, sourceID, fx)
 
 	targetRoot, _ := orch.pipelineVaultChunkRoot(targetID)
@@ -250,7 +261,7 @@ func TestGLCBBuiltBeforeTheInstanceIsIndexedWhenTheInstanceArrives(t *testing.T)
 	defer cancel()
 	p := newPlacedHome(t, ctx)
 
-	registerPipelineHome(p.orch, p.fx.vaultID, true)
+	registerPipelineHome(t, p.orch, p.fx.vaultID, true)
 	placeGLCBOnHome(t, p.orch, p.fx.vaultID, p.fx)
 	p.orch.onPipelineChunkBuilt(p.fx.vaultID, p.vaultFSM, p.fx.sealed.ID)
 	if jobs := indexJobsScheduled(p.orch); len(jobs) != 0 {

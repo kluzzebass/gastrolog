@@ -447,6 +447,13 @@ func initWriteOrder(state *chunkState, nextWrite uint64) {
 
 const lockFileName = ".lock"
 
+// IsBookkeepingFile reports whether a file name in a manager's directory
+// names manager state rather than records: the directory lock and the cloud
+// index, a cache of what the cloud store holds.
+func IsBookkeepingFile(name string) bool {
+	return name == lockFileName || name == cloudIndexFile
+}
+
 func NewManager(cfg Config) (*Manager, error) {
 	if cfg.Dir == "" {
 		return nil, ErrMissingDir

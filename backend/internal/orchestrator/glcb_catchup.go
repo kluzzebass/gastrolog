@@ -255,7 +255,7 @@ func (o *Orchestrator) holderPullSources(e vaultctlfsm.ManifestEntry) []string {
 // chunk root the peer serves FROM) — the source vault; may differ from the
 // entry's own vault for a transfer-introduced entry.
 func (o *Orchestrator) pullGLCBFromNode(ctx context.Context, node string, vaultID glid.GLID, e vaultctlfsm.ManifestEntry, glcbPath string) error {
-	if err := os.MkdirAll(filepath.Dir(glcbPath), 0o750); err != nil {
+	if err := chunking.EnsureGLCBDir(glcbPath); err != nil {
 		return err
 	}
 	f, err := os.CreateTemp(filepath.Dir(glcbPath), ".glcb.pull.*")

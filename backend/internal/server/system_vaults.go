@@ -339,8 +339,10 @@ func (s *SystemServer) PutVault(
 }
 
 // DeleteVault removes a vault. If force is false, the vault must be empty.
-// If force is true, the vault is removed regardless of content: active chunks are sealed,
-// all indexes and chunks are deleted, and for file vaults the vault directory is removed.
+// If force is true, the vault is removed regardless of content. Every node
+// then deletes its share of the vault as the deletion applies there
+// (Orchestrator.DeleteVault): delete_data decides whether the files holding
+// the vault's records go with it.
 func (s *SystemServer) DeleteVault(
 	ctx context.Context,
 	req *connect.Request[apiv1.DeleteVaultRequest],
@@ -373,11 +375,7 @@ func (s *SystemServer) DeleteVault(
 			fmt.Errorf("vault %q is referenced as destination in route %q", req.Msg.Id, routeID))
 	}
 
-	if req.Msg.Force {
-		if err := s.forceDeleteVault(id); err != nil {
-			return nil, err
-		}
-	} else {
+	if !req.Msg.Force {
 		if err := s.removeVault(id); err != nil {
 			return nil, err
 		}
@@ -386,19 +384,13 @@ func (s *SystemServer) DeleteVault(
 	if err := s.sysStore.DeleteVault(ctx, id, req.Msg.GetDeleteData()); err != nil {
 		return nil, errInternal(err)
 	}
+	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyVaultDeleted, ID: id, Name: existing.Name, DeleteData: req.Msg.GetDeleteData()})
 
 	cfg, err := s.buildFullSystem(ctx)
 	if err != nil {
 		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.DeleteVaultResponse{System: cfg}), nil
-}
-
-func (s *SystemServer) forceDeleteVault(id glid.GLID) error {
-	if err := s.orch.ForceRemoveVault(id); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
-		return errInternal(err)
-	}
-	return nil
 }
 
 func (s *SystemServer) removeVault(id glid.GLID) error {

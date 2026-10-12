@@ -64,8 +64,7 @@ type Notification struct {
 	Key        string    // settings key (empty for entity mutations)
 	NodeID     string    // owning node (populated on vault deletes)
 	NodeIDs    []string  // allowed nodes (populated on ingester deletes)
-	Dir        string    // file vault directory (populated on file vault deletes)
-	DeleteData bool      // when true, vault data directory should be removed from disk
+	DeleteData bool      // vault deletes: the vault's record files are removed from disk too
 	Drain      bool      // when true, drain vault data to a destination vault before deleting
 	Index      uint64    // Raft log index of this mutation (monotonically increasing config version)
 }

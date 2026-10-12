@@ -175,3 +175,50 @@ func TestSyncDir(t *testing.T) {
 		t.Fatal("SyncDir on missing dir should error")
 	}
 }
+
+// A write that outlives its vault's deletion must not recreate the vault's
+// root: the staging-area and chunk-directory helpers create only what lies
+// below an existing root.
+func TestMkdirBelowNeverCreatesRoot(t *testing.T) {
+	t.Parallel()
+	parent := t.TempDir()
+	root := filepath.Join(parent, "vault")
+
+	if err := paths.EnsureHeadDir(root); err == nil {
+		t.Fatalf("EnsureHeadDir created head/ under a missing root")
+	}
+	if err := paths.EnsurePreHeadDir(root); err == nil {
+		t.Fatalf("EnsurePreHeadDir created pre-head/ under a missing root")
+	}
+	if err := paths.MkdirBelow(root, filepath.Join(root, "chunks", "c1")); err == nil {
+		t.Fatalf("MkdirBelow created a chunk dir under a missing root")
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("missing root was recreated: stat err=%v", err)
+	}
+
+	if err := os.Mkdir(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.EnsureHeadDir(root); err != nil {
+		t.Fatalf("EnsureHeadDir under an existing root: %v", err)
+	}
+	if err := paths.EnsureHeadDir(root); err != nil {
+		t.Fatalf("EnsureHeadDir is not idempotent: %v", err)
+	}
+	if err := paths.EnsurePreHeadDir(root); err != nil {
+		t.Fatalf("EnsurePreHeadDir under an existing root: %v", err)
+	}
+	chunkDir := filepath.Join(root, "chunks", "c1")
+	if err := paths.MkdirBelow(root, chunkDir); err != nil {
+		t.Fatalf("MkdirBelow under an existing root: %v", err)
+	}
+	for _, dir := range []string{paths.HeadDir(root), paths.PreHeadDir(root), chunkDir} {
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			t.Fatalf("%s not created: %v", dir, err)
+		}
+	}
+	if err := paths.MkdirBelow(root, parent); err == nil {
+		t.Fatalf("MkdirBelow accepted a directory above its root")
+	}
+}

@@ -827,9 +827,7 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 	// down their cron rotation job as well.
 	for vid := range o.pipelineVaultsMap() {
 		if _, ok := desired[vid]; !ok {
-			o.pipeline.UnregisterVault(vid)
-			o.reconcileChunkCron(vid, false, "")
-			o.deletePipelineVaultLocked(vid)
+			o.unregisterPipelineVaultLocked(vid)
 		}
 	}
 

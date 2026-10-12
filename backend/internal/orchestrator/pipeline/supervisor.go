@@ -939,8 +939,10 @@ func (s *Supervisor) SealOpenChunk(vaultID glid.GLID) (bool, error) {
 }
 
 // UnregisterVault stops the managers for a vault that has left this node. It is a
-// no-op for an unknown vault. Home managers are stopped before origin managers,
-// and routing is detached before segmentation closes the input queue.
+// no-op for an unknown vault. Home managers are stopped before origin managers.
+// On the origin side each stage stops before the one it feeds: routing is
+// detached before segmentation closes the input queue, and segmentation's
+// final segment completes while distribution still owns the vault.
 func (s *Supervisor) UnregisterVault(vaultID glid.GLID) {
 	s.mu.Lock()
 	roles, ok := s.vaults[vaultID]
@@ -963,8 +965,8 @@ func (s *Supervisor) UnregisterVault(vaultID glid.GLID) {
 
 func (s *Supervisor) unregisterOrigin(vaultID glid.GLID) {
 	s.route.UnregisterVault(vaultID)
-	s.dist.UnregisterVault(vaultID)
 	s.seg.UnregisterVault(vaultID)
+	s.dist.UnregisterVault(vaultID)
 }
 
 // vaultSegmentCollector adapts the collection manager to chunking's

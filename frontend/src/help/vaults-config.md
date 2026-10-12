@@ -84,7 +84,9 @@ Each action on an expanded vault card runs against the live vault; the line besi
 
 **Delete** on a vault card removes the vault and every placement it has, on every node; the confirm step lists what goes. A vault that is a [route](help:routing) destination cannot be deleted — the Delete button stays disabled and names the route; remove the vault from the route's destinations first.
 
-The vault's chunk files stay on disk, unreachable, unless **Delete data files** is ticked, which erases the vault directory on every placement node.
+Every node then removes what it keeps for the vault. The vault's data files — its sealed chunks and their indexes, and its staging segments — stay on disk, unreachable, unless **Delete data files** is ticked, which erases them on every node, along with a cloud-backed vault's cloud objects. Either way its control-plane state (its Raft group, lock file and cloud index) and the directories left empty are removed.
+
+From the CLI: `gastrolog config vault delete <name> --force`, adding `--delete-data` to erase the data files.
 
 ## Rotation and Retention Policies
 
