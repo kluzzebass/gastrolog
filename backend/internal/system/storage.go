@@ -20,8 +20,6 @@ const (
 	NodeStateLive
 	NodeStateUnreachable
 	NodeStateMaintenance
-	NodeStateDraining
-	NodeStateDecommissioning
 )
 
 // String returns the human-readable label.
@@ -35,10 +33,6 @@ func (s NodeState) String() string {
 		return "unreachable"
 	case NodeStateMaintenance:
 		return "maintenance"
-	case NodeStateDraining:
-		return "draining"
-	case NodeStateDecommissioning:
-		return "decommissioning"
 	default:
 		return fmt.Sprintf("nodestate(%d)", uint8(s))
 	}
@@ -51,11 +45,11 @@ func (s NodeState) String() string {
 //
 // Legal transitions (see docs/node-lifecycle-design.md "Transitions in detail"):
 //
-//	Live           → Unreachable | Maintenance | Draining
-//	Unreachable    → Live | Maintenance | Draining
-//	Maintenance    → Live | Draining
-//	Draining       → Decommissioning | Live (cancel)
-//	Decommissioning → (Removed via DeleteNode; no in-FSM successor)
+//	Live        → Unreachable | Maintenance
+//	Unreachable → Live | Maintenance
+//	Maintenance → Live
+//
+// A node leaves the cluster by removal (DeleteNode), not by a state.
 func ValidateNodeStateTransition(from, to NodeState) error {
 	effFrom := from
 	if effFrom == NodeStateUnknown {
@@ -73,17 +67,11 @@ func ValidateNodeStateTransition(from, to NodeState) error {
 		// linting.
 		legal = nil
 	case NodeStateLive:
-		legal = []NodeState{NodeStateUnreachable, NodeStateMaintenance, NodeStateDraining}
+		legal = []NodeState{NodeStateUnreachable, NodeStateMaintenance}
 	case NodeStateUnreachable:
-		legal = []NodeState{NodeStateLive, NodeStateMaintenance, NodeStateDraining}
+		legal = []NodeState{NodeStateLive, NodeStateMaintenance}
 	case NodeStateMaintenance:
-		legal = []NodeState{NodeStateLive, NodeStateDraining}
-	case NodeStateDraining:
-		legal = []NodeState{NodeStateDecommissioning, NodeStateLive}
-	case NodeStateDecommissioning:
-		// No in-FSM successor — Decommissioning → Removed happens via
-		// DeleteNode, not a state transition.
-		legal = nil
+		legal = []NodeState{NodeStateLive}
 	}
 	if slices.Contains(legal, to) {
 		return nil

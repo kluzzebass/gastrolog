@@ -131,18 +131,19 @@ func TestSetNodeState_RejectsUnspecifiedState(t *testing.T) {
 	}
 }
 
-// TestSetNodeState_DrainToLiveCancelsDrain exercises the cancel-
-// drain path the CLI verb wraps: Draining → Live is a legal
-// transition specifically to support operator override before
-// decommission completes.
-func TestSetNodeState_DrainToLiveCancelsDrain(t *testing.T) {
+// A request naming a state the API does not define — the wire values the
+// retired draining and decommissioning states had — is refused, and the
+// node's state is left alone.
+func TestSetNodeState_UndefinedStateIsRefused(t *testing.T) {
 	t.Parallel()
-	client, nodeID := setupSetNodeStateTest(t, system.NodeStateDraining)
-	_, err := client.SetNodeState(context.Background(), connect.NewRequest(&gastrologv1.SetNodeStateRequest{
-		NodeId: []byte(nodeID.String()),
-		State:  gastrologv1.NodeState_NODE_STATE_LIVE,
-	}))
-	if err != nil {
-		t.Fatalf("Draining → Live (cancel drain): %v", err)
+	for _, v := range []gastrologv1.NodeState{4, 5} {
+		client, nodeID := setupSetNodeStateTest(t, system.NodeStateLive)
+		_, err := client.SetNodeState(context.Background(), connect.NewRequest(&gastrologv1.SetNodeStateRequest{
+			NodeId: []byte(nodeID.String()),
+			State:  v,
+		}))
+		if got := connect.CodeOf(err); got != connect.CodeInvalidArgument {
+			t.Fatalf("state %d: got %s (%v), want InvalidArgument", v, got, err)
+		}
 	}
 }

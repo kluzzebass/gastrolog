@@ -146,13 +146,6 @@ const (
 	// Maintenance: operator-declared absence. Placement does NOT rotate
 	// off this state. Sticky — requires `cluster online` to clear.
 	NodeState_NODE_STATE_MAINTENANCE NodeState = 3
-	// Draining: operator-initiated; chunks being transferred off the node
-	// in preparation for removal.
-	NodeState_NODE_STATE_DRAINING NodeState = 4
-	// Decommissioning: chunks moved; voter being removed from cluster-ctl Raft
-	// and vault-ctl groups. Transitions to absence-from-FSM (= Removed)
-	// when removal completes.
-	NodeState_NODE_STATE_DECOMMISSIONING NodeState = 5
 )
 
 // Enum value maps for NodeState.
@@ -162,16 +155,12 @@ var (
 		1: "NODE_STATE_LIVE",
 		2: "NODE_STATE_UNREACHABLE",
 		3: "NODE_STATE_MAINTENANCE",
-		4: "NODE_STATE_DRAINING",
-		5: "NODE_STATE_DECOMMISSIONING",
 	}
 	NodeState_value = map[string]int32{
-		"NODE_STATE_UNSPECIFIED":     0,
-		"NODE_STATE_LIVE":            1,
-		"NODE_STATE_UNREACHABLE":     2,
-		"NODE_STATE_MAINTENANCE":     3,
-		"NODE_STATE_DRAINING":        4,
-		"NODE_STATE_DECOMMISSIONING": 5,
+		"NODE_STATE_UNSPECIFIED": 0,
+		"NODE_STATE_LIVE":        1,
+		"NODE_STATE_UNREACHABLE": 2,
+		"NODE_STATE_MAINTENANCE": 3,
 	}
 )
 
@@ -9812,14 +9801,12 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\fIngesterMode\x12\x1d\n" +
 	"\x19INGESTER_MODE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15INGESTER_MODE_PASSIVE\x10\x01\x12\x18\n" +
-	"\x14INGESTER_MODE_ACTIVE\x10\x02*\xad\x01\n" +
+	"\x14INGESTER_MODE_ACTIVE\x10\x02*t\n" +
 	"\tNodeState\x12\x1a\n" +
 	"\x16NODE_STATE_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fNODE_STATE_LIVE\x10\x01\x12\x1a\n" +
 	"\x16NODE_STATE_UNREACHABLE\x10\x02\x12\x1a\n" +
-	"\x16NODE_STATE_MAINTENANCE\x10\x03\x12\x17\n" +
-	"\x13NODE_STATE_DRAINING\x10\x04\x12\x1e\n" +
-	"\x1aNODE_STATE_DECOMMISSIONING\x10\x05*w\n" +
+	"\x16NODE_STATE_MAINTENANCE\x10\x03*w\n" +
 	"\bLogLevel\x12\x19\n" +
 	"\x15LOG_LEVEL_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fLOG_LEVEL_DEBUG\x10\x01\x12\x12\n" +

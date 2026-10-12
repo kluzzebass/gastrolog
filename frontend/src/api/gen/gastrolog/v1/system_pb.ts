@@ -116,23 +116,6 @@ export enum NodeState {
    * @generated from enum value: NODE_STATE_MAINTENANCE = 3;
    */
   MAINTENANCE = 3,
-
-  /**
-   * Draining: operator-initiated; chunks being transferred off the node
-   * in preparation for removal.
-   *
-   * @generated from enum value: NODE_STATE_DRAINING = 4;
-   */
-  DRAINING = 4,
-
-  /**
-   * Decommissioning: chunks moved; voter being removed from cluster-ctl Raft
-   * and vault-ctl groups. Transitions to absence-from-FSM (= Removed)
-   * when removal completes.
-   *
-   * @generated from enum value: NODE_STATE_DECOMMISSIONING = 5;
-   */
-  DECOMMISSIONING = 5,
 }
 // Retrieve enum metadata with: proto3.getEnumType(NodeState)
 proto3.util.setEnumType(NodeState, "gastrolog.v1.NodeState", [
@@ -140,8 +123,6 @@ proto3.util.setEnumType(NodeState, "gastrolog.v1.NodeState", [
   { no: 1, name: "NODE_STATE_LIVE" },
   { no: 2, name: "NODE_STATE_UNREACHABLE" },
   { no: 3, name: "NODE_STATE_MAINTENANCE" },
-  { no: 4, name: "NODE_STATE_DRAINING" },
-  { no: 5, name: "NODE_STATE_DECOMMISSIONING" },
 ]);
 
 /**

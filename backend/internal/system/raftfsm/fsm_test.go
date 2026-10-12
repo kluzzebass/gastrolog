@@ -680,10 +680,12 @@ func TestApplySetNodeState_IllegalTransition(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	putNode(t, fsm, id, "n", system.NodeStateLive, now)
 
-	// Live → Decommissioning is illegal (must go through Draining first).
-	err := applyCmdExpectError(t, fsm, command.NewSetNodeState(id, system.NodeStateDecommissioning, now))
+	// Maintenance → Unreachable is illegal: operator-sticky state is not
+	// downgraded to cluster-detected.
+	applyCmd(t, fsm, command.NewSetNodeState(id, system.NodeStateMaintenance, now))
+	err := applyCmdExpectError(t, fsm, command.NewSetNodeState(id, system.NodeStateUnreachable, now))
 	if err == nil {
-		t.Fatal("expected error for illegal transition Live → Decommissioning, got nil")
+		t.Fatal("expected error for illegal transition Maintenance → Unreachable, got nil")
 	}
 
 	// State should not have changed.
@@ -691,8 +693,8 @@ func TestApplySetNodeState_IllegalTransition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.State != system.NodeStateLive {
-		t.Errorf("state after rejected transition: got %s, want live", got.State)
+	if got.State != system.NodeStateMaintenance {
+		t.Errorf("state after rejected transition: got %s, want maintenance", got.State)
 	}
 }
 

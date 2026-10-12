@@ -59,16 +59,11 @@ func (c *rfTestCluster) node(name string, state system.NodeState) glid.GLID {
 	return id
 }
 
-// setState transitions a node, walking the legal path to Decommissioning.
+// setState transitions a node.
 func (c *rfTestCluster) setState(name string, state system.NodeState) {
 	c.t.Helper()
 	ctx := context.Background()
 	id := c.ids[name]
-	if state == system.NodeStateDecommissioning {
-		if err := c.store.SetNodeState(ctx, id, system.NodeStateDraining, time.Now()); err != nil {
-			c.t.Fatalf("SetNodeState %s Draining: %v", name, err)
-		}
-	}
 	if err := c.store.SetNodeState(ctx, id, state, time.Now()); err != nil {
 		c.t.Fatalf("SetNodeState %s %v: %v", name, state, err)
 	}
@@ -183,16 +178,14 @@ func TestVaultsBelowRF_FourNodesRF3_EligibleSpare(t *testing.T) {
 	}
 }
 
-// The spare only counts when it is Live. Every soft-offline and
-// in-transition state is excluded, matching the placement manager, which
-// will not put new members on those nodes either.
+// The spare only counts when it is Live. Every soft-offline state is
+// excluded, matching the placement manager, which will not put new members
+// on those nodes either.
 func TestVaultsBelowRF_SpareMustBeLive(t *testing.T) {
 	t.Parallel()
 	for _, state := range []system.NodeState{
 		system.NodeStateUnreachable,
 		system.NodeStateMaintenance,
-		system.NodeStateDraining,
-		system.NodeStateDecommissioning,
 	} {
 		t.Run(state.String(), func(t *testing.T) {
 			t.Parallel()

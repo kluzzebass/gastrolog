@@ -80,8 +80,6 @@ func holderNames(t *testing.T, c *rfTestCluster, vaultID glid.GLID) (leader stri
 var nonLiveStates = []system.NodeState{
 	system.NodeStateUnreachable,
 	system.NodeStateMaintenance,
-	system.NodeStateDraining,
-	system.NodeStateDecommissioning,
 }
 
 // Every lifecycle state crossed with heartbeat liveness, for a follower that
@@ -92,11 +90,9 @@ func TestSelectFollowers_ExistingFollowerByStateAndLiveness(t *testing.T) {
 	// Whether a Live spare is backfilled: only when the existing follower
 	// is not a working replica.
 	backfills := map[system.NodeState]bool{
-		system.NodeStateLive:            false,
-		system.NodeStateUnreachable:     true,
-		system.NodeStateMaintenance:     true,
-		system.NodeStateDraining:        false,
-		system.NodeStateDecommissioning: true,
+		system.NodeStateLive:        false,
+		system.NodeStateUnreachable: true,
+		system.NodeStateMaintenance: true,
 	}
 	for state, wantBackfill := range backfills {
 		for _, alive := range []bool{true, false} {
@@ -419,12 +415,10 @@ func TestRFGate_AgreesWithPlacer(t *testing.T) {
 func TestAcceptsNewPlacements(t *testing.T) {
 	t.Parallel()
 	want := map[system.NodeState]bool{
-		system.NodeStateUnknown:         true,
-		system.NodeStateLive:            true,
-		system.NodeStateUnreachable:     false,
-		system.NodeStateMaintenance:     false,
-		system.NodeStateDraining:        false,
-		system.NodeStateDecommissioning: false,
+		system.NodeStateUnknown:     true,
+		system.NodeStateLive:        true,
+		system.NodeStateUnreachable: false,
+		system.NodeStateMaintenance: false,
 	}
 	for state, w := range want {
 		if got := acceptsNewPlacements(state); got != w {

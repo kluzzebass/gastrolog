@@ -92,10 +92,9 @@ const (
 // (placement.go) reads to refuse leader rotation. The chunks stay where
 // they live; placement does not move them off the absent node.
 //
-// Operator-set states (Maintenance, Draining, Decommissioning) are
-// never touched by the sweep — they are sticky and cleared only by
-// explicit operator action (e.g. `cluster online`, drain completion,
-// DeleteNode). Unreachable is the only auto-set state, so the
+// The operator-set state (Maintenance) is never touched by the sweep —
+// it is sticky and cleared only by explicit operator action (`cluster
+// online`, or DeleteNode). Unreachable is the only auto-set state, so the
 // auto-set vs operator-set distinction is implicit in the state name:
 // no StateSource field is needed.
 type nodeLiveness struct {
@@ -277,8 +276,8 @@ func (s *nodeLiveness) autoClear(ctx context.Context) {
 // command) is the source of truth, so every node sees the same value
 // and arrives at the same alert decision — no leader gating required.
 //
-// Maintenance, Draining, and Decommissioning intentionally do not
-// alert: operators set those deliberately, so the UI tone alone
+// Maintenance intentionally does not alert: operators set it
+// deliberately, so the UI tone alone
 // (informational badge, no warning) communicates intent without
 // pestering them.
 func (s *nodeLiveness) alertTick(ctx context.Context) {
@@ -345,10 +344,10 @@ func (s *nodeLiveness) sweepUnreachable(ctx context.Context) {
 		case system.NodeStateUnknown:
 			// EffectiveState maps Unknown→Live; this branch is
 			// unreachable but required by the exhaustive-switch lint.
-		case system.NodeStateMaintenance, system.NodeStateDraining, system.NodeStateDecommissioning:
-			// Operator-sticky states: the sweep never touches them.
-			// They clear only via explicit operator action (e.g.
-			// `cluster online`, drain completion, DeleteNode). See
+		case system.NodeStateMaintenance:
+			// Operator-sticky: the sweep never touches it. It clears
+			// only via explicit operator action (`cluster online`, or
+			// DeleteNode). See
 			// docs/node-lifecycle-design.md "Behavior gates by state".
 		case system.NodeStateLive:
 			if lastSeen.IsZero() {

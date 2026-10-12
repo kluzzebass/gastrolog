@@ -96,10 +96,10 @@ func (s *SystemServer) ingesterCheckTargets(ctx context.Context, nodeIDs []strin
 			// will not start there until they are back, at which point the
 			// save-time check runs again.
 			switch n.EffectiveState() {
-			case system.NodeStateUnreachable, system.NodeStateDecommissioning:
+			case system.NodeStateUnreachable:
 				continue
 			case system.NodeStateUnknown, system.NodeStateLive,
-				system.NodeStateMaintenance, system.NodeStateDraining:
+				system.NodeStateMaintenance:
 				out = append(out, n.ID.String())
 			}
 		}
