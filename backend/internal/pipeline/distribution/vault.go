@@ -62,6 +62,9 @@ type vaultDist struct {
 	// and only one attempt may commit or the publish counter double-counts.
 	finalized map[glid.GLID]struct{}
 	inflight  map[glid.GLID]struct{}
+	// publishing counts publishes running on this vault (Manager.acquire);
+	// UnregisterVault's wait covers them, as a publish promotes into head/.
+	publishing sync.WaitGroup
 	// badHeader remembers completed/ files whose fixed header failed to
 	// decode, keyed by segment ID (state, not time): each corrupt file is
 	// read and warned about exactly once, not on every rescan wake.

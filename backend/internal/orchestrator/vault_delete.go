@@ -38,19 +38,40 @@ func (o *Orchestrator) DeleteVault(id glid.GLID, deleteData bool) error {
 	}
 
 	o.mu.Lock()
-	defer o.mu.Unlock()
-
 	o.vaultDeletions.Add(1)
-	return errors.Join(err, o.deleteVaultLocked(sys, id, deleteData))
+	retired := o.retireVaultLocked(sys, id, deleteData)
+	o.mu.Unlock()
+
+	return errors.Join(err, retired.removeFiles())
 }
 
-// deleteVaultLocked removes the vault from this node as DeleteVault
-// describes, with sys the config naming this node's file storages. Caller
-// holds o.mu.
-func (o *Orchestrator) deleteVaultLocked(sys *system.System, id glid.GLID, deleteData bool) error {
+// retiredVault is a vault retired from this node whose files are still to be
+// removed: once its pipeline goroutines have stopped writing under its roots.
+type retiredVault struct {
+	deleteData bool
+	dirs       []string
+	stopped    func()
+	err        error
+}
+
+// removeFiles waits for the vault's pipeline goroutines to return, then
+// removes its directories. Those goroutines take o.mu, so it runs without it.
+func (r retiredVault) removeFiles() error {
+	r.stopped()
+	err := r.err
+	for _, dir := range r.dirs {
+		err = errors.Join(err, removeVaultDir(dir, r.deleteData))
+	}
+	return err
+}
+
+// retireVaultLocked stops and drops the vault on this node as DeleteVault
+// describes, with sys the config naming this node's file storages, and
+// returns what removes its files. Caller holds o.mu.
+func (o *Orchestrator) retireVaultLocked(sys *system.System, id glid.GLID, deleteData bool) retiredVault {
 	var err error
 	dirs := o.vaultDirsLocked(sys, id)
-	o.unregisterPipelineVaultLocked(id)
+	stopped := o.unregisterPipelineVaultLocked(id)
 	vault, registered := o.vaults[id]
 	if deleteData && registered && vault.Instance != nil {
 		if purger, ok := vault.Instance.Chunks.(cloudObjectPurger); ok {
@@ -66,11 +87,8 @@ func (o *Orchestrator) deleteVaultLocked(sys *system.System, id glid.GLID, delet
 		o.decommissionVaultControlPlaneRaftGroup(id)
 	}
 
-	for _, dir := range dirs {
-		err = errors.Join(err, removeVaultDir(dir, deleteData))
-	}
 	o.logger.Info("vault deleted on this node", "id", id, "delete_data", deleteData)
-	return err
+	return retiredVault{deleteData: deleteData, dirs: dirs, stopped: stopped, err: err}
 }
 
 // loadSystemForReload reads config that the caller applies later under o.mu,
@@ -102,17 +120,20 @@ func (o *Orchestrator) currentSystemLocked(ctx context.Context, sys *system.Syst
 // build created go, any records it had stay — so the deletion holds.
 func (o *Orchestrator) registerUnlessDeleted(vault *Vault) bool {
 	o.mu.Lock()
-	defer o.mu.Unlock()
 	o.vaults[vault.ID] = vault
 	o.bindVaultInstanceToCtlLocked(vault.ID, vault.Instance)
 	if o.vaultDeletions.Load() == 0 {
+		o.mu.Unlock()
 		return true
 	}
 	sys, err := o.loadSystem(context.Background())
 	if err != nil || sys == nil || findVaultConfig(sys.Config.Vaults, vault.ID) != nil {
+		o.mu.Unlock()
 		return true
 	}
-	if err := o.deleteVaultLocked(sys, vault.ID, false); err != nil {
+	retired := o.retireVaultLocked(sys, vault.ID, false)
+	o.mu.Unlock()
+	if err := retired.removeFiles(); err != nil {
 		o.logger.Warn("remove vault deleted while it initialized", "id", vault.ID, "error", err)
 	}
 	return false
@@ -154,13 +175,17 @@ func (o *Orchestrator) vaultDirsLocked(sys *system.System, id glid.GLID) []strin
 }
 
 // unregisterPipelineVaultLocked stops the vault's pipeline managers, its cron
-// rotation job and its registration. Caller holds o.mu.
-func (o *Orchestrator) unregisterPipelineVaultLocked(id glid.GLID) {
+// rotation job and its registration, and returns a wait for the pipeline
+// goroutines still writing under the vault's root; they take o.mu, so the
+// caller waits after releasing it. Caller holds o.mu.
+func (o *Orchestrator) unregisterPipelineVaultLocked(id glid.GLID) (wait func()) {
+	wait = func() {}
 	if o.pipeline != nil {
-		o.pipeline.UnregisterVault(id)
+		wait = o.pipeline.UnregisterVault(id)
 	}
 	o.reconcileChunkCron(id, false, "")
 	o.deletePipelineVaultLocked(id)
+	return wait
 }
 
 // removeVaultDir removes a deleted vault's directory: all of it with

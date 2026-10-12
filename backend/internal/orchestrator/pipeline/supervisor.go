@@ -204,6 +204,15 @@ type vaultRoles struct {
 	collects bool
 	chunking bool
 	release  *releaseConsumer
+	// catchUp is the registration's initial collect/plan/build pass, nil when
+	// none was started.
+	catchUp *catchUpPass
+}
+
+// catchUpPass is a home registration's initial pass on its own goroutine.
+type catchUpPass struct {
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 // stagingRoots returns the distinct staging roots this node uses for a vault.
@@ -676,13 +685,15 @@ func (s *Supervisor) RegisterVault(spec VaultSpec) error {
 		}
 	}
 	if homeSide {
-		if err := s.registerHome(spec); err != nil {
+		catchUp, err := s.registerHome(spec)
+		if err != nil {
 			if spec.Origin {
 				s.unregisterOrigin(spec.VaultID)
 			}
 			roles.release.unbindIfSet()
 			return err
 		}
+		roles.catchUp = catchUp
 	}
 
 	s.vaults[spec.VaultID] = roles
@@ -740,7 +751,7 @@ func (s *Supervisor) registerOrigin(spec VaultSpec) error {
 	return nil
 }
 
-func (s *Supervisor) registerHome(spec VaultSpec) error {
+func (s *Supervisor) registerHome(spec VaultSpec) (*catchUpPass, error) {
 	// Collection subscribes to the vault-ctl publish fan-out (Rubicon C): a newly
 	// published segment fires SetOnPublishCompletedSegment → triggerCollect, so
 	// replication is event-driven, not timer-polled. The fan-out is additive, so
@@ -757,7 +768,7 @@ func (s *Supervisor) registerHome(spec VaultSpec) error {
 			Receipts: spec.Receipts,
 			FSM:      spec.FSM,
 		}); err != nil {
-			return fmt.Errorf("collection register: %w", err)
+			return nil, fmt.Errorf("collection register: %w", err)
 		}
 		collectionRegistered = true
 	}
@@ -785,7 +796,7 @@ func (s *Supervisor) registerHome(spec VaultSpec) error {
 			if collectionRegistered {
 				s.col.UnregisterVault(spec.VaultID)
 			}
-			return fmt.Errorf("chunking register: %w", err)
+			return nil, fmt.Errorf("chunking register: %w", err)
 		}
 	}
 	// A home registered after Start misses Run's one-shot startup catch-up, so
@@ -793,22 +804,25 @@ func (s *Supervisor) registerHome(spec VaultSpec) error {
 	// already in the registry, then plan/build any manifest work already sealed
 	// or pending (e.g. this node just became a home, or restarted with a lagging
 	// applied index). runCtx cancellation on Stop aborts in-flight work.
-	if s.running.Load() && s.runCtx != nil {
-		ctx := s.runCtx
-		vid := spec.VaultID
-		chunkCatchUp := spec.Locate != nil
-		s.wg.Go(func() {
-			if collectionRegistered {
-				_ = s.col.CollectOnce(ctx, vid)
-			}
-			if chunkCatchUp {
-				_ = s.chunk.RecoverOnce(ctx, vid)
-				_ = s.chunk.PlanOnce(ctx, vid)
-				_ = s.chunk.BuildOnce(ctx, vid)
-			}
-		})
+	if !s.running.Load() || s.runCtx == nil {
+		return nil, nil
 	}
-	return nil
+	ctx, cancel := context.WithCancel(s.runCtx)
+	pass := &catchUpPass{cancel: cancel, done: make(chan struct{})}
+	vid := spec.VaultID
+	chunkCatchUp := spec.Locate != nil
+	s.wg.Go(func() {
+		defer close(pass.done)
+		if collectionRegistered {
+			_ = s.col.CollectOnce(ctx, vid)
+		}
+		if chunkCatchUp {
+			_ = s.chunk.RecoverOnce(ctx, vid)
+			_ = s.chunk.PlanOnce(ctx, vid)
+			_ = s.chunk.BuildOnce(ctx, vid)
+		}
+	})
+	return pass, nil
 }
 
 // RecoverVault seals pipeline chunks whose local GLCB landed before CmdSealChunk
@@ -943,7 +957,12 @@ func (s *Supervisor) SealOpenChunk(vaultID glid.GLID) (bool, error) {
 // On the origin side each stage stops before the one it feeds: routing is
 // detached before segmentation closes the input queue, and segmentation's
 // final segment completes while distribution still owns the vault.
-func (s *Supervisor) UnregisterVault(vaultID glid.GLID) {
+//
+// The returned wait blocks until the vault's goroutines that write under its
+// root — the collection and chunking workers, the registration's catch-up
+// pass, in-flight publishes — have returned. They may take locks the caller
+// holds, so the caller waits after releasing them.
+func (s *Supervisor) UnregisterVault(vaultID glid.GLID) (wait func()) {
 	s.mu.Lock()
 	roles, ok := s.vaults[vaultID]
 	if ok {
@@ -951,22 +970,32 @@ func (s *Supervisor) UnregisterVault(vaultID glid.GLID) {
 	}
 	s.mu.Unlock()
 	if !ok {
-		return
+		return func() {}
 	}
 	roles.release.unbindIfSet()
+	var waits []func()
+	if roles.catchUp != nil {
+		roles.catchUp.cancel()
+		done := roles.catchUp.done
+		waits = append(waits, func() { <-done })
+	}
 	if roles.home {
-		s.chunk.UnregisterVault(vaultID)
-		s.col.UnregisterVault(vaultID)
+		waits = append(waits, s.chunk.UnregisterVault(vaultID), s.col.UnregisterVault(vaultID))
 	}
 	if roles.origin {
-		s.unregisterOrigin(vaultID)
+		waits = append(waits, s.unregisterOrigin(vaultID))
+	}
+	return func() {
+		for _, w := range waits {
+			w()
+		}
 	}
 }
 
-func (s *Supervisor) unregisterOrigin(vaultID glid.GLID) {
+func (s *Supervisor) unregisterOrigin(vaultID glid.GLID) (wait func()) {
 	s.route.UnregisterVault(vaultID)
 	s.seg.UnregisterVault(vaultID)
-	s.dist.UnregisterVault(vaultID)
+	return s.dist.UnregisterVault(vaultID)
 }
 
 // vaultSegmentCollector adapts the collection manager to chunking's

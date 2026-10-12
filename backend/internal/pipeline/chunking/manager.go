@@ -212,6 +212,10 @@ type vaultChunking struct {
 	releaseWake *notify.Signal
 	// stopWorker cancels the per-vault worker; nil until the worker starts.
 	stopWorker context.CancelFunc
+	// workerDone is closed when the per-vault worker has exited — after its
+	// in-flight build and post-seal goroutines; nil until the worker starts.
+	// Written with stopWorker, under Manager.mu.
+	workerDone chan struct{}
 	// buildRunning gates a single in-flight GLCB build so planCatchUp can keep
 	// running on wake while materialization/build proceeds asynchronously.
 	buildRunning atomic.Bool
@@ -576,19 +580,33 @@ func (m *Manager) wireVaultFSMCallbacks(v *vaultChunking, cfg VaultConfig) {
 	})
 }
 
-// UnregisterVault removes a vault from chunking dispatch.
-func (m *Manager) UnregisterVault(vaultID glid.GLID) {
+// UnregisterVault removes a vault from chunking dispatch and returns a wait
+// that blocks until the vault's worker — with its in-flight build — has
+// exited, so nothing of the vault is still being written once it returns.
+func (m *Manager) UnregisterVault(vaultID glid.GLID) (wait func()) {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
 	delete(m.vaults, vaultID)
-	m.mu.Unlock()
+	var stop context.CancelFunc
+	var done chan struct{}
 	if ok {
-		m.unwireVaultFSMCallbacks(v)
-		if v.stopWorker != nil {
-			v.stopWorker()
+		stop = v.stopWorker
+		done = v.workerDone
+	}
+	m.mu.Unlock()
+	if !ok {
+		return func() {}
+	}
+	m.unwireVaultFSMCallbacks(v)
+	if stop != nil {
+		stop()
+	}
+	v.stopPostSeal()
+	v.closeSegmentIndexCache()
+	return func() {
+		if done != nil {
+			<-done
 		}
-		v.stopPostSeal()
-		v.closeSegmentIndexCache()
 	}
 }
 
@@ -784,7 +802,10 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 	}
 	ctx, cancel := context.WithCancel(m.runCtx)
 	v.stopWorker = cancel
+	done := make(chan struct{})
+	v.workerDone = done
 	m.wg.Go(func() {
+		defer close(done)
 		// Capture each wake channel BEFORE the pass it triggers, so a Notify
 		// landing mid-pass closes the held channel and re-fires the loop
 		// instead of being lost.

@@ -167,11 +167,31 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, root string, cfg VaultConfig)
 	return nil
 }
 
-// UnregisterVault removes a vault from pull serving.
-func (m *Manager) UnregisterVault(vaultID glid.GLID) {
+// UnregisterVault removes a vault from pull serving and publishing, and
+// returns a wait that blocks until the vault's in-flight publishes — which
+// promote segments into head/ — have returned.
+func (m *Manager) UnregisterVault(vaultID glid.GLID) (wait func()) {
 	m.mu.Lock()
+	v := m.vaults[vaultID]
 	delete(m.vaults, vaultID)
 	m.mu.Unlock()
+	if v == nil {
+		return func() {}
+	}
+	return v.publishing.Wait
+}
+
+// acquire returns a registered vault with a publish hold UnregisterVault's
+// wait covers; the caller releases it with v.publishing.Done. The hold is
+// taken under m.mu, so none is taken after the vault is unregistered.
+func (m *Manager) acquire(vaultID glid.GLID) (*vaultDist, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.vaults[vaultID]
+	if ok {
+		v.publishing.Add(1)
+	}
+	return v, ok
 }
 
 // RetireSegments marks segments released from the vault-ctl registry so rescan
@@ -587,12 +607,11 @@ func (m *Manager) vaultsSnapshot() map[glid.GLID]*vaultDist {
 // publishVaultBatch commits one coalesced batch for a vault and promotes local
 // holders after vault-ctl accepts the registry entries.
 func (m *Manager) publishVaultBatch(ctx context.Context, vaultID glid.GLID, items []pendingPublish) error {
-	m.mu.Lock()
-	v, ok := m.vaults[vaultID]
-	m.mu.Unlock()
+	v, ok := m.acquire(vaultID)
 	if !ok {
 		return ErrUnknownVault
 	}
+	defer v.publishing.Done()
 	return v.publishStagedBatch(ctx, items)
 }
 
@@ -619,11 +638,10 @@ func (m *Manager) ServePull(req PullRequest) error {
 
 // PublishCompleted handles one completed segment synchronously (for tests).
 func (m *Manager) PublishCompleted(ctx context.Context, seg segmentation.CompletedSegment) error {
-	m.mu.Lock()
-	v, ok := m.vaults[seg.VaultID]
-	m.mu.Unlock()
+	v, ok := m.acquire(seg.VaultID)
 	if !ok {
 		return ErrUnknownVault
 	}
+	defer v.publishing.Done()
 	return v.publish(ctx, seg)
 }
