@@ -43,9 +43,9 @@ archive vault want exactly this.
   vault differs only in holding them in RAM once sealed), so transfer
   works between any two of them (`VaultConfig.TransferEligible`). A
   cloud-backed vault keeps sealed chunks in object storage with its own
-  upload and cache lifecycle, and a JSONL sink holds no chunks. `PutVault`
-  validation rejects any other pairing as an explicit config error, not a
-  runtime surprise, and the validation message names the constraint.
+  upload and cache lifecycle. `PutVault` validation rejects it on either
+  end as an explicit config error, not a runtime surprise, and the
+  validation message names the constraint.
 - **#5 Destination state: defer, never drop.** Target missing, disabled,
   type-invalid at sweep time (config drifted after validation), or its
   pull/receipt cycle not completing: the chunk is RETAINED and the sweep

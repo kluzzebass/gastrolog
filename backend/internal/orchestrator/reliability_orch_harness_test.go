@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	chunkjsonl "gastrolog/internal/chunk/jsonl"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -157,8 +156,6 @@ type vaultSpec struct {
 	storageClass uint32
 	// memoryBudget, when set, makes this a memory vault with that budget.
 	memoryBudget string
-	// jsonlPath, when set, makes this a JSONL vault writing to that path.
-	jsonlPath string
 }
 
 // class is the vault's storage class.
@@ -203,20 +200,6 @@ func withMemoryVault(nodeIdxs []int, budget string) orchRelOption {
 			id:           glid.New(),
 			nodeIdxs:     nodeIdxs,
 			memoryBudget: budget,
-		})
-	}
-}
-
-// withJSONLVault registers a JSONL vault writing to path, placed on the node
-// at nodeIdx. Labeled like withExtraVault.
-func withJSONLVault(nodeIdx int, path string) orchRelOption {
-	return func(h *orchRelHarness) {
-		label := string(rune('B' + len(h.vaults) - 1))
-		h.vaults = append(h.vaults, vaultSpec{
-			label:     label,
-			id:        glid.New(),
-			nodeIdxs:  []int{nodeIdx},
-			jsonlPath: path,
 		})
 	}
 }
@@ -752,10 +735,6 @@ func (h *orchRelHarness) seedSharedConfig() {
 			vc.Type = system.VaultTypeMemory
 			vc.MemoryBudget = v.memoryBudget
 		}
-		if v.jsonlPath != "" {
-			vc.Type = system.VaultTypeJSONL
-			vc.Path = v.jsonlPath
-		}
 		if err := h.cfgStore.PutVault(ctx, vc); err != nil {
 			h.t.Fatalf("PutVault %s: %v", v.label, err)
 		}
@@ -866,7 +845,6 @@ func (h *orchRelHarness) startNode(id string) {
 		NodeAddressResolver: resolver,
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			vaultTypeKey: h.chunkManagerFactory(),
-			"jsonl":      chunkjsonl.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
 			vaultTypeKey: indexfile.NewFactory(),

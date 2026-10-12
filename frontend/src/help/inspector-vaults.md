@@ -73,7 +73,7 @@ The Validate button checks data integrity for a vault — verifying that chunk f
 
 ## Topology
 
-The **Topology** block on a vault card shows where the vault's copies live, read from the vault's placements in the cluster configuration. A jsonl vault also shows its path.
+The **Topology** block on a vault card shows where the vault's copies live, read from the vault's placements in the cluster configuration.
 
 | Field | Meaning |
 |-------|---------|

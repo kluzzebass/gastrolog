@@ -341,33 +341,24 @@ func TestResolveTransferTargetDefersWhenTargetDisabled(t *testing.T) {
 	}
 }
 
-// A target whose chunks transfer cannot move in — a JSONL sink, or a
-// cloud-backed vault — defers the transfer (config drifted after PutVault
+// A cloud-backed target defers the transfer (config drifted after PutVault
 // validation) rather than sending chunks it cannot hold.
 func TestResolveTransferTargetDefersWhenTargetIneligible(t *testing.T) {
 	t.Parallel()
 	csID := glid.New()
-	for name, target := range map[string]system.VaultConfig{
-		"jsonl sink":   {Name: "sink-target", Type: system.VaultTypeJSONL, Enabled: true},
-		"cloud-backed": {Name: "cloud-target", Type: system.VaultTypeFile, CloudServiceID: &csID, Enabled: true},
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			target.ID = glid.New()
-			orch := newResolveTargetOrch(t, target)
-			r := &retentionRunner{orch: orch}
+	target := system.VaultConfig{ID: glid.New(), Name: "cloud-target", Type: system.VaultTypeFile, CloudServiceID: &csID, Enabled: true}
+	orch := newResolveTargetOrch(t, target)
+	r := &retentionRunner{orch: orch}
 
-			cfg, category, cause := r.resolveTransferTarget(target.ID)
-			if cfg != nil {
-				t.Fatal("want nil config for an ineligible target")
-			}
-			if category != deferCatTargetIneligible {
-				t.Errorf("category = %q, want %q", category, deferCatTargetIneligible)
-			}
-			if !strings.Contains(cause, "can no longer receive transferred chunks") {
-				t.Errorf("cause must say the target cannot receive transferred chunks; got: %s", cause)
-			}
-		})
+	cfg, category, cause := r.resolveTransferTarget(target.ID)
+	if cfg != nil {
+		t.Fatal("want nil config for an ineligible target")
+	}
+	if category != deferCatTargetIneligible {
+		t.Errorf("category = %q, want %q", category, deferCatTargetIneligible)
+	}
+	if !strings.Contains(cause, "can no longer receive transferred chunks") {
+		t.Errorf("cause must say the target cannot receive transferred chunks; got: %s", cause)
 	}
 }
 

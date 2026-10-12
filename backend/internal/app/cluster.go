@@ -1089,7 +1089,7 @@ func vaultBelowRFAfterRemoval(
 		if surviving[nid] {
 			continue // already holds a placement — not a new member
 		}
-		if nodeEligibleForVault(v, nid, nscs, placements) {
+		if nodeEligibleForVault(v, nid, nscs) {
 			eligible++
 		}
 	}

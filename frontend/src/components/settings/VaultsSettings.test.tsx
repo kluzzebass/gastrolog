@@ -465,8 +465,8 @@ describe("vault edit save", () => {
 // ── Transfer eligibility ─────────────────────────────────────────────
 //
 // Each reason the picker shows corresponds to a PutVault rejection:
-// self-transfer, a JSONL target, a cloud-backed target, a target whose
-// transfer chain cycles, and a JSONL or cloud-backed source.
+// self-transfer, a cloud-backed target, a target whose transfer chain
+// cycles, and a cloud-backed source.
 
 function fileVault(n: number, name: string, extra: Partial<VaultConfig> = {}): VaultConfig {
   return new VaultConfig({
@@ -499,14 +499,12 @@ describe("transferTargetOptions", () => {
       fileVault(2, "plain"),
       fileVault(3, "cloudy", { cloudServiceId: testId(60) }),
       new VaultConfig({ id: testId(4), name: "ram", type: VaultType.MEMORY }),
-      new VaultConfig({ id: testId(5), name: "sink", type: VaultType.JSONL }),
     ];
     expect(reasonsByLabel(transferTargetOptions(vaults, encode(testId(1))))).toEqual({
       source: "this vault",
       plain: undefined,
       cloudy: "cloud-backed",
       ram: undefined,
-      sink: "JSONL sink",
     });
   });
 
@@ -803,7 +801,6 @@ describe("transferSourceIneligibility", () => {
     expect(transferSourceIneligibility({ type: "file", cloudServiceId: "" })).toBeUndefined();
     expect(transferSourceIneligibility({ type: "file", cloudServiceId: "x" })).toBe("this vault is cloud-backed");
     expect(transferSourceIneligibility({ type: "memory", cloudServiceId: "" })).toBeUndefined();
-    expect(transferSourceIneligibility({ type: "jsonl", cloudServiceId: "" })).toBe("this is a JSONL sink");
   });
 });
 

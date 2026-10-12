@@ -400,9 +400,6 @@ type Orchestrator struct {
 	// (see scheduleAfterVaultCtlRestore). Keyed by vault ID.
 	ctlRestorePending sync.Map
 
-	// jsonlSinks holds each JSONL vault's sink run state (*jsonlSinkRun).
-	jsonlSinks sync.Map
-
 	// pendingPipelineCtlRestore holds vault IDs whose vault-ctl FSM restored
 	// before pipeline chunking registered on this home. finishPendingPipelineCtlRestore
 	// runs rewire+recover when RegisterVault completes (startup ordering).

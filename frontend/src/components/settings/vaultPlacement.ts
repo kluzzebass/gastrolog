@@ -2,7 +2,7 @@
 // replication factor can go and why, and how a vault's placements compare
 // to it. Every number here is read straight off the cluster config.
 
-export type VaultShape = { type: "memory" | "file" | "jsonl"; storageClass: string };
+export type VaultShape = { type: "memory" | "file"; storageClass: string };
 
 /** The replication factor cap and the fact it derives from. */
 export interface RFCap {
@@ -33,9 +33,6 @@ export function classStorageCounts(
 export function rfCap(shape: VaultShape, counts: ReadonlyMap<number, number>, totalNodes: number): RFCap {
   if (shape.type === "memory") {
     return { max: Math.max(1, totalNodes), eligible: totalNodes, cause: `${plural(totalNodes, "node")} in the cluster` };
-  }
-  if (shape.type === "jsonl") {
-    return { max: 1, eligible: 1, cause: "a JSONL sink writes on one node" };
   }
   const sc = parseInt(shape.storageClass, 10) || 0;
   if (sc === 0) {
@@ -82,7 +79,7 @@ function placementAction(shape: VaultShape, cap: RFCap, rf: number): string {
   if (cap.eligible >= rf) return "placement pending";
   const missing = rf - cap.eligible;
   if (shape.type === "memory") return `add ${plural(missing, "node")}`;
-  if (shape.type === "file" && cap.eligible === 0 && (parseInt(shape.storageClass, 10) || 0) === 0) {
+  if (cap.eligible === 0 && (parseInt(shape.storageClass, 10) || 0) === 0) {
     return "select a storage class";
   }
   return `add ${plural(missing, "file storage")} with class ${shape.storageClass}`;

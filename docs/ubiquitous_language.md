@@ -45,7 +45,7 @@ for append-heavy write patterns and time-ordered reads.
 
 - **Vault** — a named, versioned container for log records. The unit of independent
   storage and the only abstraction over the chunk layer. A vault carries its full
-  storage shape directly: a **type** (memory, file, jsonl), a **storage class**, an
+  storage shape directly: a **type** (memory or file), a **storage class**, an
   optional **cloud service** binding, a **rotation policy**, **retention rules**, a
   **replication factor**, and cache tuning. Operators create and delete vaults; the
   system manages placements. Declarative config in
@@ -113,11 +113,6 @@ for append-heavy write patterns and time-ordered reads.
   sealed chunks with the vault's disposition (reason `memory-budget`). Its
   intake and GLCBs are durable on disk like a file vault's; it is served by
   the file chunk manager with a memory budget set.
-- **JSONL sink** — a JSONL vault: a write-only pipeline vault whose home
-  appends each sealed chunk's records to the vault's `.jsonl` file once. The
-  **sink ledger** (`<path>.chunks`) lists the chunks written, each only after
-  its lines are synced; a restart writes every sealed chunk the ledger does
-  not list. Never searched.
 - **Archived** — in an offline cloud storage class (e.g. Glacier). Unreadable
   until `Restore` completes. Tracked via `Archived = true`.
 - **Retention-pending** — marked in the vault FSM for deletion on the next sweep.

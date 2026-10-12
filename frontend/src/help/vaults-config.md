@@ -4,7 +4,7 @@ The Vaults settings tab is where you create and manage vaults and their storage 
 
 ## Creating a Vault
 
-A vault needs a **Name** and a single **storage shape** — memory, file, or JSONL sink. Configure the shape inline when you click "Add Vault".
+A vault needs a **Name** and a single **storage shape** — memory or file. Configure the shape inline when you click "Add Vault".
 
 The **Enabled** checkbox controls whether the vault starts accepting records immediately. Uncheck it to create the vault in a disabled state — useful when you want to finish configuring storage before routes start directing traffic into it. Toggle it on later from the vault card.
 
@@ -16,7 +16,6 @@ Each vault has a **type** that determines how it stores data:
 |------|-------------|
 | Memory | Sealed chunks served from RAM, bounded by the vault's memory budget. Records are durable from the moment they are accepted and survive restarts. |
 | File | Local disk. Optionally cloud-backed by selecting a Cloud Storage. |
-| JSONL | Append-only JSON lines file. Write-only — cannot be searched or queried. Useful for exporting raw records to external tools. Each record is written once, when its chunk seals. |
 
 A **File** vault is local-only by default. Selecting a Cloud Storage on it makes the vault *cloud-backed* — sealed chunks upload to S3/GCS/Azure while the active chunk and a warm cache stay on local disk. There is no separate "Cloud" type; the binding is what makes the difference.
 
@@ -35,11 +34,10 @@ Transfer moves a sealed chunk's on-disk form between two vaults' chunk directori
 | Reason shown | Rule |
 |--------------|------|
 | this vault | The target must be a different vault. A chunk transferred to its own vault would immediately qualify for the same retention rule again. |
-| JSONL sink | A JSONL sink writes records to a file and holds no chunks to transfer into. |
 | cloud-backed | The target must not be cloud-backed. A cloud-backed vault keeps sealed chunks in object storage, with its own upload and cache lifecycle. |
 | would create a transfer cycle | Following the target's own transfer target, and that vault's, must never lead back to this vault (or loop anywhere else) — a cycle would move the same chunks around forever. |
 
-The source has the same requirement: **Transfer records to another vault unchanged** is available on a file or memory vault that is not cloud-backed. On a JSONL sink or a cloud-backed vault the option is listed disabled, with the reason.
+The source has the same requirement: **Transfer records to another vault unchanged** is available on a file or memory vault that is not cloud-backed. On a cloud-backed vault the option is listed disabled, with the reason.
 
 When no vault qualifies, the Transfer Target picker says so. Create a file or memory vault that is not cloud-backed to transfer into, or use **Send records to routing engine** with a retention-trigger route instead — that is the pattern for archiving into a cloud-backed vault (see [Retention Policies](help:policy-retention)).
 
@@ -59,10 +57,6 @@ The cache fields are always shown and apply to cloud-backed vaults only — on a
 ### Memory Vault Settings
 
 - **Budget** — the most RAM this vault's sealed chunks may take on each node. Leave empty for the system default. Over budget, retention retires the oldest sealed chunks with the vault's retention disposition, like any other retention trigger.
-
-### JSONL Vault Settings
-
-- **Path** — file path, relative to the node's home directory. A ledger of the chunks written sits beside it (`<path>.chunks`); a restart writes any sealed chunk the ledger does not list, so a crash can repeat one chunk's lines but never lose them.
 
 ## Editing a Vault
 
@@ -90,10 +84,7 @@ Each action on an expanded vault card runs against the live vault; the line besi
 
 **Delete** on a vault card removes the vault and every placement it has, on every node; the confirm step lists what goes. A vault that is a [route](help:routing) destination cannot be deleted — the Delete button stays disabled and names the route; remove the vault from the route's destinations first.
 
-What happens to the data depends on the storage type:
-
-- **File** and **Memory** — the chunk files stay on disk, unreachable, unless **Delete data files** is ticked, which erases the vault directory on every placement node.
-- **JSONL** — the sink file stays on disk.
+The vault's chunk files stay on disk, unreachable, unless **Delete data files** is ticked, which erases the vault directory on every placement node.
 
 ## Rotation and Retention Policies
 

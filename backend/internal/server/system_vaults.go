@@ -260,6 +260,10 @@ func (s *SystemServer) PutVault(
 	if err != nil {
 		return nil, errInvalidArg(err)
 	}
+	if !vaultCfg.Type.Valid() {
+		return nil, errInvalidArg(fmt.Errorf("vault %q: type must be memory or file (got %s)",
+			vaultCfg.Name, req.Msg.Config.GetType()))
+	}
 
 	// Reject duplicate names.
 	if connErr := checkNameConflict(ctx, s.sysStore, "vault", vaultCfg.ID, vaultCfg.Name, s.sysStore.ListVaults,

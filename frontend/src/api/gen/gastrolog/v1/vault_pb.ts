@@ -727,7 +727,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
   vaultId = new Uint8Array(0);
 
   /**
-   * vault type: "memory", "file", "jsonl"
+   * vault type: "memory" or "file"
    *
    * @generated from field: string vault_type = 13;
    */

@@ -42,7 +42,7 @@ export class Vault {
     return this.name;
   }
 
-  /** Runtime type string ("memory", "file", "cloud", "jsonl") from VaultInfo. */
+  /** Runtime type string ("memory", "file", "cloud") from VaultInfo. */
   get typeLabel(): string {
     return this.info?.type ?? "";
   }

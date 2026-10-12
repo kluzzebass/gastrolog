@@ -3,8 +3,8 @@ package server_test
 // Coverage for the retention transfer disposition validation matrix:
 // disposition "transfer" requires a target vault ID, the target must not
 // be the source (self-transfer is the cascade footgun), and both source
-// and target must be file vaults — cloud and memory vaults have
-// different at-rest forms and lifecycle machinery.
+// and target must be file or memory vaults that are not cloud-backed — a
+// cloud-backed vault keeps its sealed chunks in object storage.
 // See docs/retention-transfer-disposition-design.md.
 
 import (
@@ -90,9 +90,8 @@ func TestPutVaultTransferRequiresTargetExists(t *testing.T) {
 	}
 }
 
-// Transfer pairs any vaults whose sealed chunks are pipeline GLCBs in a
-// local chunk root — file and memory vaults alike — and refuses a JSONL sink
-// on either end.
+// Transfer pairs file and memory vaults in every direction: both keep sealed
+// chunks as pipeline GLCBs in a local chunk root.
 func TestPutVaultTransferPairsFileAndMemoryVaults(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
 	memVault := func(name string) *gastrologv1.VaultConfig {
@@ -112,10 +111,8 @@ func TestPutVaultTransferPairsFileAndMemoryVaults(t *testing.T) {
 
 	memTarget := memVault("transfer-mem-target")
 	fileTarget := fileVaultConfig(glid.New(), "transfer-file-target")
-	sink := &gastrologv1.VaultConfig{Id: glid.New().Bytes(), Name: "transfer-sink", Enabled: true, Type: gastrologv1.VaultType_VAULT_TYPE_JSONL, Path: "jsonl/transfer-sink.jsonl"}
 	put(memTarget)
 	put(fileTarget)
-	put(sink)
 
 	for name, pair := range map[string][2]*gastrologv1.VaultConfig{
 		"file to memory":   {fileVaultConfig(glid.New(), "file-src-1"), memTarget},
@@ -124,14 +121,6 @@ func TestPutVaultTransferPairsFileAndMemoryVaults(t *testing.T) {
 	} {
 		if err := transferTo(pair[0], pair[1]); err != nil {
 			t.Errorf("%s: want accepted, got %v", name, err)
-		}
-	}
-	for name, pair := range map[string][2]*gastrologv1.VaultConfig{
-		"file to JSONL sink": {fileVaultConfig(glid.New(), "file-src-2"), sink},
-		"JSONL sink to file": {{Id: glid.New().Bytes(), Name: "sink-src", Enabled: true, Type: gastrologv1.VaultType_VAULT_TYPE_JSONL, Path: "jsonl/sink-src.jsonl"}, fileTarget},
-	} {
-		if err := transferTo(pair[0], pair[1]); err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
-			t.Errorf("%s: want InvalidArgument, got %v", name, err)
 		}
 	}
 }

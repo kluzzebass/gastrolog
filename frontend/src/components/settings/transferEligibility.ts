@@ -19,10 +19,6 @@ function chunkHolding(t: VaultType): boolean {
   return t === VaultType.FILE || t === VaultType.MEMORY;
 }
 
-function nonChunkTypeReason(t: VaultType): string {
-  return t === VaultType.JSONL ? "JSONL sink" : "not a file or memory vault";
-}
-
 // Mirrors PutVault's transfer-graph walk: following transfer edges from the
 // candidate target must never revisit a vault, the source included.
 function closesTransferCycle(
@@ -44,8 +40,8 @@ function closesTransferCycle(
 /**
  * Every vault as a candidate transfer target, eligible ones first. Each
  * ineligible vault carries the reason PutVault would reject it: the source
- * itself, a JSONL sink, a cloud-backed vault, or a target whose transfer
- * chain cycles.
+ * itself, a vault of no buildable type, a cloud-backed vault, or a target
+ * whose transfer chain cycles.
  */
 export function transferTargetOptions(
   vaults: TransferCandidate[],
@@ -56,7 +52,7 @@ export function transferTargetOptions(
     const value = encode(v.id);
     let ineligibleReason: string | undefined;
     if (value === sourceId) ineligibleReason = "this vault";
-    else if (!chunkHolding(v.type)) ineligibleReason = nonChunkTypeReason(v.type);
+    else if (!chunkHolding(v.type)) ineligibleReason = "not a file or memory vault";
     else if (v.cloudServiceId.length > 0) ineligibleReason = "cloud-backed";
     else if (closesTransferCycle(value, sourceId, byId)) ineligibleReason = "would create a transfer cycle";
     return { value, label: v.name || value, ineligibleReason };
@@ -70,6 +66,5 @@ export function transferTargetOptions(
  * accepts transfer from a file or memory vault that is not cloud-backed.
  */
 export function transferSourceIneligibility(s: { type: VaultTypeLabel; cloudServiceId: string }): string | undefined {
-  if (s.type === "jsonl") return "this is a JSONL sink";
   return s.cloudServiceId === "" ? undefined : "this vault is cloud-backed";
 }

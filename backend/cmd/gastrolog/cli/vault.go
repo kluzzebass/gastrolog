@@ -104,9 +104,6 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 	if len(v.CloudServiceId) > 0 {
 		pairs = append(pairs, [2]string{"Cloud Service ID", glid.FromBytes(v.CloudServiceId).String()})
 	}
-	if v.Path != "" {
-		pairs = append(pairs, [2]string{"Path", v.Path})
-	}
 	// Quantities are stored as the operator's own expression, so display is an
 	// exact echo — no formatter, no drift.
 	addExpr := func(label, expr string) {
@@ -147,7 +144,7 @@ func newVaultCreateCmd() *cobra.Command {
 		Long: `Create or update a vault with its storage shape and lifecycle policies.
 
 A vault is the unit of independent storage. Each vault has a single storage
-shape (memory, file, file+cloud, JSONL) defined by --type, --storage-class
+shape (memory, file, file+cloud) defined by --type, --storage-class
 (file backings) and optionally --cloud-service (cloud-backed).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _ := cmd.Flags().GetString("name")
@@ -197,7 +194,7 @@ shape (memory, file, file+cloud, JSONL) defined by --type, --storage-class
 	}
 	cmd.Flags().String("name", "", "vault name (required)")
 	cmd.Flags().Bool("enabled", true, "enable the vault")
-	cmd.Flags().String("type", "file", "vault storage type: memory, file, jsonl")
+	cmd.Flags().String("type", "file", "vault storage type: memory or file")
 	cmd.Flags().Uint32("replication-factor", 1, "replication factor")
 	cmd.Flags().Uint32("storage-class", 1, "storage class for file vaults")
 	cmd.Flags().String("cloud-service", "", "cloud service name or ID — sets cloud_service_id, making the vault cloud-backed")
@@ -208,7 +205,6 @@ shape (memory, file, file+cloud, JSONL) defined by --type, --storage-class
 	cmd.Flags().String("cache-ttl", "", "cache TTL duration for ttl eviction mode (e.g. 1h, 7d)")
 	cmd.Flags().String("retention-disposition", "delete", "what retention does with aged-out records: delete (drop), route (send through routing engine), or transfer (re-home the sealed chunk unchanged to --retention-transfer-target)")
 	cmd.Flags().String("retention-transfer-target", "", "vault name or ID records transfer to when --retention-disposition=transfer; must be a different file or memory vault that is not cloud-backed")
-	cmd.Flags().String("path", "", "direct path for JSONL sinks")
 	cmd.Flags().String("memory-budget", "", "in-memory storage cap for memory vaults (e.g. 1GB, 512MiB). Unset defaults to a bounded budget; 0 is rejected")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
@@ -223,7 +219,7 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 		t, _ := cmd.Flags().GetString("type")
 		vt, ok := parseVaultType(t)
 		if !ok {
-			return fmt.Errorf("invalid vault type %q (valid: memory, file, jsonl)", t)
+			return fmt.Errorf("invalid vault type %q (valid: memory, file)", t)
 		}
 		cfg.Type = vt
 	}
@@ -252,9 +248,6 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 		if err := resolveVaultRetentionTransferTarget(ctx, cmd, client, cfg); err != nil {
 			return err
 		}
-	}
-	if cmd.Flags().Changed("path") {
-		cfg.Path, _ = cmd.Flags().GetString("path")
 	}
 	if err := applyVaultSizeFlags(cmd, cfg); err != nil {
 		return err
@@ -387,8 +380,6 @@ func parseVaultType(s string) (v1.VaultType, bool) {
 		return v1.VaultType_VAULT_TYPE_MEMORY, true
 	case "file":
 		return v1.VaultType_VAULT_TYPE_FILE, true
-	case "jsonl":
-		return v1.VaultType_VAULT_TYPE_JSONL, true
 	}
 	return v1.VaultType_VAULT_TYPE_UNSPECIFIED, false
 }
@@ -400,8 +391,6 @@ func vaultTypeName(t v1.VaultType) string {
 		return "memory"
 	case v1.VaultType_VAULT_TYPE_FILE:
 		return "file"
-	case v1.VaultType_VAULT_TYPE_JSONL:
-		return "jsonl"
 	case v1.VaultType_VAULT_TYPE_UNSPECIFIED:
 		return "unspecified"
 	}

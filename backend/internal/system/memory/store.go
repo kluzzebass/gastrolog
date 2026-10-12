@@ -1056,7 +1056,6 @@ func copyVaultConfig(st system.VaultConfig) system.VaultConfig {
 		MemoryBudget:         st.MemoryBudget,
 		StorageClass:         st.StorageClass,
 		ReplicationFactor:    st.ReplicationFactor,
-		Path:                 st.Path,
 		CacheEviction:        st.CacheEviction,
 		CacheBudget:          st.CacheBudget,
 		CacheTTL:             st.CacheTTL,

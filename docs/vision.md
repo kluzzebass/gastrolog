@@ -124,9 +124,9 @@ Storage should be a budget, not a cliff. The cluster expresses layered storage a
 
 ### The vault as the storage unit
 
-A vault is the **only abstraction over the chunk layer**. It carries its full storage shape directly: a **type** (memory, file, jsonl), a **storage class**, an optional **cloud service** binding, a **rotation policy**, **retention rules**, a **replication factor**, and cache tuning for cloud-backed reads. The simpler the unit, the simpler the failure modes.
+A vault is the **only abstraction over the chunk layer**. It carries its full storage shape directly: a **type** (memory or file), a **storage class**, an optional **cloud service** binding, a **rotation policy**, **retention rules**, a **replication factor**, and cache tuning for cloud-backed reads. The simpler the unit, the simpler the failure modes.
 
-A cloud-backed vault is a file vault with a `CloudServiceID` set: sealed chunks upload to the cloud service, while not-yet-sealed records (segments) and a warm cache stay on local disk. This is the only "fancy" storage shape — every other vault is straightforwardly a memory, file, or JSONL container.
+A cloud-backed vault is a file vault with a `CloudServiceID` set: sealed chunks upload to the cloud service, while not-yet-sealed records (segments) and a warm cache stay on local disk. This is the only "fancy" storage shape — every other vault is straightforwardly a memory or file container.
 
 ### Storage building blocks
 
@@ -497,7 +497,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | Cloud-backed chunk manager | Done | S3/GCS/Azure for sealed chunks and indexes |
 | FileStorage model | Done | Per-node local storage declarations with storage classes |
 | CloudService model | Done | Cluster-wide cloud service definitions with archival lifecycle |
-| Vault types | Done | Memory, file (optionally cloud-backed), JSONL — all pipeline vaults: a memory vault serves sealed chunks from RAM within its budget, a JSONL vault writes each sealed chunk to its sink file |
+| Vault types | Done | Memory and file (optionally cloud-backed) — both pipeline vaults: a memory vault serves sealed chunks from RAM within its budget |
 | Vault as the storage unit | Done | One storage shape per vault; layering expressed via routes between vaults |
 | Per-vault leader election | Done | Vault-ctl Raft group per vault with leader/follower election |
 | Replication | Done | Segment distribution to every home with holder receipts; every home builds its own GLCB; homes missing a GLCB pull it from a peer home |

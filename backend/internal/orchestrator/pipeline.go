@@ -277,7 +277,7 @@ func (o *Orchestrator) onPipelineChunkBuilt(vaultID glid.GLID, fsm *vaultctlfsm.
 	if ti == nil {
 		// Boot ordering: OnBuilt can fire from chunking recovery before the
 		// vault instance exists. The instance's arrival sweeps this home's
-		// GLCBs (scheduleHomeArrivalWork) and the catch-up sweep re-earns the
+		// GLCBs (scheduleHomeIndexSweep) and the catch-up sweep re-earns the
 		// holder receipt, but the skip must be visible — a node once held 297
 		// complete GLCBs its chunk manager knew nothing about, and
 		// retention/backfill/queries all starved with zero log lines.
@@ -292,8 +292,7 @@ func (o *Orchestrator) onPipelineChunkBuilt(vaultID glid.GLID, fsm *vaultctlfsm.
 
 // onGLCBLanded runs what this home owes a chunk whose GLCB is now in its chunk
 // root: secondary indexes for its copy — any home can become the vault leader
-// that serves searches — its records in a JSONL vault's sink, and its holder
-// receipt. Every path that puts a GLCB
+// that serves searches — and its holder receipt. Every path that puts a GLCB
 // on a home calls it: a local build, a replica catch-up pull, a
 // retention-transfer copy, and the seal apply for a copy the home already
 // holds. Both are owed only for the copy the cluster agreed on at seal; a copy
@@ -317,7 +316,6 @@ func (o *Orchestrator) onGLCBLanded(vaultID glid.GLID, ti *VaultInstance, e vaul
 	if ti.Indexes != nil {
 		o.scheduleIndexRebuildIfNeeded(context.Background(), vaultID, ti, manifestEntryToChunkMeta(e, true))
 	}
-	o.triggerJSONLSink(vaultID, ti)
 	if ti.Reconciler != nil {
 		ti.Reconciler.ackOwnHolderReceipt(e)
 	}
@@ -374,15 +372,13 @@ func (o *Orchestrator) homeHoldsGLCB(vaultID glid.GLID, id chunk.ChunkID) bool {
 	return err == nil
 }
 
-// scheduleHomeArrivalWork runs what a pipeline home owes the GLCBs it already
-// holds once both things that make it owed exist: the vault instance and the
-// vault's home registration with a vault-ctl handle. It sweeps them for
-// missing secondary indexes and writes a JSONL vault's sink. The arrival of
+// scheduleHomeIndexSweep sweeps a pipeline home's GLCBs for missing secondary
+// indexes once both things that make them indexable exist: the vault instance
+// and the vault's home registration with a vault-ctl handle. The arrival of
 // each calls it, and it acts only when the other is already there. A GLCB that
 // landed while either was missing — a build that finished before the instance
-// existed, or a restart — has no event of its own left.
-func (o *Orchestrator) scheduleHomeArrivalWork(vaultID glid.GLID, ti *VaultInstance) {
-	o.triggerJSONLSink(vaultID, ti)
+// existed — has no event of its own left to index it.
+func (o *Orchestrator) scheduleHomeIndexSweep(vaultID glid.GLID, ti *VaultInstance) {
 	if ti == nil || ti.Indexes == nil {
 		return
 	}
@@ -848,7 +844,7 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 		o.reconcileChunkCron(vid, chunkEnabled, cronExpr)
 		o.finishPendingPipelineCtlRestore(vid)
 		if v := o.vaults[vid]; chunkEnabled && v != nil {
-			o.scheduleHomeArrivalWork(vid, v.Instance)
+			o.scheduleHomeIndexSweep(vid, v.Instance)
 		}
 	}
 

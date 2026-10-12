@@ -32,18 +32,12 @@ export enum VaultType {
    * @generated from enum value: VAULT_TYPE_FILE = 2;
    */
   FILE = 2,
-
-  /**
-   * @generated from enum value: VAULT_TYPE_JSONL = 3;
-   */
-  JSONL = 3,
 }
 // Retrieve enum metadata with: proto3.getEnumType(VaultType)
 proto3.util.setEnumType(VaultType, "gastrolog.v1.VaultType", [
   { no: 0, name: "VAULT_TYPE_UNSPECIFIED" },
   { no: 1, name: "VAULT_TYPE_MEMORY" },
   { no: 2, name: "VAULT_TYPE_FILE" },
-  { no: 3, name: "VAULT_TYPE_JSONL" },
 ]);
 
 /**
@@ -548,13 +542,6 @@ export class VaultConfig extends Message<VaultConfig> {
   replicationFactor = 0;
 
   /**
-   * direct path for JSONL sinks
-   *
-   * @generated from field: string path = 11;
-   */
-  path = "";
-
-  /**
    * OUTPUT ONLY. File storage assignments owned by the placement manager,
    * attached from Runtime.VaultPlacements when a vault is read. The domain
    * VaultConfig no longer carries them at all, so a write cannot express them:
@@ -562,14 +549,14 @@ export class VaultConfig extends Message<VaultConfig> {
    * (gastrolog-kl8c3s closed a second writer to the mirror; gastrolog-617qns
    * removed the mirror).
    *
-   * @generated from field: repeated gastrolog.v1.VaultPlacement placements = 12;
+   * @generated from field: repeated gastrolog.v1.VaultPlacement placements = 11;
    */
   placements: VaultPlacement[] = [];
 
   /**
    * "lru" (default) or "ttl"
    *
-   * @generated from field: string cache_eviction = 13;
+   * @generated from field: string cache_eviction = 12;
    */
   cacheEviction = "";
 
@@ -578,7 +565,7 @@ export class VaultConfig extends Message<VaultConfig> {
    * ("1GiB"). Empty = unset (defaulted at creation for cloud vaults); "0"
    * rejected.
    *
-   * @generated from field: string cache_budget = 14;
+   * @generated from field: string cache_budget = 13;
    */
   cacheBudget = "";
 
@@ -586,14 +573,14 @@ export class VaultConfig extends Message<VaultConfig> {
    * Warm-cache eviction age (ttl mode only), as a duration expression ("1h",
    * "7d"). Empty = unset.
    *
-   * @generated from field: string cache_ttl = 15;
+   * @generated from field: string cache_ttl = 14;
    */
   cacheTtl = "";
 
   /**
    * "delete", "route", or "transfer" — what retention does with aged-out records
    *
-   * @generated from field: string retention_disposition = 16;
+   * @generated from field: string retention_disposition = 15;
    */
   retentionDisposition = "";
 
@@ -606,7 +593,7 @@ export class VaultConfig extends Message<VaultConfig> {
    * FileStorage (gastrolog-9akebz) — no `reserved` (house rule): zero
    * production deployments.
    *
-   * @generated from field: bytes retention_transfer_target_vault_id = 17;
+   * @generated from field: bytes retention_transfer_target_vault_id = 16;
    */
   retentionTransferTargetVaultId = new Uint8Array(0);
 
@@ -628,13 +615,12 @@ export class VaultConfig extends Message<VaultConfig> {
     { no: 8, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 9, name: "cloud_service_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 10, name: "replication_factor", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 11, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 12, name: "placements", kind: "message", T: VaultPlacement, repeated: true },
-    { no: 13, name: "cache_eviction", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 14, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 15, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 16, name: "retention_disposition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 17, name: "retention_transfer_target_vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 11, name: "placements", kind: "message", T: VaultPlacement, repeated: true },
+    { no: 12, name: "cache_eviction", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 13, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 14, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 15, name: "retention_disposition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 16, name: "retention_transfer_target_vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultConfig {

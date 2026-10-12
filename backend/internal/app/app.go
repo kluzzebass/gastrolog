@@ -30,7 +30,6 @@ import (
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
-	chunkjsonl "gastrolog/internal/chunk/jsonl"
 	"gastrolog/internal/cluster"
 	digestlevel "gastrolog/internal/digester/level"
 	digesttimestamp "gastrolog/internal/digester/timestamp"
@@ -1800,8 +1799,7 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore sys
 	return orchestrator.Factories{
 		IngesterTypes: ingesterTypes,
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"file":  chunkfile.NewFactory(),
-			"jsonl": chunkjsonl.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
 			"file": indexfile.NewFactory(),

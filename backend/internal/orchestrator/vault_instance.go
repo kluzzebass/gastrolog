@@ -22,7 +22,7 @@ import (
 // directory.
 type VaultInstance struct {
 	VaultID         glid.GLID // identity of the owning vault
-	StorageID       string    // the file storage ID this instance uses (empty for memory/JSONL vaults)
+	StorageID       string    // the file storage ID this instance uses (empty for memory vaults)
 	Type            string
 	Chunks          chunk.ChunkManager
 	Indexes         index.IndexManager

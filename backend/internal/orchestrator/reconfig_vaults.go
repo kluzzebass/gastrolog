@@ -87,7 +87,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 	vault.StorageType = string(vaultCfg.Type)
 	o.vaults[vaultCfg.ID] = vault
 	o.bindVaultInstanceToCtlLocked(vaultCfg.ID, instance)
-	o.scheduleHomeArrivalWork(vaultCfg.ID, instance)
+	o.scheduleHomeIndexSweep(vaultCfg.ID, instance)
 
 	// Recompile the routing table immediately so the vault can receive
 	// records right away. The rotation sweep also reconciles every 15s
@@ -281,8 +281,7 @@ func (o *Orchestrator) removeVaultJobs(_ glid.GLID, vault *Vault) {
 }
 
 // cancelPendingChunkJobs cancels a vault's pending per-chunk jobs — post-seal,
-// index rebuild, home index sweep, replica catch-up pull, cloud upload and
-// JSONL sink —
+// index rebuild, home index sweep, replica catch-up pull and cloud upload —
 // which read through its chunk and index managers: run after the vault closes,
 // they would act on closed managers. It also drops the vault's cloud-upload
 // backoff/alarm state, which no sweep on this node revisits once the vault is
@@ -291,8 +290,6 @@ func (o *Orchestrator) cancelPendingChunkJobs(vaultID glid.GLID) {
 	o.scheduler.RemoveJobsByPrefix(postSealJobPrefix(vaultID))
 	o.scheduler.RemoveJobsByPrefix(indexRebuildJobPrefix(vaultID))
 	o.scheduler.RemoveJob(homeIndexSweepJobName(vaultID))
-	o.scheduler.RemoveJob(jsonlSinkJobName(vaultID))
-	o.jsonlSinks.Delete(vaultID)
 	o.scheduler.RemoveJobsByPrefix(glcbCatchupVaultJobPrefix(vaultID))
 	o.scheduler.RemoveJobsByPrefix(cloudUploadJobPrefix(vaultID))
 	o.purgeBackfillFailuresForVault(vaultID)
@@ -609,7 +606,7 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 	}
 	vault.Instance = ti
 	o.bindVaultInstanceToCtlLocked(vaultID, ti)
-	o.scheduleHomeArrivalWork(vaultID, ti)
+	o.scheduleHomeIndexSweep(vaultID, ti)
 	o.logger.Info("vault placement added", "vault", vaultID)
 	return nil
 }
@@ -745,14 +742,13 @@ func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.V
 // buildPlacedInstance creates the VaultInstance for a placement on storageID:
 // on that file storage when it is one, otherwise — a memory vault's synthetic
 // storage, or no placement yet — with class-based resolution under the vaults
-// directory. A JSONL vault's sink file is at its own path wherever it is
-// placed.
+// directory.
 func (o *Orchestrator) buildPlacedInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories, storageID string, isFollower bool) (*VaultInstance, error) {
 	var (
 		ti  *VaultInstance
 		err error
 	)
-	if storageID != "" && !strings.HasPrefix(storageID, system.SyntheticStoragePrefix) && vaultCfg.Type != system.VaultTypeJSONL {
+	if storageID != "" && !strings.HasPrefix(storageID, system.SyntheticStoragePrefix) {
 		ti, err = o.buildInstanceForStorage(sys, vaultCfg, factories, storageID, isFollower)
 	} else {
 		ti, err = o.buildInstance(sys, vaultCfg, factories, isFollower)
@@ -798,11 +794,6 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	cmParams["_expect_existing"] = "true"
 	cmParams["_vault_id"] = vaultCfg.ID.String()
 
-	// Resolve JSONL path relative to HomeDir (not VaultsDir).
-	if p := cmParams["path"]; p != "" && !filepath.IsAbs(p) && factories.HomeDir != "" {
-		cmParams["path"] = filepath.Join(factories.HomeDir, p)
-	}
-
 	cm, err := cmFactory(cmParams, cmLogger)
 	if err != nil {
 		return nil, fmt.Errorf("create chunk manager: %w", err)
@@ -818,17 +809,6 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	// reject blobs whose digest doesn't match what the leader stamped at
 	// upload time.
 	setIntegrityVerifier(cm, o.IntegrityVerifier())
-
-	// JSONL sinks are write-only — no query engine, no indexes.
-	if vaultCfg.Type == system.VaultTypeJSONL {
-		ti := &VaultInstance{
-			VaultID: vaultCfg.ID,
-			Type:    string(vaultCfg.Type),
-			Chunks:  cm,
-		}
-		ti.Reconciler = NewVaultLifecycleReconciler(o, vaultCfg.ID, ti, o.localNodeID, o.baseLogger)
-		return ti, nil
-	}
 
 	imFactory, ok := factories.IndexManagers[factoryName]
 	if !ok {
@@ -1615,8 +1595,6 @@ func mapVaultTypeToFactory(t system.VaultType) string {
 		return "file"
 	case system.VaultTypeFile:
 		return "file"
-	case system.VaultTypeJSONL:
-		return "jsonl"
 	default:
 		return string(t)
 	}
@@ -1652,14 +1630,6 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNode
 		}
 		if fs := findLocalFileStorage(rt, localNodeID, vaultCfg.StorageClass); fs != nil {
 			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), vaultCfg.ID.String())
-		}
-
-	case system.VaultTypeJSONL:
-		if vaultCfg.Path != "" {
-			params["path"] = vaultCfg.Path
-		} else {
-			// Default: jsonl/<vault-id>/<instance-id>.jsonl
-			params["path"] = filepath.Join("jsonl", vaultCfg.ID.String(), vaultCfg.ID.String()+".jsonl")
 		}
 	}
 

@@ -471,6 +471,7 @@ func TestPauseVaultPersistsToConfig(t *testing.T) {
 			Id:      vaultID.Bytes(),
 			Name:    "persist-vault",
 			Enabled: true,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_MEMORY,
 		},
 	}))
 	if err != nil {
@@ -557,13 +558,13 @@ func TestDuplicateEntityNames(t *testing.T) {
 
 	t.Run("vault", func(t *testing.T) {
 		_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
-			Config: &gastrologv1.VaultConfig{Name: "my-vault"},
+			Config: &gastrologv1.VaultConfig{Name: "my-vault", Type: gastrologv1.VaultType_VAULT_TYPE_MEMORY},
 		}))
 		if err != nil {
 			t.Fatalf("first PutVault: %v", err)
 		}
 		_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
-			Config: &gastrologv1.VaultConfig{Name: "my-vault"},
+			Config: &gastrologv1.VaultConfig{Name: "my-vault", Type: gastrologv1.VaultType_VAULT_TYPE_MEMORY},
 		}))
 		if err == nil {
 			t.Fatal("expected error for duplicate vault name")
