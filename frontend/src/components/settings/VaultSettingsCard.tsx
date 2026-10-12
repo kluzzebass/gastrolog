@@ -55,24 +55,14 @@ function routeReferenceReason(vaultId: string, routes: readonly RouteConfig[]): 
 /** What a confirmed delete does, one line each. */
 function vaultDeleteConsequences(vault: VaultConfig, holderNames: string[], deleteData: boolean): string[] {
   const name = vault.name || encode(vault.id);
-  const lines = [
+  return [
     holderNames.length > 0
       ? `Removes "${name}" and its ${String(holderNames.length)} placement(s) on ${holderNames.join(", ")}; nothing routes to it afterwards`
       : `Removes "${name}", which has no placements`,
+    deleteData
+      ? "Its chunk files are erased from every placement node"
+      : "Its chunk files stay on disk, unreachable, until removed by hand",
   ];
-  switch (vault.type) {
-    case VaultType.MEMORY:
-      lines.push("Its records live only in memory and are gone with it");
-      break;
-    case VaultType.JSONL:
-      lines.push("The JSONL file stays on disk");
-      break;
-    default:
-      lines.push(deleteData
-        ? "Its chunk files are erased from every placement node"
-        : "Its chunk files stay on disk, unreachable, until removed by hand");
-  }
-  return lines;
 }
 
 interface VaultSettingsCardProps {
@@ -96,11 +86,7 @@ interface VaultSettingsCardProps {
 // edits the vault directly; inter-vault routing covers retention chains.
 
 function vaultTypeLabel(t: VaultType): VaultTypeLabel {
-  switch (t) {
-    case VaultType.MEMORY: return "memory";
-    case VaultType.JSONL:  return "jsonl";
-    default:               return "file";
-  }
+  return t === VaultType.MEMORY ? "memory" : "file";
 }
 
 // vaultToEntry projects the vault's storage shape onto the StorageEntry
@@ -121,8 +107,6 @@ function vaultToEntry(v: VaultConfig): StorageEntry {
     retentionDisposition: v.retentionDisposition || "delete",
     retentionTransferTarget: v.retentionTransferTargetVaultId.length > 0 ? encode(v.retentionTransferTargetVaultId) : "",
     replicationFactor: String(v.replicationFactor || 1),
-    path: v.path || "",
-    nodeId: "",
   };
 }
 
@@ -157,13 +141,12 @@ function entryToVault(
     memoryBudget: entry.type === "memory" ? entry.memoryBudget : "",
     rotationPolicyId: entry.rotationPolicyId ? decode(entry.rotationPolicyId) : new Uint8Array(0),
     retentionRules: entry.retentionPolicyIds.map((id) => new RetentionRule({ retentionPolicyId: decode(id) })),
-    retentionDisposition: entry.type !== "jsonl" ? (entry.retentionDisposition || "delete") : "",
+    retentionDisposition: entry.retentionDisposition || "delete",
     retentionTransferTargetVaultId:
-      entry.type !== "jsonl" && entry.retentionDisposition === "transfer" && entry.retentionTransferTarget
+      entry.retentionDisposition === "transfer" && entry.retentionTransferTarget
         ? decode(entry.retentionTransferTarget)
         : new Uint8Array(0),
-    replicationFactor: entry.type === "jsonl" ? 1 : parseInt(entry.replicationFactor, 10) || 1,
-    path: entry.type === "jsonl" ? entry.path : "",
+    replicationFactor: parseInt(entry.replicationFactor, 10) || 1,
   });
 }
 
@@ -280,16 +263,14 @@ export function VaultSettingsCard({
       deleteConsequences={vaultDeleteConsequences(vault, holderNames, deleteData)}
       deleteConfirmExtra={
         <div className="flex items-center gap-1.5">
-          {vault.type === VaultType.FILE && (
-            <label className="flex items-center gap-1.5 text-[0.8em] opacity-70">
-              <input
-                type="checkbox"
-                checked={deleteData}
-                onChange={(e) => setDeleteData(e.target.checked)}
-              />
-              Delete data files
-            </label>
-          )}
+          <label className="flex items-center gap-1.5 text-[0.8em] opacity-70">
+            <input
+              type="checkbox"
+              checked={deleteData}
+              onChange={(e) => setDeleteData(e.target.checked)}
+            />
+            Delete data files
+          </label>
           <HelpButton helpRef={DELETING_VAULT_HELP_REF} />
         </div>
       }
@@ -393,11 +374,7 @@ export function VaultSettingsCard({
                 {followerNames.length > 0 && ` · followers: ${followerNames.join(", ")}`}
               </span>
             )}
-            {vault.type === VaultType.JSONL ? (
-              <span className="font-mono">{vault.path || `jsonl/${vault.name || "vault"}.jsonl`}</span>
-            ) : (
-              <span>{`RF ${String(placement.rf)} · cap ${String(placement.cap.max)} (${placement.cap.cause})`}</span>
-            )}
+            <span>{`RF ${String(placement.rf)} · cap ${String(placement.cap.max)} (${placement.cap.cause})`}</span>
             {vault.type === VaultType.MEMORY && vault.memoryBudget !== "" && (
               <span className="font-mono">{vault.memoryBudget}</span>
             )}

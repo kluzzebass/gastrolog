@@ -129,7 +129,7 @@ type SealEnsurer interface {
 // If the manager implements SilentDeleter, this calls DeleteSilent (the
 // common case — file.Manager supports it). Otherwise it falls back to
 // the regular Delete, which is safe for manager types that do not have
-// an announcer wired (e.g. memory, jsonl).
+// an announcer wired (e.g. memory).
 func DeleteNoAnnounce(cm ChunkManager, id ChunkID) error {
 	if silent, ok := cm.(SilentDeleter); ok {
 		return silent.DeleteSilent(id)
@@ -150,7 +150,7 @@ func DeleteNoAnnounce(cm ChunkManager, id ChunkID) error {
 // If the manager implements SealEnsurer, this calls EnsureSealed (the common
 // case — file.Manager supports it, and its contract is force-demote the local
 // active without announcing). Otherwise it falls back to Seal(), which is safe
-// for manager types that have no announcer wired (memory, jsonl).
+// for manager types that have no announcer wired (memory).
 func SealNoAnnounce(cm ChunkManager, id ChunkID) error {
 	if ensurer, ok := cm.(SealEnsurer); ok {
 		return ensurer.EnsureSealed(id)

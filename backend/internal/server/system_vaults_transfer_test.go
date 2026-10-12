@@ -3,8 +3,8 @@ package server_test
 // Coverage for the retention transfer disposition validation matrix:
 // disposition "transfer" requires a target vault ID, the target must not
 // be the source (self-transfer is the cascade footgun), and both source
-// and target must be file vaults — cloud and memory vaults have
-// different at-rest forms and lifecycle machinery.
+// and target must be file or memory vaults that are not cloud-backed — a
+// cloud-backed vault keeps its sealed chunks in object storage.
 // See docs/retention-transfer-disposition-design.md.
 
 import (
@@ -90,47 +90,38 @@ func TestPutVaultTransferRequiresTargetExists(t *testing.T) {
 	}
 }
 
-// TestPutVaultTransferRequiresBothFileVaults rejects transfer when either
-// source or target is not a file vault (#4 in the spec: file → file only).
-func TestPutVaultTransferRequiresBothFileVaults(t *testing.T) {
+// Transfer pairs file and memory vaults in every direction: both keep sealed
+// chunks as pipeline GLCBs in a local chunk root.
+func TestPutVaultTransferPairsFileAndMemoryVaults(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
-
-	// Create a memory-typed target first.
-	memTarget := &gastrologv1.VaultConfig{
-		Id:      glid.New().Bytes(),
-		Name:    "transfer-mem-target",
-		Enabled: true,
-		Type:    gastrologv1.VaultType_VAULT_TYPE_MEMORY,
+	memVault := func(name string) *gastrologv1.VaultConfig {
+		return &gastrologv1.VaultConfig{Id: glid.New().Bytes(), Name: name, Enabled: true, Type: gastrologv1.VaultType_VAULT_TYPE_MEMORY}
 	}
-	if err := putVault(t, client, memTarget); err != nil {
-		t.Fatalf("create memory target: %v", err)
+	put := func(cfg *gastrologv1.VaultConfig) {
+		t.Helper()
+		if err := putVault(t, client, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
 	}
-
-	// Source is file, target is memory: rejected.
-	src := fileVaultConfig(glid.New(), "transfer-file-src")
-	src.RetentionDisposition = "transfer"
-	src.RetentionTransferTargetVaultId = memTarget.Id
-	if err := putVault(t, client, src); err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("file->memory transfer: want InvalidArgument, got %v", err)
+	transferTo := func(src, target *gastrologv1.VaultConfig) error {
+		src.RetentionDisposition = "transfer"
+		src.RetentionTransferTargetVaultId = target.Id
+		return putVault(t, client, src)
 	}
 
-	// Create a file target.
+	memTarget := memVault("transfer-mem-target")
 	fileTarget := fileVaultConfig(glid.New(), "transfer-file-target")
-	if err := putVault(t, client, fileTarget); err != nil {
-		t.Fatalf("create file target: %v", err)
-	}
+	put(memTarget)
+	put(fileTarget)
 
-	// Source is memory, target is file: rejected.
-	memSrc := &gastrologv1.VaultConfig{
-		Id:                             glid.New().Bytes(),
-		Name:                           "transfer-mem-src",
-		Enabled:                        true,
-		Type:                           gastrologv1.VaultType_VAULT_TYPE_MEMORY,
-		RetentionDisposition:           "transfer",
-		RetentionTransferTargetVaultId: fileTarget.Id,
-	}
-	if err := putVault(t, client, memSrc); err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("memory->file transfer: want InvalidArgument, got %v", err)
+	for name, pair := range map[string][2]*gastrologv1.VaultConfig{
+		"file to memory":   {fileVaultConfig(glid.New(), "file-src-1"), memTarget},
+		"memory to file":   {memVault("mem-src-1"), fileTarget},
+		"memory to memory": {memVault("mem-src-2"), memTarget},
+	} {
+		if err := transferTo(pair[0], pair[1]); err != nil {
+			t.Errorf("%s: want accepted, got %v", name, err)
+		}
 	}
 }
 

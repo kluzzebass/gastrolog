@@ -263,8 +263,12 @@ type VaultType string
 const (
 	VaultTypeMemory VaultType = "memory"
 	VaultTypeFile   VaultType = "file"
-	VaultTypeJSONL  VaultType = "jsonl"
 )
+
+// Valid reports whether t is a vault type the cluster can build.
+func (t VaultType) Valid() bool {
+	return t == VaultTypeMemory || t == VaultTypeFile
+}
 
 // VaultPlacement assigns one replica of a vault to a specific file storage.
 // The node is derived from the file storage's NodeStorageConfig.
@@ -336,17 +340,15 @@ func NodeIDForStorage(storageID string, nscs []NodeStorageConfig) string {
 // when the node has none — the caller must fail placement loudly. A silent
 // FileStorages[0] fallback here placed leaders on the wrong disk class while
 // follower placement (eligibleStorages/storageEligible) stayed strict.
-// Memory/JSONL vaults have no class requirement and fall back to a synthetic
+// Memory vaults have no class requirement and are placed on a synthetic
 // storage ID.
 func StorageIDForNode(nodeID string, v VaultConfig, nscs []NodeStorageConfig) string {
 	idx := slices.IndexFunc(nscs, func(n NodeStorageConfig) bool { return n.NodeID == nodeID })
 
 	switch v.Type {
-	case VaultTypeMemory, VaultTypeJSONL:
-		// No storage class — pick any storage, or synthetic if none.
-		if idx >= 0 && len(nscs[idx].FileStorages) > 0 {
-			return nscs[idx].FileStorages[0].ID.String()
-		}
+	case VaultTypeMemory:
+		// A memory vault is placed on its node's synthetic storage, the only
+		// storage placement eligibility accepts for it.
 		return SyntheticStorageID(nodeID)
 	case VaultTypeFile:
 		if idx < 0 {

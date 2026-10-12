@@ -3,7 +3,9 @@ package orchestrator_test
 import (
 	"context"
 	"fmt"
+	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/glid"
+	indexfile "gastrolog/internal/index/file"
 	"slices"
 	"sync"
 	"testing"
@@ -12,7 +14,6 @@ import (
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/index"
-	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
@@ -168,11 +169,12 @@ func TestAddVault(t *testing.T) {
 	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
+		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 	}
 
@@ -215,11 +217,12 @@ func TestAddVaultDuplicate(t *testing.T) {
 	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
+		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 	}
 
@@ -248,11 +251,12 @@ func TestRemoveVaultEmpty(t *testing.T) {
 	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
+		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 	}
 
@@ -285,11 +289,12 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
+		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 	}
 
@@ -339,11 +344,12 @@ func TestForceRemoveVault(t *testing.T) {
 	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
+		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 	}
 
@@ -416,11 +422,12 @@ func TestForceRemoveEmptyVault(t *testing.T) {
 	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
+		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 	}
 
@@ -529,11 +536,12 @@ func TestVaultConfig(t *testing.T) {
 	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
+		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 	}
 
@@ -584,11 +592,12 @@ func TestSetRotationPolicyOnVaultDirectly(t *testing.T) {
 
 	// Create a vault with default rotation policy (10000 records).
 	factories := orchestrator.Factories{
+		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 	}
 
@@ -636,11 +645,12 @@ func TestPauseVault(t *testing.T) {
 	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
+		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 	}
 
@@ -700,11 +710,12 @@ func TestResumeVault(t *testing.T) {
 	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
+		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 	}
 
@@ -765,11 +776,12 @@ func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
+		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 	}
 
@@ -831,8 +843,9 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
-		ChunkManagers: map[string]chunk.ManagerFactory{"memory": chunkmem.NewFactory()},
-		IndexManagers: map[string]index.ManagerFactory{"memory": indexmem.NewFactory()},
+		VaultsDir:     t.TempDir(),
+		ChunkManagers: map[string]chunk.ManagerFactory{"file": chunkfile.NewFactory()},
+		IndexManagers: map[string]index.ManagerFactory{"file": indexfile.NewFactory()},
 	}
 	if err := orch.AddVault(context.Background(), loader.cfg.Vaults[0], factories); err != nil {
 		t.Fatal(err)

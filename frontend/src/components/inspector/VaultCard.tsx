@@ -644,7 +644,6 @@ function VaultLeaderSummary({
         followerIds={followerIds}
         rf={rf}
         storageClass={vaultCfg?.storageClass ?? 0}
-        jsonlPath={vaultTypeLabel === "jsonl" ? vaultCfg?.path : undefined}
         nscs={nscs}
         nodeNameMap={nodeNameMap}
         dark={dark}
@@ -658,7 +657,6 @@ function VaultPlacementSummary({
   followerIds,
   rf,
   storageClass,
-  jsonlPath,
   nscs,
   nodeNameMap,
   dark,
@@ -667,7 +665,6 @@ function VaultPlacementSummary({
   followerIds: string[];
   rf: number;
   storageClass: number;
-  jsonlPath?: string;
   nscs: readonly { nodeId: Uint8Array; fileStorages: { storageClass: number }[] }[];
   nodeNameMap: Map<string, string>;
   dark: boolean;
@@ -688,9 +685,6 @@ function VaultPlacementSummary({
           </span>
         </div>
         {rf > 1 && <Badge variant="info" dark={dark}>{`RF=${String(rf)}`}</Badge>}
-        {jsonlPath && (
-          <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>{jsonlPath}</span>
-        )}
       </div>
       {followerIds.length > 0 && (
         <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[0.85em]">

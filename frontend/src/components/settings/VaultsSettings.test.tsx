@@ -345,7 +345,7 @@ describe("VaultsSettings", () => {
     fireEvent.change(getByLabelText("Storage Class"), { target: { value: "1" } });
     fireEvent.change(getByLabelText("Retention Disposition"), { target: { value: "transfer" } });
     await waitFor(() => expect(getByLabelText("Transfer Target")).toBeTruthy());
-    // vault-alpha (testId(1)) is the only eligible target — a non-cloud file vault.
+    // vault-alpha (testId(1)) is the only eligible target — a file vault that is not cloud-backed.
     fireEvent.change(getByLabelText("Transfer Target"), { target: { value: encode(testId(1)) } });
 
     const createBtn = getByText("Create").closest("button")!;
@@ -465,8 +465,8 @@ describe("vault edit save", () => {
 // ── Transfer eligibility ─────────────────────────────────────────────
 //
 // Each reason the picker shows corresponds to a PutVault rejection:
-// self-transfer, a non-file target, a cloud-backed target, a target whose
-// transfer chain cycles, and a source that is not a non-cloud file vault.
+// self-transfer, a cloud-backed target, a target whose transfer chain
+// cycles, and a cloud-backed source.
 
 function fileVault(n: number, name: string, extra: Partial<VaultConfig> = {}): VaultConfig {
   return new VaultConfig({
@@ -499,14 +499,12 @@ describe("transferTargetOptions", () => {
       fileVault(2, "plain"),
       fileVault(3, "cloudy", { cloudServiceId: testId(60) }),
       new VaultConfig({ id: testId(4), name: "ram", type: VaultType.MEMORY }),
-      new VaultConfig({ id: testId(5), name: "sink", type: VaultType.JSONL }),
     ];
     expect(reasonsByLabel(transferTargetOptions(vaults, encode(testId(1))))).toEqual({
       source: "this vault",
       plain: undefined,
       cloudy: "cloud-backed",
-      ram: "memory vault",
-      sink: "JSONL sink",
+      ram: undefined,
     });
   });
 
@@ -799,11 +797,10 @@ describe("vault actions", () => {
 });
 
 describe("transferSourceIneligibility", () => {
-  test("only a non-cloud file vault may transfer", () => {
+  test("a file or memory vault that is not cloud-backed may transfer", () => {
     expect(transferSourceIneligibility({ type: "file", cloudServiceId: "" })).toBeUndefined();
     expect(transferSourceIneligibility({ type: "file", cloudServiceId: "x" })).toBe("this vault is cloud-backed");
-    expect(transferSourceIneligibility({ type: "memory", cloudServiceId: "" })).toBe("this is a memory vault");
-    expect(transferSourceIneligibility({ type: "jsonl", cloudServiceId: "" })).toBe("this is a JSONL sink");
+    expect(transferSourceIneligibility({ type: "memory", cloudServiceId: "" })).toBeUndefined();
   });
 });
 
@@ -823,7 +820,7 @@ describe("transfer target picker", () => {
 
     await waitFor(() => expect(getByLabelText("Transfer Target")).toBeTruthy());
     expect(fieldNote(getByLabelText("Transfer Target"))?.textContent).toContain(
-      "No eligible targets — transfer requires a different, non-cloud file vault.",
+      "No eligible targets — transfer requires a different file or memory vault that is not cloud-backed.",
     );
 
     fireEvent.click(getByText("Eligibility rules"));
@@ -866,7 +863,7 @@ describe("transfer target picker", () => {
     expect(optionStates(getByLabelText("Transfer Target"))[1]).toEqual({ label: "vault-archive", disabled: false });
   });
 
-  test("a memory vault cannot pick transfer, and says why", async () => {
+  test("a memory vault can pick transfer", async () => {
     m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
     const { getByText, getByLabelText } = renderWithHelp(noEligibleConfig);
     fireEvent.click(getByText("Add Vault"));
@@ -874,8 +871,8 @@ describe("transfer target picker", () => {
 
     fireEvent.change(getByLabelText("Storage Type"), { target: { value: "memory" } });
     expect(optionStates(getByLabelText("Retention Disposition")).at(-1)).toEqual({
-      label: "Transfer records to another vault unchanged — this is a memory vault",
-      disabled: true,
+      label: "Transfer records to another vault unchanged",
+      disabled: false,
     });
   });
 
@@ -1011,13 +1008,13 @@ describe("VaultsSettings delete gates and consequences", () => {
     expect(getByText("Yes")).toBeTruthy();
   });
 
-  test("a memory vault's confirm step says its records go with it", () => {
+  test("a memory vault's confirm step offers to erase its chunk files, like a file vault's", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], new GetSystemResponse({
       ...gatedInit,
       vaults: [new VaultConfig({ id: testId(2), name: "vault-mem", enabled: true, type: VaultType.MEMORY, replicationFactor: 1 })],
     }));
-    const { getByText, queryByLabelText } = renderWritable(<VaultsSettings dark />, {
+    const { getByText, getByLabelText } = renderWritable(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -1025,8 +1022,9 @@ describe("VaultsSettings delete gates and consequences", () => {
     fireEvent.click(getByText("Delete"));
 
     expect(getByText(/Removes "vault-mem", which has no placements/)).toBeTruthy();
-    expect(getByText(/live only in memory/)).toBeTruthy();
-    expect(queryByLabelText("Delete data files")).toBeNull();
+    expect(getByText(/chunk files stay on disk/)).toBeTruthy();
+    fireEvent.click(getByLabelText("Delete data files"));
+    expect(getByText(/chunk files are erased from every placement node/)).toBeTruthy();
   });
 });
 

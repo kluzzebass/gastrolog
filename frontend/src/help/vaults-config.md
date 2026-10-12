@@ -4,7 +4,7 @@ The Vaults settings tab is where you create and manage vaults and their storage 
 
 ## Creating a Vault
 
-A vault needs a **Name** and a single **storage shape** — memory, file, or JSONL sink. Configure the shape inline when you click "Add Vault".
+A vault needs a **Name** and a single **storage shape** — memory or file. Configure the shape inline when you click "Add Vault".
 
 The **Enabled** checkbox controls whether the vault starts accepting records immediately. Uncheck it to create the vault in a disabled state — useful when you want to finish configuring storage before routes start directing traffic into it. Toggle it on later from the vault card.
 
@@ -14,9 +14,8 @@ Each vault has a **type** that determines how it stores data:
 
 | Type | Description |
 |------|-------------|
-| Memory | RAM-only. Fast, but lost on restart. |
+| Memory | Sealed chunks served from RAM, bounded by the vault's memory budget. Records are durable from the moment they are accepted and survive restarts. |
 | File | Local disk. Optionally cloud-backed by selecting a Cloud Storage. |
-| JSONL | Append-only JSON lines file. Write-only — cannot be searched or queried. Useful for exporting raw records to external tools. |
 
 A **File** vault is local-only by default. Selecting a Cloud Storage on it makes the vault *cloud-backed* — sealed chunks upload to S3/GCS/Azure while the active chunk and a warm cache stay on local disk. There is no separate "Cloud" type; the binding is what makes the difference.
 
@@ -24,24 +23,23 @@ A **File** vault is local-only by default. Selecting a Cloud Storage on it makes
 
 - **Rotation Policy** — when to seal the active chunk and start a new one. Select a policy from the dropdown, or leave empty for no automatic rotation. With no rotation policy configured the picker says so and links to [Rotation and Retention Policies](help:vaults-config#rotation-and-retention-policies).
 - **Retention Policies** — when sealed chunks become eligible for retention. Tick every policy to attach; each defines a trigger (max age, max size, max chunk count). Every attached policy is evaluated on each sweep, so a chunk is retained as soon as any of them matches it and the tightest bound wins. The field says how many are attached. With none attached, only the default size floor drains the vault; with no retention policy configured at all the field says so. The CLI spells it `--retention-policy`, repeated once per policy.
-- **Retention Disposition** — what happens to records when retention triggers. The default is **Delete records on retention**: records drop, storage frees, the routing engine is never invoked. **Send records to routing engine** (`route`) streams the records through the routing table with synthetic `_source = "retention"` and `_vault = "<vault-id>"`, so routes you configure can forward them to an archive vault, cold-storage vault, etc. — use this only when you have a specific archival or forwarding pipeline in mind, otherwise a misconfigured route can re-inject records into this vault and create a cascade; the original chunk is destroyed and its records re-ingested through routing. **Transfer records to another vault unchanged** (`transfer`) re-homes the sealed chunk itself to the **Transfer Target** vault — no record decode, no re-ingest, no routing table involvement — this is the common archive pattern (age old data into a cheaper vault without touching it). Both vaults must be non-cloud file vaults — see [Transfer Target](help:vaults-config#transfer-target) for the full eligibility rule. The chunk keeps its own record timestamps and identity, but its retention clock restarts at the destination (a fresh anchor), so a shorter destination TTL does not immediately re-fire retention on arrival. If the target is missing, disabled, or its transfer can't complete, the chunk is retained and the sweep records a `retention-deferred` alarm rather than losing data.
+- **Retention Disposition** — what happens to records when retention triggers. The default is **Delete records on retention**: records drop, storage frees, the routing engine is never invoked. **Send records to routing engine** (`route`) streams the records through the routing table with synthetic `_source = "retention"` and `_vault = "<vault-id>"`, so routes you configure can forward them to an archive vault, cold-storage vault, etc. — use this only when you have a specific archival or forwarding pipeline in mind, otherwise a misconfigured route can re-inject records into this vault and create a cascade; the original chunk is destroyed and its records re-ingested through routing. **Transfer records to another vault unchanged** (`transfer`) re-homes the sealed chunk itself to the **Transfer Target** vault — no record decode, no re-ingest, no routing table involvement — this is the common archive pattern (age old data into a cheaper vault without touching it). Both vaults must be file or memory vaults that are not cloud-backed — see [Transfer Target](help:vaults-config#transfer-target) for the full eligibility rule. The chunk keeps its own record timestamps and identity, but its retention clock restarts at the destination (a fresh anchor), so a shorter destination TTL does not immediately re-fire retention on arrival. If the target is missing, disabled, or its transfer can't complete, the chunk is retained and the sweep records a `retention-deferred` alarm rather than losing data.
 - **Transfer Target** — shown only when Retention Disposition is set to Transfer. The destination vault sealed chunks re-home to when this vault's retention fires. See [Transfer Target](help:vaults-config#transfer-target) below for which vaults qualify.
 - **Replication Factor** — how many copies of each chunk to maintain. 1 = no replication. 2 = one extra copy (redundancy). 3+ = fault-tolerant quorum. The field states its cap and the cause: for a file vault, the number of [file storages](help:storage-config#how-vaults-use-file-storages) with the vault's storage class; for a memory vault, the number of nodes in the cluster. Add a file storage with that class to raise the cap.
 
 ### Transfer Target
 
-Transfer moves a sealed chunk's on-disk form between two file vaults' chunk directories, so both ends must store chunks that way. Saving a vault rejects any pairing outside these rules, and the pickers show every vault anyway — the ones that do not qualify are listed disabled with the reason:
+Transfer moves a sealed chunk's on-disk form between two vaults' chunk directories, so both ends must store chunks that way: file and memory vaults do, and transfer works between any two of them. Saving a vault rejects any pairing outside these rules, and the pickers show every vault anyway — the ones that do not qualify are listed disabled with the reason:
 
 | Reason shown | Rule |
 |--------------|------|
 | this vault | The target must be a different vault. A chunk transferred to its own vault would immediately qualify for the same retention rule again. |
-| memory vault, JSONL sink | The target must be a file vault. Memory vaults and JSONL sinks have no on-disk chunk form to receive. |
-| cloud-backed | The target must be a non-cloud file vault. A cloud-backed vault keeps sealed chunks in object storage, with its own upload and cache lifecycle. |
+| cloud-backed | The target must not be cloud-backed. A cloud-backed vault keeps sealed chunks in object storage, with its own upload and cache lifecycle. |
 | would create a transfer cycle | Following the target's own transfer target, and that vault's, must never lead back to this vault (or loop anywhere else) — a cycle would move the same chunks around forever. |
 
-The source has the same requirement: **Transfer records to another vault unchanged** is available only on a non-cloud file vault. On a memory vault or a cloud-backed vault the option is listed disabled, with the reason.
+The source has the same requirement: **Transfer records to another vault unchanged** is available on a file or memory vault that is not cloud-backed. On a cloud-backed vault the option is listed disabled, with the reason.
 
-When no vault qualifies, the Transfer Target picker says so. Create a non-cloud file vault to transfer into, or use **Send records to routing engine** with a retention-trigger route instead — that is the pattern for archiving into a cloud-backed vault (see [Retention Policies](help:policy-retention)).
+When no vault qualifies, the Transfer Target picker says so. Create a file or memory vault that is not cloud-backed to transfer into, or use **Send records to routing engine** with a retention-trigger route instead — that is the pattern for archiving into a cloud-backed vault (see [Retention Policies](help:policy-retention)).
 
 ### File Vault Settings
 
@@ -58,11 +56,7 @@ The cache fields are always shown and apply to cloud-backed vaults only — on a
 
 ### Memory Vault Settings
 
-- **Budget** — maximum memory for this vault. Leave empty for the system default.
-
-### JSONL Vault Settings
-
-- **Path** — file path, relative to the node's home directory.
+- **Budget** — the most RAM this vault's sealed chunks may take on each node. Leave empty for the system default. Over budget, retention retires the oldest sealed chunks with the vault's retention disposition, like any other retention trigger.
 
 ## Editing a Vault
 
@@ -90,11 +84,7 @@ Each action on an expanded vault card runs against the live vault; the line besi
 
 **Delete** on a vault card removes the vault and every placement it has, on every node; the confirm step lists what goes. A vault that is a [route](help:routing) destination cannot be deleted — the Delete button stays disabled and names the route; remove the vault from the route's destinations first.
 
-What happens to the data depends on the storage type:
-
-- **File** — the chunk files stay on disk, unreachable, unless **Delete data files** is ticked, which erases the vault directory on every placement node.
-- **Memory** — the records live only in memory and are gone with the vault.
-- **JSONL** — the sink file stays on disk.
+The vault's chunk files stay on disk, unreachable, unless **Delete data files** is ticked, which erases the vault directory on every placement node.
 
 ## Rotation and Retention Policies
 

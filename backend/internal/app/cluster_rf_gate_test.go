@@ -370,32 +370,6 @@ func TestVaultsBelowRF_EmptyAndUnplaced(t *testing.T) {
 	}
 }
 
-// JSONL vaults are pinned to their path's node, so no other node is ever
-// an eligible replacement — the arithmetic reports zero spares rather
-// than pretending a Live node could take over.
-func TestVaultsBelowRF_JSONLVaultHasNoSpare(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	c := newRFTestCluster(t)
-	c.node("a", system.NodeStateLive)
-	c.node("b", system.NodeStateLive)
-	vaultID := glid.New()
-	if err := c.store.PutVault(ctx, system.VaultConfig{
-		ID: vaultID, Name: "jsonl", Type: system.VaultTypeJSONL, ReplicationFactor: 2,
-	}); err != nil {
-		t.Fatalf("PutVault: %v", err)
-	}
-	c.place(vaultID, []system.VaultPlacement{
-		{StorageID: system.SyntheticStorageID(c.ids["a"].String()), Leader: true},
-		{StorageID: system.SyntheticStorageID(c.ids["b"].String()), Leader: false},
-	})
-
-	degraded := c.below("b")
-	if len(degraded) != 1 || degraded[0].Eligible != 0 {
-		t.Fatalf("JSONL vault must report no eligible spare, got %v", degraded)
-	}
-}
-
 // TestRFRefusalError_Format pins the operator-actionable shape: the
 // sentinel is wrapped (so callers can errors.Is it), every affected
 // vault is named with its ID and the redundancy arithmetic, and the

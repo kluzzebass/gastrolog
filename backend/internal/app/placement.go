@@ -482,7 +482,7 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 	// own — DeleteNode sweeps the node's storage config, so the leader stops
 	// resolving — but relying on that would make the outcome depend on vault
 	// type.
-	if currentLeader != "" && !leaderDeparted && pm.nodeEligible(v, currentLeader, nscs) {
+	if currentLeader != "" && !leaderDeparted && nodeEligibleForVault(v, currentLeader, nscs) {
 		pm.clearUnplacedAlarms(v)
 		pm.placeFollowers(ctx, &v, nodes, nscs, vaultCount)
 		return
@@ -925,34 +925,23 @@ func (pm *placementManager) handleUnplaceable(_ context.Context, v system.VaultC
 // apply acceptsNewPlacements to the node's lifecycle state, and the
 // placement manager also requires a current heartbeat. This function
 // answers only "can this node hold this vault's data".
-func nodeEligibleForVault(v system.VaultConfig, nodeID string, nscs []system.NodeStorageConfig, placements []system.VaultPlacement) bool {
+func nodeEligibleForVault(v system.VaultConfig, nodeID string, nscs []system.NodeStorageConfig) bool {
 	switch v.Type {
 	case system.VaultTypeMemory:
 		return true // any node can serve memory vaults
 	case system.VaultTypeFile:
 		return nodeHasStorageClass(nscs, nodeID, v.StorageClass)
-	case system.VaultTypeJSONL:
-		// JSONL vaults have explicit node assignment via Path — only the
-		// node already holding the leader placement is eligible.
-		return system.LeaderNodeID(placements, nscs) == nodeID
 	default:
 		return false
 	}
 }
 
-// nodeEligible checks whether a specific node can serve a vault.
-func (pm *placementManager) nodeEligible(v system.VaultConfig, nodeID string, nscs []system.NodeStorageConfig) bool {
-	placements, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
-	return nodeEligibleForVault(v, nodeID, nscs, placements)
-}
-
 // eligibleNodes returns every node that can take a new leader placement for
 // the vault: it accepts new placements and can hold the vault's data.
 func (pm *placementManager) eligibleNodes(v system.VaultConfig, nodes placementNodes, nscs []system.NodeStorageConfig) []string {
-	placements, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 	var result []string
 	for nodeID := range nodes.alive {
-		if nodes.acceptsNew(nodeID) && nodeEligibleForVault(v, nodeID, nscs, placements) {
+		if nodes.acceptsNew(nodeID) && nodeEligibleForVault(v, nodeID, nscs) {
 			result = append(result, nodeID)
 		}
 	}

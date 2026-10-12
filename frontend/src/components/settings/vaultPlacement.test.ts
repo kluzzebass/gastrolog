@@ -43,13 +43,12 @@ describe("rfCap", () => {
     });
   });
 
-  test("a memory vault is capped by the node count; a JSONL sink is single-node", () => {
+  test("a memory vault is capped by the node count", () => {
     expect(rfCap({ type: "memory", storageClass: "" }, twoClassOne, 4)).toEqual({
       max: 4,
       eligible: 4,
       cause: "4 nodes in the cluster",
     });
-    expect(rfCap({ type: "jsonl", storageClass: "" }, twoClassOne, 4).max).toBe(1);
   });
 });
 

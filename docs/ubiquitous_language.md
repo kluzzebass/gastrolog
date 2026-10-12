@@ -45,7 +45,7 @@ for append-heavy write patterns and time-ordered reads.
 
 - **Vault** — a named, versioned container for log records. The unit of independent
   storage and the only abstraction over the chunk layer. A vault carries its full
-  storage shape directly: a **type** (memory, file, jsonl), a **storage class**, an
+  storage shape directly: a **type** (memory or file), a **storage class**, an
   optional **cloud service** binding, a **rotation policy**, **retention rules**, a
   **replication factor**, and cache tuning. Operators create and delete vaults; the
   system manages placements. Declarative config in
@@ -107,6 +107,12 @@ for append-heavy write patterns and time-ordered reads.
 - **Cloud-backed** — record bytes live in S3/Azure/GCS, not local disk; marked
   with `CloudBacked = true` in `ChunkMeta`. A cloud-backed vault is a file vault
   with `CloudServiceID` set; there is no separate "cloud" vault type.
+- **Memory vault** — a pipeline vault whose homes serve its sealed GLCBs from
+  RAM (held, not mapped) and whose **memory budget** bounds the bytes of its
+  sealed chunks on each node: over budget, retention retires the oldest
+  sealed chunks with the vault's disposition (reason `memory-budget`). Its
+  intake and GLCBs are durable on disk like a file vault's; it is served by
+  the file chunk manager with a memory budget set.
 - **Archived** — in an offline cloud storage class (e.g. Glacier). Unreadable
   until `Restore` completes. Tracked via `Archived = true`.
 - **Retention-pending** — marked in the vault FSM for deletion on the next sweep.
@@ -966,7 +972,8 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   its local copy — no loss window. The destination-side retention clock
   starts fresh at arrival (`SealedAt` stamped on landing), so a shorter
   destination TTL does not re-fire retention the moment the chunk
-  lands. File vaults only (source and target); self-transfer is
+  lands. File and memory vaults that are not cloud-backed, as source
+  and target; self-transfer is
   rejected at `PutVault`. See
   docs/retention-transfer-disposition-design.md (gastrolog-2l918).
 

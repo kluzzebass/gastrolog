@@ -92,12 +92,12 @@ func newDeferredGroupFixture(t *testing.T) *deferredGroupFixture {
 			return nodeID, true
 		},
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": func(_ map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
+			"file": func(_ map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
 				return &fakeChunkManager{}, nil
 			},
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": func(_ map[string]string, _ chunk.ChunkManager, _ *slog.Logger) (index.IndexManager, error) {
+			"file": func(_ map[string]string, _ chunk.ChunkManager, _ *slog.Logger) (index.IndexManager, error) {
 				return &fakeIndexManager{}, nil
 			},
 		},

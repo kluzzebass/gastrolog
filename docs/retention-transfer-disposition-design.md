@@ -37,15 +37,15 @@ archive vault want exactly this.
 
 ## Decisions settled by this spec (previously open)
 
-- **#4 Type compatibility: file → file only.** Transfer moves an on-disk
-  GLCB between vault chunk roots; cloud-backed and memory vaults have
-  different at-rest forms and lifecycle machinery. `PutVault` validation:
-  disposition `transfer` requires source and target both file vaults.
-  Anything else is an explicit config error, not a runtime surprise.
-  (Cloud-target transfer is a future extension: land in the file vault,
-  let ITS cloud binding offload — already expressible by transferring to a
-  cloud-backed file vault? NO — cloud vaults are their own type; not in
-  scope. The validation message names the constraint.)
+- **#4 Type compatibility: file and memory vaults, not cloud-backed.**
+  Transfer moves an on-disk GLCB between vault chunk roots. File and
+  memory vaults both keep sealed GLCBs in a local chunk root (a memory
+  vault differs only in holding them in RAM once sealed), so transfer
+  works between any two of them (`VaultConfig.TransferEligible`). A
+  cloud-backed vault keeps sealed chunks in object storage with its own
+  upload and cache lifecycle. `PutVault` validation rejects it on either
+  end as an explicit config error, not a runtime surprise, and the
+  validation message names the constraint.
 - **#5 Destination state: defer, never drop.** Target missing, disabled,
   type-invalid at sweep time (config drifted after validation), or its
   pull/receipt cycle not completing: the chunk is RETAINED and the sweep
@@ -225,8 +225,8 @@ catalog + doc table row updated for the rename and new causes.
   destination chunk root, destination FSM registers, source expires only
   after receipts; crash-window honesty test: source survives when
   receipts never arrive (defer + alarm, chunk retained).
-- Multi-node: the server harness is memory-vault-only (33ul6h finding) —
-  transfer REQUIRES file vaults, so multi-node coverage uses the
+- Multi-node: the server harness is memory-vault-only (33ul6h finding),
+  so multi-node coverage of file-vault transfer uses the
   orchestrator multi-node fixtures that the GLCB catch-up tests use
   (find them: PullChunkGLCB tests);
   destination RF > 1: receipts gate holds until every destination home

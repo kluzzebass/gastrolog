@@ -3,6 +3,7 @@ package glcb
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -34,6 +35,8 @@ type MappedBlob struct {
 	recordInitErr  error
 	pins           atomic.Int32
 	closed         atomic.Bool
+	// held marks data as a heap copy of the file rather than a mapping of it.
+	held bool
 }
 
 // OpenMappedBlob memory-maps path and parses the GLCB in place.
@@ -72,6 +75,44 @@ func OpenMappedBlob(path string) (*MappedBlob, error) {
 	blob.data = data
 	return blob, nil
 }
+
+// OpenHeldBlob reads the whole of path into RAM and parses the GLCB there.
+// It serves exactly as a mapping does, but its bytes stay resident whatever
+// the OS page cache does.
+func OpenHeldBlob(path string) (*MappedBlob, error) {
+	path = filepath.Clean(path)
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat %s: %w", path, err)
+	}
+	if info.Size() == 0 {
+		return nil, fmt.Errorf("empty GLCB: %s", path)
+	}
+	data := make([]byte, info.Size())
+	if _, err := io.ReadFull(f, data); err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	blob, err := parseMappedBlob(data)
+	if err != nil {
+		return nil, err
+	}
+	blob.path = path
+	blob.file = info
+	blob.data = data
+	blob.held = true
+	return blob, nil
+}
+
+// Held reports whether the blob's bytes are a heap copy held in RAM.
+func (b *MappedBlob) Held() bool { return b.held }
+
+// Size is the number of bytes the blob occupies, mapped or held.
+func (b *MappedBlob) Size() int64 { return int64(len(b.data)) }
 
 // PinCount returns active Retain pins (tests and cache eviction).
 func (b *MappedBlob) PinCount() int32 { return b.pins.Load() }
@@ -126,6 +167,10 @@ func (b *MappedBlob) Close() error {
 
 func (b *MappedBlob) unmap() error {
 	if b.data == nil {
+		return nil
+	}
+	if b.held {
+		b.data = nil
 		return nil
 	}
 	err := syscall.Munmap(b.data)

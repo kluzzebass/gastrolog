@@ -13,15 +13,12 @@ export function displayExpression(expr: string, vaults: ReadonlyArray<{ id: stri
 }
 
 /**
- * What a destination candidate is besides a name: a JSONL sink cannot be
- * searched, and a disabled vault has no instance to append to. Both remain
- * selectable — a route may be configured ahead of enabling its vault.
+ * What a destination candidate is besides a name: a disabled vault has no
+ * instance to append to. It remains selectable — a route may be configured
+ * ahead of enabling its vault.
  */
-export function destinationState(v: Pick<DestinationVault, "type" | "enabled">): string | undefined {
-  const notes: string[] = [];
-  if (v.type === VaultType.JSONL) notes.push("JSONL sink, write-only");
-  if (!v.enabled) notes.push("disabled, not accepting records");
-  return notes.length > 0 ? notes.join("; ") : undefined;
+export function destinationState(v: Pick<DestinationVault, "enabled">): string | undefined {
+  return v.enabled ? undefined : "disabled, not accepting records";
 }
 
 export type DestinationVault = { id: string; name: string; type: VaultType; enabled: boolean };

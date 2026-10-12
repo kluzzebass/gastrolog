@@ -23,11 +23,9 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
-	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
-	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
 	"gastrolog/internal/system"
@@ -48,12 +46,10 @@ func admissionTestSetup(t *testing.T) (gastrologv1connect.SystemServiceClient, g
 	factories := orchestrator.Factories{
 		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
-			"file":   chunkfile.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
-			"file":   indexfile.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 	}
 
