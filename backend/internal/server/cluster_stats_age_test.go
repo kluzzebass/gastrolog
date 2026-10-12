@@ -42,7 +42,7 @@ func (f *fakePeerStats) StatsTTL() time.Duration             { return f.ttl }
 
 const fakeStatsTTL = 15 * time.Second
 
-func statusFromNode(t *testing.T, nodeID string, peers *fakePeerStats) *gastrologv1.GetClusterStatusResponse {
+func statusFromNode(t *testing.T, nodeID string, collected time.Time, peers *fakePeerStats) *gastrologv1.GetClusterStatusResponse {
 	t.Helper()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
@@ -64,8 +64,8 @@ func statusFromNode(t *testing.T, nodeID string, peers *fakePeerStats) *gastrolo
 		ClusterAddress: ":4566",
 		Cluster:        mc,
 		PeerStats:      peers,
-		LocalStats: func() *gastrologv1.NodeStats {
-			return &gastrologv1.NodeStats{NodeName: nodeID}
+		LastLocalStats: func() (*gastrologv1.NodeStats, time.Time) {
+			return &gastrologv1.NodeStats{NodeName: nodeID}, collected
 		},
 	})
 	client := gastrologv1connect.NewLifecycleServiceClient(
@@ -80,8 +80,9 @@ func statusFromNode(t *testing.T, nodeID string, peers *fakePeerStats) *gastrolo
 
 // From whichever node answers, the TTL is the same and every node that has
 // stats has the instant they were received: the responding node's own stats
-// are dated now, a peer's by its broadcast receipt, and a peer without stats
-// gets no instant at all — an age without a value would date nothing.
+// are dated by their collection, a peer's by its broadcast receipt, and a
+// peer without stats gets no instant at all — an age without a value would
+// date nothing.
 func TestGetClusterStatus_StatsAgeFromEveryNode(t *testing.T) {
 	t.Parallel()
 	start := time.Now()
@@ -89,8 +90,9 @@ func TestGetClusterStatus_StatsAgeFromEveryNode(t *testing.T) {
 		"node-1": start.Add(-2 * time.Second),
 		"node-2": start.Add(-4 * time.Second),
 	}
+	collected := start.Add(-3 * time.Second)
 	for _, responding := range []string{"node-1", "node-2", "node-3"} {
-		resp := statusFromNode(t, responding, &fakePeerStats{received: received, ttl: fakeStatsTTL})
+		resp := statusFromNode(t, responding, collected, &fakePeerStats{received: received, ttl: fakeStatsTTL})
 		if resp.StatsTtl != fakeStatsTTL.String() {
 			t.Errorf("from %s: stats_ttl = %q, want %q", responding, resp.StatsTtl, fakeStatsTTL)
 		}
@@ -102,8 +104,8 @@ func TestGetClusterStatus_StatsAgeFromEveryNode(t *testing.T) {
 					t.Errorf("from %s: own node carries stats=%v received_at=%v, want both", responding, n.Stats != nil, n.StatsReceivedAt != nil)
 					continue
 				}
-				if at := n.StatsReceivedAt.AsTime(); at.Before(start) {
-					t.Errorf("from %s: own stats dated %v, before the request at %v", responding, at, start)
+				if at := n.StatsReceivedAt.AsTime(); !at.Equal(collected) {
+					t.Errorf("from %s: own stats dated %v, want their collection at %v", responding, at, collected)
 				}
 			case n.Stats == nil:
 				if n.StatsReceivedAt != nil {

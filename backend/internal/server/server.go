@@ -179,6 +179,12 @@ type Config struct {
 
 	// LocalStats returns real-time stats for the local node.
 	LocalStats func() *apiv1.NodeStats
+
+	// LastLocalStats returns the local node's stats as last collected for
+	// broadcast, with the instant they were collected. Cluster status
+	// reports these rather than collecting, so answering it never waits on
+	// the subsystems a collection reads.
+	LastLocalStats func() (*apiv1.NodeStats, time.Time)
 	// ClusterRouteRates returns the server-side cluster-total route rate
 	// series (instant/30s/1m + spark) windowed over summed cluster counters
 	// by the stats collector. Nil in single-node mode.
@@ -294,6 +300,7 @@ type Server struct {
 	remoteIndexer              RemoteIndexer
 	peerJobs                   PeerJobsProvider
 	localStatsFn               func() *apiv1.NodeStats
+	lastLocalStatsFn           func() (*apiv1.NodeStats, time.Time)
 	clusterRouteRatesFn        func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)
 	localNodeID                string
 	clusterAddress             string
@@ -334,6 +341,10 @@ type Server struct {
 	rl       *rateLimiter // per-IP rate limiter for auth endpoints
 	rlCancel context.CancelFunc
 	rlWG     sync.WaitGroup
+
+	// statusSnapshots is the system-status cache every lifecycle server of
+	// this server streams from.
+	statusSnapshots *statusSnapshots
 
 	// Dynamic TLS: HTTPS listener when enabled
 	httpsListener   net.Listener
@@ -377,6 +388,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		remoteIndexer:              cfg.RemoteIndexer,
 		peerJobs:                   cfg.PeerJobs,
 		localStatsFn:               cfg.LocalStats,
+		lastLocalStatsFn:           cfg.LastLocalStats,
 		clusterRouteRatesFn:        cfg.ClusterRouteRates,
 		localNodeID:                cfg.NodeID,
 		clusterAddress:             cfg.ClusterAddress,
@@ -390,6 +402,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		afterConfigApply:           cfg.AfterConfigApply,
 		configSignal:               cfg.ConfigSignal,
 		statsSignal:                cfg.StatsSignal,
+		statusSnapshots:            newStatusSnapshots(),
 		routingForwarder:           cfg.RoutingForwarder,
 		placementReconcile:         cfg.PlacementReconcile,
 		bootstrapTokenServeSecret:  cfg.BootstrapTokenServeSecret,
@@ -736,6 +749,9 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	if s.statsSignal != nil {
 		lifecycleServer.SetStatsSignal(s.statsSignal)
 	}
+	if s.lastLocalStatsFn != nil {
+		lifecycleServer.SetLastLocalStats(s.lastLocalStatsFn)
+	}
 	if s.peerRouteStats != nil {
 		lifecycleServer.SetPeerRouteStats(s.peerRouteStats)
 		lifecycleServer.SetClusterRouteRates(s.clusterRouteRatesFn)
@@ -752,6 +768,8 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		storages, _ := configServer.allStorageStates(ctx)
 		return storages
 	})
+	lifecycleServer.useStatusSnapshots(s.statusSnapshots)
+	s.statusSnapshots.bind(lifecycleServer.buildSystemStatus, s.statsSignal)
 	authServer := NewAuthServer(s.cfgStore, s.tokens, s.logger, s.noAuth)
 	jobServer := NewJobServer(s.orch.Scheduler(), s.localNodeID, s.peerJobs, s.orch.Scheduler().Events())
 

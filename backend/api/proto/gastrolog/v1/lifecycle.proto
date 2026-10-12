@@ -111,12 +111,22 @@ message GetClusterStatusResponse {
   repeated ClusterNode nodes = 4;
   RaftStats local_stats = 5;
   bytes local_node_id = 6;
-  string cluster_address = 8;
+  string cluster_address = 7;
   // How long a received stats broadcast stays queryable on the responding
   // node, as a Go duration string (a multiple of the broadcast interval). A
   // node's stats older than this are no longer served, so a UI that still
   // shows them is showing a copy the cluster itself has let go of.
-  string stats_ttl = 9;
+  string stats_ttl = 8;
+  // Set when the cluster removed the answering node. A removed node takes no
+  // part in the cluster, so it reports no topology and no Raft state.
+  NodeRemoval removal = 9;
+}
+
+// NodeRemoval is what a removed node knows about its own removal.
+message NodeRemoval {
+  google.protobuf.Timestamp removed_at = 1;
+  // The reason the leader gave when it told the node.
+  string reason = 2;
 }
 
 message CreateJoinTokenRequest {

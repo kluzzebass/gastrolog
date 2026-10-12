@@ -10,11 +10,13 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/cluster/tlsutil"
+	"gastrolog/internal/logging"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -65,8 +67,12 @@ func (s *Server) requestMembership(ctx context.Context, req *gastrologv1.Request
 	// the victim — its traffic routed to the caller. Bound, the only node
 	// that can move an identity is the one holding its key, which a node
 	// legitimately does when it comes back on a new address.
+	certID := ""
 	if leaf, err := verifiedPeerLeaf(ctx); err == nil {
-		if certID := tlsutil.NodeIDFromCert(leaf); certID != nodeID {
+		certID = tlsutil.NodeIDFromCert(leaf)
+		if certID != nodeID {
+			logging.Default(s.logger).Warn("membership refused: the certificate names another node",
+				"requested_node_id", nodeID, "certificate_node_id", certID, "node_addr", req.GetNodeAddr())
 			return nil, status.Errorf(codes.PermissionDenied,
 				"certificate names node %s; membership may only be requested for it, not %s", certID, nodeID)
 		}
@@ -79,7 +85,9 @@ func (s *Server) requestMembership(ctx context.Context, req *gastrologv1.Request
 		case errors.Is(err, ErrNoLeader):
 			return nil, status.Errorf(codes.Unavailable, "membership change: %v", err)
 		case errors.Is(err, ErrNodeRemoved):
-			return nil, status.Error(codes.PermissionDenied, err.Error())
+			logging.Default(s.logger).Warn("membership refused: the cluster removed this node",
+				"requested_node_id", nodeID, "certificate_node_id", certID, "node_addr", req.GetNodeAddr())
+			return nil, removedRefusal(nodeID, err.Error())
 		default:
 			return nil, status.Errorf(codes.Internal, "membership change: %v", err)
 		}
@@ -197,5 +205,24 @@ func tryRequestMembership(ctx context.Context, addr, nodeID, nodeAddr string, cr
 		NodeAddr: nodeAddr,
 	}
 	out := &gastrologv1.RequestMembershipResponse{}
-	return conn.Invoke(ctx, "/gastrolog.v1.ClusterService/RequestMembership", req, out)
+	var p peer.Peer
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/RequestMembership", req, out, grpc.Peer(&p)); err != nil {
+		if leaf := peerLeaf(&p); leaf != nil {
+			return &MembershipRefusal{AnsweredBy: tlsutil.NodeIDFromCert(leaf), err: err}
+		}
+		return err
+	}
+	return nil
 }
+
+// MembershipRefusal is a membership request the node at the join address
+// answered with an error, together with the node its certificate names.
+// The join address is only known to hold a certificate the cluster CA
+// signed, so what the refusal claims is that node's word alone.
+type MembershipRefusal struct {
+	AnsweredBy string
+	err        error
+}
+
+func (e *MembershipRefusal) Error() string { return e.err.Error() }
+func (e *MembershipRefusal) Unwrap() error { return e.err }

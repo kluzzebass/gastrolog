@@ -64,12 +64,16 @@ func (p *StoreProxy) check() error {
 	return nil
 }
 
-// Close delegates to the inner store if it implements io.Closer.
+// Close delegates to the inner store if it implements io.Closer. The inner
+// store is closed without holding the proxy's lock: closing a Raft-backed
+// store waits for its FSM to finish applying, and the apply path reads
+// through this proxy.
 func (p *StoreProxy) Close() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	inner := p.inner
+	p.mu.RUnlock()
 	type closer interface{ Close() error }
-	if c, ok := p.inner.(closer); ok {
+	if c, ok := inner.(closer); ok {
 		return c.Close()
 	}
 	return nil
