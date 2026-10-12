@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { StrictMode } from "react";
 import { renderHook, act } from "@testing-library/react";
+import { renderHookWithAbandonedRender } from "../../test/abandonedRender";
 import { useEditState } from "./useEditState";
 
 const defaults = (id: string) => ({
   name: `default-${id}`,
   count: 0,
 });
+const configA = (id: string) => ({ name: `a-${id}`, count: 0 });
+const configB = (id: string) => ({ name: `b-${id}`, count: 0 });
 
 describe("useEditState", () => {
   test("getEdit returns defaults when no edits", () => {
@@ -133,5 +137,69 @@ describe("useEditState", () => {
     externalName = "updated-externally";
     rerender();
     expect(result.current.isDirty("x")).toBe(false);
+  });
+
+  test("editing after defaults changed starts over from the fresh defaults", () => {
+    let configNodeId = "node-1";
+    const configDefaults = (id: string) => ({ name: `vault-${id}`, count: 0, nodeId: configNodeId });
+    const { result, rerender } = renderHook(() => useEditState(configDefaults));
+
+    act(() => {
+      result.current.setEdit("v1", { nodeId: "node-2" });
+    });
+    configNodeId = "node-3";
+    rerender();
+    expect(result.current.getEdit("v1").nodeId).toBe("node-3");
+
+    // The operator sees node-3 and edits another field: the stale node-2 must not come back.
+    act(() => {
+      result.current.setEdit("v1", { count: 4 });
+    });
+    expect(result.current.getEdit("v1")).toEqual({ name: "vault-v1", count: 4, nodeId: "node-3" });
+    expect(result.current.isDirty("v1")).toBe(true);
+  });
+
+  test("an edit that matches the defaults again is not dirty", () => {
+    const { result } = renderHook(() => useEditState(defaults));
+
+    act(() => {
+      result.current.setEdit("foo", { count: 3 });
+    });
+    expect(result.current.isDirty("foo")).toBe(true);
+    act(() => {
+      result.current.setEdit("foo", { count: 0 });
+    });
+    expect(result.current.isDirty("foo")).toBe(false);
+  });
+
+  test("setEdit merges correctly under StrictMode's double-invoked updaters", () => {
+    const { result } = renderHook(() => useEditState(defaults), { wrapper: StrictMode });
+
+    act(() => {
+      result.current.setEdit("foo", { name: "edited" });
+    });
+    act(() => {
+      result.current.setEdit("foo", { count: 2 });
+    });
+
+    expect(result.current.getEdit("foo")).toEqual({ name: "edited", count: 2 });
+    expect(result.current.isDirty("foo")).toBe(true);
+  });
+
+  test("a render React threw away cannot discard a live edit", async () => {
+    const { result, abandon } = renderHookWithAbandonedRender((d: typeof configA) => {
+      const edits = useEditState(d);
+      edits.getEdit("foo");
+      return edits;
+    }, configA);
+
+    act(() => {
+      result.current.setEdit("foo", { count: 9 });
+    });
+    // A render against other defaults starts and is thrown away; the committed defaults never changed.
+    await abandon(configB);
+
+    expect(result.current.getEdit("foo")).toEqual({ name: "a-foo", count: 9 });
+    expect(result.current.isDirty("foo")).toBe(true);
   });
 });
