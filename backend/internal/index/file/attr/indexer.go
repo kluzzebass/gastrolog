@@ -282,8 +282,8 @@ func (idx *Indexer) sortEntries(keyEntries []index.AttrKeyIndexEntry, valueEntri
 }
 
 func (idx *Indexer) writeAllIndexes(chunkID chunk.ChunkID, keyEntries []index.AttrKeyIndexEntry, valueEntries []index.AttrValueIndexEntry, kvEntries []index.AttrKVIndexEntry) error {
-	chunkDir := filepath.Join(idx.dir, chunkID.String())
-	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
+	chunkDir, err := chunk.MkdirChunkDir(idx.dir, chunkID)
+	if err != nil {
 		return fmt.Errorf("create index dir: %w", err)
 	}
 	if err := idx.writeIndex(chunkDir, keyIndexFileName, encodeKeyIndex(keyEntries)); err != nil {

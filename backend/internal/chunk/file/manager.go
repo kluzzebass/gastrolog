@@ -2004,8 +2004,7 @@ func (m *Manager) openLocked() error {
 	} else {
 		id = chunk.NewChunkID()
 	}
-	chunkDir := m.chunkDir(id)
-	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
+	if _, err := chunk.MkdirChunkDir(m.cfg.Dir, id); err != nil {
 		return err
 	}
 
@@ -2332,8 +2331,8 @@ func (f *importFiles) cleanup() {
 // openImportFiles creates the chunk directory and all four log files.
 // On failure, any already-created resources are cleaned up.
 func (m *Manager) openImportFiles(id chunk.ChunkID, createdAt time.Time) (*importFiles, error) {
-	dir := m.chunkDir(id)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	dir, err := chunk.MkdirChunkDir(m.cfg.Dir, id)
+	if err != nil {
 		return nil, err
 	}
 	m.logger.Debug("chunk-lifecycle: import dir created", "chunk", id.String(), "dir", dir)
@@ -4022,8 +4021,8 @@ func (m *Manager) uploadedChunkIDs() []chunk.ChunkID {
 // chunk dir becomes the warm cache, structurally identical to a freshly-
 // sealed local chunk. See docs/obsoleted/vault_redesign.md decisions 6 and 9.
 func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCursor, error) {
-	dir := m.chunkDir(id)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	dir, err := chunk.MkdirChunkDir(m.cfg.Dir, id)
+	if err != nil {
 		return nil, fmt.Errorf("ensure chunk dir for cache: %w", err)
 	}
 	tmp, err := os.CreateTemp(dir, dataGLCBFileName+".tmp.*")
@@ -4536,8 +4535,8 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*glcb.Writer, int64, error) {
 	}
 	m.mu.Unlock()
 
-	dir := m.chunkDir(id)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	dir, err := chunk.MkdirChunkDir(m.cfg.Dir, id)
+	if err != nil {
 		return nil, 0, fmt.Errorf("ensure chunk dir: %w", err)
 	}
 
