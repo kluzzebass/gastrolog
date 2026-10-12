@@ -411,15 +411,15 @@ type GetClusterStatusResponse struct {
 	Nodes          []*ClusterNode         `protobuf:"bytes,4,rep,name=nodes,proto3" json:"nodes,omitempty"`
 	LocalStats     *RaftStats             `protobuf:"bytes,5,opt,name=local_stats,json=localStats,proto3" json:"local_stats,omitempty"`
 	LocalNodeId    []byte                 `protobuf:"bytes,6,opt,name=local_node_id,json=localNodeId,proto3" json:"local_node_id,omitempty"`
-	ClusterAddress string                 `protobuf:"bytes,8,opt,name=cluster_address,json=clusterAddress,proto3" json:"cluster_address,omitempty"`
+	ClusterAddress string                 `protobuf:"bytes,7,opt,name=cluster_address,json=clusterAddress,proto3" json:"cluster_address,omitempty"`
 	// How long a received stats broadcast stays queryable on the responding
 	// node, as a Go duration string (a multiple of the broadcast interval). A
 	// node's stats older than this are no longer served, so a UI that still
 	// shows them is showing a copy the cluster itself has let go of.
-	StatsTtl string `protobuf:"bytes,9,opt,name=stats_ttl,json=statsTtl,proto3" json:"stats_ttl,omitempty"`
+	StatsTtl string `protobuf:"bytes,8,opt,name=stats_ttl,json=statsTtl,proto3" json:"stats_ttl,omitempty"`
 	// Set when the cluster removed the answering node. A removed node takes no
 	// part in the cluster, so it reports no topology and no Raft state.
-	Removal       *NodeRemoval `protobuf:"bytes,10,opt,name=removal,proto3" json:"removal,omitempty"`
+	Removal       *NodeRemoval `protobuf:"bytes,9,opt,name=removal,proto3" json:"removal,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1597,10 +1597,9 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\vlocal_stats\x18\x05 \x01(\v2\x17.gastrolog.v1.RaftStatsR\n" +
 	"localStats\x12\"\n" +
 	"\rlocal_node_id\x18\x06 \x01(\fR\vlocalNodeId\x12'\n" +
-	"\x0fcluster_address\x18\b \x01(\tR\x0eclusterAddress\x12\x1b\n" +
-	"\tstats_ttl\x18\t \x01(\tR\bstatsTtl\x123\n" +
-	"\aremoval\x18\n" +
-	" \x01(\v2\x19.gastrolog.v1.NodeRemovalR\aremoval\"`\n" +
+	"\x0fcluster_address\x18\a \x01(\tR\x0eclusterAddress\x12\x1b\n" +
+	"\tstats_ttl\x18\b \x01(\tR\bstatsTtl\x123\n" +
+	"\aremoval\x18\t \x01(\v2\x19.gastrolog.v1.NodeRemovalR\aremoval\"`\n" +
 	"\vNodeRemoval\x129\n" +
 	"\n" +
 	"removed_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\tremovedAt\x12\x16\n" +

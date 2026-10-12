@@ -31,6 +31,7 @@ import (
 	"gastrolog/internal/cluster/tlsutil"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/home"
+	"gastrolog/internal/server"
 )
 
 const removedTestVaults = 2
@@ -217,7 +218,55 @@ func TestRemovedNodeStaysRemoved(t *testing.T) {
 		}
 	})
 
+	t.Run("a node down while it is removed comes back removed", func(t *testing.T) {
+		downed := members[2]
+		downedID := string(downed.requireStatus(t).LocalNodeId)
+		downed.stop()
+		if _, err := boot.client().Lifecycle.RemoveNode(context.Background(), connect.NewRequest(&apiv1.RemoveNodeRequest{
+			NodeId: []byte(downedID), Force: true,
+		})); err != nil {
+			t.Fatalf("remove the stopped %s: %v", downedID, err)
+		}
+
+		downed.start()
+		waitFor(t, time.Minute, "the node to learn its removal from the members", func() bool {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			st, err := downed.clusterStatus(ctx)
+			return err == nil && st.Removal != nil
+		})
+		st := downed.requireStatus(t)
+		requireReportsRemoval(t, downed, st, downedID)
+		if !strings.Contains(st.Removal.Reason, "refused as removed by cluster member") {
+			t.Fatalf("removal reason %q, want the refusing member", st.Removal.Reason)
+		}
+		requireRemovalLogged(t, downed, downedID)
+		requireStaysUp(t, downed)
+		refused := 0
+		for _, m := range members[:2] {
+			refused += len(m.logs.lines("refusing cluster calls from a node the cluster removed", "certificate_node_id="+downedID))
+		}
+		if refused == 0 {
+			t.Fatal("no member logged refusing the removed node's calls")
+		}
+
+		downed.stop()
+		downed.start()
+		waitForAnswer(t, downed)
+		st = downed.requireStatus(t)
+		requireReportsRemoval(t, downed, st, downedID)
+		requireRemovalLogged(t, downed, downedID)
+		if errs := downed.logs.lines("level=ERROR"); len(errs) != 1 {
+			t.Fatalf("the restart after learning the removal logged %d errors, want only the removal:\n%s", len(errs), strings.Join(errs, "\n"))
+		}
+		requireStaysUp(t, downed)
+		if _, listed := configuration(boot.requireStatus(t))[downedID]; listed {
+			t.Fatalf("%s is back in the configuration", downedID)
+		}
+	})
+
 	t.Run("the machine comes back from an empty home as a new node", func(t *testing.T) {
+		before := configuration(boot.requireStatus(t))
 		victim.stop()
 		reborn := newRunningNode(t, "node-3-reborn", shortHome(t), victim.cfg)
 		reborn.cfg.HomeFlag = reborn.hd.Root()
@@ -239,8 +288,8 @@ func TestRemovedNodeStaysRemoved(t *testing.T) {
 			t.Fatalf("the machine came back under its removed identity %s", victimID)
 		}
 		cfg := configuration(boot.requireStatus(t))
-		if _, listed := cfg[victimID]; listed || len(cfg) != 4 {
-			t.Fatalf("configuration %v, want the three members and %s, without %s", cfg, newID, victimID)
+		if _, listed := cfg[victimID]; listed || len(cfg) != len(before)+1 {
+			t.Fatalf("configuration %v, want %v and %s, without %s", cfg, before, newID, victimID)
 		}
 	})
 }
@@ -292,10 +341,34 @@ func requireStaysUp(t *testing.T, n *runningNode) {
 	if err != nil || resp.Msg.Transferred {
 		t.Fatalf("yield-leadership on %s: %v, %v; want answered with nothing transferred", n.name, resp, err)
 	}
+	requirePublicSurfaceOnly(t, n)
+}
+
+// requirePublicSurfaceOnly asserts the removed node's TCP listener, which
+// authenticates nobody, shows the probes and the bare fact of the removal:
+// not the node, not when or why.
+func requirePublicSurfaceOnly(t *testing.T, n *runningNode) {
+	t.Helper()
+	st := n.requireStatus(t)
+	secrets := []string{string(st.LocalNodeId), st.Removal.GetReason(), server.RemovedNodeRemedy}
 	for path, want := range map[string]int{"/healthz": http.StatusOK, "/readyz": http.StatusServiceUnavailable} {
-		code, _ := httpGet(t, "http://"+n.cfg.ServerAddr+path)
+		code, body := httpGet(t, "http://"+n.cfg.ServerAddr+path)
 		if code != want {
 			t.Fatalf("%s %s = %d, want %d", n.name, path, code, want)
+		}
+		if code == http.StatusServiceUnavailable && strings.TrimSpace(body) != server.RemovedNodePublicNotice {
+			t.Fatalf("%s %s over TCP says %q, want only %q", n.name, path, body, server.RemovedNodePublicNotice)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), statusAnswerBound)
+	defer cancel()
+	_, err := server.NewClient("http://"+n.cfg.ServerAddr).Lifecycle.GetClusterStatus(ctx, connect.NewRequest(&apiv1.GetClusterStatusRequest{}))
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("cluster status over TCP on %s: %v, want FailedPrecondition", n.name, err)
+	}
+	for _, secret := range secrets {
+		if secret != "" && strings.Contains(err.Error(), secret) {
+			t.Fatalf("cluster status over TCP on %s reveals %q: %v", n.name, secret, err)
 		}
 	}
 }

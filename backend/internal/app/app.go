@@ -203,22 +203,19 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	memberCtx, leave := context.WithCancelCause(ctx)
 	defer leave(nil)
-	err = runMember(memberCtx, leave, logger, cfg, hd, ident.ID.String())
-	var removed *removedFromCluster
-	if errors.As(context.Cause(memberCtx), &removed) && ctx.Err() == nil {
-		return serveRemovedNode(ctx, logger, cfg, hd, ident.ID, removed.removal)
-	}
-	return err
+	end := newMembershipEnd(leave)
+	err = runMember(memberCtx, end, logger, cfg, hd, ident.ID.String())
+	return finishMembership(ctx, logger, cfg, hd, ident.ID, end, err)
 }
 
 // runMember runs the node as a cluster member until ctx is cancelled. It is
 // the composition root: each subsystem's wiring depends on the ones before
 // it, so it stays one linear sequence and the subsystems' own logic lives in
-// their files. leave ends membership from inside, when the cluster removes
-// this node.
+// their files. end ends membership from inside, when this node learns the
+// cluster removed it.
 //
 //nolint:gocognit,gocyclo // composition root: wires every subsystem in dependency order
-func runMember(ctx context.Context, leave context.CancelCauseFunc, logger *slog.Logger, cfg RunConfig, hd home.Dir, nodeID string) error {
+func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg RunConfig, hd home.Dir, nodeID string) error {
 	// Raft failure-detector timing must be installed before ANY group or
 	// transport exists — openConfigStore below already starts cluster-ctl.
 	// Partial operator input resolves against the shipped defaults so
@@ -245,6 +242,14 @@ func runMember(ctx context.Context, leave context.CancelCauseFunc, logger *slog.
 	clusterSrv, clusterTLS, err := setupCluster(ctx, logger, cfg, hd, nodeID)
 	if err != nil {
 		return err
+	}
+	if clusterSrv != nil {
+		// Before Raft starts: a node that was down when the cluster removed
+		// it learns so from its first refused call, wherever startup is.
+		clusterSrv.SetEvictionHandler(end.removed)
+		clusterSrv.SetRefusedAsRemovedObserver(func(byPeer string) {
+			end.removed("refused as removed by cluster member " + byPeer)
+		})
 	}
 
 	// There is no boot-time auto-rejoin check here: yield-leadership
@@ -304,6 +309,9 @@ func runMember(ctx context.Context, leave context.CancelCauseFunc, logger *slog.
 	// Non-blocking: try local FSM, bootstrap, or return nil for replication cases.
 	appSys, fromLocalFSM, err := loadLocalConfig(ctx, logger, cfg, cfgStore, clusterSrv, clusterTLS, nodeID)
 	if err != nil {
+		if cluster.RefusedAsRemoved(err, nodeID) {
+			end.removed("refused membership as removed by " + cfg.JoinAddr)
+		}
 		return err
 	}
 
@@ -437,9 +445,7 @@ func runMember(ctx context.Context, leave context.CancelCauseFunc, logger *slog.
 	}
 
 	// Wire the dispatcher now that orchestrator and factories are available.
-	disp.orch = orch
-	disp.cfgStore = cfgStore
-	disp.factories = factories
+	disp.wire(orch, cfgStore, factories)
 
 	// Sync the ComponentFilterHandler's rule set with the system config
 	// store. Watcher runs until ctx is cancelled; on every configSignal
@@ -525,7 +531,7 @@ func runMember(ctx context.Context, leave context.CancelCauseFunc, logger *slog.
 				return slices.Contains(orch.StorageProtectedVaults(), id)
 			},
 		}
-		disp.placementTrigger = pm.Trigger
+		disp.setPlacementTrigger(pm.Trigger)
 		placementReconcileFn = pm.Reconcile
 		go pm.Run(ctx)
 
@@ -655,8 +661,6 @@ func runMember(ctx context.Context, leave context.CancelCauseFunc, logger *slog.
 		joinClusterFn = makeJoinClusterFunc(proxy, clusterSrv, clusterTLS, hd, nodeID, advertisedAddr, orch, disp, logger)
 		removeNodeFn = makeRemoveNodeFunc(clusterSrv, cfgStore, &membershipChanges, nodeID, logger)
 		setNodeSuffrageFn = makeSetNodeSuffrageFunc(clusterSrv, cfgStore, &membershipChanges, nodeID, orch.Scheduler(), logger)
-
-		clusterSrv.SetEvictionHandler(makeEvictionHandler(proxy, leave, logger))
 
 		// No stale-voter reaper here: the preStop hook + `cluster
 		// demote-self` CLI make every K8s-managed termination call

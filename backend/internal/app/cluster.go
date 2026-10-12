@@ -596,35 +596,6 @@ func makeJoinClusterFunc(
 	}
 }
 
-// makeEvictionHandler returns what the cluster server runs when the leader
-// tells this node it was removed. The removal is recorded beside the node's
-// identity, so every later start of this home finds it, and then membership
-// ends: Run shuts the member down in order and serves the removal from then
-// on.
-func makeEvictionHandler(proxy *system.StoreProxy, leave context.CancelCauseFunc, logger *slog.Logger) func(reason string) {
-	var once sync.Once
-	return func(reason string) {
-		once.Do(func() {
-			removal := nodeRemoval{At: time.Now(), Reason: reason}
-			if err := recordRemovalInHome(proxy, removal); err != nil {
-				logger.Error("could not record this node's removal in its home; the next start of this home runs it as a member the cluster refuses",
-					"error", err)
-			}
-			leave(&removedFromCluster{removal: removal})
-		})
-	}
-}
-
-// recordRemovalInHome persists the removal through the running cluster-ctl
-// store's WAL, the one that holds the node's identity.
-func recordRemovalInHome(proxy *system.StoreProxy, removal nodeRemoval) error {
-	rcs, ok := proxy.Inner().(*raftClusterCtlStore)
-	if !ok {
-		return errors.New("config store is not raft-backed")
-	}
-	return recordNodeRemoval(rcs.wal.GroupStore("cluster-ctl"), removal)
-}
-
 // nodeRemover is the leader-side removal serializer: one instance per
 // node, shared by every entry point that can start a removal here (the
 // local-leader call and the ForwardRemoveNode handler). Removal requests

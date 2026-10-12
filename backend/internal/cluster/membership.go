@@ -86,7 +86,7 @@ func (s *Server) requestMembership(ctx context.Context, req *gastrologv1.Request
 		case errors.Is(err, ErrNodeRemoved):
 			logging.Default(s.logger).Warn("membership refused: the cluster removed this node",
 				"requested_node_id", nodeID, "certificate_node_id", certID, "node_addr", req.GetNodeAddr())
-			return nil, status.Error(codes.PermissionDenied, err.Error())
+			return nil, removedRefusal(nodeID, err.Error())
 		default:
 			return nil, status.Errorf(codes.Internal, "membership change: %v", err)
 		}

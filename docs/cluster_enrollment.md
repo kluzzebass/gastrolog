@@ -209,7 +209,8 @@ the identity presented: a `RequestMembership` from a removed node, and one
 whose request names a different node than its certificate
 (`requested_node_id`, `certificate_node_id`), are logged on the member that
 received it; any other call from a node in the removal record is refused as
-"removed from this cluster" and logged once per node. A non-member that is
+"removed from this cluster", with the `RemovedNodeRefusal` detail, and
+logged once per node. A non-member that is
 not in the removal record — a joiner reaching a peer that has not applied its
 admission yet — is refused without a log line.
 
@@ -274,14 +275,28 @@ re-address itself; retrying the removal completes it.
 ### The removed node's side
 
 After the configuration change the leader tells the removed node
-(`NotifyEviction`). The node records its removal in its home, in the
-cluster-ctl Raft stable store beside its node identity, so the two cannot be
-separated short of deleting both. It then shuts its member side down and
-serves only the account of the removal (see the Removed state in
-[node-lifecycle-design.md](node-lifecycle-design.md)). Every later start of
-that home finds the record before it opens Raft, loads a certificate or
-contacts a peer, and serves the removal again. The node keeps its
-certificate and its identity; neither buys it anything.
+(`NotifyEviction`). A node that was down then learns it from the first
+member that refuses one of its calls: the refusal of a node in the removal
+record is a `PermissionDenied` carrying a `RemovedNodeRefusal` detail that
+names the node. The node acts on that detail only when it names the node
+itself and comes from the peer it dialled — a node its own configuration
+lists, whose certificate names it — the same standing a `NotifyEviction`
+caller needs. A `RequestMembership` refused with the detail counts the same
+way. The notification is taken in even while the node is stopping: a
+graceful stop waits for the call, so a removal that races a rolling restart
+is not lost.
+
+Either way the node shuts its member side down and records the removal in
+its home, in the cluster-ctl Raft stable store beside its node identity, so
+the two cannot be separated short of deleting both. It then serves only the
+account of the removal (see the Removed state in
+[node-lifecycle-design.md](node-lifecycle-design.md)): the full account —
+reason, time and remedy — on its Unix socket and in its log, and on its TCP
+listener, which authenticates nobody, only the probes and a bare "removed
+from cluster". Every later start of that home finds the record before it
+opens Raft, loads a certificate or contacts a peer, and serves the removal
+again. The node keeps its certificate and its identity; neither buys it
+anything.
 
 A home that holds `cluster-tls.json` but no node identity — its raft
 directory deleted, or only the identity store in it — is refused at start.
@@ -291,9 +306,10 @@ than its identity is refused the same way. Both are local refusals with an
 operator-facing reason; the cluster's own checks above are what deny the
 identity regardless of what the node runs.
 
-A node that was down when it was removed never receives the notification.
-When it starts again it believes itself a member, but every member refuses
-its calls as removed and logs that once.
+Bringing the machine back as a new node takes an empty home and emptied
+vault storage. Vault data directories are named by vault, not by node, so a
+new node given a file storage at the old path would open the removed node's
+chunk directories for any vault placed on it.
 
 ## Constraints and Trade-offs
 

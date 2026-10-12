@@ -36,8 +36,13 @@ func (n RemovedNode) Explanation() string {
 		n.NodeID, n.RemovedAt.UTC().Format(time.RFC3339), n.Reason, RemovedNodeRemedy)
 }
 
-// RemovedNodeHandler serves the API of a removed node. It answers cluster
-// status, health and leadership questions from what the node knows about its
+// RemovedNodePublicNotice is all a removed node tells an unauthenticated
+// caller: that it was removed, and nothing of when, why or who it was.
+const RemovedNodePublicNotice = "removed from cluster"
+
+// RemovedNodeHandler serves the API of a removed node on its Unix socket,
+// whose file permissions are the access control. It answers cluster status,
+// health and leadership questions from what the node knows about its
 // removal, and refuses every other call with that account. It reads no
 // cluster state: a removed node opens neither its Raft store nor its vaults.
 func RemovedNodeHandler(n RemovedNode, version string) http.Handler {
@@ -72,30 +77,37 @@ func RemovedNodeHandler(n RemovedNode, version string) http.Handler {
 		func(context.Context, *connect.Request[apiv1.YieldLeadershipRequest]) (*connect.Response[apiv1.YieldLeadershipResponse], error) {
 			return connect.NewResponse(&apiv1.YieldLeadershipResponse{Transferred: false}), nil
 		}))
+	mux.Handle("/", refuseWith(n.Explanation()))
+	return securityHeadersMiddleware(mux)
+}
 
-	// The process is alive and must stay up, so the liveness probe passes;
-	// it serves nothing, so the readiness probe never does.
+// RemovedNodePublicHandler serves a removed node's TCP listener, which
+// authenticates nobody: the probes and nothing else. The liveness probe
+// passes — the process is meant to stay up — and every other request,
+// readiness included, gets RemovedNodePublicNotice.
+func RemovedNodePublicHandler() http.Handler {
+	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	explain := func(w http.ResponseWriter) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = io.WriteString(w, n.Explanation()+"\n")
-	}
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) { explain(w) })
+	mux.Handle("/", refuseWith(RemovedNodePublicNotice))
+	return securityHeadersMiddleware(mux)
+}
 
-	refusal := connect.NewError(connect.CodeFailedPrecondition, errors.New(n.Explanation()))
+// refuseWith answers an RPC with FailedPrecondition and anything else with a
+// 503 page, both carrying text.
+func refuseWith(text string) http.Handler {
+	refusal := connect.NewError(connect.CodeFailedPrecondition, errors.New(text))
 	errWriter := connect.NewErrorWriter()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && errWriter.IsSupported(r) {
 			_ = errWriter.Write(w, r, refusal)
 			return
 		}
-		explain(w)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, text+"\n")
 	})
-
-	return securityHeadersMiddleware(mux)
 }
 
 // removedNodeDrain bounds how long shutdown waits for in-flight requests.
@@ -103,13 +115,12 @@ func RemovedNodeHandler(n RemovedNode, version string) http.Handler {
 // still running after this is a client that stopped reading.
 const removedNodeDrain = time.Second
 
-// ServeRemovedNode serves RemovedNodeHandler on the node's API address, when
-// it has one, and on its Unix socket until ctx ends.
+// ServeRemovedNode serves RemovedNodePublicHandler on the node's API address,
+// when it has one, and RemovedNodeHandler on its Unix socket, until ctx ends.
 func ServeRemovedNode(ctx context.Context, n RemovedNode, version, addr, socketPath string, logger *slog.Logger) error {
-	handler := RemovedNodeHandler(n, version)
 	var servers []*http.Server
 	var wg sync.WaitGroup
-	serve := func(ln net.Listener) {
+	serve := func(ln net.Listener, handler http.Handler) {
 		srv := newTimedServer(handler, readHeaderTimeout, readTimeout, idleTimeout)
 		servers = append(servers, srv)
 		wg.Go(func() {
@@ -124,7 +135,7 @@ func ServeRemovedNode(ctx context.Context, n RemovedNode, version, addr, socketP
 		if err != nil {
 			return fmt.Errorf("listen %s: %w", addr, err)
 		}
-		serve(ln)
+		serve(ln, RemovedNodePublicHandler())
 	}
 	if socketPath != "" {
 		ln, err := listenUnixSocket(socketPath)
@@ -132,7 +143,7 @@ func ServeRemovedNode(ctx context.Context, n RemovedNode, version, addr, socketP
 			logger.Warn("removed node: unix socket unavailable", "error", err)
 		} else {
 			defer func() { _ = os.Remove(socketPath) }()
-			serve(ln)
+			serve(ln, RemovedNodeHandler(n, version))
 		}
 	}
 

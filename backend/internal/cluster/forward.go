@@ -870,25 +870,13 @@ func (s *Server) forwardSetNodeSuffrage(ctx context.Context, req *gastrologv1.Fo
 }
 
 // notifyEviction handles the NotifyEviction RPC — tells this node it has been
-// removed from the cluster. The eviction handler (if registered) is called
-// asynchronously so the RPC can return before shutdown begins.
-//
-// If the server is already shutting down (stopCtx cancelled), the eviction
-// notification is acknowledged and ignored: the handler records the removal
-// through the cluster-ctl WAL, which shutdown is closing under it.
+// removed from the cluster. The handler runs before the RPC returns, so a
+// removal that arrives while the server is stopping is still taken in before
+// Stop finishes: a graceful stop waits for in-flight calls.
 func (s *Server) notifyEviction(_ context.Context, req *gastrologv1.NotifyEvictionRequest) (*gastrologv1.NotifyEvictionResponse, error) {
-	if s.stopCtx != nil && s.stopCtx.Err() != nil {
-		s.logger.Info("ignoring eviction notification — server already shutting down",
-			"reason", req.GetReason())
-		// stopCtx.Err() signals "we're already shutting down", not an RPC
-		// failure. Returning success closes the eviction RPC cleanly while
-		// the node exits; surfacing the ctx error to the caller would make
-		// the cluster think the eviction failed and retry.
-		return &gastrologv1.NotifyEvictionResponse{}, nil //nolint:nilerr
-	}
 	s.logger.Warn("received eviction notification", "reason", req.GetReason())
 	if s.evictionHandler != nil {
-		go s.evictionHandler(req.GetReason())
+		s.evictionHandler(req.GetReason())
 	}
 	return &gastrologv1.NotifyEvictionResponse{}, nil
 }

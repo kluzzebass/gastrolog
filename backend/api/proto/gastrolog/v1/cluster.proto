@@ -542,8 +542,18 @@ message ForwardExportToVaultResponse {
   bytes job_id = 1;
 }
 
+// RemovedNodeRefusal rides on the PermissionDenied status a member returns
+// when it refuses a call from a node the cluster removed. It is what lets the
+// refused node tell its own removal apart from any other refusal, including
+// when it was down when the leader would have told it.
+message RemovedNodeRefusal {
+  // The removed node, as its certificate names it.
+  string node_id = 1;
+}
+
 // NotifyEvictionRequest is sent by the leader to a node that has been removed
-// from the cluster. The evicted node should initiate a graceful shutdown.
+// from the cluster. The node records its removal and serves only that from
+// then on.
 message NotifyEvictionRequest {
   string reason = 1;
 }

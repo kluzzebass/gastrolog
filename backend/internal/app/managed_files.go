@@ -112,7 +112,7 @@ func wireManagedFiles(ctx context.Context, deps serverDeps, srv *server.Server) 
 		return
 	}
 	mgr := wireManagedFileTransfer(deps.ClusterSrv, srv, deps.CfgStore, deps.HomeDir, deps.Logger)
-	deps.Dispatcher.managedFileHandler = mgr
+	deps.Dispatcher.setManagedFileHandler(mgr)
 
 	// On-demand repair: when the server resolves a manifest entry
 	// but the file is missing from disk, this pulls it from a peer

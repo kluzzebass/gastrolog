@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gastrolog/internal/cluster/tlsutil"
@@ -130,6 +131,8 @@ type Server struct {
 	// refusedRemoved holds the removed nodes whose calls this node has
 	// logged refusing, so a removed node that keeps calling is logged once.
 	refusedRemoved sync.Map
+	// refusedAsRemoved is what runs when a peer refuses this node as removed.
+	refusedAsRemoved atomic.Pointer[func(byPeer string)]
 
 	// evictionHandler is called with the leader's reason when this node
 	// receives a NotifyEviction RPC, meaning it has been removed from the
@@ -347,6 +350,7 @@ func (s *Server) SetRaft(r *hraft.Raft) {
 			Logger:                s.logger,
 			ServicePoolMaxPerPeer: s.cfg.ServicePoolMaxPerPeer,
 			ByteMetrics:           s.cfg.ByteMetrics,
+			OnRefusedAsRemoved:    s.observeRefusedAsRemoved,
 		})
 	}
 	if s.tm != nil {
@@ -849,7 +853,7 @@ func (s *Server) explainRefusal(err error, leaf *x509.Certificate, method string
 		logging.Default(s.logger).Warn("refusing cluster calls from a node the cluster removed",
 			"certificate_node_id", nodeID, "method", method)
 	}
-	return status.Errorf(codes.PermissionDenied, "node %s was removed from this cluster", nodeID)
+	return removedRefusal(nodeID, fmt.Sprintf("node %s was removed from this cluster", nodeID))
 }
 
 // verifiedPeerLeaf returns the certificate the peer presented, once the TLS

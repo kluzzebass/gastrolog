@@ -74,6 +74,7 @@ type LifecycleServer struct {
 	listVaultsFn      func(ctx context.Context) []*apiv1.VaultInfo
 	getStatsFn        func(ctx context.Context) *apiv1.GetStatsResponse
 	listStoragesFn    func(ctx context.Context) []*apiv1.StorageState
+	snapshots         *statusSnapshots
 	logger            *slog.Logger
 }
 
@@ -92,8 +93,16 @@ func NewLifecycleServer(orch *orchestrator.Orchestrator, shutdown func(drain boo
 		clusterAddress: clusterAddress,
 		peerStats:      peerStats,
 		localStats:     localStats,
+		snapshots:      newStatusSnapshots(),
 		logger:         compLifecycle.Apply(logging.Default(logger)),
 	}
+}
+
+// useStatusSnapshots shares one system-status snapshot cache between the
+// lifecycle servers of one server, so it is built once per update, not once
+// per listener.
+func (s *LifecycleServer) useStatusSnapshots(c *statusSnapshots) {
+	s.snapshots = c
 }
 
 // SetJoinClusterFunc sets the callback for the JoinCluster RPC.
@@ -551,28 +560,44 @@ func (s *LifecycleServer) YieldLeadership(
 
 // WatchSystemStatus streams combined system status whenever stats update.
 // Replaces polling GetClusterStatus, Health, and GetRouteStats.
+//
+// It sends snapshots built off the request path (statusSnapshots), so a
+// subscriber is answered from the last one even while a build is held up.
+// Only a server that has never finished a build makes its first subscriber
+// wait for one.
 func (s *LifecycleServer) WatchSystemStatus(
 	ctx context.Context,
 	req *connect.Request[apiv1.WatchSystemStatusRequest],
 	stream *connect.ServerStream[apiv1.WatchSystemStatusResponse],
 ) error {
-	// Send initial snapshot immediately.
-	if err := stream.Send(s.buildSystemStatus(ctx)); err != nil {
-		return err
-	}
-
-	if s.statsSignal == nil {
-		<-ctx.Done()
-		return nil
-	}
-
-	for {
-		ch := s.statsSignal.C()
+	snaps := s.snapshots
+	snaps.bind(s.buildSystemStatus)
+	updated := snaps.updated.C()
+	snaps.refresh()
+	if snaps.latest.Load() == nil {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-ch:
-			if err := stream.Send(s.buildSystemStatus(ctx)); err != nil {
+		case <-updated:
+		}
+	}
+	if err := stream.Send(snaps.latest.Load()); err != nil {
+		return err
+	}
+
+	for {
+		updated = snaps.updated.C()
+		var stats <-chan struct{}
+		if s.statsSignal != nil {
+			stats = s.statsSignal.C()
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-stats:
+			snaps.refresh()
+		case <-updated:
+			if err := stream.Send(snaps.latest.Load()); err != nil {
 				return err
 			}
 		}

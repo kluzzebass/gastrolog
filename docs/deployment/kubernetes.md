@@ -186,16 +186,19 @@ remove voters from Raft membership *before* `kubectl scale` so dead
 pods don't linger in `cluster status` as orphan voters, and they
 delete the now-unused PVCs after scale-down.
 
-A removed node does not rejoin. If its pod keeps running, or restarts
-on the same `config` PVC, it stays `Running` but never `Ready`: it
-logs its removal and the remedy once at error level, `/readyz` answers
-503 with the same text, and `gastrolog --home /config cluster status`
-inside the pod reports the removal instead of a topology. It takes no
-part in the cluster and does not crash-loop. To bring that ordinal
-back, delete its `config` PVC so the pod starts from an empty home; it
-then enrols as a new node under a new node ID. Deleting only
-`/config/raft` is refused at start: the home still holds the old
-node's certificate.
+A removed node does not rejoin — whether it was running when it was
+removed or was down and restarts later on the same PVCs. It stays
+`Running` but never `Ready`: it logs its removal and the remedy once at
+error level, `/readyz` answers 503 with a bare "removed from cluster",
+and `gastrolog --home /config cluster status` inside the pod (the Unix
+socket) reports when and why. It takes no part in the cluster and does
+not crash-loop. To bring that ordinal back as a new node, delete both of
+its PVCs, `config` and `vaults`, so the pod starts from an empty home and
+empty vault storage; it then enrols under a new node ID. Vault data
+directories are named by vault, not by node, so a new node handed the old
+`vaults` volume would open the removed node's chunks. Deleting only
+`/config/raft` is refused at start: the home still holds the old node's
+certificate.
 
 `gastrolog-0` should never be removed — it's the bootstrap and
 holds Raft state required for new joiners to enroll. The recipes

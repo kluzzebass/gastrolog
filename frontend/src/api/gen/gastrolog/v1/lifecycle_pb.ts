@@ -328,7 +328,7 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
   localNodeId = new Uint8Array(0);
 
   /**
-   * @generated from field: string cluster_address = 8;
+   * @generated from field: string cluster_address = 7;
    */
   clusterAddress = "";
 
@@ -338,7 +338,7 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
    * node's stats older than this are no longer served, so a UI that still
    * shows them is showing a copy the cluster itself has let go of.
    *
-   * @generated from field: string stats_ttl = 9;
+   * @generated from field: string stats_ttl = 8;
    */
   statsTtl = "";
 
@@ -346,7 +346,7 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
    * Set when the cluster removed the answering node. A removed node takes no
    * part in the cluster, so it reports no topology and no Raft state.
    *
-   * @generated from field: gastrolog.v1.NodeRemoval removal = 10;
+   * @generated from field: gastrolog.v1.NodeRemoval removal = 9;
    */
   removal?: NodeRemoval;
 
@@ -364,9 +364,9 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
     { no: 4, name: "nodes", kind: "message", T: ClusterNode, repeated: true },
     { no: 5, name: "local_stats", kind: "message", T: RaftStats },
     { no: 6, name: "local_node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 8, name: "cluster_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 9, name: "stats_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 10, name: "removal", kind: "message", T: NodeRemoval },
+    { no: 7, name: "cluster_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 8, name: "stats_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 9, name: "removal", kind: "message", T: NodeRemoval },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetClusterStatusResponse {

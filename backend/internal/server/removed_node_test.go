@@ -1,12 +1,13 @@
 package server_test
 
 // A node the cluster removed keeps serving one thing: the account of its
-// removal. Status, health and the preStop hook's question get answers;
-// everything else, the UI's first call and every administrative verb
+// removal, on its Unix socket. Status, health and the preStop hook's
+// question get answers there; everything else, every administrative verb
 // included, is refused with that account and nothing behind it runs.
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -120,9 +121,26 @@ func TestRemovedNodeRefusesEveryOtherCall(t *testing.T) {
 	}
 }
 
-func TestRemovedNodeProbesAndPages(t *testing.T) {
+// Anyone who reaches the TCP listener of a removed node learns what its
+// readiness probe already says and nothing more: not which node it was, not
+// when or why it was removed, not its version. The account is for the Unix
+// socket, whose file permissions are the access control.
+func TestRemovedNodePublicSurfaceRevealsNothingMore(t *testing.T) {
 	t.Parallel()
-	n, _, api := removedNodeAPI(t)
+	n, _, _ := removedNodeAPI(t)
+	api := httptest.NewServer(server.RemovedNodePublicHandler())
+	t.Cleanup(api.Close)
+	client := server.NewClientWithHTTP(api.Client(), api.URL)
+	secrets := []string{n.NodeID, n.Reason, n.RemovedAt.Format(time.RFC3339), "test-version", server.RemovedNodeRemedy}
+	leaks := func(where, text string) {
+		t.Helper()
+		for _, secret := range secrets {
+			if strings.Contains(text, secret) {
+				t.Errorf("%s reveals %q: %q", where, secret, text)
+			}
+		}
+	}
+
 	for path, want := range map[string]int{
 		"/healthz": http.StatusOK,
 		"/readyz":  http.StatusServiceUnavailable,
@@ -138,10 +156,44 @@ func TestRemovedNodeProbesAndPages(t *testing.T) {
 		if resp.StatusCode != want {
 			t.Errorf("GET %s = %d, want %d", path, resp.StatusCode, want)
 		}
-		if want == http.StatusServiceUnavailable && !strings.Contains(string(body), n.Explanation()) {
-			t.Errorf("GET %s says %q, want the removal and its remedy", path, body)
+		if want == http.StatusServiceUnavailable && strings.TrimSpace(string(body)) != server.RemovedNodePublicNotice {
+			t.Errorf("GET %s says %q, want only %q", path, body, server.RemovedNodePublicNotice)
 		}
+		leaks("GET "+path, string(body))
 	}
+
+	ctx := context.Background()
+	for name, call := range map[string]func() error{
+		"GetClusterStatus": func() error {
+			_, err := client.Lifecycle.GetClusterStatus(ctx, connect.NewRequest(&gastrologv1.GetClusterStatusRequest{}))
+			return err
+		},
+		"Health": func() error {
+			_, err := client.Lifecycle.Health(ctx, connect.NewRequest(&gastrologv1.HealthRequest{}))
+			return err
+		},
+		"YieldLeadership": func() error {
+			_, err := client.Lifecycle.YieldLeadership(ctx, connect.NewRequest(&gastrologv1.YieldLeadershipRequest{}))
+			return err
+		},
+		"Shutdown": func() error {
+			_, err := client.Lifecycle.Shutdown(ctx, connect.NewRequest(&gastrologv1.ShutdownRequest{}))
+			return err
+		},
+	} {
+		err := call()
+		var cerr *connect.Error
+		if !errors.As(err, &cerr) || cerr.Code() != connect.CodeFailedPrecondition || cerr.Message() != server.RemovedNodePublicNotice {
+			t.Errorf("%s over TCP: %v, want FailedPrecondition %q only", name, err, server.RemovedNodePublicNotice)
+			continue
+		}
+		leaks(name+" over TCP", err.Error())
+	}
+}
+
+func TestRemovedNodeExplanationNamesNodeAndRemedy(t *testing.T) {
+	t.Parallel()
+	n, _, _ := removedNodeAPI(t)
 	if !strings.Contains(n.Explanation(), server.RemovedNodeRemedy) || !strings.Contains(n.Explanation(), n.NodeID) {
 		t.Fatalf("explanation %q does not name the node and the remedy", n.Explanation())
 	}

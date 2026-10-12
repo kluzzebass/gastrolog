@@ -297,28 +297,28 @@ func (noopIngester) Run(context.Context, chan<- ingestion.IngesterMessage) error
 
 // newTestDispatcher creates a configDispatcher wired to the given mocks.
 func newTestDispatcher(orch orchActions, store system.Store, h *captureHandler) *configDispatcher {
-	return &configDispatcher{
-		orch:        orch,
-		cfgStore:    store,
-		factories:   orchestrator.Factories{IngesterTypes: map[string]orchestrator.IngesterRegistration{}},
+	d := &configDispatcher{
 		localNodeID: "local",
 		logger:      slog.New(h),
 	}
+	d.wire(orch, store, orchestrator.Factories{IngesterTypes: map[string]orchestrator.IngesterRegistration{}})
+	return d
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-func TestHandle_NilOrch(t *testing.T) {
+// The cluster-ctl FSM delivers before Run has wired the orchestrator side;
+// those notifications are dropped quietly.
+func TestHandle_BeforeWiring(t *testing.T) {
 	h := &captureHandler{}
-	d := newTestDispatcher(nil, &stubCfgStore{}, h)
+	d := &configDispatcher{localNodeID: "local", logger: slog.New(h)}
 
-	// Should not panic; bootstrap phase silently returns.
 	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: glid.New()})
 
 	if h.count() != 0 {
-		t.Fatal("expected no log output when orch is nil")
+		t.Fatal("expected no log output before wiring")
 	}
 }
 

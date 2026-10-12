@@ -96,6 +96,8 @@ type PeerConnManager struct {
 	logger      *slog.Logger
 	byteMetrics *PeerByteMetrics // optional; mirrors outbound bytes per peer
 
+	onRefusedAsRemoved func(byPeer string)
+
 	servicePoolMax int
 
 	staticResolve func(nodeID string) (string, bool)
@@ -182,6 +184,9 @@ type PeerConnManagerConfig struct {
 	// managed connection (service and raft lanes). Inbound bytes are tracked on
 	// the cluster server stats handler separately.
 	ByteMetrics *PeerByteMetrics
+	// OnRefusedAsRemoved runs when a peer refuses this node because the
+	// cluster removed it; nil ignores such refusals.
+	OnRefusedAsRemoved func(byPeer string)
 }
 
 // NewPeerConnManager creates the central outbound connection manager.
@@ -198,6 +203,8 @@ func NewPeerConnManager(cfg PeerConnManagerConfig) *PeerConnManager {
 		servicePoolMax: poolMax,
 		staticResolve:  cfg.StaticResolve,
 		byteMetrics:    cfg.ByteMetrics,
+
+		onRefusedAsRemoved: cfg.OnRefusedAsRemoved,
 	}
 	for i := range m.shards {
 		m.shards[i].entries = make(map[string]*connEntry)
@@ -607,8 +614,8 @@ func (m *PeerConnManager) dial(spec ConnSpec, poolIndex int) (*managedConn, erro
 				MaxDelay:   3 * time.Second,
 			},
 		}),
-		grpc.WithChainUnaryInterceptor(m.attachNodeIDUnaryInterceptor, peerStatusUnaryClientInterceptor),
-		grpc.WithChainStreamInterceptor(m.attachNodeIDStreamInterceptor, peerStatusStreamClientInterceptor),
+		grpc.WithChainUnaryInterceptor(m.observeRemovalUnary(spec.PeerNodeID), m.attachNodeIDUnaryInterceptor, peerStatusUnaryClientInterceptor),
+		grpc.WithChainStreamInterceptor(m.observeRemovalStream(spec.PeerNodeID), m.attachNodeIDStreamInterceptor, peerStatusStreamClientInterceptor),
 		grpc.WithStatsHandler(newManagedConnStatsHandler(mc, m.byteMetrics)),
 	}
 	if spec.Lane == LaneService {

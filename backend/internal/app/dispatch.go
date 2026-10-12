@@ -65,6 +65,13 @@ type ManagedFileHandler interface {
 // It is called synchronously from within FSM.Apply, so actions complete before
 // the cfgStore write method returns to the server handler.
 type configDispatcher struct {
+	// wiring guards what Run binds after the cluster-ctl FSM may already be
+	// delivering notifications: orch, cfgStore and factories (bound together
+	// by wire), placementTrigger and managedFileHandler. Handle drops
+	// notifications until wire has run.
+	wiring sync.RWMutex
+	wired  bool
+
 	orch        orchActions
 	cfgStore    system.Store
 	factories   orchestrator.Factories
@@ -210,8 +217,8 @@ func (d *configDispatcher) obligationCount() int {
 // dispatch touching the same entity re-runs the handler (and settle clears the
 // obligation on success), as does startup replay in ReplayConfigFromStore.
 func (d *configDispatcher) Handle(n raftfsm.Notification) {
-	if d.orch == nil {
-		return // not wired yet (bootstrap phase)
+	if !d.isWired() {
+		return
 	}
 
 	ctx := context.Background()
@@ -275,12 +282,12 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		// promptly.
 		d.triggerPlacement()
 	case raftfsm.NotifyManagedFilePut:
-		if d.managedFileHandler != nil {
-			d.managedFileHandler.OnPut(ctx, n.ID)
+		if h := d.managedFiles(); h != nil {
+			h.OnPut(ctx, n.ID)
 		}
 	case raftfsm.NotifyManagedFileDeleted:
-		if d.managedFileHandler != nil {
-			d.managedFileHandler.OnDelete(n.ID)
+		if h := d.managedFiles(); h != nil {
+			h.OnDelete(n.ID)
 		}
 	case raftfsm.NotifyIngesterAssignmentSet:
 		d.settle(entIngester, "", "reconcile-ingesters", d.reconcileIngesters(ctx))
@@ -336,11 +343,49 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 	}
 }
 
+// wire binds the orchestrator side. Until it runs, Handle drops
+// notifications: there is nothing to apply them to yet.
+func (d *configDispatcher) wire(orch orchActions, cfgStore system.Store, factories orchestrator.Factories) {
+	d.wiring.Lock()
+	defer d.wiring.Unlock()
+	d.orch, d.cfgStore, d.factories = orch, cfgStore, factories
+	d.wired = true
+}
+
+func (d *configDispatcher) isWired() bool {
+	d.wiring.RLock()
+	defer d.wiring.RUnlock()
+	return d.wired
+}
+
+// setPlacementTrigger binds the placement manager's wake-up.
+func (d *configDispatcher) setPlacementTrigger(fn func()) {
+	d.wiring.Lock()
+	defer d.wiring.Unlock()
+	d.placementTrigger = fn
+}
+
+// setManagedFileHandler binds managed-file transfer.
+func (d *configDispatcher) setManagedFileHandler(h ManagedFileHandler) {
+	d.wiring.Lock()
+	defer d.wiring.Unlock()
+	d.managedFileHandler = h
+}
+
+func (d *configDispatcher) managedFiles() ManagedFileHandler {
+	d.wiring.RLock()
+	defer d.wiring.RUnlock()
+	return d.managedFileHandler
+}
+
 // triggerPlacement pokes the placement manager for an immediate reconcile,
 // tolerating the single-node case where no placement manager is wired.
 func (d *configDispatcher) triggerPlacement() {
-	if d.placementTrigger != nil {
-		d.placementTrigger()
+	d.wiring.RLock()
+	trigger := d.placementTrigger
+	d.wiring.RUnlock()
+	if trigger != nil {
+		trigger()
 	}
 }
 
@@ -367,9 +412,7 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id glid.GLID) err
 		if err := d.orch.AddVault(ctx, *vaultCfg, d.factories); err != nil {
 			errs = append(errs, fmt.Errorf("add vault %q: %w", vaultCfg.Name, err))
 		}
-		if d.placementTrigger != nil {
-			d.placementTrigger()
-		}
+		d.triggerPlacement()
 		return errors.Join(errs...)
 	}
 
@@ -414,9 +457,7 @@ func (d *configDispatcher) reconcileVaultInstance(ctx context.Context, vaultID g
 		errs = append(errs, d.applyExistingVaultChanges(ctx, vaultID, vaultCfg))
 	}
 
-	if d.placementTrigger != nil {
-		d.placementTrigger()
-	}
+	d.triggerPlacement()
 	return errors.Join(errs...)
 }
 
@@ -838,7 +879,7 @@ func (d *configDispatcher) handleNodeConfigChange(ctx context.Context) error {
 // Routes / rotation / retention reload as a whole set per call — idempotent and
 // goroutine-free — so they run unconditionally.
 func (d *configDispatcher) ReplayConfigFromStore(ctx context.Context) {
-	if d.orch == nil || d.cfgStore == nil {
+	if !d.isWired() {
 		return
 	}
 

@@ -576,16 +576,19 @@ one segmented file set, one batch-writer goroutine.
   identity back. The machine returns as a new node, under a new node ID.
   See [`docs/cluster_enrollment.md`](cluster_enrollment.md).
 
-- **Removed node** — a node the cluster removed, as it sees itself. Told by
-  the leader, it records its **node removal** (time and reason) beside its
-  node identity in its home's cluster-ctl stable store, shuts its member side
-  down, and from then on — in that process and on every start of the same
-  home — serves only the account of its removal: one error-level log line
-  with the remedy, `GetClusterStatusResponse.removal`, a failing readiness
-  probe, and a refusal naming the removal for every other call. It never
-  rejoins, mints a new identity, or runs as a cluster of its own; the remedy
-  is an empty home. A home holding the cluster certificate but no node
-  identity is an **incomplete home** and is refused at start.
+- **Removed node** — a node the cluster removed, as it sees itself. It
+  learns of its **node removal** from the leader, or, when it was down at
+  the time, from a member's **removed-node refusal** (a `PermissionDenied`
+  carrying `RemovedNodeRefusal`). It shuts its member side down, records the
+  removal (time and reason) beside its node identity in its home's
+  cluster-ctl stable store, and from then on — in that process and on every
+  start of the same home — serves only the account of its removal: one
+  error-level log line with the remedy and `GetClusterStatusResponse.removal`
+  on its Unix socket; its TCP listener shows only the probes and a bare
+  "removed from cluster". It never rejoins, mints a new identity, or runs as
+  a cluster of its own; the remedy is an empty home and emptied vault
+  storage. A home holding the cluster certificate but no node identity is an
+  **incomplete home** and is refused at start.
 
 - **Admission** — the leader's answer to a membership request. The request
   carries no suffrage: a node outside the configuration enters as a nonvoter
@@ -637,8 +640,8 @@ one segmented file set, one batch-writer goroutine.
   `ClusterNode.stats_received_at`, so every stats surface dates its figures
   and marks a sample older than the TTL as **stale**. The responding node
   reports its own stats as last collected for broadcast, dated by that
-  collection, so cluster status never waits on the subsystems a collection
-  reads.
+  collection, and the system status stream sends the last snapshot built off
+  the request path, so neither waits on the subsystems a collection reads.
 
 - **Responding node** — the node that answered a given RPC. The API has no
   session affinity, so behind a load balancer each request may be answered by
