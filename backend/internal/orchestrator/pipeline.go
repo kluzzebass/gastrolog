@@ -717,20 +717,39 @@ func (noHandlePublisher) Publish(context.Context, distribution.Metadata) error {
 // config. Routing is vault-only: each enabled route maps its match expression
 // to its destination vault IDs, independent of node placement — every node is
 // an Origin for every destination vault, so records are written to a local
-// durable segment wherever they are ingested.
+// durable segment wherever they are ingested. A disabled destination vault
+// receives nothing: the route distributes over its enabled destinations.
 func buildRoutingTable(sys *system.System) (*routing.Table, error) {
 	if sys == nil {
 		return routing.NewTable(nil), nil
+	}
+	disabled := make(map[glid.GLID]bool)
+	for _, v := range sys.Config.Vaults {
+		if !v.Enabled {
+			disabled[v.ID] = true
+		}
 	}
 	var routes []*routing.Route
 	for _, rc := range sys.Config.Routes {
 		if !rc.Enabled {
 			continue
 		}
-		r, err := routing.CompileRoute(rc.ID, rc.Name, rc.Priority, rc.MatchExpression(), rc.Destinations)
+		var accepting, refusing []glid.GLID
+		for _, vid := range rc.Destinations {
+			if disabled[vid] {
+				refusing = append(refusing, vid)
+			} else {
+				accepting = append(accepting, vid)
+			}
+		}
+		r, err := routing.CompileRoute(rc.ID, rc.Name, rc.Priority, rc.MatchExpression(), accepting)
 		if err != nil {
 			return nil, fmt.Errorf("compile route %s: %w", rc.Name, err)
 		}
+		if r.Distribution, err = routing.ParseDistribution(string(rc.Distribution)); err != nil {
+			return nil, fmt.Errorf("compile route %s: %w", rc.Name, err)
+		}
+		r.DisabledVaultIDs = refusing
 		routes = append(routes, r)
 	}
 	return routing.NewTable(routes), nil

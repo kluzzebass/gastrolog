@@ -36,6 +36,7 @@ func (h *orchRelHarness) addRuntimeVault(label string, nodeIdxs []int) (vaultSpe
 	ctx := context.Background()
 	v := vaultSpec{label: label, id: glid.New(), nodeIdxs: nodeIdxs}
 	if err := h.cfgStore.PutVault(ctx, system.VaultConfig{
+		Enabled:          true,
 		ID:               v.id,
 		Name:             "orch-rel-vault-" + label,
 		Type:             system.VaultTypeFile,

@@ -95,6 +95,7 @@ func TestOrchPipeline_BlackholedCloudStoreNeverStallsIngest(t *testing.T) {
 	}
 	vB := vaultSpec{label: "B", id: glid.New(), nodeIdxs: []int{0, 1, 2}}
 	if err := h.cfgStore.PutVault(ctx, system.VaultConfig{
+		Enabled:          true,
 		ID:               vB.id,
 		Name:             "orch-rel-vault-" + vB.label,
 		Type:             system.VaultTypeFile,

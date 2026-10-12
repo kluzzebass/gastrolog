@@ -34,8 +34,8 @@ const ROUTE_COMPONENTS_HELP_REF = "routing#route-components";
 
 const distributionTitles: Record<string, string> = {
   "fanout": "Fanout — every destination receives every matched record",
-  "round-robin": "Round Robin — matched records are spread evenly across destinations",
-  "failover": "Failover — records go to the first available destination",
+  "round-robin": "Round Robin — each matched record goes to one destination, rotating, skipping one that refuses",
+  "failover": "Failover — each matched record goes to the first destination, in order, that admits it",
 };
 
 function distributionBadge(distribution: string) {
@@ -237,7 +237,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
             description={
               newDestinations.length <= 1
                 ? "Only takes effect with two or more destinations."
-                : "Fanout sends to all destinations. Round Robin distributes evenly. Failover sends to the first available destination."
+                : "Fanout sends to every destination. Round Robin rotates across destinations, skipping one that refuses. Failover sends to the first destination, in order, that admits the record."
             }
             helpRef={ROUTE_COMPONENTS_HELP_REF}
             dark={dark}
@@ -341,7 +341,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
                 description={
                   edit.destinations.length <= 1
                     ? "Only takes effect with two or more destinations."
-                    : "Fanout sends to all destinations. Round Robin distributes evenly. Failover sends to the first available destination."
+                    : "Fanout sends to every destination. Round Robin rotates across destinations, skipping one that refuses. Failover sends to the first destination, in order, that admits the record."
                 }
                 helpRef={ROUTE_COMPONENTS_HELP_REF}
                 dark={dark}

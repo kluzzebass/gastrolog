@@ -544,9 +544,10 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 		_ = store.SetVaultPlacements(context.Background(), vaultIDs[i], placements)
 	}
 	_ = store.PutVault(context.Background(), system.VaultConfig{
-		ID:   vaultID,
-		Name: "cluster-vault",
-		Type: system.VaultTypeFile,
+		Enabled: true,
+		ID:      vaultID,
+		Name:    "cluster-vault",
+		Type:    system.VaultTypeFile,
 	})
 
 	// Build follower targets for the leader.

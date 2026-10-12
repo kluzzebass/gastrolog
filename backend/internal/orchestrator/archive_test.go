@@ -39,7 +39,8 @@ func TestArchiveChunkViaRetentionSweep(t *testing.T) {
 
 	store := sysmem.NewStore()
 	_ = store.PutVault(context.Background(), system.VaultConfig{
-		ID: vaultID, Name: "archive-test",
+		Enabled: true,
+		ID:      vaultID, Name: "archive-test",
 	})
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})
 	_ = orch.Scheduler().Stop()

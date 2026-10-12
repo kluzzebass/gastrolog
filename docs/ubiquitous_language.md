@@ -261,11 +261,20 @@ a vault's active chunk".
   the routing table for a vault that's draining). Other kinds may be
   added by future stages.
 
-- **Distribution mode** — how a single route fans matched records
-  across its destinations:
-  - `fanout` — write to all destinations (default).
-  - `round-robin` — rotate through destinations (load-balance).
-  - `failover` — try first; on failure, try next.
+- **Distribution mode** — how a single route spreads matched records over
+  its enabled destinations (`routing.Distribution`, chosen per record by
+  `routing.Manager.selectDestinations`):
+  - `fanout` — every destination (default); a destination refusing
+    admission refuses the whole record.
+  - `round-robin` — one destination per record, rotating from a per-route
+    position the routing manager keeps across table swaps; a refusing
+    destination is skipped.
+  - `failover` — the first destination, in configured order, that admits
+    the record.
+  Round-robin and failover refuse a record only when every destination
+  refuses it. A **disabled** destination vault is left out of the
+  distribution, and each record the route would have sent it counts as
+  dropped for that vault.
 
 - **Routing table** (`routing.Table`) — the compiled, priority-sorted
   routes on a node, published to the pipeline supervisor

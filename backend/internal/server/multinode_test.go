@@ -342,9 +342,10 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 				{StorageID: system.SyntheticStorageID(id), Leader: true},
 			}
 			_ = cfgStore.PutVault(ctx, system.VaultConfig{
-				ID:   node.vaultID,
-				Name: "vault-" + id,
-				Type: vaultType,
+				ID:      node.vaultID,
+				Name:    "vault-" + id,
+				Type:    vaultType,
+				Enabled: true,
 			})
 			_ = cfgStore.SetVaultPlacements(ctx, node.vaultID, placements)
 			nodes[id] = node

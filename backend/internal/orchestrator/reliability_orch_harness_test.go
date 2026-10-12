@@ -703,6 +703,7 @@ func (h *orchRelHarness) seedSharedConfig() {
 			Type:             system.VaultTypeFile,
 			StorageClass:     v.class(),
 			RotationPolicyID: rotationPolicyID,
+			Enabled:          true,
 		}); err != nil {
 			h.t.Fatalf("PutVault %s: %v", v.label, err)
 		}
