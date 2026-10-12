@@ -275,16 +275,37 @@ re-address itself; retrying the removal completes it.
 ### The removed node's side
 
 After the configuration change the leader tells the removed node
-(`NotifyEviction`). A node that was down then learns it from the first
-member that refuses one of its calls: the refusal of a node in the removal
-record is a `PermissionDenied` carrying a `RemovedNodeRefusal` detail that
-names the node. The node acts on that detail only when it names the node
-itself and comes from the peer it dialled — a node its own configuration
-lists, whose certificate names it — the same standing a `NotifyEviction`
-caller needs. A `RequestMembership` refused with the detail counts the same
-way. The notification is taken in even while the node is stopping: a
-graceful stop waits for the call, so a removal that races a rolling restart
-is not lost.
+(`NotifyEviction`). The node takes that notice only from the leader it
+follows, as the caller's certificate names it, and only while it knows its
+membership; from any other member, from a node outside its configuration,
+or while its configuration is empty, the notice is refused and logged.
+
+A node that was down then learns it from the first member that refuses one
+of its calls: the refusal of a node in the removal record is a
+`PermissionDenied` carrying a `RemovedNodeRefusal` detail that names the
+node. The node acts on that detail only when all of these hold:
+
+- the detail names the node itself;
+- it comes from the peer the node dialled, whose certificate names it;
+- that peer is in the configuration the node holds, and not in the node's
+  own removal record;
+- the call was not the eviction notice — whoever answers that one is the
+  node being removed.
+
+A removed node keeps its certificate and still answers whatever dials it,
+so without these a removed node could answer the leader's eviction notice,
+or a vault-ctl Raft call, by naming the caller and take the caller out.
+
+A `RequestMembership` refused with the detail counts the same way, and only
+for a node that was a member: a fresh home was never in a cluster to be
+removed from, and the node at the join address is only known to hold a
+certificate the cluster CA signed. A refusal that does not count stops that
+start with an error-level log line and records nothing; the next start asks
+again.
+
+The notification is taken in even while the node is stopping: a graceful
+stop waits for the call, so a removal that races a rolling restart is not
+lost.
 
 Either way the node shuts its member side down and records the removal in
 its home, in the cluster-ctl Raft stable store beside its node identity, so

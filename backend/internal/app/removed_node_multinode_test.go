@@ -72,6 +72,9 @@ func TestRemovedNodeStaysRemoved(t *testing.T) {
 		})
 		st = victim.requireStatus(t)
 		requireReportsRemoval(t, victim, st, victimID)
+		if st.Removal.Reason != "removed from cluster by leader" {
+			t.Fatalf("removal reason %q, want the leader's eviction notice", st.Removal.Reason)
+		}
 		requireRemovalLogged(t, victim, victimID)
 		requireStaysUp(t, victim)
 	})
@@ -184,6 +187,36 @@ func TestRemovedNodeStaysRemoved(t *testing.T) {
 		}
 		if st := target.requireStatus(t); st.Removal != nil || len(st.Nodes) != len(members) {
 			t.Fatalf("%s acted on the forged eviction: removal %v, configuration %v", target.name, st.Removal, configuration(st))
+		}
+	})
+
+	t.Run("a member that does not lead cannot evict another", func(t *testing.T) {
+		leaderID := string(boot.requireStatus(t).LeaderId)
+		var sender, target *runningNode
+		for _, m := range members {
+			id := string(m.requireStatus(t).LocalNodeId)
+			switch {
+			case sender == nil && id != leaderID:
+				sender = m
+			case target == nil:
+				target = m
+			}
+		}
+		conn, err := grpc.NewClient(target.cfg.ClusterAddr, grpc.WithTransportCredentials(loadCert(t, sender.hd).TransportCredentials()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = conn.Close() }()
+		err = cluster.NewNotifyEvictionClient(conn).NotifyEviction(boundedCtx(t), "forged by a member that does not lead")
+		if status.Code(err) != codes.PermissionDenied {
+			t.Fatalf("eviction notice from %s, which does not lead: %v, want PermissionDenied", sender.name, err)
+		}
+		if lines := target.logs.lines("eviction notice refused", "caller_node_id="+string(sender.requireStatus(t).LocalNodeId)); len(lines) == 0 {
+			t.Fatalf("%s did not log refusing the eviction notice:\n%s", target.name, target.logs)
+		}
+		if st := target.requireStatus(t); st.Removal != nil || len(st.Nodes) != len(members) {
+			t.Fatalf("%s acted on an eviction notice from a member that does not lead: removal %v, configuration %v",
+				target.name, st.Removal, configuration(st))
 		}
 	})
 

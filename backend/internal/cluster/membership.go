@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -204,5 +205,37 @@ func tryRequestMembership(ctx context.Context, addr, nodeID, nodeAddr string, cr
 		NodeAddr: nodeAddr,
 	}
 	out := &gastrologv1.RequestMembershipResponse{}
-	return conn.Invoke(ctx, "/gastrolog.v1.ClusterService/RequestMembership", req, out)
+	var p peer.Peer
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/RequestMembership", req, out, grpc.Peer(&p)); err != nil {
+		if leaf := peerLeaf(&p); leaf != nil {
+			return &MembershipRefusal{AnsweredBy: tlsutil.NodeIDFromCert(leaf), err: err}
+		}
+		return err
+	}
+	return nil
+}
+
+// MembershipRefusal is a membership request the node at the join address
+// answered with an error, together with the node its certificate names.
+// The join address is only known to hold a certificate the cluster CA
+// signed, so what the refusal claims is that node's word alone.
+type MembershipRefusal struct {
+	AnsweredBy string
+	err        error
+}
+
+func (e *MembershipRefusal) Error() string { return e.err.Error() }
+func (e *MembershipRefusal) Unwrap() error { return e.err }
+
+// JoinRefusalEndsMembership reports whether a membership request refused as
+// removed is word of this node's removal. A node with no membership of its
+// own — a fresh home — was never in a cluster to be removed from, so no
+// claim counts; a restarting member takes it only from a current member of
+// the configuration it holds, as with any other refusal.
+func (s *Server) JoinRefusalEndsMembership(err error) bool {
+	var refusal *MembershipRefusal
+	if !errors.As(err, &refusal) || !RefusedAsRemoved(err, s.cfg.NodeID) || refusal.AnsweredBy == s.cfg.NodeID {
+		return false
+	}
+	return refusalEndsMembership(s.configuredIDs(), refusal.AnsweredBy, s.isRemoved)
 }

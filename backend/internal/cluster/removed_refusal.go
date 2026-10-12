@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"crypto/x509"
+	"slices"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -12,6 +13,7 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/cluster/tlsutil"
+	"gastrolog/internal/logging"
 )
 
 // removedRefusal is the status a member answers a removed node with. The
@@ -44,28 +46,70 @@ func RefusedAsRemoved(err error, nodeID string) bool {
 	return false
 }
 
-// SetRefusedAsRemovedObserver registers what runs when a peer this node
-// dialed as a member refuses it as removed. It is called with the refusing
-// peer's node ID, possibly many times.
+// SetRefusedAsRemovedObserver registers what runs when a current member
+// refuses this node as removed. It is called with the refusing member's
+// node ID, possibly many times.
 func (s *Server) SetRefusedAsRemovedObserver(fn func(byPeer string)) {
 	s.refusedAsRemoved.Store(&fn)
 }
 
+// observeRefusedAsRemoved acts on a refusal that named this node and came
+// from the peer it dialled. The peer's word counts only while this node's
+// own configuration lists it and its own removal record does not: a node
+// the cluster removed — which still answers dials made to it, the eviction
+// notice among them — is in no position to say who else was removed.
 func (s *Server) observeRefusedAsRemoved(byPeer string) {
+	if !refusalEndsMembership(s.configuredIDs(), byPeer, s.isRemoved) {
+		if _, logged := s.ignoredRemovalClaims.LoadOrStore(byPeer, struct{}{}); !logged {
+			logging.Default(s.logger).Warn("ignoring a claim that this node was removed: the claimant is not a current member",
+				"claimant_node_id", byPeer)
+		}
+		return
+	}
 	if fn := s.refusedAsRemoved.Load(); fn != nil {
 		(*fn)(byPeer)
 	}
 }
 
+// refusalEndsMembership decides whether byPeer's refusal of this node as
+// removed ends its membership: only a node in this node's configuration
+// that this node does not know to be removed itself has that standing.
+func refusalEndsMembership(configured []string, byPeer string, removed func(string) bool) bool {
+	if byPeer == "" || !slices.Contains(configured, byPeer) {
+		return false
+	}
+	return !removed(byPeer)
+}
+
+// configuredIDs is the node IDs in this node's Raft configuration; nil when
+// it cannot be read.
+func (s *Server) configuredIDs() []string {
+	servers, err := s.Servers()
+	if err != nil {
+		return nil
+	}
+	ids := make([]string, 0, len(servers))
+	for _, srv := range servers {
+		ids = append(ids, srv.ID)
+	}
+	return ids
+}
+
+// notifyEvictionMethod is the eviction notice. A refusal to it is never word
+// of this node's own removal: the node it goes to is the one being removed.
+const notifyEvictionMethod = "/gastrolog.v1.ClusterService/NotifyEviction"
+
 // observeRemovalUnary watches calls to one peer for that peer refusing this
-// node as removed. The refusal counts only from the peer this node meant to
-// reach: it was dialled because this node's configuration lists it, and its
-// certificate must name it — the same standing NotifyEviction's caller needs.
+// node as removed. The refusal reaches the Server's check only from the peer
+// this node meant to reach, as its certificate proves, and never from the
+// eviction notice.
 func (m *PeerConnManager) observeRemovalUnary(peerID string) grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		var p peer.Peer
 		err := invoker(ctx, method, req, reply, cc, append(opts, grpc.Peer(&p))...)
-		m.observeRefusal(err, peerID, &p)
+		if method != notifyEvictionMethod {
+			m.observeRefusal(err, peerID, &p)
+		}
 		return err
 	}
 }

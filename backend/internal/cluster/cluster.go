@@ -127,12 +127,15 @@ type Server struct {
 
 	// removedNodeCheck reports whether the cluster's removal record names a
 	// node. Consulted only for a call that is already refused, to say why.
-	removedNodeCheck func(nodeID string) bool
+	removedNodeCheck atomic.Pointer[func(nodeID string) bool]
 	// refusedRemoved holds the removed nodes whose calls this node has
 	// logged refusing, so a removed node that keeps calling is logged once.
 	refusedRemoved sync.Map
-	// refusedAsRemoved is what runs when a peer refuses this node as removed.
+	// refusedAsRemoved is what runs when a member refuses this node as removed.
 	refusedAsRemoved atomic.Pointer[func(byPeer string)]
+	// ignoredRemovalClaims holds the non-members whose claims that this node
+	// was removed have been logged and ignored, so each is logged once.
+	ignoredRemovalClaims sync.Map
 
 	// evictionHandler is called with the leader's reason when this node
 	// receives a NotifyEviction RPC, meaning it has been removed from the
@@ -498,7 +501,14 @@ func (s *Server) SetGroupApplyFn(fn func(ctx context.Context, groupID string, da
 // SetRemovedNodeCheck registers the removal-record lookup used to explain
 // refusing a node the cluster removed.
 func (s *Server) SetRemovedNodeCheck(fn func(nodeID string) bool) {
-	s.removedNodeCheck = fn
+	s.removedNodeCheck.Store(&fn)
+}
+
+// isRemoved reports whether the removal record names nodeID, as far as this
+// node knows; false before the lookup is registered.
+func (s *Server) isRemoved(nodeID string) bool {
+	check := s.removedNodeCheck.Load()
+	return check != nil && (*check)(nodeID)
 }
 
 // SetEvictionHandler registers the callback invoked when this node receives
@@ -846,7 +856,7 @@ func (s *Server) requirePeerAuthority(ctx context.Context, method string) error 
 // before they apply its admission.
 func (s *Server) explainRefusal(err error, leaf *x509.Certificate, method string) error {
 	nodeID := tlsutil.NodeIDFromCert(leaf)
-	if nodeID == "" || s.removedNodeCheck == nil || !s.removedNodeCheck(nodeID) {
+	if nodeID == "" || !s.isRemoved(nodeID) {
 		return err
 	}
 	if _, logged := s.refusedRemoved.LoadOrStore(nodeID, struct{}{}); !logged {

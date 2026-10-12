@@ -579,7 +579,10 @@ one segmented file set, one batch-writer goroutine.
 - **Removed node** — a node the cluster removed, as it sees itself. It
   learns of its **node removal** from the leader, or, when it was down at
   the time, from a member's **removed-node refusal** (a `PermissionDenied`
-  carrying `RemovedNodeRefusal`). It shuts its member side down, records the
+  carrying `RemovedNodeRefusal`), which counts only from a current member
+  of its configuration that is not itself removed, and never as the answer
+  to an eviction notice. The eviction notice counts only from the leader it
+  follows. It shuts its member side down, records the
   removal (time and reason) beside its node identity in its home's
   cluster-ctl stable store, and from then on — in that process and on every
   start of the same home — serves only the account of its removal: one
