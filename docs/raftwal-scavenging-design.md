@@ -189,9 +189,10 @@ replay applies the drop in physical order so nothing resurrects. The
 tombstone stays live only until its own segment becomes the oldest;
 everything it masks is gone by then, so the scavenge pass evaporates it
 instead of carrying it. Vault deletion decommissions the vault's
-control-plane group this way on every node; a vault merely reassigned away
-from a node stops its group without dropping, so the state recovers when
-the group re-ensures.
+control-plane group this way on every node, without a final snapshot, and
+removes the group's directory; a vault merely reassigned away from a node
+stops its group without dropping, so the state recovers when the group
+re-ensures.
 
 ### 7. Acceptance criteria (restated for this shape)
 

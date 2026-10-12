@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
 	"io"
@@ -23,11 +24,17 @@ func newImportCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "import [file]",
 		Short: "Import configuration from JSON",
-		Long:  "Imports configuration from a JSON file (or stdin if no file given). Use --merge (default) to upsert or --replace to delete all existing entities first.",
-		Args:  cobra.MaximumNArgs(1),
+		Long: "Imports configuration from a JSON file (or stdin if no file given). Use --merge (default) to upsert or --replace to delete all existing entities first.\n\n" +
+			"Vaults that --replace deletes keep their data files on disk, unreachable, as a vault delete without --delete-data does. " +
+			"Add --delete-data to erase them on every node, cloud objects included.",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			replace, _ := cmd.Flags().GetBool("replace")
 			yes, _ := cmd.Flags().GetBool("yes")
+			deleteData, _ := cmd.Flags().GetBool("delete-data")
+			if deleteData && !replace {
+				return errors.New("--delete-data erases the data of the vaults --replace deletes; it needs --replace")
+			}
 
 			doc, err := readImportDoc(args)
 			if err != nil {
@@ -35,7 +42,7 @@ func newImportCmd() *cobra.Command {
 			}
 
 			if replace && !yes {
-				fmt.Print("This will DELETE all existing entities before importing. Continue? [y/N] ")
+				fmt.Print(replaceWarning(deleteData))
 				reader := bufio.NewReader(os.Stdin)
 				line, _ := reader.ReadString('\n')
 				if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(line)), "y") {
@@ -48,7 +55,7 @@ func newImportCmd() *cobra.Command {
 			ctx := context.Background()
 
 			if replace {
-				if err := deleteAll(ctx, client); err != nil {
+				if err := deleteAll(ctx, client, deleteData); err != nil {
 					return fmt.Errorf("delete existing entities: %w", err)
 				}
 			}
@@ -65,8 +72,19 @@ func newImportCmd() *cobra.Command {
 	cmd.Flags().Bool("merge", true, "merge with existing config (default)")
 	cmd.Flags().Bool("replace", false, "delete all existing entities before importing")
 	cmd.Flags().Bool("yes", false, "skip confirmation for --replace")
+	cmd.Flags().Bool("delete-data", false, "with --replace: also erase the data files of the vaults it deletes, on every node; without it they stay on disk, unreachable")
 	cmd.MarkFlagsMutuallyExclusive("merge", "replace")
 	return cmd
+}
+
+// replaceWarning is the confirmation prompt for --replace, naming what
+// happens to the deleted vaults' data.
+func replaceWarning(deleteData bool) string {
+	data := "Their vaults' data files stay on disk, unreachable."
+	if deleteData {
+		data = "Their vaults' data files are ERASED from every node, cloud objects included."
+	}
+	return "This will DELETE all existing entities before importing. " + data + " Continue? [y/N] "
 }
 
 // readImportDoc reads and decodes an exportDoc from a file argument or stdin.
@@ -568,7 +586,7 @@ func deleteAllLookups(ctx context.Context, client *server.Client) error {
 	return nil
 }
 
-func deleteAll(ctx context.Context, client *server.Client) error {
+func deleteAll(ctx context.Context, client *server.Client, deleteData bool) error {
 	resp, err := client.System.GetSystem(ctx, connect.NewRequest(&v1.GetSystemRequest{}))
 	if err != nil {
 		return err
@@ -587,7 +605,7 @@ func deleteAll(ctx context.Context, client *server.Client) error {
 		}
 	}
 	for _, v := range resp.Msg.Vaults {
-		if _, err := client.System.DeleteVault(ctx, connect.NewRequest(&v1.DeleteVaultRequest{Id: v.Id, Force: true})); err != nil {
+		if _, err := client.System.DeleteVault(ctx, connect.NewRequest(&v1.DeleteVaultRequest{Id: v.Id, Force: true, DeleteData: deleteData})); err != nil {
 			return fmt.Errorf("delete vault %s: %w", v.Name, err)
 		}
 	}

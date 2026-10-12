@@ -209,19 +209,25 @@ func (o *Orchestrator) applyVaults(sys *system.System, factories Factories) erro
 	// ApplyConfig, and the unlocked reload here raced it into a fatal
 	// concurrent map write on o.pipelineVaults that crashed a node during a
 	// rolling restart with live placement changes.
+	//
+	// sys was read before this orchestrator applied any vault deletion, so a
+	// deletion applied since makes it re-read (currentSystemLocked).
 	o.mu.Lock()
-	err := o.reloadRoutesFromConfig(sys)
-	o.mu.Unlock()
+	defer o.mu.Unlock()
+	cur, err := o.currentSystemLocked(context.Background(), sys, 0)
 	if err != nil {
-		return err
+		return fmt.Errorf("reload config: %w", err)
 	}
-	return nil
+	return o.reloadRoutesFromConfig(cur)
 }
 
 // initVault creates vault instances for a single vault and registers it.
 // Returns nil on success and on recoverable init failures (vault is skipped).
 // Returns an error only for structural config problems.
 func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig, factories Factories) error {
+	if err := o.awaitVaultTeardown(context.Background(), vaultCfg.ID); err != nil {
+		return err
+	}
 	instance, err := o.buildVaultInstance(sys, vaultCfg, factories)
 	if err != nil {
 		o.logger.Error("vault failed to initialize, skipping",
@@ -243,7 +249,10 @@ func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig
 	vault.Name = vaultCfg.Name
 	vault.Enabled = vaultCfg.Enabled
 	vault.StorageType = string(vaultCfg.Type)
-	o.RegisterVault(vault)
+	if !o.registerUnlessDeleted(vault) {
+		o.logger.Info("vault deleted while it initialized; not registered", "id", vaultCfg.ID, "name", vaultCfg.Name)
+		return nil
+	}
 	o.scheduleHomeIndexSweep(vaultCfg.ID, instance)
 	if o.alerts != nil {
 		o.alerts.Clear("vault-init", vaultCfg.ID.String())

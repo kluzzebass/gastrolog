@@ -3,7 +3,10 @@ package json
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -281,5 +284,21 @@ func TestIndexer_FormatRoundTrip(t *testing.T) {
 	}
 	if !slices.Equal(pvEntries[0].Positions, []uint64{0}) {
 		t.Errorf("pvEntries[0].Positions = %v, want [0]", pvEntries[0].Positions)
+	}
+}
+
+// A build still running when its vault is deleted must not recreate the
+// removed chunk-manager directory it writes into.
+func TestIndexerBuildNeverRecreatesRemovedDir(t *testing.T) {
+	t.Parallel()
+	cm, chunkID := setupChunk(t, []string{`{"level":"info","service":"api"}`})
+	dir := filepath.Join(t.TempDir(), "removed-vault")
+	indexer := NewIndexer(dir, cm, nil)
+
+	if err := indexer.Build(context.Background(), chunkID); err == nil {
+		t.Fatalf("build into a removed directory succeeded")
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("build recreated the removed directory: stat err=%v", err)
 	}
 }

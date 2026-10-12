@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
@@ -96,7 +97,7 @@ type mockOrch struct {
 	running    map[glid.GLID]bool
 
 	addVaultErr        error
-	forceRemoveErr     error
+	deleteVaultErr     error
 	reloadFiltersErr   error
 	reloadRotationErr  error
 	reloadRetentionErr error
@@ -106,8 +107,8 @@ type mockOrch struct {
 	updateMaxJobsErr   error
 	currentMaxJobs     int
 
-	forceRemoveIDs     []glid.GLID // IDs passed to ForceRemoveVault
-	unregisterIDs      []glid.GLID // IDs passed to UnregisterVault
+	deleteVaultCalls   []deleteVaultCall // arguments passed to DeleteVault
+	unregisterIDs      []glid.GLID       // IDs passed to UnregisterVault
 	unregisterErr      error
 	reconcileCalls     [][]glid.GLID // desired ID sets passed to ReconcileIngesters
 	addVaultCalls      []glid.GLID   // IDs passed to AddVault
@@ -154,10 +155,16 @@ func (m *mockOrch) ReloadRotationPolicies(context.Context) error  { return m.rel
 func (m *mockOrch) ReloadRetentionPolicies(context.Context) error { return m.reloadRetentionErr }
 func (m *mockOrch) DisableVault(glid.GLID) error                  { return m.disableVaultErr }
 func (m *mockOrch) EnableVault(glid.GLID) error                   { return m.enableVaultErr }
-func (m *mockOrch) ForceRemoveVault(id glid.GLID) error {
-	m.forceRemoveIDs = append(m.forceRemoveIDs, id)
-	return m.forceRemoveErr
+func (m *mockOrch) DeleteVault(id glid.GLID, deleteData bool) error {
+	m.deleteVaultCalls = append(m.deleteVaultCalls, deleteVaultCall{id: id, deleteData: deleteData})
+	return m.deleteVaultErr
 }
+
+type deleteVaultCall struct {
+	id         glid.GLID
+	deleteData bool
+}
+
 func (m *mockOrch) RemoveVaultInstance(vaultID glid.GLID) bool {
 	m.removeInstanceCalls = append(m.removeInstanceCalls, vaultID)
 	return true
@@ -421,46 +428,44 @@ func TestHandle_VaultPut(t *testing.T) {
 func TestHandle_VaultDeleted(t *testing.T) {
 	id := glid.New()
 
-	t.Run("force_remove_error", func(t *testing.T) {
+	t.Run("delete_error", func(t *testing.T) {
 		h := &captureHandler{}
-		mo := &mockOrch{forceRemoveErr: errors.New("storage busy")}
+		mo := &mockOrch{deleteVaultErr: errors.New("storage busy")}
 		d := newTestDispatcher(mo, &stubCfgStore{}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultDeleted, ID: id})
 
-		if !h.hasErrorContaining("force remove vault") {
-			t.Fatal("expected obligation error for ForceRemoveVault failure")
+		if !h.hasErrorContaining("delete vault") {
+			t.Fatal("expected obligation error for DeleteVault failure")
+		}
+		if d.obligationCount() != 1 {
+			t.Fatalf("expected 1 vault obligation, got %d", d.obligationCount())
 		}
 	})
 
-	t.Run("not_found_suppressed", func(t *testing.T) {
-		h := &captureHandler{}
-		mo := &mockOrch{forceRemoveErr: orchestrator.ErrVaultNotFound}
-		d := newTestDispatcher(mo, &stubCfgStore{}, h)
+	// The operator's delete_data choice reaches this node's deletion as
+	// given: a dropped flag either destroys records the operator kept or
+	// keeps records the operator destroyed.
+	for _, deleteData := range []bool{false, true} {
+		t.Run(fmt.Sprintf("delete_data_%t", deleteData), func(t *testing.T) {
+			h := &captureHandler{}
+			mo := &mockOrch{}
+			d := newTestDispatcher(mo, &stubCfgStore{}, h)
 
-		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultDeleted, ID: id})
+			d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultDeleted, ID: id, DeleteData: deleteData})
 
-		if h.hasMessage("dispatch: force remove vault") {
-			t.Fatal("ErrVaultNotFound should be silently ignored")
-		}
-	})
-
-	t.Run("remote_node_dir_skipped", func(t *testing.T) {
-		h := &captureHandler{}
-		d := newTestDispatcher(&mockOrch{}, &stubCfgStore{}, h)
-
-		d.Handle(raftfsm.Notification{
-			Kind:   raftfsm.NotifyVaultDeleted,
-			ID:     id,
-			NodeID: "other-node",
-			Dir:    "/tmp/should-not-be-removed",
+			want := []deleteVaultCall{{id: id, deleteData: deleteData}}
+			if !slices.Equal(mo.deleteVaultCalls, want) {
+				t.Fatalf("DeleteVault calls = %+v, want %+v", mo.deleteVaultCalls, want)
+			}
+			if mo.reloadFiltersCalls != 1 {
+				t.Fatalf("ReloadFilters calls = %d, want 1 (routing table republished)", mo.reloadFiltersCalls)
+			}
+			if d.obligationCount() != 0 {
+				t.Fatalf("expected no obligation, got %d", d.obligationCount())
+			}
 		})
-
-		// No os.RemoveAll should be called for a remote node's directory.
-		if h.hasMessage("dispatch: remove vault directory") {
-			t.Fatal("should not attempt to remove remote node's directory")
-		}
-	})
+	}
 }
 
 // reg is the test ingester registration used across ingester dispatch tests.
@@ -1377,13 +1382,13 @@ func TestShouldRunIngesterParallelEmptyNodeIDs(t *testing.T) {
 // registered type has SingletonSupported=true.
 func singletonTestIngester(ingID glid.GLID, nodeIDs ...string) (*system.IngesterConfig, orchestrator.IngesterRegistration) {
 	return &system.IngesterConfig{
-		ID: ingID, Type: "test", Enabled: true, NodeIDs: nodeIDs, Singleton: true,
-	}, orchestrator.IngesterRegistration{
-		Factory: func(glid.GLID, map[string]string, *slog.Logger) (ingestion.Ingester, error) {
-			return noopIngester{}, nil
-		},
-		SingletonSupported: true,
-	}
+			ID: ingID, Type: "test", Enabled: true, NodeIDs: nodeIDs, Singleton: true,
+		}, orchestrator.IngesterRegistration{
+			Factory: func(glid.GLID, map[string]string, *slog.Logger) (ingestion.Ingester, error) {
+				return noopIngester{}, nil
+			},
+			SingletonSupported: true,
+		}
 }
 
 func TestHandleIngesterAssignmentStartsLocally(t *testing.T) {

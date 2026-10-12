@@ -514,8 +514,8 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 
 	data := encodeIndex(dr.newDict, layout.pathTable, layout.pvTable, layout.postingBlob, ar.jsonStatus)
 
-	chunkDir := filepath.Join(idx.dir, chunkID.String())
-	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
+	chunkDir, err := chunk.MkdirChunkDir(idx.dir, chunkID)
+	if err != nil {
 		return fmt.Errorf("create index dir: %w", err)
 	}
 
@@ -543,8 +543,8 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 
 func (idx *Indexer) writeCappedIndex(chunkID chunk.ChunkID) error {
 	data := encodeIndex(nil, nil, nil, nil, index.JSONCapped)
-	chunkDir := filepath.Join(idx.dir, chunkID.String())
-	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
+	chunkDir, err := chunk.MkdirChunkDir(idx.dir, chunkID)
+	if err != nil {
 		return fmt.Errorf("create index dir: %w", err)
 	}
 	return idx.writeFile(chunkDir, data)
@@ -552,8 +552,8 @@ func (idx *Indexer) writeCappedIndex(chunkID chunk.ChunkID) error {
 
 func (idx *Indexer) writeEmptyIndex(chunkID chunk.ChunkID) error {
 	data := encodeIndex(nil, nil, nil, nil, index.JSONComplete)
-	chunkDir := filepath.Join(idx.dir, chunkID.String())
-	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
+	chunkDir, err := chunk.MkdirChunkDir(idx.dir, chunkID)
+	if err != nil {
 		return fmt.Errorf("create index dir: %w", err)
 	}
 	return idx.writeFile(chunkDir, data)

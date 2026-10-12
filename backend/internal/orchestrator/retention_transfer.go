@@ -414,7 +414,7 @@ func (r *retentionRunner) tryLocalTransferCopy(targetID glid.GLID, id chunk.Chun
 // — identical integrity guarantee whether the bytes crossed the network or
 // just crossed vault directories on the same disk.
 func localCopyAndPromoteGLCB(srcPath, destPath string, e vaultctlfsm.ManifestEntry, logger *slog.Logger) error {
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o750); err != nil {
+	if err := chunking.EnsureGLCBDir(destPath); err != nil {
 		return err
 	}
 	src, err := os.Open(filepath.Clean(srcPath))

@@ -10,6 +10,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/paths"
 )
 
 var (
@@ -113,7 +114,7 @@ func BuildSealedChunk(in BuildInput) (BuildResult, error) {
 	}
 
 	glcbPath := ChunkGLCBPath(in.ChunkRoot, in.Manifest.ChunkID)
-	if err := os.MkdirAll(filepath.Dir(glcbPath), 0o750); err != nil {
+	if err := EnsureGLCBDir(glcbPath); err != nil {
 		return BuildResult{}, fmt.Errorf("create chunk dir: %w", err)
 	}
 
@@ -147,6 +148,14 @@ func BuildSealedChunk(in BuildInput) (BuildResult, error) {
 // ChunkGLCBPath returns <chunkRoot>/<chunkID>/data.glcb.
 func ChunkGLCBPath(chunkRoot string, id chunk.ChunkID) string {
 	return filepath.Join(chunkRoot, id.String(), glcb.BlobFilename)
+}
+
+// EnsureGLCBDir creates the chunk directory of a ChunkGLCBPath, and its chunk
+// root, below the vault root holding them (paths.MkdirBelow).
+func EnsureGLCBDir(glcbPath string) error {
+	chunkDir := filepath.Dir(glcbPath)
+	vaultRoot := filepath.Dir(filepath.Dir(chunkDir))
+	return paths.MkdirBelow(vaultRoot, chunkDir)
 }
 
 // MissingSegmentsError lists segment IDs absent from the local head.

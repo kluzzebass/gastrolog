@@ -115,8 +115,8 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	totalFileSize := int64(offset)
 
 	// Create temp file and pre-allocate space.
-	chunkDir := filepath.Join(t.dir, chunkID.String())
-	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
+	chunkDir, err := chunk.MkdirChunkDir(t.dir, chunkID)
+	if err != nil {
 		return fmt.Errorf("create index dir: %w", err)
 	}
 

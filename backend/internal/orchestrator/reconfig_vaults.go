@@ -63,13 +63,20 @@ func resolveVaultDir(params map[string]string, vaultsDir, vaultID string) map[st
 // Loads the full config internally to resolve the vault's vault IDs to vault configs.
 // Returns ErrDuplicateID if a vault with this ID already exists.
 func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig, factories Factories) error {
-	sys, err := o.loadSystem(ctx)
+	sys, deletions, err := o.lockWithoutVaultTeardown(ctx, vaultCfg.ID)
 	if err != nil {
-		return fmt.Errorf("load config for AddVault: %w", err)
+		return err
 	}
-
-	o.mu.Lock()
 	defer o.mu.Unlock()
+
+	if o.vaultDeletions.Load() != deletions {
+		if sys, err = o.currentSystemLocked(ctx, sys, deletions); err != nil {
+			return fmt.Errorf("reload config for AddVault: %w", err)
+		}
+		if sys != nil && findVaultConfig(sys.Config.Vaults, vaultCfg.ID) == nil {
+			return fmt.Errorf("%w: %s was deleted", ErrVaultNotFound, vaultCfg.ID)
+		}
+	}
 
 	if _, exists := o.vaults[vaultCfg.ID]; exists {
 		return fmt.Errorf("%w: %s", ErrDuplicateID, vaultCfg.ID)
@@ -195,11 +202,27 @@ func retentionPolicyLabel(c system.RetentionPolicyConfig) string {
 // a stale-disk-but-fresh-FSM state.
 func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 	o.mu.Lock()
-	defer o.mu.Unlock()
+	vault, err := o.checkVaultEmptyLocked(id)
+	if err != nil {
+		o.mu.Unlock()
+		return err
+	}
+	o.vaultDeletions.Add(1)
+	retired := o.retireVaultLocked(nil, id, false)
+	retired.dirs = nil
+	o.scheduleVaultTeardownLocked(retired)
+	o.mu.Unlock()
 
+	o.logger.Info("vault removed", "id", id, "name", vault.Name, "type", vault.Type())
+	return nil
+}
+
+// checkVaultEmptyLocked returns the vault when it is registered and holds no
+// data, by the rules RemoveVault describes. Caller holds o.mu.
+func (o *Orchestrator) checkVaultEmptyLocked(id glid.GLID) (*Vault, error) {
 	vault, exists := o.vaults[id]
 	if !exists {
-		return fmt.Errorf("%w: %s", ErrVaultNotFound, id)
+		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, id)
 	}
 
 	// Primary: FSM manifest. Returns (nil, nil) when the FSM isn't
@@ -209,11 +232,11 @@ func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 	// inspect.
 	fsmMetas, err := o.listClusterChunkMetasLocked(id)
 	if err != nil {
-		return fmt.Errorf("list FSM chunks for vault %s: %w", id, err)
+		return nil, fmt.Errorf("list FSM chunks for vault %s: %w", id, err)
 	}
 	for _, m := range fsmMetas {
 		if m.RecordCount > 0 || !m.Sealed {
-			return fmt.Errorf("%w: vault %s has data in FSM manifest", ErrVaultNotEmpty, id)
+			return nil, fmt.Errorf("%w: vault %s has data in FSM manifest", ErrVaultNotEmpty, id)
 		}
 	}
 
@@ -225,21 +248,18 @@ func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 	if vaultInst := vault.Instance; vaultInst != nil {
 		metas, err := vaultInst.Chunks.List()
 		if err != nil {
-			return fmt.Errorf("list chunks for vault %s: %w", id, err)
+			return nil, fmt.Errorf("list chunks for vault %s: %w", id, err)
 		}
 		for _, m := range metas {
 			if m.RecordCount > 0 || !m.Sealed {
-				return fmt.Errorf("%w: vault %s has data on local disk", ErrVaultNotEmpty, id)
+				return nil, fmt.Errorf("%w: vault %s has data on local disk", ErrVaultNotEmpty, id)
 			}
 		}
 		if active := vaultInst.Chunks.Active(); active != nil {
-			return fmt.Errorf("%w: vault %s has active chunk", ErrVaultNotEmpty, id)
+			return nil, fmt.Errorf("%w: vault %s has active chunk", ErrVaultNotEmpty, id)
 		}
 	}
-
-	o.teardownVault(id, vault)
-	o.logger.Info("vault removed", "id", id, "name", vault.Name, "type", vault.Type())
-	return nil
+	return vault, nil
 }
 
 // listClusterChunkMetasLocked is the FSM-manifest variant of

@@ -1038,6 +1038,31 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 - **Drain** — move all of a vault's chunks off this node, then remove the
   local instance. Used for decommission.
 
+- **Vault deletion** — the operator removing a vault from the config; every
+  node then deletes its share (`Orchestrator.DeleteVault`, from the
+  vault-deleted notification), whether or not the vault is registered there.
+  The delete drops the vault from the node's registries and returns; a
+  background **vault teardown** — a `vault-teardown:` scheduler job, one at a
+  time per vault, abandoned at shutdown — then decommissions its vault-ctl
+  group (WAL state and directory), stops its pipeline, closes the vault, and
+  removes the vault's directories. A vault re-created under the same ID waits
+  for a pending teardown, which would otherwise remove its files. The
+  directories removed are each
+  **pipeline root** candidate and each chunk-manager directory, all named by
+  the vault's ID. **Delete data** decides the files holding records — staging
+  segments, sealed chunks and their indexes, a cloud-backed vault's cloud
+  objects: with it they go — the cloud objects by key prefix, after the
+  vault's uploads are stopped and the in-flight ones have returned, so none
+  lands afterwards; without it they stay, unreachable, and only the
+  chunk-manager bookkeeping (lock file, cloud index) and the directories left
+  empty go. Config read before a deletion still names the vault: whatever
+  applies config under the orchestrator lock (routing reload, the pipeline
+  config reconcile, vault add, startup `ApplyConfig`) re-reads it when a
+  deletion was applied since the read, so the vault is not registered again.
+  A vault's pipeline root is created only by its registration, so a
+  write in flight when the root is removed fails rather than recreating it
+  (`paths.MkdirBelow`).
+
 - **GLCB catch-up** — a home missing a sealed chunk's GLCB (it missed the
   build and the source segments are released) pulls the blob from a peer
   home, verifies its record count against the manifest entry and its bytes

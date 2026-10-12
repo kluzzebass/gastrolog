@@ -827,9 +827,7 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 	// down their cron rotation job as well.
 	for vid := range o.pipelineVaultsMap() {
 		if _, ok := desired[vid]; !ok {
-			o.pipeline.UnregisterVault(vid)
-			o.reconcileChunkCron(vid, false, "")
-			o.deletePipelineVaultLocked(vid)
+			o.unregisterPipelineVaultLocked(vid)
 		}
 	}
 
@@ -842,6 +840,11 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 	var errs []error
 	chunkHomes := make(map[glid.GLID]bool, len(desired))
 	for vid := range desired {
+		if o.vaultTeardowns[vid] != nil {
+			// The vault's previous incarnation is still being torn down; its
+			// re-creation (AddVault) registers it once the teardown is done.
+			continue
+		}
 		home := o.isVaultHome(sys, vid)
 		fsm, applier, isLeader, hasHandle := o.vaultCtlHandle(vid)
 		policy, cronExpr := o.resolveChunkPolicy(sys, vid)

@@ -12,7 +12,7 @@ import (
 // route set. The method name is kept for callsite stability across the FSM
 // dispatch fan-out.
 func (o *Orchestrator) ReloadFilters(ctx context.Context) error {
-	sys, err := o.loadSystem(ctx)
+	sys, deletions, err := o.loadSystemForReload(ctx)
 	if err != nil {
 		return fmt.Errorf("load system for routes reload: %w", err)
 	}
@@ -23,6 +23,9 @@ func (o *Orchestrator) ReloadFilters(ctx context.Context) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
+	if sys, err = o.currentSystemLocked(ctx, sys, deletions); err != nil {
+		return fmt.Errorf("reload system for routes reload: %w", err)
+	}
 	return o.reloadRoutesFromConfig(sys)
 }
 

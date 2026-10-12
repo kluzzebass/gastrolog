@@ -1001,14 +1001,14 @@ describe("VaultsSettings delete gates and consequences", () => {
     fireEvent.click(getByText("Delete"));
 
     expect(getByText(/Removes "vault-alpha" and its 1 placement\(s\) on node-1/)).toBeTruthy();
-    expect(getByText(/chunk files stay on disk/)).toBeTruthy();
+    expect(getByText(/staging segments — stay on disk, unreachable/)).toBeTruthy();
 
     fireEvent.click(getByLabelText("Delete data files"));
-    expect(getByText(/chunk files are erased from every placement node/)).toBeTruthy();
+    expect(getByText(/staging segments — are erased from every node/)).toBeTruthy();
     expect(getByText("Yes")).toBeTruthy();
   });
 
-  test("a memory vault's confirm step offers to erase its chunk files, like a file vault's", () => {
+  test("a memory vault's confirm step offers to erase its data files, like a file vault's", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], new GetSystemResponse({
       ...gatedInit,
@@ -1022,9 +1022,9 @@ describe("VaultsSettings delete gates and consequences", () => {
     fireEvent.click(getByText("Delete"));
 
     expect(getByText(/Removes "vault-mem", which has no placements/)).toBeTruthy();
-    expect(getByText(/chunk files stay on disk/)).toBeTruthy();
+    expect(getByText(/staging segments — stay on disk, unreachable/)).toBeTruthy();
     fireEvent.click(getByLabelText("Delete data files"));
-    expect(getByText(/chunk files are erased from every placement node/)).toBeTruthy();
+    expect(getByText(/staging segments — are erased from every node/)).toBeTruthy();
   });
 });
 
