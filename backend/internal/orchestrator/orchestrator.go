@@ -233,6 +233,12 @@ type Orchestrator struct {
 	// second copy can drift out of sync with it.
 	pipelineVaults atomic.Pointer[map[glid.GLID]pipelineVaultReg]
 
+	// vaultDeletions counts the vault deletions applied on this node;
+	// DeleteVault advances it while holding mu. Config read before a deletion
+	// still names the deleted vault, so whatever applies config under mu
+	// re-reads it when the count moved since the read (currentSystemLocked).
+	vaultDeletions atomic.Uint64
+
 	// pipelineReregisterHook, if non-nil, is invoked during a vault's
 	// (re-)registration after the supervisor has dropped its previous
 	// registration and before it registers the new one — the instant the

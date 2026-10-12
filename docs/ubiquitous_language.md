@@ -1017,7 +1017,11 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   vault's uploads are stopped and the in-flight ones have returned, so none
   lands afterwards; without it they stay, unreachable, and only the
   chunk-manager bookkeeping (lock file, cloud index) and the directories left
-  empty go. A vault's pipeline root is created only by its registration, so a
+  empty go. Config read before a deletion still names the vault: whatever
+  applies config under the orchestrator lock (routing reload, the pipeline
+  config reconcile, vault add, startup `ApplyConfig`) re-reads it when a
+  deletion was applied since the read, so the vault is not registered again.
+  A vault's pipeline root is created only by its registration, so a
   write in flight when the root is removed fails rather than recreating it
   (`paths.MkdirBelow`).
 

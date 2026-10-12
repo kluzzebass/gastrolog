@@ -25,6 +25,7 @@ import (
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
@@ -897,4 +898,99 @@ func TestOrchVaultDeleteStopsInFlightCloudUpload(t *testing.T) {
 		t.Fatalf("an upload in flight at the delete landed afterwards: %v", left)
 	}
 	h.assertNothingNamesVault("after the delete", v)
+}
+
+// holdingLoader is a config loader that a test can pause right after one read,
+// so the read's caller applies config read before whatever the test does in
+// the pause.
+type holdingLoader struct {
+	inner orchestrator.SystemLoader
+	mu    sync.Mutex
+	held  *loadHold
+}
+
+// loadHold pauses one config read: loaded is closed once the read is done,
+// and the reader waits for proceed to be closed.
+type loadHold struct {
+	loaded  chan struct{}
+	proceed chan struct{}
+}
+
+func (l *holdingLoader) Load(ctx context.Context) (*system.System, error) {
+	sys, err := l.inner.Load(ctx)
+	l.mu.Lock()
+	hold := l.held
+	l.held = nil
+	l.mu.Unlock()
+	if hold != nil {
+		close(hold.loaded)
+		<-hold.proceed
+	}
+	return sys, err
+}
+
+// holdNextLoad pauses the next config read on the node after it has read.
+func (l *holdingLoader) holdNextLoad() *loadHold {
+	hold := &loadHold{loaded: make(chan struct{}), proceed: make(chan struct{})}
+	l.mu.Lock()
+	l.held = hold
+	l.mu.Unlock()
+	return hold
+}
+
+// Config read before a vault's deletion still names the vault. A routing
+// reload and a vault add that read config, then apply it after the deletion,
+// must not bring the vault back: no pipeline registration, no vault, no
+// files, on the home that applied them.
+func TestOrchVaultDeleteFencesConfigReadBeforeIt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node vault-delete acceptance test")
+	}
+	t.Parallel()
+
+	homeIdxs := []int{0, 1, 2}
+	h := newOrchRelHarness(t, 4,
+		withExtraVault(homeIdxs),
+		withMatchAllRoute(1),
+		withPipelineCluster(pipelineTestCompletePolicy, pipelineChunkMaxRecords),
+	)
+	v := h.vaults[1]
+	const sealed = 2 * pipelineChunkMaxRecords
+	h.submitIngestRecords(h.nodeIDs[3], sealed, "stale-config")
+	h.waitGLCBsOnHomes(v, homeIdxs, h.waitSealedRecords(v, h.nodeIDs[0], sealed))
+	h.requireVaultOnDisk(v, homeIdxs)
+	vaultCfg, err := h.cfgStore.GetVault(context.Background(), v.id)
+	if err != nil || vaultCfg == nil {
+		t.Fatalf("GetVault: %v", err)
+	}
+
+	reloader, adder := h.nodes[h.nodeIDs[0]], h.nodes[h.nodeIDs[1]]
+	reloadHold := reloader.loader.holdNextLoad()
+	reloadErr := make(chan error, 1)
+	go func() { reloadErr <- reloader.orch.ReloadFilters(context.Background()) }()
+	awaitSignal(t, "routing reload read config", reloadHold.loaded)
+
+	addHold := adder.loader.holdNextLoad()
+	addErr := make(chan error, 1)
+	go func() { addErr <- adder.orch.AddVault(context.Background(), *vaultCfg, adder.factories) }()
+	awaitSignal(t, "vault add read config", addHold.loaded)
+
+	// The route still names the vault in the held reads; the delete drops it
+	// from the route first, as the delete RPC requires.
+	h.deleteVaultEverywhere(v, true)
+	close(reloadHold.proceed)
+	close(addHold.proceed)
+	if err := <-reloadErr; err != nil {
+		t.Fatalf("routing reload: %v", err)
+	}
+	if err := <-addErr; !errors.Is(err, orchestrator.ErrVaultNotFound) {
+		t.Errorf("vault add from config read before the delete: err=%v, want ErrVaultNotFound", err)
+	}
+
+	for _, n := range []*orchRelNode{reloader, adder} {
+		if slices.Contains(n.orch.ListVaults(), v.id) {
+			t.Errorf("%s: deleted vault %s registered again", n.label, v.label)
+		}
+	}
+	h.assertNothingNamesVault("after config read before the delete was applied", v)
 }

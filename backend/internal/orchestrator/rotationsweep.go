@@ -53,7 +53,7 @@ func (o *Orchestrator) startPipelineConfigReconcile() error {
 // pipelineConfigReconcile is the scheduled task: load config and republish the
 // routing table + pipeline registrations + vault-ctl desired leaders.
 func (o *Orchestrator) pipelineConfigReconcile() {
-	sys, err := o.loadSystem(context.Background())
+	sys, deletions, err := o.loadSystemForReload(context.Background())
 	if err != nil {
 		o.rotationLogger.Error("pipeline-config reconcile: failed to load config", "error", err)
 		return
@@ -61,7 +61,7 @@ func (o *Orchestrator) pipelineConfigReconcile() {
 	if sys == nil {
 		return
 	}
-	o.reconcileFilters(sys)
+	o.reconcileFilters(sys, deletions)
 }
 
 // ReconcilePlacements aligns every local vault instance's role and (for
@@ -79,7 +79,7 @@ func (o *Orchestrator) pipelineConfigReconcile() {
 // sealing (event-driven thresholds + scheduler-driven cron via
 // reconcileChunkCron), so no chunk-manager rotation runs here.
 func (o *Orchestrator) ReconcilePlacements(ctx context.Context) {
-	sys, err := o.loadSystem(ctx)
+	sys, deletions, err := o.loadSystemForReload(ctx)
 	if err != nil {
 		o.rotationLogger.Error("placement reconcile: failed to load config", "error", err)
 		return
@@ -123,7 +123,7 @@ func (o *Orchestrator) ReconcilePlacements(ctx context.Context) {
 	// map lets vaults that re-resolved this pass diff to a Clear.
 	o.updateLeaderlessAlarms(leaderless)
 
-	o.reconcileFilters(sys)
+	o.reconcileFilters(sys, deletions)
 }
 
 // ReconcileVaultPlacement aligns ONE local vault instance's role and (for a
@@ -220,10 +220,17 @@ func (o *Orchestrator) wakeOutsidePlacementPrune(moved []*VaultLifecycleReconcil
 }
 
 // reconcileFilters republishes the pipeline routing table from config under a
-// write lock. Name kept for callsite stability across the Phase 5 refactor.
-func (o *Orchestrator) reconcileFilters(sys *system.System) {
+// write lock; deletions is the vault-deletion count sys was read at
+// (loadSystemForReload). Name kept for callsite stability across the Phase 5
+// refactor.
+func (o *Orchestrator) reconcileFilters(sys *system.System, deletions uint64) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	sys, err := o.currentSystemLocked(context.Background(), sys, deletions)
+	if err != nil {
+		o.rotationLogger.Warn("placement reconcile: config reload failed", "error", err)
+		return
+	}
 	if err := o.reloadRoutesFromConfig(sys); err != nil {
 		o.rotationLogger.Warn("placement reconcile: routing-table reconciliation failed", "error", err)
 	}

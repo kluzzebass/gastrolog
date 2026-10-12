@@ -15,6 +15,7 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -962,5 +963,44 @@ func TestRefreshVaultCtlMembers_NilResolverNoOp(t *testing.T) {
 
 	if got := len(orch.vaultCtlLeaders.desired.Get(vaultID)); got != 0 {
 		t.Fatalf("single-node mode should leave desired set empty, got %d", got)
+	}
+}
+
+// A vault deleted after the config ApplyConfig is given was read is not
+// registered from it: the startup config would otherwise bring back a vault
+// the node has already deleted.
+func TestApplyConfigSkipsVaultDeletedSinceConfigRead(t *testing.T) {
+	ctx := context.Background()
+	store := sysmem.NewStore()
+	deleted, kept := glid.New(), glid.New()
+	stale := &system.Config{Vaults: []system.VaultConfig{
+		testVaultCfg(deleted, system.VaultTypeMemory),
+		testVaultCfg(kept, system.VaultTypeMemory),
+	}}
+	if err := store.PutVault(ctx, stale.Vaults[1]); err != nil {
+		t.Fatal(err)
+	}
+	orch := newTestOrch(t, Config{SystemLoader: store})
+	if err := orch.DeleteVault(deleted, true); err != nil {
+		t.Fatalf("DeleteVault: %v", err)
+	}
+
+	factories := Factories{
+		ChunkManagers: map[string]chunk.ManagerFactory{
+			"file": func(map[string]string, *slog.Logger) (chunk.ChunkManager, error) {
+				return &fakeChunkManager{}, nil
+			},
+		},
+		IndexManagers: map[string]index.ManagerFactory{
+			"file": func(map[string]string, chunk.ChunkManager, *slog.Logger) (index.IndexManager, error) {
+				return &fakeIndexManager{}, nil
+			},
+		},
+	}
+	if err := orch.ApplyConfig(&system.System{Config: *stale}, factories); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+	if got := orch.ListVaults(); !slices.Equal(got, []glid.GLID{kept}) {
+		t.Fatalf("vaults after ApplyConfig = %v, want only %s (the other was deleted)", got, kept)
 	}
 }

@@ -63,13 +63,22 @@ func resolveVaultDir(params map[string]string, vaultsDir, vaultID string) map[st
 // Loads the full config internally to resolve the vault's vault IDs to vault configs.
 // Returns ErrDuplicateID if a vault with this ID already exists.
 func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig, factories Factories) error {
-	sys, err := o.loadSystem(ctx)
+	sys, deletions, err := o.loadSystemForReload(ctx)
 	if err != nil {
 		return fmt.Errorf("load config for AddVault: %w", err)
 	}
 
 	o.mu.Lock()
 	defer o.mu.Unlock()
+
+	if o.vaultDeletions.Load() != deletions {
+		if sys, err = o.currentSystemLocked(ctx, sys, deletions); err != nil {
+			return fmt.Errorf("reload config for AddVault: %w", err)
+		}
+		if sys != nil && findVaultConfig(sys.Config.Vaults, vaultCfg.ID) == nil {
+			return fmt.Errorf("%w: %s was deleted", ErrVaultNotFound, vaultCfg.ID)
+		}
+	}
 
 	if _, exists := o.vaults[vaultCfg.ID]; exists {
 		return fmt.Errorf("%w: %s", ErrDuplicateID, vaultCfg.ID)

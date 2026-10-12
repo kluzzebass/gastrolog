@@ -75,6 +75,9 @@ type orchRelNode struct {
 	factories orchestrator.Factories
 	// alerts is the node's alarm collector, wired as the orchestrator's sink.
 	alerts *alert.Collector
+	// loader is the node's config loader in pipeline mode: the shared config
+	// store, with a test-held pause after a read (holdNextLoad).
+	loader *holdingLoader
 	cancel context.CancelFunc
 }
 
@@ -822,7 +825,8 @@ func (h *orchRelHarness) startNode(id string) {
 		// Hot-reload paths (ReloadFilters, AddVaultInstance, placement
 		// sweep) need read access to the shared config store, exactly as
 		// production wires the system store.
-		orchCfg.SystemLoader = h.cfgStore
+		n.loader = &holdingLoader{inner: h.cfgStore}
+		orchCfg.SystemLoader = n.loader
 	}
 	orch, err := orchestrator.New(orchCfg)
 	if err != nil {

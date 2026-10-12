@@ -40,6 +40,15 @@ func (o *Orchestrator) DeleteVault(id glid.GLID, deleteData bool) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
+	o.vaultDeletions.Add(1)
+	return errors.Join(err, o.deleteVaultLocked(sys, id, deleteData))
+}
+
+// deleteVaultLocked removes the vault from this node as DeleteVault
+// describes, with sys the config naming this node's file storages. Caller
+// holds o.mu.
+func (o *Orchestrator) deleteVaultLocked(sys *system.System, id glid.GLID, deleteData bool) error {
+	var err error
 	dirs := o.vaultDirsLocked(sys, id)
 	o.unregisterPipelineVaultLocked(id)
 	vault, registered := o.vaults[id]
@@ -62,6 +71,51 @@ func (o *Orchestrator) DeleteVault(id glid.GLID, deleteData bool) error {
 	}
 	o.logger.Info("vault deleted on this node", "id", id, "delete_data", deleteData)
 	return err
+}
+
+// loadSystemForReload reads config that the caller applies later under o.mu,
+// with the vault-deletion count at the time of the read.
+func (o *Orchestrator) loadSystemForReload(ctx context.Context) (*system.System, uint64, error) {
+	deletions := o.vaultDeletions.Load()
+	sys, err := o.loadSystem(ctx)
+	return sys, deletions, err
+}
+
+// currentSystemLocked returns sys, read when the vault-deletion count was
+// deletions, or config read again when a vault deletion has been applied
+// since: applying the earlier read would register the deleted vault again.
+// Caller holds o.mu, which DeleteVault holds while it counts a deletion.
+func (o *Orchestrator) currentSystemLocked(ctx context.Context, sys *system.System, deletions uint64) (*system.System, error) {
+	if o.vaultDeletions.Load() == deletions {
+		return sys, nil
+	}
+	fresh, err := o.loadSystem(ctx)
+	if errors.Is(err, ErrNoSystemLoader) {
+		return sys, nil
+	}
+	return fresh, err
+}
+
+// registerUnlessDeleted registers a vault built from the config ApplyConfig
+// was given, and reports whether it did. A vault deleted since that config
+// was read is removed again instead — the files and the vault-ctl group its
+// build created go, any records it had stay — so the deletion holds.
+func (o *Orchestrator) registerUnlessDeleted(vault *Vault) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.vaults[vault.ID] = vault
+	o.bindVaultInstanceToCtlLocked(vault.ID, vault.Instance)
+	if o.vaultDeletions.Load() == 0 {
+		return true
+	}
+	sys, err := o.loadSystem(context.Background())
+	if err != nil || sys == nil || findVaultConfig(sys.Config.Vaults, vault.ID) != nil {
+		return true
+	}
+	if err := o.deleteVaultLocked(sys, vault.ID, false); err != nil {
+		o.logger.Warn("remove vault deleted while it initialized", "id", vault.ID, "error", err)
+	}
+	return false
 }
 
 // cloudObjectPurger is the chunk-manager seam that deletes a vault's cloud
