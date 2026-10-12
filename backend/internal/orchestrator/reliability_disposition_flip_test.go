@@ -58,10 +58,12 @@ func TestOrchRel_DispositionFlipToDeleteStopsFeedingTheDestination(t *testing.T)
 	enableVault(t, h, source)
 	enableVault(t, h, dest)
 
-	// Two chunks: the first proves transfer is live, the second is what must
-	// NOT arrive after the flip.
-	h.submitIngestRecords(node, pipelineChunkMaxRecords*2, "disposition-flip")
-	h.waitSealedRecords(source, node, pipelineChunkMaxRecords*2)
+	// Several chunks: the first proves transfer is live, the rest are what
+	// must NOT arrive after the flip. A sweep that kept the disposition it
+	// started with would transfer all of them.
+	const chunks = 6
+	h.submitIngestRecords(node, pipelineChunkMaxRecords*chunks, "disposition-flip")
+	h.waitSealedRecords(source, node, pipelineChunkMaxRecords*chunks)
 
 	policyID := putTransferRetentionPolicy(t, h, "flip-policy")
 	configureTransferDisposition(t, h, source, dest.id, policyID)
@@ -73,11 +75,16 @@ func TestOrchRel_DispositionFlipToDeleteStopsFeedingTheDestination(t *testing.T)
 			n := len(h.sealedPipelineChunks(dest, node))
 			return fmt.Sprintf("dest_sealed_chunks=%d", n), n >= 1
 		}, nil)
-	arrivedBeforeFlip := len(h.sealedPipelineChunks(dest, node))
 
 	// The operator action: flip to delete, mid-flight, with retention still
-	// working through the vault's chunks.
+	// working through the vault's chunks. Every disposition decision after
+	// the flip reads delete. A transfer creates its destination entry when it
+	// starts, so the one transfer the sweep decided just before the flip may
+	// still add an entry after this count: a sweep transfers one chunk at a
+	// time, so at most one.
 	switchToDeleteDisposition(t, h, source)
+	arrivedAtFlip := len(h.sealedPipelineChunks(dest, node))
+	const decidedBeforeFlip = 1
 
 	// The destination must stop growing. Held across three OBSERVED retention
 	// sweeps rather than a wall-clock window: the negative only means something
@@ -87,8 +94,8 @@ func TestOrchRel_DispositionFlipToDeleteStopsFeedingTheDestination(t *testing.T)
 	h.holdAcrossSweeps("destination stops receiving once disposition is delete",
 		node, retentionSweepJob, 3, func() (string, bool) {
 			n := len(h.sealedPipelineChunks(dest, node))
-			return fmt.Sprintf("dest_sealed_chunks=%d (was %d at the flip)", n, arrivedBeforeFlip),
-				n <= arrivedBeforeFlip
+			return fmt.Sprintf("dest_sealed_chunks=%d (was %d at the flip)", n, arrivedAtFlip),
+				n <= arrivedAtFlip+decidedBeforeFlip
 		})
 
 	// And the source must still be draining — delete disposition means the
