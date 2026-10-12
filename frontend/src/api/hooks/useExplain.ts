@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, type MutableRefObject } from "react";
+import { useState, useCallback, useEffect, useRef, type MutableRefObject } from "react";
 import { queryClient, Query, ChunkPlan, QueryPipelineStage } from "../client";
 import { ContributionReport } from "../gen/gastrolog/v1/vault_pb";
 
@@ -28,7 +28,9 @@ const emptyExplainState: ExplainState = {
 
 export function useExplain(options?: { onError?: (err: Error) => void }) {
   const onErrorRef = useRef(options?.onError) as MutableRefObject<((err: Error) => void) | undefined>;
-  onErrorRef.current = options?.onError;
+  useEffect(() => {
+    onErrorRef.current = options?.onError;
+  });
 
   const [state, setState] = useState<ExplainState>(emptyExplainState);
 

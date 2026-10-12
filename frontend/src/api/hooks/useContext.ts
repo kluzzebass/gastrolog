@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, type MutableRefObject } from "react";
+import { useState, useCallback, useEffect, useRef, type MutableRefObject } from "react";
 import { queryClient, Record, RecordRef } from "../client";
 
 interface ContextState {
@@ -11,7 +11,9 @@ interface ContextState {
 
 export function useRecordContext(options?: { onError?: (err: Error) => void }) {
   const onErrorRef = useRef(options?.onError) as MutableRefObject<((err: Error) => void) | undefined>;
-  onErrorRef.current = options?.onError;
+  useEffect(() => {
+    onErrorRef.current = options?.onError;
+  });
   const [state, setState] = useState<ContextState>({
     before: [],
     anchor: null,

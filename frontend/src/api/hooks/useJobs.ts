@@ -23,7 +23,9 @@ interface WatchJobsState {
 
 export function useWatchJobs(options?: { onError?: (err: Error) => void }) {
   const onErrorRef = useRef(options?.onError) as MutableRefObject<((err: Error) => void) | undefined>;
-  onErrorRef.current = options?.onError;
+  useEffect(() => {
+    onErrorRef.current = options?.onError;
+  });
 
   const [state, setState] = useState<WatchJobsState>({
     jobs: [],

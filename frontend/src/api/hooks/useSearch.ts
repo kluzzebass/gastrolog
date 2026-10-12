@@ -1,4 +1,4 @@
-import { useState, useRef, type MutableRefObject } from "react";
+import { useState, useEffect, useRef, type MutableRefObject } from "react";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { queryClient, Query, Record, TableResult, refreshAuth } from "../client";
 import { HistogramBucket } from "../gen/gastrolog/v1/query_pb";
@@ -69,7 +69,9 @@ export function extractTokens(queryStr: string): string[] {
 
 export function useSearch(options?: { onError?: (err: Error) => void }) {
   const onErrorRef = useRef(options?.onError) as MutableRefObject<((err: Error) => void) | undefined>;
-  onErrorRef.current = options?.onError;
+  useEffect(() => {
+    onErrorRef.current = options?.onError;
+  });
 
   const [state, setState] = useState<SearchState>({
     records: [],
@@ -85,9 +87,11 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
 
   const abortRef = useRef<AbortController | null>(null);
   const searchStartRef = useRef<number>(0);
-  // Ref mirrors state so callbacks always read fresh values (no stale closures).
+  // Ref mirrors committed state so callbacks always read fresh values (no stale closures).
   const stateRef = useRef(state);
-  stateRef.current = state;
+  useEffect(() => {
+    stateRef.current = state;
+  });
 
   // eslint-disable-next-line sonarjs/cognitive-complexity -- streaming search with append/silent/auth-retry
   const search = async (queryStr: string, append = false, keepPrevious = false, silent = false) => {
