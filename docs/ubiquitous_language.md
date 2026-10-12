@@ -1013,7 +1013,9 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   **pipeline root** candidate and each chunk-manager directory, all named by
   the vault's ID. **Delete data** decides the files holding records — staging
   segments, sealed chunks and their indexes, a cloud-backed vault's cloud
-  objects: with it they go; without it they stay, unreachable, and only the
+  objects: with it they go — the cloud objects by key prefix, after the
+  vault's uploads are stopped and the in-flight ones have returned, so none
+  lands afterwards; without it they stay, unreachable, and only the
   chunk-manager bookkeeping (lock file, cloud index) and the directories left
   empty go. A vault's pipeline root is created only by its registration, so a
   write in flight when the root is removed fails rather than recreating it

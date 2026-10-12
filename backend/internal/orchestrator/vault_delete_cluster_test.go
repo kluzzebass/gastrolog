@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -814,4 +815,86 @@ func TestOrchVaultDeleteCloudObjectsFollowDeleteData(t *testing.T) {
 	}
 	h.assertNothingNamesVault("after the delete", erased)
 	h.assertOnlyRecordFilesKept("after the delete", kept)
+}
+
+// gatedUploadStore holds every Upload until released or until the upload's
+// context ends, reporting when an upload is in flight and when it returned.
+type gatedUploadStore struct {
+	blobstore.Store
+	gate     chan struct{}
+	started  chan struct{}
+	returned chan struct{}
+	once     sync.Once
+}
+
+func newGatedUploadStore(inner blobstore.Store) *gatedUploadStore {
+	return &gatedUploadStore{
+		Store:    inner,
+		gate:     make(chan struct{}),
+		started:  make(chan struct{}, 1),
+		returned: make(chan struct{}, 1),
+	}
+}
+
+func (s *gatedUploadStore) Upload(ctx context.Context, key string, data io.Reader, metadata map[string]string) error {
+	select {
+	case s.started <- struct{}{}:
+	default:
+	}
+	defer func() {
+		select {
+		case s.returned <- struct{}{}:
+		default:
+		}
+	}()
+	select {
+	case <-s.gate:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return s.Store.Upload(ctx, key, data, metadata)
+}
+
+func (s *gatedUploadStore) release() { s.once.Do(func() { close(s.gate) }) }
+
+func awaitSignal(t *testing.T, what string, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(orchHarnessEventTimeout):
+		// One event that either happens or does not: no progress to watch.
+		t.Fatalf("%s: no signal within %s", what, orchHarnessEventTimeout)
+	}
+}
+
+// A cloud upload in flight when its vault is deleted with its data does not
+// land afterwards: the delete stops the vault's uploads and waits for the
+// in-flight one to return before it deletes the vault's objects, so the
+// object the upload was writing never appears.
+func TestOrchVaultDeleteStopsInFlightCloudUpload(t *testing.T) {
+	if testing.Short() {
+		t.Skip("pipeline vault-delete acceptance test")
+	}
+	t.Parallel()
+
+	bucket := blobstore.NewMemory()
+	gated := newGatedUploadStore(bucket)
+	h := newOrchRelHarness(t, 1,
+		withPipelineCluster(pipelineTestCompletePolicy, pipelineChunkMaxRecords),
+		withSharedCloudStore(gated),
+	)
+	v := h.addCloudVaultsWithOneRoute([]string{"U"}, []glid.GLID{glid.New()}, []int{0})[0]
+
+	h.submitIngestRecords(h.nodeIDs[0], pipelineChunkMaxRecords, "upload-in-flight")
+	h.waitSealedRecords(v, h.nodeIDs[0], pipelineChunkMaxRecords)
+	awaitSignal(t, "cloud upload in flight", gated.started)
+
+	h.deleteVaultEverywhere(v, true)
+	gated.release()
+	awaitSignal(t, "in-flight cloud upload returned", gated.returned)
+
+	if left := cloudKeys(t, bucket, v); len(left) > 0 {
+		t.Fatalf("an upload in flight at the delete landed afterwards: %v", left)
+	}
+	h.assertNothingNamesVault("after the delete", v)
 }

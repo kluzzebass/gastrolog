@@ -44,9 +44,11 @@ func (o *Orchestrator) DeleteVault(id glid.GLID, deleteData bool) error {
 	o.unregisterPipelineVaultLocked(id)
 	vault, registered := o.vaults[id]
 	if deleteData && registered && vault.Instance != nil {
-		// Deleting through the chunk manager is what reaches a cloud-backed
-		// chunk's cloud object; the local files go with the directories.
-		o.sealAndDeleteAllChunks(vault.Instance, "vault delete", id)
+		if purger, ok := vault.Instance.Chunks.(cloudObjectPurger); ok {
+			if perr := purger.PurgeCloudObjects(context.Background()); perr != nil {
+				err = errors.Join(err, fmt.Errorf("purge cloud objects of vault %s: %w", id, perr))
+			}
+		}
 	}
 	if registered {
 		o.teardownVault(id, vault)
@@ -60,6 +62,12 @@ func (o *Orchestrator) DeleteVault(id glid.GLID, deleteData bool) error {
 	}
 	o.logger.Info("vault deleted on this node", "id", id, "delete_data", deleteData)
 	return err
+}
+
+// cloudObjectPurger is the chunk-manager seam that deletes a vault's cloud
+// objects once no upload of it can still land.
+type cloudObjectPurger interface {
+	PurgeCloudObjects(ctx context.Context) error
 }
 
 // vaultDirsLocked lists every directory this node can hold files of the vault

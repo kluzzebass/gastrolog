@@ -86,6 +86,9 @@ var (
 	ErrMissingDir      = errors.New("file chunk manager dir is required")
 	ErrManagerClosed   = errors.New("manager is closed")
 	ErrDirectoryLocked = errors.New("vault directory is locked by another process")
+	// ErrCloudWritesStopped refuses an upload once PurgeCloudObjects has
+	// started: the vault's cloud objects are being deleted for good.
+	ErrCloudWritesStopped = errors.New("cloud writes stopped: the vault's cloud objects are being purged")
 )
 
 type Config struct {
@@ -269,6 +272,15 @@ type Manager struct {
 	remoteTSMu     sync.Mutex
 	storageClasses map[chunk.ChunkID]string // in-memory cache of cloud storage class per chunk
 	nextChunkID    *chunk.ChunkID           // if set, used instead of NewChunkID() on next open
+
+	// cloudWrites counts uploads between their start and their object write.
+	// PurgeCloudObjects sets cloudWritesStopped, cancels cloudWriteCtx and
+	// waits on cloudWrites, so no upload writes an object after the purge.
+	// cloudWritesStopped and cloudWriteCtx are guarded by mu.
+	cloudWrites        sync.WaitGroup
+	cloudWritesStopped bool
+	cloudWriteCtx      context.Context
+	cancelCloudWrites  context.CancelFunc
 
 	postSealActive sync.Map       // chunk.ChunkID → chan struct{} — closed when PostSealProcess finishes
 	postSealWg     sync.WaitGroup // tracks in-flight PostSealProcess calls (for Close only)
@@ -4439,6 +4451,50 @@ func (m *Manager) rebuildCloudListCache() {
 	m.cloudListCache = cache
 }
 
+// cloudWriteContextLocked returns the context every upload's object write
+// runs under; PurgeCloudObjects cancels it. Caller holds m.mu.
+func (m *Manager) cloudWriteContextLocked() context.Context {
+	if m.cloudWriteCtx == nil {
+		m.cloudWriteCtx, m.cancelCloudWrites = context.WithCancel(context.Background())
+	}
+	return m.cloudWriteCtx
+}
+
+// PurgeCloudObjects deletes every cloud object under the vault's key prefix.
+// It first stops this manager's uploads for good — refusing new ones,
+// cancelling the ones in flight and waiting for them to return — so no
+// upload lands after the objects are gone.
+func (m *Manager) PurgeCloudObjects(ctx context.Context) error {
+	m.mu.Lock()
+	m.cloudWritesStopped = true
+	m.cloudWriteContextLocked()
+	cancel := m.cancelCloudWrites
+	store := m.cfg.CloudStore
+	m.mu.Unlock()
+	cancel()
+	m.cloudWrites.Wait()
+	if store == nil {
+		return nil
+	}
+
+	var keys []string
+	if err := store.List(ctx, m.cloudPrefix(), func(b blobstore.BlobInfo) error {
+		keys = append(keys, b.Key)
+		return nil
+	}); err != nil {
+		return fmt.Errorf("list cloud objects of vault %s: %w", m.cfg.VaultID, err)
+	}
+	var errs []error
+	for _, key := range keys {
+		delCtx, delCancel := context.WithTimeout(ctx, cloudDeleteTimeout)
+		if err := store.Delete(delCtx, key); err != nil {
+			errs = append(errs, fmt.Errorf("delete cloud object %s: %w", key, err))
+		}
+		delCancel()
+	}
+	return errors.Join(errs...)
+}
+
 func (m *Manager) cloudPrefix() string {
 	return fmt.Sprintf("vault-%s/", m.cfg.VaultID)
 }
@@ -4670,6 +4726,14 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		m.mu.Unlock()
 		return chunk.ErrChunkNotSealed
 	}
+	if m.cloudWritesStopped {
+		m.mu.Unlock()
+		return ErrCloudWritesStopped
+	}
+	writeCtx := m.cloudWriteContextLocked()
+	m.cloudWrites.Add(1)
+	writeDone := sync.OnceFunc(m.cloudWrites.Done)
+	defer writeDone()
 	bm := glcb.BlobMeta{
 		ChunkID:         id,
 		VaultID:         m.cfg.VaultID,
@@ -4732,7 +4796,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		_ = pw.Close()
 	}()
 
-	uploadCtx, uploadCancel := context.WithTimeout(context.Background(), cloudUploadTimeout)
+	uploadCtx, uploadCancel := context.WithTimeout(writeCtx, cloudUploadTimeout)
 	err = m.cfg.CloudStore.Upload(
 		uploadCtx,
 		key,
@@ -4740,6 +4804,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		glcb.EncodeObjectMetadata(bm),
 	)
 	uploadCancel()
+	writeDone()
 	_ = pr.Close()
 	<-wrapped
 	m.trackCloudResult(err)
