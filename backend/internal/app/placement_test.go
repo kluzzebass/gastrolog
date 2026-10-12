@@ -1013,26 +1013,6 @@ func TestPlacement_UnreachableLeader_RetainsPlacement(t *testing.T) {
 	}
 }
 
-func TestPlacement_DrainingLeader_RetainsPlacement_NoSoftOfflineAlert(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	pm, store, alerts, _, peerID := setupStateGuardTest(t, system.NodeStateDraining)
-	vaultID := seedVaultWithLeader(t, store, peerID.String())
-
-	pm.reconcile(ctx)
-
-	// Draining: placement reconcile is a no-op for the vault — the
-	// drain orchestrator is the authority for moving placements off.
-	if got := vaultNode(t, store, vaultID); got != peerID.String() {
-		t.Errorf("placement rotated off Draining leader: got %q, want %q", got, peerID.String())
-	}
-	// Draining is a deliberate operator transition — no soft-offline
-	// alert (the operator already knows).
-	if hasAlert(alerts, "vault-soft-offline-leader:") {
-		t.Errorf("Draining state should not raise soft-offline alert")
-	}
-}
-
 func TestPlacement_LiveLeaderHeartbeatLost_RetainsPlacement(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

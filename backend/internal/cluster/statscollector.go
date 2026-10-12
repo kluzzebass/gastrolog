@@ -95,6 +95,7 @@ type StatsRouteSnapshot struct {
 type StatsVaultRouteSnapshot struct {
 	VaultID glid.GLID
 	Matched int64
+	Dropped int64
 }
 
 // StatsPerRouteSnapshot captures per-route stats. Same GLID-encoding
@@ -477,6 +478,7 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 			stats.RouteVaultStats = append(stats.RouteVaultStats, &gastrologv1.VaultRouteStats{
 				VaultId:        vs.VaultID.ToProto(),
 				RecordsMatched: vs.Matched,
+				RecordsDropped: vs.Dropped,
 			})
 		}
 		for _, ps := range rs.RouteStats {

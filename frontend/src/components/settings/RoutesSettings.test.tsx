@@ -27,15 +27,13 @@ describe("route destinations eligibility", () => {
     return { ...result, openHelp };
   }
 
-  test("a JSONL sink and a disabled vault are told apart from an ordinary vault, all selectable", () => {
+  test("a disabled vault is told apart from an enabled one, both selectable", () => {
     const { getByText, container } = renderWithHelp([
       { id: testId(20), name: "vault-alpha", type: VaultType.FILE, enabled: true },
-      { id: testId(21), name: "vault-sink", type: VaultType.JSONL, enabled: true },
       { id: testId(22), name: "vault-off", type: VaultType.MEMORY, enabled: false },
     ]);
     fireEvent.click(getByText("default-route"));
     expect(getByText("vault-alpha")).toBeTruthy();
-    expect(getByText("vault-sink — JSONL sink, write-only")).toBeTruthy();
     expect(getByText("vault-off — disabled, not accepting records")).toBeTruthy();
     const boxes = [...container.querySelectorAll('[role="checkbox"]')];
     expect(boxes.some((b) => b.getAttribute("aria-disabled") === "true")).toBe(false);

@@ -3,7 +3,6 @@ config.db
 users.json
 stores/
 data/
-jsonl/
 /gastrolog
 /gastrolog-*
 /multirun

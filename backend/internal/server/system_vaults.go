@@ -118,11 +118,10 @@ func validateVaultExpressions(vaultCfg *system.VaultConfig) *connect.Error {
 // config rules at write time, not at retention-sweep time: disposition
 // "transfer" requires a target vault ID; the target must not be the source
 // vault (self-transfer is the cascade footgun — a transferred chunk would
-// immediately re-qualify for the same rule); and transfer is file → file
-// only (cloud-backed and memory vaults have
-// different at-rest forms and lifecycle machinery, so their pairing with
-// transfer is an explicit config error rather than a runtime surprise on
-// the first retention sweep). vaults is the already-loaded vault list
+// immediately re-qualify for the same rule); and both ends must be
+// TransferEligible (a file or memory vault, not cloud-backed), so an
+// ineligible pairing is an explicit config error rather than a runtime
+// surprise on the first retention sweep. vaults is the already-loaded vault list
 // (existing vaults, for the target lookup); vaultCfg is the (already
 // resolved) incoming config.
 func validateRetentionTransferDisposition(vaultCfg system.VaultConfig, vaults []system.VaultConfig) *connect.Error {
@@ -149,14 +148,14 @@ func validateRetentionTransferDisposition(vaultCfg system.VaultConfig, vaults []
 		return errInvalidArg(fmt.Errorf(
 			"vault %q: retention transfer target %s not found", vaultCfg.Name, targetID))
 	}
-	if vaultCfg.Type != system.VaultTypeFile || vaultCfg.IsCloud() {
+	if !vaultCfg.TransferEligible() {
 		return errInvalidArg(fmt.Errorf(
-			"vault %q: retention_disposition=transfer requires a plain file-typed source vault (got %s, cloud=%t) — cloud-backed and memory vaults have different at-rest forms and lifecycle machinery",
+			"vault %q: retention_disposition=transfer requires a file or memory source vault that is not cloud-backed (got %s, cloud=%t)",
 			vaultCfg.Name, vaultCfg.Type, vaultCfg.IsCloud()))
 	}
-	if target.Type != system.VaultTypeFile || target.IsCloud() {
+	if !target.TransferEligible() {
 		return errInvalidArg(fmt.Errorf(
-			"vault %q: retention transfer target %q must be a plain file vault (got %s, cloud=%t) — cloud-backed and memory vaults have different at-rest forms and lifecycle machinery",
+			"vault %q: retention transfer target %q must be a file or memory vault that is not cloud-backed (got %s, cloud=%t)",
 			vaultCfg.Name, target.Name, target.Type, target.IsCloud()))
 	}
 	return detectTransferCycle(vaultCfg, vaults)
@@ -260,6 +259,10 @@ func (s *SystemServer) PutVault(
 	vaultCfg, err := protoToVaultConfig(req.Msg.Config)
 	if err != nil {
 		return nil, errInvalidArg(err)
+	}
+	if !vaultCfg.Type.Valid() {
+		return nil, errInvalidArg(fmt.Errorf("vault %q: type must be memory or file (got %s)",
+			vaultCfg.Name, req.Msg.Config.GetType()))
 	}
 
 	// Reject duplicate names.

@@ -3,6 +3,8 @@ package server_test
 import (
 	"context"
 	"fmt"
+	chunkfile "gastrolog/internal/chunk/file"
+	indexfile "gastrolog/internal/index/file"
 	"net"
 	"strings"
 	"testing"
@@ -11,11 +13,9 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
-	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
-	indexmem "gastrolog/internal/index/memory"
 	ingestsyslog "gastrolog/internal/ingester/syslog"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
@@ -87,8 +87,9 @@ func newIngesterCheckCluster(t *testing.T, mode topologyMode, names ...string) *
 	}
 
 	factories := orchestrator.Factories{
-		ChunkManagers: map[string]chunk.ManagerFactory{"memory": chunkmem.NewFactory()},
-		IndexManagers: map[string]index.ManagerFactory{"memory": indexmem.NewFactory()},
+		VaultsDir:     t.TempDir(),
+		ChunkManagers: map[string]chunk.ManagerFactory{"file": chunkfile.NewFactory()},
+		IndexManagers: map[string]index.ManagerFactory{"file": indexfile.NewFactory()},
 		IngesterTypes: map[string]orchestrator.IngesterRegistration{
 			"syslog": {Factory: ingestsyslog.NewFactory(nil), Defaults: ingestsyslog.ParamDefaults, ListenAddrs: ingestsyslog.ListenAddrs},
 		},

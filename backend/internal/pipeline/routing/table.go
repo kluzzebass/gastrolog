@@ -29,7 +29,39 @@ type Route struct {
 	Kind     MatchKind
 	Expr     string
 	DNF      *querylang.DNF
+	// VaultIDs are the destinations that accept records, in configured order.
 	VaultIDs []glid.GLID
+	// DisabledVaultIDs are configured destinations whose vault is disabled:
+	// they receive nothing, and each matched record counts as dropped for them.
+	DisabledVaultIDs []glid.GLID
+	// Distribution decides which of VaultIDs a matched record goes to.
+	Distribution Distribution
+}
+
+// Distribution is how a route spreads a matched record over its
+// destinations.
+type Distribution string
+
+const (
+	// DistributeFanout sends every record to every destination.
+	DistributeFanout Distribution = "fanout"
+	// DistributeRoundRobin sends each record to one destination, rotating.
+	DistributeRoundRobin Distribution = "round-robin"
+	// DistributeFailover sends each record to the first destination, in
+	// configured order, that admits it.
+	DistributeFailover Distribution = "failover"
+)
+
+// ParseDistribution reads a configured distribution; empty is fanout.
+func ParseDistribution(s string) (Distribution, error) {
+	switch d := Distribution(s); d {
+	case "", DistributeFanout:
+		return DistributeFanout, nil
+	case DistributeRoundRobin, DistributeFailover:
+		return d, nil
+	default:
+		return "", fmt.Errorf("unknown distribution %q (want fanout, round-robin or failover)", s)
+	}
 }
 
 // SourceKind identifies record origin for synthetic routing attributes.
@@ -75,14 +107,16 @@ func NewTable(routes []*Route) *Table {
 	return &Table{routes: cp}
 }
 
-// CompileRoute parses expression and binds vault destinations.
+// CompileRoute parses expression and binds vault destinations, distributed
+// by fanout until the caller sets Distribution.
 func CompileRoute(id glid.GLID, name string, priority int32, expression string, vaultIDs []glid.GLID) (*Route, error) {
 	r := &Route{
-		ID:       id,
-		Name:     name,
-		Priority: priority,
-		Expr:     expression,
-		VaultIDs: vaultIDs,
+		ID:           id,
+		Name:         name,
+		Priority:     priority,
+		Expr:         expression,
+		VaultIDs:     vaultIDs,
+		Distribution: DistributeFanout,
 	}
 	expr := strings.TrimSpace(expression)
 

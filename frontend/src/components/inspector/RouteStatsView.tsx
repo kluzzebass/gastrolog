@@ -50,6 +50,9 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
   const sorted = [...stats.vaultStats].sort(
     (a, b) => Number(b.recordsMatched) - Number(a.recordsMatched),
   );
+  // The dropped column shows only once some vault has had a drop.
+  const anyDropped = sorted.some((vs) => vs.recordsDropped > BigInt(0));
+  const vaultGridCols = anyDropped ? "grid-cols-[1fr_7rem_7rem]" : "grid-cols-[1fr_7rem]";
 
   // Per-route view comes from the Route models (config joined with stats),
   // so even unmatched routes show up as zero rows when stats lag.
@@ -127,10 +130,11 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
             className={`rounded-lg border overflow-hidden ${c("border-ink-border", "border-light-border")}`}
           >
             <div
-              className={`grid grid-cols-[1fr_7rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c("text-text-muted border-ink-border-subtle bg-ink-well", "text-light-text-muted border-light-border-subtle bg-light-well")}`}
+              className={`grid ${vaultGridCols} gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c("text-text-muted border-ink-border-subtle bg-ink-well", "text-light-text-muted border-light-border-subtle bg-light-well")}`}
             >
               <span>Vault</span>
               <span className="text-right">Matched</span>
+              {anyDropped && <span className="text-right">Dropped</span>}
             </div>
             {sorted.map((vs) => {
               const vsId = idFromBytes(vs.vaultId);
@@ -138,7 +142,7 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
               return (
                 <div
                   key={vsId}
-                  className={`grid grid-cols-[1fr_7rem] gap-3 px-4 py-2.5 text-[0.85em] border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+                  className={`grid ${vaultGridCols} gap-3 px-4 py-2.5 text-[0.85em] border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
                 >
                   <span
                     className={`font-mono truncate ${c("text-text-bright", "text-light-text-bright")}`}
@@ -149,6 +153,11 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
                   <LiveValue dark={dark} tone="muted">
                     {formatCount(vs.recordsMatched)}
                   </LiveValue>
+                  {anyDropped && (
+                    <LiveValue dark={dark} tone={vs.recordsDropped > BigInt(0) ? "warn" : "muted"}>
+                      {formatCount(vs.recordsDropped)}
+                    </LiveValue>
+                  )}
                 </div>
               );
             })}

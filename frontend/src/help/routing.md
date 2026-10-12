@@ -23,8 +23,8 @@ loss, add a catch-all route (`*`) at the lowest priority (highest number).
 |-----------|-------------|
 | **Priority** | Evaluation order. Lower fires first; routes with the same priority break ties by name. |
 | **Match expression** | A boolean expression evaluated against each record's attributes (see [Query Language](help:query-language) for syntax). Determines whether this route fires. |
-| **Destinations** | One or more vaults that receive records when the route fires. Every vault is listed; a JSONL sink is marked write-only and a disabled vault as not accepting records, both still selectable. With no vault configured the list says so — a route whose destinations are missing drops what it matches. |
-| **Distribution** | How records fan across destinations: **fanout** (all destinations, default), **round-robin** (rotate), or **failover** (first healthy). |
+| **Destinations** | One or more vaults that receive records when the route fires, in order. Every vault is listed; a disabled vault is marked as not accepting records and is still selectable. A disabled destination receives nothing: the route distributes over its enabled destinations, and each record it would have sent there counts as dropped for that vault in the [Routes inspector view](help:inspector-routes). With no vault configured the list says so — a route whose destinations are missing drops what it matches. |
+| **Distribution** | How records spread over the enabled destinations: **fanout** (default) sends each record to every one, and a destination refusing admission (disk protection, a size bound) refuses the whole record; **round-robin** sends each record to one destination, rotating, and skips a refusing destination; **failover** sends each record to the first destination, in the listed order, that admits it. Round-robin and failover refuse a record only when every destination refuses it; the source then retries, so no record is lost. |
 | **Enabled** | Disabled routes are skipped during evaluation. |
 
 ## Match Expressions

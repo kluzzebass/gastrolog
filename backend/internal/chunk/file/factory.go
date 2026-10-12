@@ -21,6 +21,9 @@ const (
 	ParamMaxChunkAge   = "maxChunkAge"
 	ParamFileMode      = "fileMode"
 	ParamSealedBacking = "sealed_backing" // "local", "s3", "azure", "gcs" (default: local)
+	// ParamMemoryBudget makes the manager a memory vault's: sealed GLCBs held
+	// in RAM, bounded by this size expression.
+	ParamMemoryBudget = "memory_budget"
 
 	// ParamExpectExisting is injected by the orchestrator when loading vaults
 	// from config. It tells the chunk manager to warn if the vault directory
@@ -96,6 +99,16 @@ func NewFactoryWithStores(createStore StoreCreator) chunk.ManagerFactory {
 
 		if err := applyCloudAndCacheParams(&cfg, params); err != nil {
 			return nil, err
+		}
+		if v := params[ParamMemoryBudget]; v != "" {
+			parsed, err := system.ParseSize(v)
+			if err != nil {
+				return nil, fmt.Errorf("invalid %s: %w", ParamMemoryBudget, err)
+			}
+			if parsed == 0 {
+				return nil, fmt.Errorf("invalid %s: a memory vault needs a non-zero budget", ParamMemoryBudget)
+			}
+			cfg.MemoryBudgetBytes = parsed
 		}
 
 		return NewManager(cfg)

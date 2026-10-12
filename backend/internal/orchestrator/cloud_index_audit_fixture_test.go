@@ -45,7 +45,8 @@ func newAuditFixture(t *testing.T, n int) *auditFixture {
 
 	store := sysmem.NewStore()
 	_ = store.PutVault(context.Background(), system.VaultConfig{
-		ID: vaultID, Name: "cloud-index-audit", Type: system.VaultTypeFile, CloudServiceID: &csID,
+		Enabled: true,
+		ID:      vaultID, Name: "cloud-index-audit", Type: system.VaultTypeFile, CloudServiceID: &csID,
 	})
 	_ = store.PutCloudService(context.Background(), system.CloudService{
 		ID: csID, Name: "audit-cloud", Provider: "memory", ArchivalMode: "active",
@@ -136,7 +137,8 @@ func newLocalOnlyVaultForAudit(t *testing.T) (*Orchestrator, glid.GLID) {
 
 	store := sysmem.NewStore()
 	_ = store.PutVault(context.Background(), system.VaultConfig{
-		ID: vaultID, Name: "local-only", Type: system.VaultTypeFile,
+		Enabled: true,
+		ID:      vaultID, Name: "local-only", Type: system.VaultTypeFile,
 	})
 	orch := newTestOrch(t, Config{
 		LocalNodeID:  "audit-node",

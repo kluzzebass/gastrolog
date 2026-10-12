@@ -176,29 +176,14 @@ func TestNodeLiveness_OperatorStatesUntouched(t *testing.T) {
 		state system.NodeState
 	}{
 		{"Maintenance", system.NodeStateMaintenance},
-		{"Draining", system.NodeStateDraining},
-		{"Decommissioning", system.NodeStateDecommissioning},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name+"/stale_heartbeat", func(t *testing.T) {
 			sweep, store, peerState, _, peerID := newSweepTest(t, threshold, 10*time.Second)
 
-			// Force state to the operator-sticky value via the legal-transition
-			// chain (Live → Draining or Live → Maintenance, etc.).
 			now := time.Unix(1500, 0)
-			switch tc.state {
-			case system.NodeStateMaintenance, system.NodeStateDraining:
-				if err := store.SetNodeState(ctx, peerID, tc.state, now); err != nil {
-					t.Fatalf("SetNodeState %s: %v", tc.state, err)
-				}
-			case system.NodeStateDecommissioning:
-				// Must go through Draining first.
-				if err := store.SetNodeState(ctx, peerID, system.NodeStateDraining, now); err != nil {
-					t.Fatalf("SetNodeState Draining: %v", err)
-				}
-				if err := store.SetNodeState(ctx, peerID, system.NodeStateDecommissioning, now); err != nil {
-					t.Fatalf("SetNodeState Decommissioning: %v", err)
-				}
+			if err := store.SetNodeState(ctx, peerID, tc.state, now); err != nil {
+				t.Fatalf("SetNodeState %s: %v", tc.state, err)
 			}
 
 			sweep.now = func() time.Time { return time.Unix(3000, 0) }
@@ -216,18 +201,8 @@ func TestNodeLiveness_OperatorStatesUntouched(t *testing.T) {
 			sweep, store, peerState, _, peerID := newSweepTest(t, threshold, 10*time.Second)
 
 			now := time.Unix(1500, 0)
-			switch tc.state {
-			case system.NodeStateMaintenance, system.NodeStateDraining:
-				if err := store.SetNodeState(ctx, peerID, tc.state, now); err != nil {
-					t.Fatalf("SetNodeState %s: %v", tc.state, err)
-				}
-			case system.NodeStateDecommissioning:
-				if err := store.SetNodeState(ctx, peerID, system.NodeStateDraining, now); err != nil {
-					t.Fatalf("SetNodeState Draining: %v", err)
-				}
-				if err := store.SetNodeState(ctx, peerID, system.NodeStateDecommissioning, now); err != nil {
-					t.Fatalf("SetNodeState Decommissioning: %v", err)
-				}
+			if err := store.SetNodeState(ctx, peerID, tc.state, now); err != nil {
+				t.Fatalf("SetNodeState %s: %v", tc.state, err)
 			}
 
 			sweep.now = func() time.Time { return time.Unix(3000, 0) }

@@ -17,7 +17,7 @@ type VaultConfig struct {
 	// When false, the vault will not receive new records from the ingest pipeline.
 	Enabled bool `json:"enabled,omitempty"`
 
-	// Type is the storage shape (memory / file / jsonl). Cloud-backed vaults
+	// Type is the storage shape (memory / file). Cloud-backed vaults
 	// are file vaults with CloudServiceID set; there is no "cloud" type.
 	Type VaultType `json:"type,omitempty"`
 
@@ -40,9 +40,6 @@ type VaultConfig struct {
 
 	// ReplicationFactor is the desired RF (1 = no replication, default).
 	ReplicationFactor uint32 `json:"replicationFactor,omitempty"`
-
-	// Path is the direct path for JSONL sinks.
-	Path string `json:"path,omitempty"`
 
 	// CacheEviction is "lru" (default) or "ttl" — only meaningful for cloud-backed.
 	CacheEviction string `json:"cacheEviction,omitempty"`
@@ -147,6 +144,14 @@ func (v VaultConfig) ResolveRetentionDisposition() string {
 // IsCloud reports whether this vault is cloud-backed (CloudServiceID set).
 func (v VaultConfig) IsCloud() bool {
 	return v.CloudServiceID != nil
+}
+
+// TransferEligible reports whether retention transfer can move the vault's
+// sealed chunks out or in: they are pipeline GLCBs in a local chunk root, as
+// in a file or memory vault. A cloud-backed vault keeps them in object
+// storage with its own upload and cache lifecycle.
+func (v VaultConfig) TransferEligible() bool {
+	return (v.Type == VaultTypeFile || v.Type == VaultTypeMemory) && !v.IsCloud()
 }
 
 // DistributionMode controls how messages are distributed across route destinations.
@@ -293,7 +298,6 @@ func (v VaultConfig) DiffFields(other VaultConfig) []string {
 	add(v.Name != other.Name, "name")
 	add(v.Enabled != other.Enabled, "enabled")
 	add(v.Type != other.Type, "type")
-	add(v.Path != other.Path, "path")
 	add(v.StorageClass != other.StorageClass, "storageClass")
 	add(v.ReplicationFactor != other.ReplicationFactor, "replicationFactor")
 	add(v.RetentionDisposition != other.RetentionDisposition, "retentionDisposition")

@@ -12,8 +12,6 @@ func TestNodeState_EffectiveState(t *testing.T) {
 		{NodeStateLive, NodeStateLive},
 		{NodeStateUnreachable, NodeStateUnreachable},
 		{NodeStateMaintenance, NodeStateMaintenance},
-		{NodeStateDraining, NodeStateDraining},
-		{NodeStateDecommissioning, NodeStateDecommissioning},
 	}
 	for _, tc := range tests {
 		n := NodeConfig{State: tc.raw}
@@ -33,8 +31,6 @@ func TestNodeState_String(t *testing.T) {
 		{NodeStateLive, "live"},
 		{NodeStateUnreachable, "unreachable"},
 		{NodeStateMaintenance, "maintenance"},
-		{NodeStateDraining, "draining"},
-		{NodeStateDecommissioning, "decommissioning"},
 	}
 	for _, tc := range tests {
 		if got := tc.s.String(); got != tc.want {
@@ -48,37 +44,27 @@ func TestValidateNodeStateTransition_Legal(t *testing.T) {
 	legal := []struct {
 		from, to NodeState
 	}{
-		// Live → soft-offline + draining.
+		// Live → soft-offline.
 		{NodeStateLive, NodeStateUnreachable},
 		{NodeStateLive, NodeStateMaintenance},
-		{NodeStateLive, NodeStateDraining},
 
-		// Unreachable → live (recover) + maintenance + draining.
+		// Unreachable → live (recover) + maintenance.
 		{NodeStateUnreachable, NodeStateLive},
 		{NodeStateUnreachable, NodeStateMaintenance},
-		{NodeStateUnreachable, NodeStateDraining},
 
-		// Maintenance → live (operator clear) + draining.
+		// Maintenance → live (operator clear).
 		{NodeStateMaintenance, NodeStateLive},
-		{NodeStateMaintenance, NodeStateDraining},
-
-		// Draining → decommissioning (complete) + live (cancel).
-		{NodeStateDraining, NodeStateDecommissioning},
-		{NodeStateDraining, NodeStateLive},
 
 		// Lazy migration: legacy Unknown is treated as Live for the
 		// transition check, so every Live-successor is legal from
 		// Unknown too.
 		{NodeStateUnknown, NodeStateUnreachable},
 		{NodeStateUnknown, NodeStateMaintenance},
-		{NodeStateUnknown, NodeStateDraining},
 
 		// Idempotent: re-applying the same state is a no-op success.
 		{NodeStateLive, NodeStateLive},
 		{NodeStateUnreachable, NodeStateUnreachable},
 		{NodeStateMaintenance, NodeStateMaintenance},
-		{NodeStateDraining, NodeStateDraining},
-		{NodeStateDecommissioning, NodeStateDecommissioning},
 	}
 	for _, tc := range legal {
 		if err := ValidateNodeStateTransition(tc.from, tc.to); err != nil {
@@ -90,23 +76,21 @@ func TestValidateNodeStateTransition_Legal(t *testing.T) {
 
 func TestValidateNodeStateTransition_Illegal(t *testing.T) {
 	t.Parallel()
+	// The values the retired draining and decommissioning states had: no
+	// state reaches them, so a stale or crafted request cannot put a node
+	// into a state nothing handles.
+	retired := []NodeState{NodeStateMaintenance + 1, NodeStateMaintenance + 2}
 	illegal := []struct {
 		from, to NodeState
 	}{
-		// Skipping Draining: Live → Decommissioning isn't legal.
-		{NodeStateLive, NodeStateDecommissioning},
-		{NodeStateUnreachable, NodeStateDecommissioning},
-		{NodeStateMaintenance, NodeStateDecommissioning},
-
 		// Maintenance → Unreachable: don't downgrade operator-sticky
 		// state to cluster-auto-detected.
 		{NodeStateMaintenance, NodeStateUnreachable},
-
-		// Decommissioning has no in-FSM successor (Removed = DeleteNode).
-		{NodeStateDecommissioning, NodeStateLive},
-		{NodeStateDecommissioning, NodeStateUnreachable},
-		{NodeStateDecommissioning, NodeStateMaintenance},
-		{NodeStateDecommissioning, NodeStateDraining},
+	}
+	for _, from := range []NodeState{NodeStateUnknown, NodeStateLive, NodeStateUnreachable, NodeStateMaintenance} {
+		for _, to := range retired {
+			illegal = append(illegal, struct{ from, to NodeState }{from, to})
+		}
 	}
 	for _, tc := range illegal {
 		if err := ValidateNodeStateTransition(tc.from, tc.to); err == nil {

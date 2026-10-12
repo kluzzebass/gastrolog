@@ -45,7 +45,7 @@ for append-heavy write patterns and time-ordered reads.
 
 - **Vault** — a named, versioned container for log records. The unit of independent
   storage and the only abstraction over the chunk layer. A vault carries its full
-  storage shape directly: a **type** (memory, file, jsonl), a **storage class**, an
+  storage shape directly: a **type** (memory or file), a **storage class**, an
   optional **cloud service** binding, a **rotation policy**, **retention rules**, a
   **replication factor**, and cache tuning. Operators create and delete vaults; the
   system manages placements. Declarative config in
@@ -107,6 +107,12 @@ for append-heavy write patterns and time-ordered reads.
 - **Cloud-backed** — record bytes live in S3/Azure/GCS, not local disk; marked
   with `CloudBacked = true` in `ChunkMeta`. A cloud-backed vault is a file vault
   with `CloudServiceID` set; there is no separate "cloud" vault type.
+- **Memory vault** — a pipeline vault whose homes serve its sealed GLCBs from
+  RAM (held, not mapped) and whose **memory budget** bounds the bytes of its
+  sealed chunks on each node: over budget, retention retires the oldest
+  sealed chunks with the vault's disposition (reason `memory-budget`). Its
+  intake and GLCBs are durable on disk like a file vault's; it is served by
+  the file chunk manager with a memory budget set.
 - **Archived** — in an offline cloud storage class (e.g. Glacier). Unreadable
   until `Restore` completes. Tracked via `Archived = true`.
 - **Retention-pending** — marked in the vault FSM for deletion on the next sweep.
@@ -261,11 +267,20 @@ a vault's active chunk".
   the routing table for a vault that's draining). Other kinds may be
   added by future stages.
 
-- **Distribution mode** — how a single route fans matched records
-  across its destinations:
-  - `fanout` — write to all destinations (default).
-  - `round-robin` — rotate through destinations (load-balance).
-  - `failover` — try first; on failure, try next.
+- **Distribution mode** — how a single route spreads matched records over
+  its enabled destinations (`routing.Distribution`, chosen per record by
+  `routing.Manager.selectDestinations`):
+  - `fanout` — every destination (default); a destination refusing
+    admission refuses the whole record.
+  - `round-robin` — one destination per record, rotating from a per-route
+    position the routing manager keeps across table swaps; a refusing
+    destination is skipped.
+  - `failover` — the first destination, in configured order, that admits
+    the record.
+  Round-robin and failover refuse a record only when every destination
+  refuses it. A **disabled** destination vault is left out of the
+  distribution, and each record the route would have sent it counts as
+  dropped for that vault.
 
 - **Routing table** (`routing.Table`) — the compiled, priority-sorted
   routes on a node, published to the pipeline supervisor
@@ -522,14 +537,9 @@ one segmented file set, one batch-writer goroutine.
     to live on the broadcast fabric, not on a tick.
   - **Maintenance** — an operator declared the node absent; the cluster
     expects it back and keeps its placements.
-  - **Draining** — chunks are being transferred off the node ahead of its
-    removal; cancelling returns it to live.
-  - **Decommissioning** — the node is leaving: it receives no placements and
-    `DeleteNode` removes it. No state follows.
-
-  Legal transitions: live → unreachable | maintenance | draining;
-  unreachable → live | maintenance | draining; maintenance → live |
-  draining; draining → decommissioning | live.
+  Legal transitions: live → unreachable | maintenance; unreachable → live |
+  maintenance; maintenance → live. A node leaves the cluster by removal
+  (`cluster remove-node`, which deletes its NodeConfig), not by a state.
 
   **Offline** is not a node state. It is the stats surface's verdict on a
   node whose broadcast is older than the stats TTL, shown with how long it
@@ -962,7 +972,8 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   its local copy — no loss window. The destination-side retention clock
   starts fresh at arrival (`SealedAt` stamped on landing), so a shorter
   destination TTL does not re-fire retention the moment the chunk
-  lands. File vaults only (source and target); self-transfer is
+  lands. File and memory vaults that are not cloud-backed, as source
+  and target; self-transfer is
   rejected at `PutVault`. See
   docs/retention-transfer-disposition-design.md (gastrolog-2l918).
 

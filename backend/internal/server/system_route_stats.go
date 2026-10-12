@@ -69,6 +69,7 @@ func clusterRouteStats(orch routeStatsSource, peers PeerRouteStatsProvider) clus
 		out.vaults[vaultID.String()] = &apiv1.VaultRouteStats{
 			VaultId:        vaultID.ToProto(),
 			RecordsMatched: vs.Matched,
+			RecordsDropped: vs.Dropped,
 		}
 	}
 	for routeID, ps := range orch.PerRouteStatsList() {
@@ -148,6 +149,7 @@ func mergeVaultRouteStats(m map[string]*apiv1.VaultRouteStats, stats []*apiv1.Va
 			continue
 		}
 		existing.RecordsMatched += vs.RecordsMatched
+		existing.RecordsDropped += vs.RecordsDropped
 	}
 }
 

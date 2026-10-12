@@ -19,7 +19,6 @@ import (
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
-	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/ingester/syslog"
 	"gastrolog/internal/ingester/tail"
 	"gastrolog/internal/orchestrator"
@@ -111,12 +110,10 @@ func newConfigTestSetup(t *testing.T) (gastrologv1connect.SystemServiceClient, s
 	factories := orchestrator.Factories{
 		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
-			"file":   chunkfile.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
-			"file":   indexfile.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 	}
 
@@ -474,6 +471,7 @@ func TestPauseVaultPersistsToConfig(t *testing.T) {
 			Id:      vaultID.Bytes(),
 			Name:    "persist-vault",
 			Enabled: true,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_MEMORY,
 		},
 	}))
 	if err != nil {
@@ -527,12 +525,10 @@ func newConfigTestSetupWithIngesters(t *testing.T) (gastrologv1connect.SystemSer
 	factories := orchestrator.Factories{
 		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
-			"file":   chunkfile.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
-			"file":   indexfile.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 		IngesterTypes: map[string]orchestrator.IngesterRegistration{
 			"syslog": {Factory: syslog.NewFactory(nil), Defaults: syslog.ParamDefaults, ListenAddrs: syslog.ListenAddrs},
@@ -562,13 +558,13 @@ func TestDuplicateEntityNames(t *testing.T) {
 
 	t.Run("vault", func(t *testing.T) {
 		_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
-			Config: &gastrologv1.VaultConfig{Name: "my-vault"},
+			Config: &gastrologv1.VaultConfig{Name: "my-vault", Type: gastrologv1.VaultType_VAULT_TYPE_MEMORY},
 		}))
 		if err != nil {
 			t.Fatalf("first PutVault: %v", err)
 		}
 		_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
-			Config: &gastrologv1.VaultConfig{Name: "my-vault"},
+			Config: &gastrologv1.VaultConfig{Name: "my-vault", Type: gastrologv1.VaultType_VAULT_TYPE_MEMORY},
 		}))
 		if err == nil {
 			t.Fatal("expected error for duplicate vault name")
@@ -1093,11 +1089,12 @@ func TestGetIngesterDefaultsModes(t *testing.T) {
 	}
 
 	factories := orchestrator.Factories{
+		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
+			"file": chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
+			"file": indexfile.NewFactory(),
 		},
 		IngesterTypes: map[string]orchestrator.IngesterRegistration{
 			"syslog": {Factory: syslog.NewFactory(nil), Defaults: syslog.ParamDefaults, ListenAddrs: syslog.ListenAddrs},

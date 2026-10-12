@@ -33,7 +33,6 @@ const (
 	VaultType_VAULT_TYPE_UNSPECIFIED VaultType = 0
 	VaultType_VAULT_TYPE_MEMORY      VaultType = 1
 	VaultType_VAULT_TYPE_FILE        VaultType = 2
-	VaultType_VAULT_TYPE_JSONL       VaultType = 3
 )
 
 // Enum value maps for VaultType.
@@ -42,13 +41,11 @@ var (
 		0: "VAULT_TYPE_UNSPECIFIED",
 		1: "VAULT_TYPE_MEMORY",
 		2: "VAULT_TYPE_FILE",
-		3: "VAULT_TYPE_JSONL",
 	}
 	VaultType_value = map[string]int32{
 		"VAULT_TYPE_UNSPECIFIED": 0,
 		"VAULT_TYPE_MEMORY":      1,
 		"VAULT_TYPE_FILE":        2,
-		"VAULT_TYPE_JSONL":       3,
 	}
 )
 
@@ -146,13 +143,6 @@ const (
 	// Maintenance: operator-declared absence. Placement does NOT rotate
 	// off this state. Sticky — requires `cluster online` to clear.
 	NodeState_NODE_STATE_MAINTENANCE NodeState = 3
-	// Draining: operator-initiated; chunks being transferred off the node
-	// in preparation for removal.
-	NodeState_NODE_STATE_DRAINING NodeState = 4
-	// Decommissioning: chunks moved; voter being removed from cluster-ctl Raft
-	// and vault-ctl groups. Transitions to absence-from-FSM (= Removed)
-	// when removal completes.
-	NodeState_NODE_STATE_DECOMMISSIONING NodeState = 5
 )
 
 // Enum value maps for NodeState.
@@ -162,16 +152,12 @@ var (
 		1: "NODE_STATE_LIVE",
 		2: "NODE_STATE_UNREACHABLE",
 		3: "NODE_STATE_MAINTENANCE",
-		4: "NODE_STATE_DRAINING",
-		5: "NODE_STATE_DECOMMISSIONING",
 	}
 	NodeState_value = map[string]int32{
-		"NODE_STATE_UNSPECIFIED":     0,
-		"NODE_STATE_LIVE":            1,
-		"NODE_STATE_UNREACHABLE":     2,
-		"NODE_STATE_MAINTENANCE":     3,
-		"NODE_STATE_DRAINING":        4,
-		"NODE_STATE_DECOMMISSIONING": 5,
+		"NODE_STATE_UNSPECIFIED": 0,
+		"NODE_STATE_LIVE":        1,
+		"NODE_STATE_UNREACHABLE": 2,
+		"NODE_STATE_MAINTENANCE": 3,
 	}
 )
 
@@ -632,23 +618,22 @@ type VaultConfig struct {
 	StorageClass      uint32 `protobuf:"varint,8,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
 	CloudServiceId    []byte `protobuf:"bytes,9,opt,name=cloud_service_id,json=cloudServiceId,proto3" json:"cloud_service_id,omitempty"`
 	ReplicationFactor uint32 `protobuf:"varint,10,opt,name=replication_factor,json=replicationFactor,proto3" json:"replication_factor,omitempty"` // desired RF (1 = no replication, default)
-	Path              string `protobuf:"bytes,11,opt,name=path,proto3" json:"path,omitempty"`                                                     // direct path for JSONL sinks
 	// OUTPUT ONLY. File storage assignments owned by the placement manager,
 	// attached from Runtime.VaultPlacements when a vault is read. The domain
 	// VaultConfig no longer carries them at all, so a write cannot express them:
 	// the field is absent from the type a PutVault command marshals
 	// (gastrolog-kl8c3s closed a second writer to the mirror; gastrolog-617qns
 	// removed the mirror).
-	Placements    []*VaultPlacement `protobuf:"bytes,12,rep,name=placements,proto3" json:"placements,omitempty"`
-	CacheEviction string            `protobuf:"bytes,13,opt,name=cache_eviction,json=cacheEviction,proto3" json:"cache_eviction,omitempty"` // "lru" (default) or "ttl"
+	Placements    []*VaultPlacement `protobuf:"bytes,11,rep,name=placements,proto3" json:"placements,omitempty"`
+	CacheEviction string            `protobuf:"bytes,12,opt,name=cache_eviction,json=cacheEviction,proto3" json:"cache_eviction,omitempty"` // "lru" (default) or "ttl"
 	// Warm-cache soft cap for cloud-backed chunks, as a size expression
 	// ("1GiB"). Empty = unset (defaulted at creation for cloud vaults); "0"
 	// rejected.
-	CacheBudget string `protobuf:"bytes,14,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`
+	CacheBudget string `protobuf:"bytes,13,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`
 	// Warm-cache eviction age (ttl mode only), as a duration expression ("1h",
 	// "7d"). Empty = unset.
-	CacheTtl             string `protobuf:"bytes,15,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`
-	RetentionDisposition string `protobuf:"bytes,16,opt,name=retention_disposition,json=retentionDisposition,proto3" json:"retention_disposition,omitempty"` // "delete", "route", or "transfer" — what retention does with aged-out records
+	CacheTtl             string `protobuf:"bytes,14,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`
+	RetentionDisposition string `protobuf:"bytes,15,opt,name=retention_disposition,json=retentionDisposition,proto3" json:"retention_disposition,omitempty"` // "delete", "route", or "transfer" — what retention does with aged-out records
 	// Target vault ID for retention_disposition = "transfer": the sealed
 	// chunk is re-homed here unchanged when retention fires. Required when,
 	// and only valid when, disposition is "transfer" — see PutVault
@@ -656,7 +641,7 @@ type VaultConfig struct {
 	// Renumbered to 17 when disk_free_warn/disk_free_floor moved to
 	// FileStorage (gastrolog-9akebz) — no `reserved` (house rule): zero
 	// production deployments.
-	RetentionTransferTargetVaultId []byte `protobuf:"bytes,17,opt,name=retention_transfer_target_vault_id,json=retentionTransferTargetVaultId,proto3" json:"retention_transfer_target_vault_id,omitempty"`
+	RetentionTransferTargetVaultId []byte `protobuf:"bytes,16,opt,name=retention_transfer_target_vault_id,json=retentionTransferTargetVaultId,proto3" json:"retention_transfer_target_vault_id,omitempty"`
 	unknownFields                  protoimpl.UnknownFields
 	sizeCache                      protoimpl.SizeCache
 }
@@ -759,13 +744,6 @@ func (x *VaultConfig) GetReplicationFactor() uint32 {
 		return x.ReplicationFactor
 	}
 	return 0
-}
-
-func (x *VaultConfig) GetPath() string {
-	if x != nil {
-		return x.Path
-	}
-	return ""
 }
 
 func (x *VaultConfig) GetPlacements() []*VaultPlacement {
@@ -7324,6 +7302,9 @@ type VaultRouteStats struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	VaultId        []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	RecordsMatched int64                  `protobuf:"varint,2,opt,name=records_matched,json=recordsMatched,proto3" json:"records_matched,omitempty"` // records that matched a route targeting this vault
+	// records a matched route sent this vault's way but it did not receive:
+	// the vault was disabled, or its sink went away mid-delivery
+	RecordsDropped int64 `protobuf:"varint,3,opt,name=records_dropped,json=recordsDropped,proto3" json:"records_dropped,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -7368,6 +7349,13 @@ func (x *VaultRouteStats) GetVaultId() []byte {
 func (x *VaultRouteStats) GetRecordsMatched() int64 {
 	if x != nil {
 		return x.RecordsMatched
+	}
+	return 0
+}
+
+func (x *VaultRouteStats) GetRecordsDropped() int64 {
+	if x != nil {
+		return x.RecordsDropped
 	}
 	return 0
 }
@@ -9174,7 +9162,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0eVaultPlacement\x12\x1d\n" +
 	"\n" +
 	"storage_id\x18\x01 \x01(\fR\tstorageId\x12\x16\n" +
-	"\x06leader\x18\x02 \x01(\bR\x06leader\"\xc9\x05\n" +
+	"\x06leader\x18\x02 \x01(\bR\x06leader\"\xb5\x05\n" +
 	"\vVaultConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -9186,16 +9174,15 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\rstorage_class\x18\b \x01(\rR\fstorageClass\x12(\n" +
 	"\x10cloud_service_id\x18\t \x01(\fR\x0ecloudServiceId\x12-\n" +
 	"\x12replication_factor\x18\n" +
-	" \x01(\rR\x11replicationFactor\x12\x12\n" +
-	"\x04path\x18\v \x01(\tR\x04path\x12<\n" +
+	" \x01(\rR\x11replicationFactor\x12<\n" +
 	"\n" +
-	"placements\x18\f \x03(\v2\x1c.gastrolog.v1.VaultPlacementR\n" +
+	"placements\x18\v \x03(\v2\x1c.gastrolog.v1.VaultPlacementR\n" +
 	"placements\x12%\n" +
-	"\x0ecache_eviction\x18\r \x01(\tR\rcacheEviction\x12!\n" +
-	"\fcache_budget\x18\x0e \x01(\tR\vcacheBudget\x12\x1b\n" +
-	"\tcache_ttl\x18\x0f \x01(\tR\bcacheTtl\x123\n" +
-	"\x15retention_disposition\x18\x10 \x01(\tR\x14retentionDisposition\x12J\n" +
-	"\"retention_transfer_target_vault_id\x18\x11 \x01(\fR\x1eretentionTransferTargetVaultId\"-\n" +
+	"\x0ecache_eviction\x18\f \x01(\tR\rcacheEviction\x12!\n" +
+	"\fcache_budget\x18\r \x01(\tR\vcacheBudget\x12\x1b\n" +
+	"\tcache_ttl\x18\x0e \x01(\tR\bcacheTtl\x123\n" +
+	"\x15retention_disposition\x18\x0f \x01(\tR\x14retentionDisposition\x12J\n" +
+	"\"retention_transfer_target_vault_id\x18\x10 \x01(\fR\x1eretentionTransferTargetVaultId\"-\n" +
 	"\x10RouteDestination\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\x81\x02\n" +
 	"\vRouteConfig\x12\x0e\n" +
@@ -9672,10 +9659,11 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"routeStats\x12=\n" +
 	"\vrouted_rate\x18\a \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\n" +
 	"routedRate\x12?\n" +
-	"\fmatched_rate\x18\b \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\vmatchedRate\"U\n" +
+	"\fmatched_rate\x18\b \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\vmatchedRate\"~\n" +
 	"\x0fVaultRouteStats\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12'\n" +
-	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\"S\n" +
+	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\x12'\n" +
+	"\x0frecords_dropped\x18\x03 \x01(\x03R\x0erecordsDropped\"S\n" +
 	"\rPerRouteStats\x12\x19\n" +
 	"\broute_id\x18\x01 \x01(\fR\arouteId\x12'\n" +
 	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\"\x82\x01\n" +
@@ -9803,23 +9791,20 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x19ListLogComponentsResponse\x12>\n" +
 	"\n" +
 	"components\x18\x01 \x03(\v2\x1e.gastrolog.v1.LogComponentInfoR\n" +
-	"components*i\n" +
+	"components*S\n" +
 	"\tVaultType\x12\x1a\n" +
 	"\x16VAULT_TYPE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11VAULT_TYPE_MEMORY\x10\x01\x12\x13\n" +
-	"\x0fVAULT_TYPE_FILE\x10\x02\x12\x14\n" +
-	"\x10VAULT_TYPE_JSONL\x10\x03*b\n" +
+	"\x0fVAULT_TYPE_FILE\x10\x02*b\n" +
 	"\fIngesterMode\x12\x1d\n" +
 	"\x19INGESTER_MODE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15INGESTER_MODE_PASSIVE\x10\x01\x12\x18\n" +
-	"\x14INGESTER_MODE_ACTIVE\x10\x02*\xad\x01\n" +
+	"\x14INGESTER_MODE_ACTIVE\x10\x02*t\n" +
 	"\tNodeState\x12\x1a\n" +
 	"\x16NODE_STATE_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fNODE_STATE_LIVE\x10\x01\x12\x1a\n" +
 	"\x16NODE_STATE_UNREACHABLE\x10\x02\x12\x1a\n" +
-	"\x16NODE_STATE_MAINTENANCE\x10\x03\x12\x17\n" +
-	"\x13NODE_STATE_DRAINING\x10\x04\x12\x1e\n" +
-	"\x1aNODE_STATE_DECOMMISSIONING\x10\x05*w\n" +
+	"\x16NODE_STATE_MAINTENANCE\x10\x03*w\n" +
 	"\bLogLevel\x12\x19\n" +
 	"\x15LOG_LEVEL_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fLOG_LEVEL_DEBUG\x10\x01\x12\x12\n" +

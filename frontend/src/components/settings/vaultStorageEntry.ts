@@ -3,7 +3,7 @@ import { transferSourceIneligibility } from "./transferEligibility";
 
 // A cloud-backed vault is a file vault with cloudServiceId set; cloud-ness
 // is derived via isCloudBacked() rather than a separate type discriminator.
-export type VaultTypeLabel = "memory" | "file" | "jsonl";
+export type VaultTypeLabel = "memory" | "file";
 
 /** Returns true if this vault is cloud-backed (file vault with a cloud service binding). */
 export function isCloudBacked(v: { type: VaultTypeLabel; cloudServiceId: string }): boolean {
@@ -24,8 +24,6 @@ export interface StorageEntry {
   retentionDisposition: string; // "delete" (default) | "route" | "transfer"
   retentionTransferTarget: string; // vault ID — required when retentionDisposition is "transfer"
   replicationFactor: string;
-  path: string;
-  nodeId: string;
 }
 
 export function vaultTypeEnum(t: VaultTypeLabel): VaultType {
@@ -34,8 +32,6 @@ export function vaultTypeEnum(t: VaultTypeLabel): VaultType {
       return VaultType.MEMORY;
     case "file":
       return VaultType.FILE;
-    case "jsonl":
-      return VaultType.JSONL;
   }
 }
 
@@ -45,7 +41,7 @@ export function isStorageComplete(s: StorageEntry, _hasCloudServices: boolean): 
 
 /** Why the storage shape cannot be saved yet, or undefined when it can. */
 export function storageIncompleteReason(s: StorageEntry): string | undefined {
-  if (s.type !== "jsonl" && s.retentionDisposition === "transfer") {
+  if (s.retentionDisposition === "transfer") {
     const sourceReason = transferSourceIneligibility(s);
     if (sourceReason !== undefined) return `Transfer is not available: ${sourceReason}`;
     if (s.retentionTransferTarget === "") return "Pick a transfer target";
@@ -58,7 +54,5 @@ export function storageIncompleteReason(s: StorageEntry): string | undefined {
       // vaults — the active chunk and warm cache live at the same chunkDir
       // path, so no separate "active" or "cache" class is meaningful.
       return s.storageClass === "" ? "Pick a storage class" : undefined;
-    case "jsonl":
-      return s.nodeId === "" ? "Pick a node" : undefined;
   }
 }

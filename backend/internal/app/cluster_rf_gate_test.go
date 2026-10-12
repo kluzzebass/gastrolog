@@ -59,16 +59,11 @@ func (c *rfTestCluster) node(name string, state system.NodeState) glid.GLID {
 	return id
 }
 
-// setState transitions a node, walking the legal path to Decommissioning.
+// setState transitions a node.
 func (c *rfTestCluster) setState(name string, state system.NodeState) {
 	c.t.Helper()
 	ctx := context.Background()
 	id := c.ids[name]
-	if state == system.NodeStateDecommissioning {
-		if err := c.store.SetNodeState(ctx, id, system.NodeStateDraining, time.Now()); err != nil {
-			c.t.Fatalf("SetNodeState %s Draining: %v", name, err)
-		}
-	}
 	if err := c.store.SetNodeState(ctx, id, state, time.Now()); err != nil {
 		c.t.Fatalf("SetNodeState %s %v: %v", name, state, err)
 	}
@@ -183,16 +178,14 @@ func TestVaultsBelowRF_FourNodesRF3_EligibleSpare(t *testing.T) {
 	}
 }
 
-// The spare only counts when it is Live. Every soft-offline and
-// in-transition state is excluded, matching the placement manager, which
-// will not put new members on those nodes either.
+// The spare only counts when it is Live. Every soft-offline state is
+// excluded, matching the placement manager, which will not put new members
+// on those nodes either.
 func TestVaultsBelowRF_SpareMustBeLive(t *testing.T) {
 	t.Parallel()
 	for _, state := range []system.NodeState{
 		system.NodeStateUnreachable,
 		system.NodeStateMaintenance,
-		system.NodeStateDraining,
-		system.NodeStateDecommissioning,
 	} {
 		t.Run(state.String(), func(t *testing.T) {
 			t.Parallel()
@@ -374,32 +367,6 @@ func TestVaultsBelowRF_EmptyAndUnplaced(t *testing.T) {
 	}
 	if got := c.below("a"); len(got) != 0 {
 		t.Fatalf("unplaced vault: got %v", got)
-	}
-}
-
-// JSONL vaults are pinned to their path's node, so no other node is ever
-// an eligible replacement — the arithmetic reports zero spares rather
-// than pretending a Live node could take over.
-func TestVaultsBelowRF_JSONLVaultHasNoSpare(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	c := newRFTestCluster(t)
-	c.node("a", system.NodeStateLive)
-	c.node("b", system.NodeStateLive)
-	vaultID := glid.New()
-	if err := c.store.PutVault(ctx, system.VaultConfig{
-		ID: vaultID, Name: "jsonl", Type: system.VaultTypeJSONL, ReplicationFactor: 2,
-	}); err != nil {
-		t.Fatalf("PutVault: %v", err)
-	}
-	c.place(vaultID, []system.VaultPlacement{
-		{StorageID: system.SyntheticStorageID(c.ids["a"].String()), Leader: true},
-		{StorageID: system.SyntheticStorageID(c.ids["b"].String()), Leader: false},
-	})
-
-	degraded := c.below("b")
-	if len(degraded) != 1 || degraded[0].Eligible != 0 {
-		t.Fatalf("JSONL vault must report no eligible spare, got %v", degraded)
 	}
 }
 

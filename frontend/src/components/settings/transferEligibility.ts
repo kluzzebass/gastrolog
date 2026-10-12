@@ -14,15 +14,9 @@ type TransferCandidate = Pick<
   "id" | "name" | "type" | "cloudServiceId" | "retentionDisposition" | "retentionTransferTargetVaultId"
 >;
 
-function nonFileTypeReason(t: VaultType): string {
-  switch (t) {
-    case VaultType.MEMORY:
-      return "memory vault";
-    case VaultType.JSONL:
-      return "JSONL sink";
-    default:
-      return "not a file vault";
-  }
+// File and memory vaults both keep sealed chunks transfer can move.
+function chunkHolding(t: VaultType): boolean {
+  return t === VaultType.FILE || t === VaultType.MEMORY;
 }
 
 // Mirrors PutVault's transfer-graph walk: following transfer edges from the
@@ -46,8 +40,8 @@ function closesTransferCycle(
 /**
  * Every vault as a candidate transfer target, eligible ones first. Each
  * ineligible vault carries the reason PutVault would reject it: the source
- * itself, a non-file vault, a cloud-backed vault, or a target whose
- * transfer chain cycles.
+ * itself, a vault of no buildable type, a cloud-backed vault, or a target
+ * whose transfer chain cycles.
  */
 export function transferTargetOptions(
   vaults: TransferCandidate[],
@@ -58,7 +52,7 @@ export function transferTargetOptions(
     const value = encode(v.id);
     let ineligibleReason: string | undefined;
     if (value === sourceId) ineligibleReason = "this vault";
-    else if (v.type !== VaultType.FILE) ineligibleReason = nonFileTypeReason(v.type);
+    else if (!chunkHolding(v.type)) ineligibleReason = "not a file or memory vault";
     else if (v.cloudServiceId.length > 0) ineligibleReason = "cloud-backed";
     else if (closesTransferCycle(value, sourceId, byId)) ineligibleReason = "would create a transfer cycle";
     return { value, label: v.name || value, ineligibleReason };
@@ -69,15 +63,8 @@ export function transferTargetOptions(
 
 /**
  * Why a vault cannot itself transfer, or undefined when it can: PutVault
- * accepts transfer only from a non-cloud file vault.
+ * accepts transfer from a file or memory vault that is not cloud-backed.
  */
 export function transferSourceIneligibility(s: { type: VaultTypeLabel; cloudServiceId: string }): string | undefined {
-  switch (s.type) {
-    case "memory":
-      return "this is a memory vault";
-    case "jsonl":
-      return "this is a JSONL sink";
-    case "file":
-      return s.cloudServiceId === "" ? undefined : "this vault is cloud-backed";
-  }
+  return s.cloudServiceId === "" ? undefined : "this vault is cloud-backed";
 }

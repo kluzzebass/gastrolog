@@ -412,11 +412,6 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 	//     raise warning alert. Closes the RF=1 redeploy bug — placement
 	//     can't move chunks off a transiently-absent node and orphan
 	//     them on its disk.
-	//   - Draining / Decommissioning (in-transition): retain placement;
-	//     the explicit drain orchestrator / decommission flow is the
-	//     authority for moving placements off these nodes, not this
-	//     reconcile loop. No alert — these are deliberate operator
-	//     states, not unexpected absences.
 	// See docs/node-lifecycle-design.md "Behavior gates by state".
 	// A leader that has DEPARTED — no NodeConfig and no heartbeat — is exempt
 	// from every guard below. Those guards exist to protect a node that still
@@ -467,11 +462,6 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 			}
 			pm.placeFollowers(ctx, &v, nodes, nscs, vaultCount)
 			return
-		case system.NodeStateDraining, system.NodeStateDecommissioning:
-			// Drain / decommission flow is the authority; reconcile is a
-			// no-op for this vault while the node is in transition.
-			pm.placeFollowers(ctx, &v, nodes, nscs, vaultCount)
-			return
 		}
 	}
 	if pm.alerts != nil {
@@ -492,7 +482,7 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 	// own — DeleteNode sweeps the node's storage config, so the leader stops
 	// resolving — but relying on that would make the outcome depend on vault
 	// type.
-	if currentLeader != "" && !leaderDeparted && pm.nodeEligible(v, currentLeader, nscs) {
+	if currentLeader != "" && !leaderDeparted && nodeEligibleForVault(v, currentLeader, nscs) {
 		pm.clearUnplacedAlarms(v)
 		pm.placeFollowers(ctx, &v, nodes, nscs, vaultCount)
 		return
@@ -761,9 +751,9 @@ func (pm *placementManager) alertReplication(v *system.VaultConfig, placed, desi
 // acceptsNewPlacements reports whether a node in this lifecycle state may be
 // given a placement it does not already hold. Only Live may (Unknown is the
 // zero value of a record minted before the state field, and of a node whose
-// NodeConfig has not landed yet; both are Live). Soft-offline (Unreachable,
-// Maintenance) and in-transition (Draining, Decommissioning) nodes keep the
-// placements they hold and take no new ones. The placement manager and the
+// NodeConfig has not landed yet; both are Live). Soft-offline nodes
+// (Unreachable, Maintenance) keep the placements they hold and take no new
+// ones. The placement manager and the
 // RF-preservation removal gate both decide eligibility with this predicate: a
 // gate that counts a spare the placer will not use approves removals that
 // leave a vault below its replication factor.
@@ -773,14 +763,12 @@ func acceptsNewPlacements(state system.NodeState) bool {
 
 // countsTowardReplication reports whether a placement member on a node in
 // this lifecycle state is a working replica. Soft-offline nodes are expected
-// back but are not serving now, and a decommissioning node refuses reads and
-// writes; their members are retained but do not count. A draining node still
-// serves reads and writes until its chunks have moved, so it counts.
+// back but are not serving now; their members are retained but do not count.
 func countsTowardReplication(state system.NodeState) bool {
 	switch state {
-	case system.NodeStateUnreachable, system.NodeStateMaintenance, system.NodeStateDecommissioning:
+	case system.NodeStateUnreachable, system.NodeStateMaintenance:
 		return false
-	case system.NodeStateUnknown, system.NodeStateLive, system.NodeStateDraining:
+	case system.NodeStateUnknown, system.NodeStateLive:
 		return true
 	}
 	return true
@@ -937,34 +925,23 @@ func (pm *placementManager) handleUnplaceable(_ context.Context, v system.VaultC
 // apply acceptsNewPlacements to the node's lifecycle state, and the
 // placement manager also requires a current heartbeat. This function
 // answers only "can this node hold this vault's data".
-func nodeEligibleForVault(v system.VaultConfig, nodeID string, nscs []system.NodeStorageConfig, placements []system.VaultPlacement) bool {
+func nodeEligibleForVault(v system.VaultConfig, nodeID string, nscs []system.NodeStorageConfig) bool {
 	switch v.Type {
 	case system.VaultTypeMemory:
 		return true // any node can serve memory vaults
 	case system.VaultTypeFile:
 		return nodeHasStorageClass(nscs, nodeID, v.StorageClass)
-	case system.VaultTypeJSONL:
-		// JSONL vaults have explicit node assignment via Path — only the
-		// node already holding the leader placement is eligible.
-		return system.LeaderNodeID(placements, nscs) == nodeID
 	default:
 		return false
 	}
 }
 
-// nodeEligible checks whether a specific node can serve a vault.
-func (pm *placementManager) nodeEligible(v system.VaultConfig, nodeID string, nscs []system.NodeStorageConfig) bool {
-	placements, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
-	return nodeEligibleForVault(v, nodeID, nscs, placements)
-}
-
 // eligibleNodes returns every node that can take a new leader placement for
 // the vault: it accepts new placements and can hold the vault's data.
 func (pm *placementManager) eligibleNodes(v system.VaultConfig, nodes placementNodes, nscs []system.NodeStorageConfig) []string {
-	placements, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 	var result []string
 	for nodeID := range nodes.alive {
-		if nodes.acceptsNew(nodeID) && nodeEligibleForVault(v, nodeID, nscs, placements) {
+		if nodes.acceptsNew(nodeID) && nodeEligibleForVault(v, nodeID, nscs) {
 			result = append(result, nodeID)
 		}
 	}

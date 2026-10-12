@@ -72,14 +72,13 @@ func TestIngesterCheckTargets_AllNodesAsksEveryServiceableNode(t *testing.T) {
 		// because the ingester will not start there until it returns — at which
 		// point the config is validated again.
 		"n3": system.NodeStateUnreachable,
-		"n4": system.NodeStateDecommissioning,
 		// Operator-quiesced but reachable, so it can still answer.
-		"n5": system.NodeStateMaintenance,
+		"n4": system.NodeStateMaintenance,
 	})
 	s := &SystemServer{sysStore: store, localNodeID: ids["n1"].String()}
 
 	got := s.ingesterCheckTargets(context.Background(), nil, true)
-	want := map[string]bool{ids["n1"].String(): true, ids["n2"].String(): true, ids["n5"].String(): true}
+	want := map[string]bool{ids["n1"].String(): true, ids["n2"].String(): true, ids["n4"].String(): true}
 	if len(got) != len(want) {
 		t.Fatalf("targets = %v (%d), want the %d serviceable nodes", got, len(got), len(want))
 	}

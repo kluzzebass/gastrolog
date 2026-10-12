@@ -71,7 +71,7 @@ function nodeHasStorageClass(nscs: readonly NSC[], nodeId: string, storageClass:
 }
 
 // A node can take a new copy of a memory vault always, of a file vault when
-// it has a file storage of the vault's class, and of a JSONL sink never.
+// it has a file storage of the vault's class.
 function nodeEligibleForVault(vault: Vault, nodeId: string, nscs: readonly NSC[]): boolean {
   switch (vault.type) {
     case VaultType.MEMORY:

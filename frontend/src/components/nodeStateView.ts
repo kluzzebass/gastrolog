@@ -22,16 +22,6 @@ const viewByState: Partial<Record<NodeState, StateView>> = {
     variant: "info",
     description: "operator-declared absence — the cluster expects it back and keeps its placements",
   },
-  [NodeState.DRAINING]: {
-    label: "draining",
-    variant: "info",
-    description: "chunks are being transferred off this node ahead of its removal",
-  },
-  [NodeState.DECOMMISSIONING]: {
-    label: "decommissioning",
-    variant: "warn",
-    description: "being removed from the cluster — it stops receiving placements",
-  },
 };
 
 /** The badge view for a node state, or undefined for the states that show no badge. */

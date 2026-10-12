@@ -20,8 +20,6 @@ const (
 	NodeStateLive
 	NodeStateUnreachable
 	NodeStateMaintenance
-	NodeStateDraining
-	NodeStateDecommissioning
 )
 
 // String returns the human-readable label.
@@ -35,10 +33,6 @@ func (s NodeState) String() string {
 		return "unreachable"
 	case NodeStateMaintenance:
 		return "maintenance"
-	case NodeStateDraining:
-		return "draining"
-	case NodeStateDecommissioning:
-		return "decommissioning"
 	default:
 		return fmt.Sprintf("nodestate(%d)", uint8(s))
 	}
@@ -51,11 +45,11 @@ func (s NodeState) String() string {
 //
 // Legal transitions (see docs/node-lifecycle-design.md "Transitions in detail"):
 //
-//	Live           → Unreachable | Maintenance | Draining
-//	Unreachable    → Live | Maintenance | Draining
-//	Maintenance    → Live | Draining
-//	Draining       → Decommissioning | Live (cancel)
-//	Decommissioning → (Removed via DeleteNode; no in-FSM successor)
+//	Live        → Unreachable | Maintenance
+//	Unreachable → Live | Maintenance
+//	Maintenance → Live
+//
+// A node leaves the cluster by removal (DeleteNode), not by a state.
 func ValidateNodeStateTransition(from, to NodeState) error {
 	effFrom := from
 	if effFrom == NodeStateUnknown {
@@ -73,17 +67,11 @@ func ValidateNodeStateTransition(from, to NodeState) error {
 		// linting.
 		legal = nil
 	case NodeStateLive:
-		legal = []NodeState{NodeStateUnreachable, NodeStateMaintenance, NodeStateDraining}
+		legal = []NodeState{NodeStateUnreachable, NodeStateMaintenance}
 	case NodeStateUnreachable:
-		legal = []NodeState{NodeStateLive, NodeStateMaintenance, NodeStateDraining}
+		legal = []NodeState{NodeStateLive, NodeStateMaintenance}
 	case NodeStateMaintenance:
-		legal = []NodeState{NodeStateLive, NodeStateDraining}
-	case NodeStateDraining:
-		legal = []NodeState{NodeStateDecommissioning, NodeStateLive}
-	case NodeStateDecommissioning:
-		// No in-FSM successor — Decommissioning → Removed happens via
-		// DeleteNode, not a state transition.
-		legal = nil
+		legal = []NodeState{NodeStateLive}
 	}
 	if slices.Contains(legal, to) {
 		return nil
@@ -275,8 +263,12 @@ type VaultType string
 const (
 	VaultTypeMemory VaultType = "memory"
 	VaultTypeFile   VaultType = "file"
-	VaultTypeJSONL  VaultType = "jsonl"
 )
+
+// Valid reports whether t is a vault type the cluster can build.
+func (t VaultType) Valid() bool {
+	return t == VaultTypeMemory || t == VaultTypeFile
+}
 
 // VaultPlacement assigns one replica of a vault to a specific file storage.
 // The node is derived from the file storage's NodeStorageConfig.
@@ -348,17 +340,15 @@ func NodeIDForStorage(storageID string, nscs []NodeStorageConfig) string {
 // when the node has none — the caller must fail placement loudly. A silent
 // FileStorages[0] fallback here placed leaders on the wrong disk class while
 // follower placement (eligibleStorages/storageEligible) stayed strict.
-// Memory/JSONL vaults have no class requirement and fall back to a synthetic
+// Memory vaults have no class requirement and are placed on a synthetic
 // storage ID.
 func StorageIDForNode(nodeID string, v VaultConfig, nscs []NodeStorageConfig) string {
 	idx := slices.IndexFunc(nscs, func(n NodeStorageConfig) bool { return n.NodeID == nodeID })
 
 	switch v.Type {
-	case VaultTypeMemory, VaultTypeJSONL:
-		// No storage class — pick any storage, or synthetic if none.
-		if idx >= 0 && len(nscs[idx].FileStorages) > 0 {
-			return nscs[idx].FileStorages[0].ID.String()
-		}
+	case VaultTypeMemory:
+		// A memory vault is placed on its node's synthetic storage, the only
+		// storage placement eligibility accepts for it.
 		return SyntheticStorageID(nodeID)
 	case VaultTypeFile:
 		if idx < 0 {

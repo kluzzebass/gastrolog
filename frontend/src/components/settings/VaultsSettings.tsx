@@ -48,8 +48,6 @@ function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
     retentionDisposition: "delete",
     retentionTransferTarget: "",
     replicationFactor: "1",
-    path: "",
-    nodeId: "",
   };
 }
 
@@ -162,7 +160,6 @@ export function VaultStorageForm({
             options={[
               { value: "memory", label: "Memory" },
               { value: "file", label: "File" },
-              { value: "jsonl", label: "JSONL sink" },
             ]}
             dark={dark}
           />
@@ -251,108 +248,75 @@ export function VaultStorageForm({
         </>
       )}
 
-      {storage.type === "jsonl" && (
-        <>
-          <FormField label="Node" dark={dark}>
-            <SelectInput
-              value={storage.nodeId}
-              onChange={(v) => onUpdate({ nodeId: v })}
-              options={[
-                { value: "", label: "Select node..." },
-                ...nodeOptions,
-              ]}
-              dark={dark}
-            />
-          </FormField>
-          <FormField label="Path" dark={dark} description="Relative to node home">
-            <TextInput
-              value={storage.path}
-              onChange={(v) => onUpdate({ path: v })}
-              placeholder={`jsonl/${vaultName || "vault"}.jsonl`}
-              dark={dark}
-              mono
-            />
-          </FormField>
-        </>
-      )}
-
-      {storage.type !== "jsonl" && (
-        <FormField label="Rotation Policy" helpRef={POLICIES_HELP_REF} dark={dark}>
-          <EligibilitySelect
-            value={storage.rotationPolicyId}
-            onChange={(v) => onUpdate({ rotationPolicyId: v })}
-            options={rotationPolicyOptions}
-            placeholder="None"
-            emptyMessage="No rotation policies configured — create one under Rotation Policies; without one the active chunk is not rotated automatically."
-            helpRef={POLICIES_HELP_REF}
-            dark={dark}
-          />
-        </FormField>
-      )}
-
-      {storage.type !== "jsonl" && (
-        <RetentionPoliciesEditor
-          attached={storage.retentionPolicyIds}
-          onChange={(ids) => onUpdate({ retentionPolicyIds: ids })}
-          options={retentionPolicyOptions}
+      <FormField label="Rotation Policy" helpRef={POLICIES_HELP_REF} dark={dark}>
+        <EligibilitySelect
+          value={storage.rotationPolicyId}
+          onChange={(v) => onUpdate({ rotationPolicyId: v })}
+          options={rotationPolicyOptions}
+          placeholder="None"
+          emptyMessage="No rotation policies configured — create one under Rotation Policies; without one the active chunk is not rotated automatically."
+          helpRef={POLICIES_HELP_REF}
           dark={dark}
         />
-      )}
+      </FormField>
 
-      {storage.type !== "jsonl" && (
-        <FormField
-          label="Retention Disposition"
+      <RetentionPoliciesEditor
+        attached={storage.retentionPolicyIds}
+        onChange={(ids) => onUpdate({ retentionPolicyIds: ids })}
+        options={retentionPolicyOptions}
+        dark={dark}
+      />
+
+      <FormField
+        label="Retention Disposition"
+        dark={dark}
+        description="What retention does with aged-out chunks: delete, route the records, or transfer the chunk unchanged."
+      >
+        <EligibilitySelect
+          value={storage.retentionDisposition || "delete"}
+          onChange={(v) => onUpdate({ retentionDisposition: v })}
+          options={[
+            { value: "delete", label: "Delete records on retention" },
+            { value: "route", label: "Send records to routing engine" },
+            {
+              value: "transfer",
+              label: "Transfer records to another vault unchanged",
+              ineligibleReason: transferSourceIneligibility(storage),
+            },
+          ]}
+          helpRef={TRANSFER_HELP_REF}
           dark={dark}
-          description="What retention does with aged-out chunks: delete, route the records, or transfer the chunk unchanged."
-        >
-          <EligibilitySelect
-            value={storage.retentionDisposition || "delete"}
-            onChange={(v) => onUpdate({ retentionDisposition: v })}
-            options={[
-              { value: "delete", label: "Delete records on retention" },
-              { value: "route", label: "Send records to routing engine" },
-              {
-                value: "transfer",
-                label: "Transfer records to another vault unchanged",
-                ineligibleReason: transferSourceIneligibility(storage),
-              },
-            ]}
-            helpRef={TRANSFER_HELP_REF}
-            dark={dark}
-          />
-        </FormField>
-      )}
+        />
+      </FormField>
 
-      {storage.type !== "jsonl" && storage.retentionDisposition === "transfer" && (
+      {storage.retentionDisposition === "transfer" && (
         <FormField label="Transfer Target" dark={dark}>
           <EligibilitySelect
             value={storage.retentionTransferTarget}
             onChange={(v) => onUpdate({ retentionTransferTarget: v })}
             options={transferTargetOptions}
             placeholder="Select target vault..."
-            emptyMessage="No eligible targets — transfer requires a different, non-cloud file vault."
+            emptyMessage="No eligible targets — transfer requires a different file or memory vault that is not cloud-backed."
             helpRef={TRANSFER_HELP_REF}
             dark={dark}
           />
         </FormField>
       )}
 
-      {storage.type !== "jsonl" && (
-        <FormField
-          label="Replication Factor"
+      <FormField
+        label="Replication Factor"
+        dark={dark}
+        description={`1 = none, 2 = redundant, 3+ = fault tolerant. Cap ${String(cap.max)}: ${cap.cause}.`}
+        helpRef="storage-config#how-vaults-use-file-storages"
+      >
+        <SpinnerInput
+          value={storage.replicationFactor}
+          onChange={(v) => onUpdate({ replicationFactor: v })}
           dark={dark}
-          description={`1 = none, 2 = redundant, 3+ = fault tolerant. Cap ${String(cap.max)}: ${cap.cause}.`}
-          helpRef="storage-config#how-vaults-use-file-storages"
-        >
-          <SpinnerInput
-            value={storage.replicationFactor}
-            onChange={(v) => onUpdate({ replicationFactor: v })}
-            dark={dark}
-            min={1}
-            max={cap.max}
-          />
-        </FormField>
-      )}
+          min={1}
+          max={cap.max}
+        />
+      </FormField>
     </div>
   );
 }
@@ -521,13 +485,12 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       memoryBudget: storage.type === "memory" ? storage.memoryBudget : "",
       rotationPolicyId: storage.rotationPolicyId ? decode(storage.rotationPolicyId) : new Uint8Array(0),
       retentionRules: storage.retentionPolicyIds.map((id) => new RetentionRule({ retentionPolicyId: decode(id) })),
-      retentionDisposition: storage.type !== "jsonl" ? (storage.retentionDisposition || "delete") : "",
+      retentionDisposition: storage.retentionDisposition || "delete",
       retentionTransferTargetVaultId:
-        storage.type !== "jsonl" && storage.retentionDisposition === "transfer" && storage.retentionTransferTarget
+        storage.retentionDisposition === "transfer" && storage.retentionTransferTarget
           ? decode(storage.retentionTransferTarget)
           : new Uint8Array(0),
       replicationFactor: parseInt(storage.replicationFactor, 10) || 1,
-      path: storage.type === "jsonl" ? storage.path : "",
     });
 
     setIsCreating(true);

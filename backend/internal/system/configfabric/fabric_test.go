@@ -73,7 +73,7 @@ func TestStaleWriterCatchesUpInOrder(t *testing.T) {
 		t.Fatal("node 0 must not see b until delivery")
 	}
 	// The FSM's error is the write's error, on the writer and everywhere else.
-	err := f.Node(0).Store().SetNodeState(ctx, glid.New(), system.NodeStateDraining, timeNow())
+	err := f.Node(0).Store().SetNodeState(ctx, glid.New(), system.NodeStateMaintenance, timeNow())
 	if err == nil {
 		t.Fatal("setting state on an unknown node must fail")
 	}

@@ -24,7 +24,6 @@ import { providerOptions, restoreDaysReason, restoreSpeedReason } from "./cloudP
 import { destinationState } from "./routeDisplay";
 import { joinIneligibility } from "./joinEligibility";
 import { SettingsDialog } from "./SettingsDialog";
-import { VaultType } from "../../api/gen/gastrolog/v1/system_pb";
 import type { ManagedFileInfo } from "../../api/gen/gastrolog/v1/system_pb";
 
 function testId(n: number): Uint8Array<ArrayBuffer> {
@@ -429,11 +428,9 @@ describe("cloud service restore fields", () => {
 // ── Route destinations and join eligibility (pure rules) ──────────────
 
 describe("destinationState", () => {
-  test("names JSONL sinks and disabled vaults, and nothing for an ordinary vault", () => {
-    expect(destinationState({ type: VaultType.FILE, enabled: true })).toBeUndefined();
-    expect(destinationState({ type: VaultType.JSONL, enabled: true })).toBe("JSONL sink, write-only");
-    expect(destinationState({ type: VaultType.MEMORY, enabled: false })).toBe("disabled, not accepting records");
-    expect(destinationState({ type: VaultType.JSONL, enabled: false })).toBe("JSONL sink, write-only; disabled, not accepting records");
+  test("names a disabled vault, and nothing for an enabled one", () => {
+    expect(destinationState({ enabled: true })).toBeUndefined();
+    expect(destinationState({ enabled: false })).toBe("disabled, not accepting records");
   });
 });
 

@@ -22,8 +22,6 @@ describe("nodeStateView", () => {
   test("each non-live state names its cause and consequence", () => {
     expect(nodeStateView(NodeState.UNREACHABLE)?.description).toContain("check the process");
     expect(nodeStateView(NodeState.MAINTENANCE)?.description).toContain("operator-declared");
-    expect(nodeStateView(NodeState.DRAINING)?.description).toContain("transferred off");
-    expect(nodeStateView(NodeState.DECOMMISSIONING)?.description).toContain("removed from the cluster");
   });
 });
 

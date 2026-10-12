@@ -164,7 +164,6 @@ func VaultConfigToProto(v system.VaultConfig, placements []system.VaultPlacement
 		MemoryBudget:         v.MemoryBudget,
 		StorageClass:         v.StorageClass,
 		ReplicationFactor:    v.ReplicationFactor,
-		Path:                 v.Path,
 		Placements:           pbPlacements,
 		CacheEviction:        v.CacheEviction,
 		CacheBudget:          v.CacheBudget,
@@ -190,7 +189,6 @@ func VaultConfigFromProto(p *gastrologv1.VaultConfig) (system.VaultConfig, error
 		MemoryBudget:                   p.GetMemoryBudget(),
 		StorageClass:                   p.GetStorageClass(),
 		ReplicationFactor:              p.GetReplicationFactor(),
-		Path:                           p.GetPath(),
 		CacheEviction:                  p.GetCacheEviction(),
 		CacheBudget:                    p.GetCacheBudget(),
 		CacheTTL:                       p.GetCacheTtl(),
@@ -220,8 +218,6 @@ func VaultTypeToProto(t system.VaultType) gastrologv1.VaultType {
 		return gastrologv1.VaultType_VAULT_TYPE_MEMORY
 	case system.VaultTypeFile:
 		return gastrologv1.VaultType_VAULT_TYPE_FILE
-	case system.VaultTypeJSONL:
-		return gastrologv1.VaultType_VAULT_TYPE_JSONL
 	default:
 		return gastrologv1.VaultType_VAULT_TYPE_UNSPECIFIED
 	}
@@ -278,8 +274,6 @@ func VaultTypeFromProto(t gastrologv1.VaultType) system.VaultType {
 		return system.VaultTypeMemory
 	case gastrologv1.VaultType_VAULT_TYPE_FILE:
 		return system.VaultTypeFile
-	case gastrologv1.VaultType_VAULT_TYPE_JSONL:
-		return system.VaultTypeJSONL
 	case gastrologv1.VaultType_VAULT_TYPE_UNSPECIFIED:
 		return ""
 	default:

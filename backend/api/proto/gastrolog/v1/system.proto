@@ -348,7 +348,6 @@ enum VaultType {
   VAULT_TYPE_UNSPECIFIED = 0;
   VAULT_TYPE_MEMORY = 1;
   VAULT_TYPE_FILE = 2;
-  VAULT_TYPE_JSONL = 3;
 }
 
 // VaultPlacement assigns one replica of a vault to a specific file storage.
@@ -377,23 +376,22 @@ message VaultConfig {
   uint32 storage_class = 8;
   bytes cloud_service_id = 9;
   uint32 replication_factor = 10;          // desired RF (1 = no replication, default)
-  string path = 11;                         // direct path for JSONL sinks
   // OUTPUT ONLY. File storage assignments owned by the placement manager,
   // attached from Runtime.VaultPlacements when a vault is read. The domain
   // VaultConfig no longer carries them at all, so a write cannot express them:
   // the field is absent from the type a PutVault command marshals
   // (gastrolog-kl8c3s closed a second writer to the mirror; gastrolog-617qns
   // removed the mirror).
-  repeated VaultPlacement placements = 12;
-  string cache_eviction = 13;               // "lru" (default) or "ttl"
+  repeated VaultPlacement placements = 11;
+  string cache_eviction = 12;               // "lru" (default) or "ttl"
   // Warm-cache soft cap for cloud-backed chunks, as a size expression
   // ("1GiB"). Empty = unset (defaulted at creation for cloud vaults); "0"
   // rejected.
-  string cache_budget = 14;
+  string cache_budget = 13;
   // Warm-cache eviction age (ttl mode only), as a duration expression ("1h",
   // "7d"). Empty = unset.
-  string cache_ttl = 15;
-  string retention_disposition = 16;         // "delete", "route", or "transfer" — what retention does with aged-out records
+  string cache_ttl = 14;
+  string retention_disposition = 15;         // "delete", "route", or "transfer" — what retention does with aged-out records
   // Target vault ID for retention_disposition = "transfer": the sealed
   // chunk is re-homed here unchanged when retention fires. Required when,
   // and only valid when, disposition is "transfer" — see PutVault
@@ -401,7 +399,7 @@ message VaultConfig {
   // Renumbered to 17 when disk_free_warn/disk_free_floor moved to
   // FileStorage (gastrolog-9akebz) — no `reserved` (house rule): zero
   // production deployments.
-  bytes retention_transfer_target_vault_id = 17;
+  bytes retention_transfer_target_vault_id = 16;
 }
 
 message RouteDestination {
@@ -1146,13 +1144,6 @@ enum NodeState {
   // Maintenance: operator-declared absence. Placement does NOT rotate
   // off this state. Sticky — requires `cluster online` to clear.
   NODE_STATE_MAINTENANCE = 3;
-  // Draining: operator-initiated; chunks being transferred off the node
-  // in preparation for removal.
-  NODE_STATE_DRAINING = 4;
-  // Decommissioning: chunks moved; voter being removed from cluster-ctl Raft
-  // and vault-ctl groups. Transitions to absence-from-FSM (= Removed)
-  // when removal completes.
-  NODE_STATE_DECOMMISSIONING = 5;
 }
 
 message PutNodeConfigRequest {
@@ -1224,6 +1215,9 @@ message GetRouteStatsResponse {
 message VaultRouteStats {
   bytes vault_id = 1;
   int64 records_matched = 2; // records that matched a route targeting this vault
+  // records a matched route sent this vault's way but it did not receive:
+  // the vault was disabled, or its sink went away mid-delivery
+  int64 records_dropped = 3;
 }
 
 message PerRouteStats {
