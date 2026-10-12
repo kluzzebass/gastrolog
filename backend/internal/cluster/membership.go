@@ -226,16 +226,3 @@ type MembershipRefusal struct {
 
 func (e *MembershipRefusal) Error() string { return e.err.Error() }
 func (e *MembershipRefusal) Unwrap() error { return e.err }
-
-// JoinRefusalEndsMembership reports whether a membership request refused as
-// removed is word of this node's removal. A node with no membership of its
-// own — a fresh home — was never in a cluster to be removed from, so no
-// claim counts; a restarting member takes it only from a current member of
-// the configuration it holds, as with any other refusal.
-func (s *Server) JoinRefusalEndsMembership(err error) bool {
-	var refusal *MembershipRefusal
-	if !errors.As(err, &refusal) || !RefusedAsRemoved(err, s.cfg.NodeID) || refusal.AnsweredBy == s.cfg.NodeID {
-		return false
-	}
-	return refusalEndsMembership(s.configuredIDs(), refusal.AnsweredBy, s.isRemoved)
-}

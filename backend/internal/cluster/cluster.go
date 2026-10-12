@@ -136,6 +136,8 @@ type Server struct {
 	// ignoredRemovalClaims holds the non-members whose claims that this node
 	// was removed have been logged and ignored, so each is logged once.
 	ignoredRemovalClaims sync.Map
+	// removalClaims tallies the members that refused this node as removed.
+	removalClaims removalClaims
 
 	// evictionHandler is called with the leader's reason when this node
 	// receives a NotifyEviction RPC, meaning it has been removed from the

@@ -12,7 +12,11 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"testing"
+
+	hraft "github.com/hashicorp/raft"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -137,5 +141,77 @@ func TestOnlyACurrentNonRemovedMemberMayEndMembership(t *testing.T) {
 	}
 	if refusalEndsMembership(nil, "node-a", removed) {
 		t.Error("a node that cannot read its configuration took a removal claim")
+	}
+}
+
+// One member's word never ends a membership: a compromised member, or a
+// just-removed one this node has not yet seen go, would otherwise take out
+// every node that dials it. A majority of the other voters must refuse it,
+// each counted once, within one configuration.
+func TestRemovalClaimsNeedAMajorityOfTheOtherVoters(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		others    []string
+		claimants []string
+		want      bool
+	}{
+		{"two-node cluster: the one other voter", []string{"a"}, []string{"a"}, true},
+		{"three-node cluster: one of two", []string{"a", "b"}, []string{"a"}, false},
+		{"three-node cluster: both", []string{"a", "b"}, []string{"a", "b"}, true},
+		{"four-node cluster: one of three", []string{"a", "b", "c"}, []string{"a"}, false},
+		{"four-node cluster: two of three", []string{"a", "b", "c"}, []string{"a", "c"}, true},
+		{"one claimant, counted once however often it claims", []string{"a", "b", "c"}, []string{"a", "a", "a"}, false},
+		{"claims from non-voters do not count", []string{"a", "b"}, []string{"a", "learner"}, false},
+		{"no other voter", nil, []string{"a"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var c removalClaims
+			reached := false
+			for _, by := range tc.claimants {
+				_, reached = c.add(7, by, tc.others)
+			}
+			if reached != tc.want {
+				t.Fatalf("claims from %v against other voters %v reach a majority: %v, want %v", tc.claimants, tc.others, reached, tc.want)
+			}
+		})
+	}
+
+	t.Run("a configuration change starts the tally over", func(t *testing.T) {
+		t.Parallel()
+		var c removalClaims
+		others := []string{"a", "b"}
+		c.add(7, "a", others)
+		if _, reached := c.add(8, "b", others); reached {
+			t.Fatal("a claim made under an earlier configuration still counted")
+		}
+	})
+}
+
+// Through the server's own configuration: in a three-voter configuration
+// the first member's refusal is not acted on, a repeat of it changes
+// nothing, and the second member's refusal ends membership.
+func TestOneMembersRefusalDoesNotEndMembership(t *testing.T) {
+	t.Parallel()
+	const self = "node-self"
+	members := []hraft.Server{
+		{ID: self, Address: self},
+		{ID: "node-a", Address: "node-a"},
+		{ID: "node-b", Address: "node-b"},
+	}
+	s := &Server{cfg: Config{NodeID: self}, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	s.raft = createVaultRaft(t, self, &hraft.MockFSM{}, true, members)
+	var ended []string
+	s.SetRefusedAsRemovedObserver(func(by string) { ended = append(ended, by) })
+
+	s.observeRefusedAsRemoved("node-a")
+	s.observeRefusedAsRemoved("node-a")
+	if len(ended) != 0 {
+		t.Fatalf("one member's refusal ended membership: %v", ended)
+	}
+	s.observeRefusedAsRemoved("node-b")
+	if len(ended) != 1 {
+		t.Fatalf("refusals from both other voters ended membership %d times, want once", len(ended))
 	}
 }

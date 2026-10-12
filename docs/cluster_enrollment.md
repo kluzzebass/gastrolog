@@ -280,10 +280,10 @@ follows, as the caller's certificate names it, and only while it knows its
 membership; from any other member, from a node outside its configuration,
 or while its configuration is empty, the notice is refused and logged.
 
-A node that was down then learns it from the first member that refuses one
-of its calls: the refusal of a node in the removal record is a
-`PermissionDenied` carrying a `RemovedNodeRefusal` detail that names the
-node. The node acts on that detail only when all of these hold:
+A node that was down then learns it from the members that refuse its
+calls: the refusal of a node in the removal record is a `PermissionDenied`
+carrying a `RemovedNodeRefusal` detail that names the node. A refusal is a
+claim, and a claim counts only when all of these hold:
 
 - the detail names the node itself;
 - it comes from the peer the node dialled, whose certificate names it;
@@ -292,16 +292,23 @@ node. The node acts on that detail only when all of these hold:
 - the call was not the eviction notice — whoever answers that one is the
   node being removed.
 
-A removed node keeps its certificate and still answers whatever dials it,
-so without these a removed node could answer the leader's eviction notice,
-or a vault-ctl Raft call, by naming the caller and take the caller out.
+No single claim ends a membership. The node ends it once a majority of the
+other voters in its configuration have claimed it, each counted once; the
+tally starts over whenever its configuration changes. A restarted removed
+node dials every member it lists, and every genuine member refuses it, so it
+gets there quickly: in a three-node cluster both others, in a two-node
+cluster the one other. One member's word is never enough, because a removed
+node keeps its certificate and still answers whatever dials it — a member
+that has not yet seen the removal, or is cut off from the rest, still lists
+and dials it — and because a single compromised member would otherwise take
+out every node that dials it. A two-node cluster is the exception it cannot
+cover: there, the one other voter is the majority.
 
-A `RequestMembership` refused with the detail counts the same way, and only
-for a node that was a member: a fresh home was never in a cluster to be
-removed from, and the node at the join address is only known to hold a
-certificate the cluster CA signed. A refusal that does not count stops that
-start with an error-level log line and records nothing; the next start asks
-again.
+A `RequestMembership` refused with the detail never counts on its own: the
+node at the join address is only known to hold a certificate the cluster CA
+signed, and a fresh home was never in a cluster to be removed from. Such a
+refusal stops that start with an error-level log line and records nothing;
+the next start asks again.
 
 The notification is taken in even while the node is stopping: a graceful
 stop waits for the call, so a removal that races a rolling restart is not

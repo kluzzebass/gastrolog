@@ -4,6 +4,9 @@ import (
 	"context"
 	"crypto/x509"
 	"slices"
+	"sync"
+
+	hraft "github.com/hashicorp/raft"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -54,21 +57,112 @@ func (s *Server) SetRefusedAsRemovedObserver(fn func(byPeer string)) {
 }
 
 // observeRefusedAsRemoved acts on a refusal that named this node and came
-// from the peer it dialled. The peer's word counts only while this node's
-// own configuration lists it and its own removal record does not: a node
-// the cluster removed — which still answers dials made to it, the eviction
-// notice among them — is in no position to say who else was removed.
+// from the peer it dialled. A peer's word has standing only while this
+// node's own configuration lists it and its own removal record does not: a
+// node the cluster removed — which still answers dials made to it, the
+// eviction notice among them — is in no position to say who else was
+// removed. And no single member's word is enough: one compromised member,
+// or a just-removed one this node has not yet seen go, would otherwise take
+// out every node that dials it. Membership ends once a majority of the other
+// voters in this node's configuration have refused it, each counted once.
 func (s *Server) observeRefusedAsRemoved(byPeer string) {
-	if !refusalEndsMembership(s.configuredIDs(), byPeer, s.isRemoved) {
+	conf, ok := s.localConfiguration()
+	if !ok || !refusalEndsMembership(conf.ids(), byPeer, s.isRemoved) {
 		if _, logged := s.ignoredRemovalClaims.LoadOrStore(byPeer, struct{}{}); !logged {
 			logging.Default(s.logger).Warn("ignoring a claim that this node was removed: the claimant is not a current member",
 				"claimant_node_id", byPeer)
 		}
 		return
 	}
+	others := conf.otherVoters(s.cfg.NodeID)
+	claimants, reached := s.removalClaims.add(conf.index, byPeer, others)
+	if !reached {
+		logging.Default(s.logger).Warn("a member refuses this node as removed; waiting for a majority of the other voters before taking it",
+			"claimant_node_id", byPeer, "claimants", claimants, "other_voters", len(others))
+		return
+	}
 	if fn := s.refusedAsRemoved.Load(); fn != nil {
 		(*fn)(byPeer)
 	}
+}
+
+// removalClaims tallies the distinct members that refused this node as
+// removed. The tally belongs to one configuration: when the configuration
+// changes, who counts and how many are needed change with it, so it starts
+// over.
+type removalClaims struct {
+	mu          sync.Mutex
+	configIndex uint64
+	claimants   map[string]struct{}
+}
+
+// add records byPeer's claim under the configuration at configIndex and
+// reports how many of otherVoters have claimed, and whether that is a
+// majority of them.
+func (c *removalClaims) add(configIndex uint64, byPeer string, otherVoters []string) (int, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.claimants == nil || c.configIndex != configIndex {
+		c.configIndex, c.claimants = configIndex, map[string]struct{}{}
+	}
+	c.claimants[byPeer] = struct{}{}
+	return claimsFromVoters(c.claimants, otherVoters), claimsReachMajority(c.claimants, otherVoters)
+}
+
+func claimsFromVoters(claimants map[string]struct{}, otherVoters []string) int {
+	n := 0
+	for _, v := range otherVoters {
+		if _, ok := claimants[v]; ok {
+			n++
+		}
+	}
+	return n
+}
+
+// claimsReachMajority reports whether claimants include more than half of
+// otherVoters. A node with no other voter can never be told it was removed
+// this way: there is nobody whose word could outweigh another's.
+func claimsReachMajority(claimants map[string]struct{}, otherVoters []string) bool {
+	if len(otherVoters) == 0 {
+		return false
+	}
+	return claimsFromVoters(claimants, otherVoters) > len(otherVoters)/2
+}
+
+// localConfiguration is the Raft configuration this node holds, with the
+// log index it was set at.
+type localConfiguration struct {
+	index   uint64
+	servers []hraft.Server
+}
+
+func (c localConfiguration) ids() []string {
+	ids := make([]string, 0, len(c.servers))
+	for _, srv := range c.servers {
+		ids = append(ids, string(srv.ID))
+	}
+	return ids
+}
+
+func (c localConfiguration) otherVoters(self string) []string {
+	var voters []string
+	for _, srv := range c.servers {
+		if srv.Suffrage == hraft.Voter && string(srv.ID) != self {
+			voters = append(voters, string(srv.ID))
+		}
+	}
+	return voters
+}
+
+func (s *Server) localConfiguration() (localConfiguration, bool) {
+	if s.raft == nil {
+		return localConfiguration{}, false
+	}
+	future := s.raft.GetConfiguration()
+	if err := future.Error(); err != nil {
+		return localConfiguration{}, false
+	}
+	return localConfiguration{index: future.Index(), servers: future.Configuration().Servers}, true
 }
 
 // refusalEndsMembership decides whether byPeer's refusal of this node as

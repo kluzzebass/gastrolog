@@ -312,12 +312,12 @@ func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg
 	appSys, fromLocalFSM, err := loadLocalConfig(ctx, logger, cfg, cfgStore, clusterSrv, clusterTLS, nodeID)
 	if err != nil {
 		if cluster.RefusedAsRemoved(err, nodeID) {
-			if clusterSrv != nil && clusterSrv.JoinRefusalEndsMembership(err) {
-				end.removed("refused membership as removed by a cluster member at " + cfg.JoinAddr)
-			} else {
-				logger.Error("the node at the join address refused this node's membership as removed; nothing is recorded, because that node has no standing to say so: only a current member of this node's configuration does. Startup stops here and the next start asks again",
-					"join_addr", cfg.JoinAddr, "error", err)
+			answeredBy := ""
+			if refusal, ok := errors.AsType[*cluster.MembershipRefusal](err); ok {
+				answeredBy = refusal.AnsweredBy
 			}
+			logger.Error("the node at the join address refused this node's membership as removed; nothing is recorded, because one node's answer is no proof: a removal is taken only from the leader's notice or from a majority of this node's voters. Startup stops here and the next start asks again",
+				"join_addr", cfg.JoinAddr, "answered_by", answeredBy, "error", err)
 		}
 		return err
 	}

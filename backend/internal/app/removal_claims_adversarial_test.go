@@ -40,12 +40,13 @@ type forgingNode struct {
 
 	mu      sync.Mutex
 	forged  map[string]int // method → refusals forged
-	callers map[string]bool
+	callers map[string]int // caller → refusals forged
+	stop    func()
 }
 
 func startForgingNode(t *testing.T, addr string, cert tls.Certificate, forgeAlways bool) *forgingNode {
 	t.Helper()
-	f := &forgingNode{forgeAlways: forgeAlways, forged: map[string]int{}, callers: map[string]bool{}}
+	f := &forgingNode{forgeAlways: forgeAlways, forged: map[string]int{}, callers: map[string]int{}}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +72,7 @@ func startForgingNode(t *testing.T, addr string, cert tls.Certificate, forgeAlwa
 		}
 		f.mu.Lock()
 		f.forged[method]++
-		f.callers[caller] = true
+		f.callers[caller]++
 		f.mu.Unlock()
 		st, err := status.New(codes.PermissionDenied, "node "+caller+" was removed from this cluster").
 			WithDetails(&apiv1.RemovedNodeRefusal{NodeId: caller})
@@ -81,8 +82,16 @@ func startForgingNode(t *testing.T, addr string, cert tls.Certificate, forgeAlwa
 		return st.Err()
 	}))
 	go func() { _ = srv.Serve(ln) }()
+	f.stop = srv.Stop
 	t.Cleanup(srv.Stop)
 	return f
+}
+
+// forgedTo is how many refusals the forger has sent caller.
+func (f *forgingNode) forgedTo(caller string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.callers[caller]
 }
 
 func (f *forgingNode) forgedFor(methodSuffix string) int {
@@ -218,4 +227,129 @@ func TestAForgedJoinRefusalIsNeitherTrustedNorRecorded(t *testing.T) {
 			t.Fatalf("start %d: membership asked %d times, want once per start", attempt, got)
 		}
 	}
+}
+
+// No single member's word ends another's membership. A compromised member
+// that refuses every node dialling it as removed takes nobody out; a member
+// cut off from the rest, whose only reachable peer is the node the cluster
+// just removed, is not taken out by that node; and a restarting member with
+// a stale configuration does not record a removal on one join answer.
+func TestNoSingleMemberCanEndAnothersMembership(t *testing.T) {
+	if testing.Short() {
+		t.Skip("five in-process nodes running the full server")
+	}
+	nodes := formCluster(t, 5, 0)
+	ids := make(map[*runningNode]string, len(nodes))
+	for _, n := range nodes {
+		ids[n] = string(n.requireStatus(t).LocalNodeId)
+	}
+	compromised, cutOff := nodes[4], nodes[3]
+	genuine := nodes[:3]
+	compromisedCert := certificateOf(t, compromised.hd)
+
+	t.Run("a compromised member refusing every node takes nobody out", func(t *testing.T) {
+		compromised.stop()
+		forger := startForgingNode(t, compromised.cfg.ClusterAddr, compromisedCert, true)
+		waitFor(t, time.Minute, "the forger to refuse every other node", func() bool {
+			for _, n := range nodes[:4] {
+				if forger.forgedTo(ids[n]) == 0 {
+					return false
+				}
+			}
+			return true
+		})
+		waiting := 0
+		for _, n := range nodes[:4] {
+			st := n.requireStatus(t)
+			if st.Removal != nil {
+				t.Fatalf("%s took one member's word and declared itself removed: %+v", n.name, st.Removal)
+			}
+			if len(st.Nodes) != len(nodes) {
+				t.Fatalf("%s reports configuration %v, want all five", n.name, configuration(st))
+			}
+			waiting += len(n.logs.lines("a member refuses this node as removed", "claimant_node_id="+ids[compromised]))
+		}
+		if waiting == 0 {
+			t.Fatal("no node weighed the forged refusals; the test did not reach the majority rule")
+		}
+		forger.stop()
+	})
+
+	t.Run("a member cut off with only the just-removed node reachable is not taken out", func(t *testing.T) {
+		compromised.stop()
+		cutOff.stop()
+		var leader *runningNode
+		for _, n := range genuine {
+			if st := n.requireStatus(t); string(st.LeaderId) == ids[n] {
+				leader = n
+			}
+		}
+		if leader == nil {
+			t.Fatal("no leader among the three running members")
+		}
+		if _, err := leader.client().Lifecycle.RemoveNode(context.Background(), connect.NewRequest(&apiv1.RemoveNodeRequest{
+			NodeId: []byte(ids[compromised]), Force: true,
+		})); err != nil {
+			t.Fatalf("remove %s: %v", ids[compromised], err)
+		}
+		forger := startForgingNode(t, compromised.cfg.ClusterAddr, compromisedCert, true)
+		for _, n := range genuine {
+			n.stop()
+		}
+
+		// Cut off, the member cannot reach quorum, so it never finishes
+		// starting; what is checked is that it does not take the removed
+		// node's word while it waits.
+		cutOff.start()
+		waitFor(t, time.Minute, "the removed node to refuse the cut-off member several times", func() bool {
+			return forger.forgedTo(ids[cutOff]) >= 3 || len(cutOff.logs.lines("was removed from the cluster")) > 0
+		})
+		if lines := cutOff.logs.lines("was removed from the cluster"); len(lines) != 0 {
+			t.Fatalf("the cut-off member took the removed node's word: %v", lines)
+		}
+		if lines := cutOff.logs.lines("a member refuses this node as removed", "claimant_node_id="+ids[compromised]); len(lines) == 0 {
+			t.Fatal("the cut-off member never weighed the refusals; the test did not reach the majority rule")
+		}
+		if err, exited := cutOff.exited(); exited {
+			t.Fatalf("the cut-off member's Run returned: %v", err)
+		}
+		cutOff.stop()
+		ident, err := resolveNodeID(cutOff.hd, discardLogger())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ident.Removal != nil {
+			t.Fatalf("the cut-off member recorded a removal on the removed node's word: %+v", ident.Removal)
+		}
+
+		t.Run("one join answer to a restarting member records nothing", func(t *testing.T) {
+			hd := copyHome(t, cutOff.hd)
+			cfg := cutOff.cfg
+			cfg.HomeFlag = hd.Root()
+			cfg.ServerAddr = ""
+			cfg.ClusterAddr = reserveClusterAddrs(t, 1)[0]
+			cfg.JoinAddr = compromised.cfg.ClusterAddr
+			asked := forger.forgedFor("/RequestMembership")
+			logs := &logBuffer{}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			err := Run(ctx, slog.New(slog.NewTextHandler(logs, nil)), cfg)
+			cancel()
+			if err == nil || errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("Run returned %v; want the start to stop on the refusal", err)
+			}
+			if got := forger.forgedFor("/RequestMembership"); got != asked+1 {
+				t.Fatalf("membership asked %d times, want once", got-asked)
+			}
+			if lines := logs.lines("level=ERROR", "refused this node's membership as removed", "nothing is recorded"); len(lines) != 1 {
+				t.Fatalf("want one line saying the claim was not recorded:\n%s", logs)
+			}
+			ident, rerr := resolveNodeID(hd, discardLogger())
+			if rerr != nil {
+				t.Fatal(rerr)
+			}
+			if ident.Removal != nil {
+				t.Fatalf("one join answer recorded a removal: %+v", ident.Removal)
+			}
+		})
+	})
 }
