@@ -352,7 +352,7 @@ func (m *Manager) FindIngestStartPosition(chunkID chunk.ChunkID, ts time.Time) (
 		return nil
 	})
 	if err != nil {
-		if os.IsNotExist(err) || errors.Is(err, filetsidx.ErrIndexTooSmall) {
+		if os.IsNotExist(err) {
 			return 0, false, index.ErrIndexNotFound
 		}
 		return 0, false, err
@@ -370,7 +370,7 @@ func (m *Manager) FindIngestEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uin
 		return nil
 	})
 	if err != nil {
-		if os.IsNotExist(err) || errors.Is(err, filetsidx.ErrIndexTooSmall) {
+		if os.IsNotExist(err) {
 			return 0, false, index.ErrIndexNotFound
 		}
 		return 0, false, err
@@ -388,7 +388,7 @@ func (m *Manager) FindSourceStartPosition(chunkID chunk.ChunkID, ts time.Time) (
 		return nil
 	})
 	if err != nil {
-		if os.IsNotExist(err) || errors.Is(err, filetsidx.ErrIndexTooSmall) {
+		if os.IsNotExist(err) {
 			return 0, false, index.ErrIndexNotFound
 		}
 		return 0, false, err
@@ -406,7 +406,7 @@ func (m *Manager) FindSourceEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uin
 		return nil
 	})
 	if err != nil {
-		if os.IsNotExist(err) || errors.Is(err, filetsidx.ErrIndexTooSmall) {
+		if os.IsNotExist(err) {
 			return 0, false, index.ErrIndexNotFound
 		}
 		return 0, false, err
@@ -422,7 +422,7 @@ func (m *Manager) IngestIndexLen(chunkID chunk.ChunkID) (uint64, error) {
 		return nil
 	})
 	if err != nil {
-		if os.IsNotExist(err) || errors.Is(err, filetsidx.ErrIndexTooSmall) {
+		if os.IsNotExist(err) {
 			return 0, index.ErrIndexNotFound
 		}
 		return 0, err
@@ -442,7 +442,7 @@ func (m *Manager) IngestIndexEntryAt(chunkID chunk.ChunkID, rank uint64) (index.
 		return nil
 	})
 	if err != nil {
-		if os.IsNotExist(err) || errors.Is(err, filetsidx.ErrIndexTooSmall) {
+		if os.IsNotExist(err) {
 			return index.TSEntry{}, index.ErrIndexNotFound
 		}
 		return index.TSEntry{}, err
@@ -458,7 +458,7 @@ func (m *Manager) SourceIndexLen(chunkID chunk.ChunkID) (uint64, error) {
 		return nil
 	})
 	if err != nil {
-		if os.IsNotExist(err) || errors.Is(err, filetsidx.ErrIndexTooSmall) {
+		if os.IsNotExist(err) {
 			return 0, index.ErrIndexNotFound
 		}
 		return 0, err
@@ -478,7 +478,7 @@ func (m *Manager) SourceIndexEntryAt(chunkID chunk.ChunkID, rank uint64) (index.
 		return nil
 	})
 	if err != nil {
-		if os.IsNotExist(err) || errors.Is(err, filetsidx.ErrIndexTooSmall) {
+		if os.IsNotExist(err) {
 			return index.TSEntry{}, index.ErrIndexNotFound
 		}
 		return index.TSEntry{}, err

@@ -200,10 +200,12 @@ func (b *MappedBlob) BlobDigest() [32]byte { return b.toc.BlobDigest }
 // Section returns the TOC entry and a sub-slice of the mapping for a TOC
 // section type. The entry carries the section's recorded version so decode
 // dispatch (Registry.NewView) can honor it. The slice aliases b.data and is
-// invalid after Close.
+// invalid after Close. A section the TOC lists with size zero is present
+// and empty; ok is false only for a section the TOC does not list or whose
+// extent lies outside the mapping.
 func (b *MappedBlob) Section(sectionType byte) (TOCEntry, []byte, bool) {
 	entry, ok := b.toc.Find(sectionType)
-	if !ok || entry.Size <= 0 {
+	if !ok || entry.Size < 0 {
 		return TOCEntry{}, nil, false
 	}
 	start := entry.Offset

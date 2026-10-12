@@ -511,7 +511,7 @@ local file (or against a downloaded cache copy) without rescanning records.
 |   (recordCount × 12)      |
 +---------------------------+
 |   SourceTS Index          |
-|   (N × 12, N ≤ records)   |
+|   (recordCount × 12)      |
 +---------------------------+
 |   TOC entries             |
 |   (entryCount × 42)       |
@@ -595,9 +595,9 @@ Two sorted timestamp indexes are appended after the records section. Each index 
 | 8      | 4    | recordPos | Record index (uint32)                |
 
 - **IngestTS Index**: One entry per record, sorted by IngestTS. Size = `recordCount × 12` bytes.
-- **SourceTS Index**: One entry per record with non-zero SourceTS, sorted by SourceTS. Size = `N × 12` bytes where N ≤ recordCount.
+- **SourceTS Index**: One entry per record, keyed by the record's SourceTS, or by its IngestTS when it has none (`chunk.EffectiveSourceTS`), sorted by that key. Size = `recordCount × 12` bytes. The key is the record's place on the source axis, not a claim about the record: its frame keeps `sourceTS` = 0, and the layout's `sourceStart`/`sourceEnd` cover non-zero SourceTS only.
 
-No header — the TOC provides section offsets and sizes. Entry count is derived from `sectionSize / 12`.
+No header — the TOC provides section offsets and sizes. Entry count is derived from `sectionSize / 12`. A section the TOC lists with size 0 is an index with no entries (a chunk with no records); a section the TOC does not list is a missing index, and a read that needs it fails.
 
 ### TOC Entries (entryCount × 42 bytes)
 

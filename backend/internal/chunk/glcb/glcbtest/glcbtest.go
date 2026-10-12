@@ -73,27 +73,16 @@ func externalInfo(records []chunk.Record, toc glcb.BlobTOC, diskBytes int64, ing
 		if i == 0 {
 			info.WriteStart, info.WriteEnd = rec.WriteTS, rec.WriteTS
 			info.IngestStart, info.IngestEnd = rec.IngestTS, rec.IngestTS
-			info.SourceStart, info.SourceEnd = rec.SourceTS, rec.SourceTS
+		}
+		widen(&info.WriteStart, &info.WriteEnd, rec.WriteTS)
+		widen(&info.IngestStart, &info.IngestEnd, rec.IngestTS)
+		if rec.SourceTS.IsZero() {
 			continue
 		}
-		if rec.WriteTS.Before(info.WriteStart) {
-			info.WriteStart = rec.WriteTS
+		if info.SourceStart.IsZero() {
+			info.SourceStart, info.SourceEnd = rec.SourceTS, rec.SourceTS
 		}
-		if rec.WriteTS.After(info.WriteEnd) {
-			info.WriteEnd = rec.WriteTS
-		}
-		if rec.IngestTS.Before(info.IngestStart) {
-			info.IngestStart = rec.IngestTS
-		}
-		if rec.IngestTS.After(info.IngestEnd) {
-			info.IngestEnd = rec.IngestTS
-		}
-		if rec.SourceTS.Before(info.SourceStart) {
-			info.SourceStart = rec.SourceTS
-		}
-		if rec.SourceTS.After(info.SourceEnd) {
-			info.SourceEnd = rec.SourceTS
-		}
+		widen(&info.SourceStart, &info.SourceEnd, rec.SourceTS)
 	}
 	if e, ok := toc.Find(glcb.SectionIngestTSIndex); ok {
 		info.IngestIdxOffset, info.IngestIdxSize = e.Offset, e.Size
@@ -102,4 +91,13 @@ func externalInfo(records []chunk.Record, toc glcb.BlobTOC, diskBytes int64, ing
 		info.SourceIdxOffset, info.SourceIdxSize = e.Offset, e.Size
 	}
 	return info
+}
+
+func widen(lo, hi *time.Time, ts time.Time) {
+	if ts.Before(*lo) {
+		*lo = ts
+	}
+	if ts.After(*hi) {
+		*hi = ts
+	}
 }

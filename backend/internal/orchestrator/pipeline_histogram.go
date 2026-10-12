@@ -36,7 +36,13 @@ func (o *Orchestrator) withPipelineChunkIngestIndex(vaultID glid.GLID, chunkID c
 	if !ok {
 		return os.ErrNotExist
 	}
-	glcbPath := chunking.ChunkGLCBPath(root, chunkID)
+	return withGLCBIngestIndex(chunking.ChunkGLCBPath(root, chunkID), fn)
+}
+
+// withGLCBIngestIndex hands fn the ITSI of the GLCB at glcbPath. An ITSI the
+// TOC lists with no entries is an empty view; one the TOC does not list is
+// os.ErrNotExist.
+func withGLCBIngestIndex(glcbPath string, fn func(filetsidx.MmapView) error) error {
 	if _, err := os.Stat(glcbPath); err != nil {
 		return err
 	}
@@ -49,7 +55,7 @@ func (o *Orchestrator) withPipelineChunkIngestIndex(vaultID glid.GLID, chunkID c
 	defer blob.Release()
 
 	entry, section, ok := blob.Section(glcb.SectionIngestTSIndex)
-	if !ok || len(section) == 0 {
+	if !ok {
 		return os.ErrNotExist
 	}
 	mv, err := filetsidx.ViewFromSection(entry.Type, entry.Version, section)

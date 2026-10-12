@@ -12,10 +12,7 @@ import (
 	"gastrolog/internal/tsindex"
 )
 
-var (
-	ErrIndexTooSmall   = errors.New("timestamp index too small")
-	ErrIndexIncomplete = errors.New("timestamp index incomplete (missing complete flag)")
-)
+var ErrIndexIncomplete = errors.New("timestamp index incomplete (missing complete flag)")
 
 // Entry is a (timestamp, position) pair for binary search. It is a type
 // alias for tsindex.Entry — tsidx carries no semantics beyond the shared
@@ -82,7 +79,7 @@ func OpenSourceMmapAt(glcbPath string) (MmapView, error) {
 
 // OpenIngestMmap opens the chunk's ingest TS index section inside
 // data.glcb, resolves its view through the section registry, and returns
-// it for repeated lookups. Returns ErrIndexTooSmall if the section is empty.
+// it for repeated lookups. An empty section is a view with no entries.
 func OpenIngestMmap(dir string, chunkID chunk.ChunkID) (MmapView, error) {
 	return openSectionMmap(blobPath(dir, chunkID), format.TypeIngestIndex)
 }
@@ -101,9 +98,6 @@ func ViewFromSection(sectionType byte, version uint8, data []byte) (MmapView, er
 	if err != nil {
 		return MmapView{}, err
 	}
-	if view.Len() == 0 {
-		return MmapView{}, ErrIndexTooSmall
-	}
 	return MmapView{view: view}, nil
 }
 
@@ -116,10 +110,6 @@ func openSectionMmap(path string, sectionType byte) (MmapView, error) {
 	if err != nil {
 		_ = closer()
 		return MmapView{}, err
-	}
-	if view.Len() == 0 {
-		_ = closer()
-		return MmapView{}, ErrIndexTooSmall
 	}
 	return MmapView{view: view, close: closer}, nil
 }

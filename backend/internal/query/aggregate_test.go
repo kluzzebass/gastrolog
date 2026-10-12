@@ -788,8 +788,9 @@ func TestAggregatorSourceTSBin(t *testing.T) {
 	}
 }
 
-func TestAggregatorMissingSourceTS(t *testing.T) {
-	// bin(5m, _source_ts) with zero SourceTS → record skipped.
+func TestAggregatorSourceTSBinFallsBackToIngestTS(t *testing.T) {
+	// bin(5m, source_ts): a record without SourceTS bins by its IngestTS,
+	// beside a record whose SourceTS lands in another bin.
 	stats := &querylang.StatsOp{
 		Aggs: []querylang.AggExpr{{Func: "count"}},
 		Groups: []querylang.GroupExpr{{
@@ -805,18 +806,31 @@ func TestAggregatorMissingSourceTS(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec := chunk.Record{
-		WriteTS:  baseTime,
-		IngestTS: baseTime,
-		// SourceTS is zero
-		Raw: []byte("test"),
-	}
-	agg.Add(rec)
+	agg.Add(chunk.Record{
+		WriteTS:  baseTime.Add(20 * time.Minute),
+		IngestTS: baseTime.Add(12 * time.Minute), // 10:12, no SourceTS
+		Raw:      []byte("fallback"),
+	})
+	agg.Add(chunk.Record{
+		WriteTS:  baseTime.Add(20 * time.Minute),
+		IngestTS: baseTime.Add(20 * time.Minute),
+		SourceTS: baseTime.Add(2 * time.Minute), // 10:02
+		Raw:      []byte("sourced"),
+	})
 
 	result := agg.Result(time.Time{}, time.Time{})
-	// No rows because the record was skipped (missing source timestamp).
-	if len(result.Rows) != 0 {
-		t.Fatalf("rows = %d, want 0 (source_ts missing)", len(result.Rows))
+	got := map[string]string{}
+	for _, row := range result.Rows {
+		got[row[0]] = row[1]
+	}
+	want := map[string]string{"2025-06-15T10:00:00Z": "1", "2025-06-15T10:05:00Z": "0", "2025-06-15T10:10:00Z": "1"}
+	if len(got) != len(want) {
+		t.Fatalf("bins = %v, want %v", got, want)
+	}
+	for bin, count := range want {
+		if got[bin] != count {
+			t.Errorf("bin %s count = %q, want %q (all bins %v)", bin, got[bin], count, got)
+		}
 	}
 }
 

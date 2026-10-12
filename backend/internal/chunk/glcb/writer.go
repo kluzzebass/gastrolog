@@ -299,9 +299,7 @@ func (w *Writer) commitFrame(sourceTS, ingestTS, writeTS time.Time) error {
 	}
 
 	w.ingestEntries = append(w.ingestEntries, tsindex.Entry{TS: ingestTS.UnixNano(), Pos: pos})
-	if !sourceTS.IsZero() {
-		w.sourceEntries = append(w.sourceEntries, tsindex.Entry{TS: sourceTS.UnixNano(), Pos: pos})
-	}
+	w.sourceEntries = append(w.sourceEntries, tsindex.Entry{TS: chunk.EffectiveSourceTS(sourceTS, ingestTS).UnixNano(), Pos: pos})
 	w.count++
 	return nil
 }

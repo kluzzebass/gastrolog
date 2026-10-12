@@ -219,7 +219,7 @@ type ChunkMeta struct {
 	IngestStart time.Time // min IngestTS in chunk
 	IngestEnd   time.Time // max IngestTS in chunk
 	SourceStart time.Time // min SourceTS (excluding zero)
-	SourceEnd   time.Time // max SourceTS in chunk
+	SourceEnd   time.Time // max SourceTS (excluding zero)
 
 	// IngestTSMonotonic is true when records were appended in
 	// IngestTS-monotonic order (typical edge ingest path). False when
@@ -302,6 +302,16 @@ type Record struct {
 	Raw      []byte
 	Ref      RecordRef
 	VaultID  glid.GLID
+}
+
+// EffectiveSourceTS is the timestamp a record sorts, filters and bins by on
+// the source axis: its SourceTS, or its IngestTS when it has none. The
+// record's own SourceTS stays zero; only the axis falls back.
+func EffectiveSourceTS(sourceTS, ingestTS time.Time) time.Time {
+	if sourceTS.IsZero() {
+		return ingestTS
+	}
+	return sourceTS
 }
 
 // Copy returns a deep copy of the record with its own Raw slice and Attrs map.
