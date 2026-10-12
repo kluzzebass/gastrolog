@@ -122,6 +122,11 @@ signs them, not a token.
   and `GASTROLOG_BOOTSTRAP_TOKEN_SECRET=<same-secret>`. The joiner polls
   the URL with backoff (1s → 30s, 10 minute total timeout).
 
+The joiner fetches a token only on its first boot, when its home holds no
+cluster certificate yet. Once enrolled it restarts from its certificate and
+never contacts the URL again, so the variables can stay set on every boot,
+and a restart of every node at once does not wait on the token-serving node.
+
 Minting per request is what makes expiry workable: a joiner starting a
 week after the cluster was built still gets a token whose window has not
 begun closing. The durable credential here is the serve secret, which the

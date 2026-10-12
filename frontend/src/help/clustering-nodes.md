@@ -30,7 +30,7 @@ A single-node server can join an existing cluster from this tab. Enter the leade
 
 A node that was removed from a cluster cannot join that cluster again under its node ID — see **Removing Nodes** below.
 
-You can also join at startup via CLI flags: `--join-addr` and `--join-token`.
+You can also join at startup via CLI flags: `--join-addr` and `--join-token`. The token is used only on the node's first start, to obtain its certificate; once the node holds one it restarts from it without contacting any other node for a token, so the flags can stay in place across restarts.
 
 ## Promoting and Demoting
 

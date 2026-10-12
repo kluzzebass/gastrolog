@@ -56,16 +56,14 @@ func setupCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd ho
 		logger.Info("cluster TLS loaded from local file")
 	}
 
-	// First boot of a joiner: enroll with a member before creating the
-	// cluster server. cfg.JoinToken may have been populated from a file or
-	// HTTP source by resolveJoinTokenFromSources before we got here, so the
-	// literal-token check still does the right thing.
-	if clusterTLS.State() == nil && cfg.JoinAddr != "" && cfg.JoinToken != "" {
-		enrolled, err := enrollInCluster(ctx, logger, cfg, hd, nodeID)
+	if clusterTLS.State() == nil {
+		enrolled, err := enrollOnFirstBoot(ctx, logger, cfg, hd, nodeID)
 		if err != nil {
 			return nil, nil, err
 		}
-		clusterTLS = enrolled
+		if enrolled != nil {
+			clusterTLS = enrolled
+		}
 	}
 
 	clusterSrv, err := cluster.New(cluster.Config{
@@ -82,6 +80,25 @@ func setupCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd ho
 	}
 
 	return clusterSrv, clusterTLS, nil
+}
+
+// enrollOnFirstBoot obtains a certificate for a node that holds none, and
+// returns nil when there is nothing to enrol with: a bootstrap node, or a
+// joiner given no token.
+//
+// The join token is resolved here and nowhere earlier. It buys exactly the
+// certificate this node lacks, so a node that already holds one has no use
+// for it — and must not wait for one: on a whole-cluster restart the node
+// serving tokens opens its HTTP listener only once its Raft group has quorum,
+// which needs this node's Raft transport up first.
+func enrollOnFirstBoot(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd home.Dir, nodeID string) (*cluster.ClusterTLS, error) {
+	if err := resolveJoinTokenFromSources(ctx, &cfg, logger); err != nil {
+		return nil, fmt.Errorf("resolve bootstrap token: %w", err)
+	}
+	if cfg.JoinAddr == "" || cfg.JoinToken == "" {
+		return nil, nil
+	}
+	return enrollInCluster(ctx, logger, cfg, hd, nodeID)
 }
 
 // enrollInCluster performs the Enroll RPC to obtain TLS material. Any member

@@ -166,6 +166,14 @@ that decides.
 - Enrollment runs only on a node's first boot. A restarting node resumes
   with its stored certificate even when the join address and token are
   still configured (containerized deployments pass both on every boot)
+- A token source (`--bootstrap-token-url`) is contacted only when enrollment
+  is about to run — when the node's home holds no loadable certificate. A
+  restarting node never waits on it, so a whole-cluster restart does not
+  depend on the token-serving node, whose HTTP listener opens only once its
+  Raft group has quorum. Holding a certificate is the whole of what the token
+  would have bought: a certificate the cluster CA did not sign gets no
+  membership, and an unreadable certificate file stops the node rather than
+  being treated as absent
 
 ## Certificate Properties
 

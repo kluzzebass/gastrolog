@@ -136,6 +136,12 @@ sees. The endpoint mints a fresh token per request instead.
    join the Raft cluster.
 5. Both joiners settle as `FOLLOWER` / `VOTER` within ~10 seconds.
 
+The token fetch is first-boot only. A pod whose PVC already holds its
+cluster certificate restarts from it without contacting
+`/cluster/bootstrap-token`, which matters when every pod restarts at once
+(a Kubernetes node reboot): `gastrolog-0` opens port 4564 only after its
+Raft group has quorum, and that quorum needs the joiners' Raft ports up.
+
 ### Probes
 
 The manifest wires K8s `livenessProbe` and `readinessProbe` to the
