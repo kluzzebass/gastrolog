@@ -3,15 +3,16 @@
 // indexing, or searching.
 //
 // A JSONL vault's records reach the sink one sealed chunk at a time
-// (WriteChunk). A ledger beside the sink file lists the chunks written, each
-// only after its lines are synced, so a restart writes every chunk the
-// ledger does not list — a crash can repeat one chunk's lines but never
-// lose them.
+// (WriteChunk). A ledger beside the sink file records the file's size when
+// the sink first opened it, then each chunk written with the file's size
+// once its lines were synced. Opening the sink cuts the file back to the last
+// size the ledger records, so a chunk a crash interrupted loses its partial
+// lines and is written again whole — each chunk once — and bytes the sink did
+// not write are never touched.
 package jsonl
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -58,79 +61,123 @@ type record struct {
 // LedgerSuffix names the ledger of written chunks beside the sink file.
 const LedgerSuffix = ".chunks"
 
+// ledgerBase names the ledger's first entry: the sink file's size when the
+// sink first opened it.
+const ledgerBase = "base"
+
 // NewManager creates a JSONL sink manager at the given file path.
 func NewManager(cfg Config) (*Manager, error) {
 	if err := os.MkdirAll(filepath.Dir(cfg.Path), 0o750); err != nil {
 		return nil, fmt.Errorf("create jsonl parent dir: %w", err)
 	}
-	if err := dropTornLine(cfg.Path); err != nil {
-		return nil, err
-	}
 	f, err := os.OpenFile(cfg.Path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open jsonl sink: %w", err)
 	}
-	written, err := readLedger(cfg.Path + LedgerSuffix)
+	ledgerPath := filepath.Clean(cfg.Path + LedgerSuffix)
+	written, recorded, ok, err := readLedger(ledgerPath)
+	if err == nil {
+		err = settleSink(f, recorded, ok)
+	}
 	if err != nil {
 		_ = f.Close()
 		return nil, err
 	}
-	ledger, err := os.OpenFile(cfg.Path+LedgerSuffix, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	ledger, err := os.OpenFile(ledgerPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("open jsonl sink ledger: %w", err)
 	}
-	return &Manager{
+	m := &Manager{
 		file:    f,
 		encoder: json.NewEncoder(f),
 		ledger:  ledger,
 		written: written,
 		id:      chunk.NewChunkID(),
-	}, nil
+	}
+	if !ok {
+		if err := m.recordLocked(ledgerBase); err != nil {
+			_ = m.Close()
+			return nil, err
+		}
+	}
+	return m, nil
 }
 
-// dropTornLine truncates a partly written last line off the sink file: it
-// belongs to a chunk the ledger does not list, which is written again whole.
-func dropTornLine(path string) error {
-	data, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read jsonl sink: %w", err)
-	}
-	if len(data) == 0 || data[len(data)-1] == '\n' {
+// settleSink cuts the sink file back to recorded, the last size the ledger
+// records: what lies past it is the partial lines of a chunk a crash
+// interrupted, which is written again whole. A file shorter than recorded was
+// changed outside the sink and is left alone, as is a file the ledger has no
+// record of (ok false).
+func settleSink(f *os.File, recorded int64, ok bool) error {
+	if !ok {
 		return nil
 	}
-	keep := bytes.LastIndexByte(data, '\n') + 1
-	if err := os.Truncate(path, int64(keep)); err != nil {
-		return fmt.Errorf("drop torn jsonl line: %w", err)
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat jsonl sink: %w", err)
+	}
+	if info.Size() <= recorded {
+		return nil
+	}
+	if err := f.Truncate(recorded); err != nil {
+		return fmt.Errorf("cut jsonl sink back to its last written chunk: %w", err)
 	}
 	return nil
 }
 
-// readLedger returns the chunks the ledger lists. A torn last entry lists
+// readLedger returns the chunks the ledger lists and the last sink size it
+// records; ok is false when it records none. A torn last entry records
 // nothing: its chunk is written again.
-func readLedger(path string) (map[chunk.ChunkID]bool, error) {
-	written := make(map[chunk.ChunkID]bool)
+func readLedger(path string) (written map[chunk.ChunkID]bool, recorded int64, ok bool, err error) {
+	written = make(map[chunk.ChunkID]bool)
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return written, nil
+			return written, 0, false, nil
 		}
-		return nil, fmt.Errorf("open jsonl sink ledger: %w", err)
+		return nil, 0, false, fmt.Errorf("open jsonl sink ledger: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
-		if id, err := chunk.ParseChunkID(sc.Text()); err == nil {
+		name, sizeText, found := strings.Cut(sc.Text(), " ")
+		if !found {
+			continue
+		}
+		size, err := strconv.ParseInt(sizeText, 10, 64)
+		if err != nil || size < 0 {
+			continue
+		}
+		if name != ledgerBase {
+			id, err := chunk.ParseChunkID(name)
+			if err != nil {
+				continue
+			}
 			written[id] = true
 		}
+		recorded, ok = size, true
 	}
 	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("read jsonl sink ledger: %w", err)
+		return nil, 0, false, fmt.Errorf("read jsonl sink ledger: %w", err)
 	}
-	return written, nil
+	return written, recorded, ok, nil
+}
+
+// recordLocked appends a ledger entry naming what, with the sink file's
+// current size, and syncs it. Caller holds m.mu or owns m exclusively.
+func (m *Manager) recordLocked(what string) error {
+	info, err := m.file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat jsonl sink: %w", err)
+	}
+	if _, err := m.ledger.WriteString(what + " " + strconv.FormatInt(info.Size(), 10) + "\n"); err != nil {
+		return fmt.Errorf("write jsonl sink ledger: %w", err)
+	}
+	if err := m.ledger.Sync(); err != nil {
+		return fmt.Errorf("sync jsonl sink ledger: %w", err)
+	}
+	return nil
 }
 
 // Written reports whether the ledger lists chunk id as written.
@@ -152,29 +199,39 @@ func (m *Manager) WriteChunk(id chunk.ChunkID, next chunk.RecordIterator) (bool,
 	if m.written[id] {
 		return false, nil
 	}
+	info, err := m.file.Stat()
+	if err != nil {
+		return false, fmt.Errorf("stat jsonl sink: %w", err)
+	}
+	if err := m.writeChunkLocked(id, next); err != nil {
+		// Cut the chunk's partial lines so the next chunk does not follow
+		// them; this chunk is written again whole.
+		if cutErr := m.file.Truncate(info.Size()); cutErr != nil {
+			err = errors.Join(err, fmt.Errorf("cut partial chunk: %w", cutErr))
+		}
+		return false, err
+	}
+	m.written[id] = true
+	return true, nil
+}
+
+func (m *Manager) writeChunkLocked(id chunk.ChunkID, next chunk.RecordIterator) error {
 	for {
 		rec, err := next()
 		if errors.Is(err, chunk.ErrNoMoreRecords) {
 			break
 		}
 		if err != nil {
-			return false, fmt.Errorf("read chunk %s: %w", id, err)
+			return fmt.Errorf("read chunk %s: %w", id, err)
 		}
 		if err := m.encodeLocked(rec); err != nil {
-			return false, err
+			return err
 		}
 	}
 	if err := m.file.Sync(); err != nil {
-		return false, fmt.Errorf("sync jsonl sink: %w", err)
+		return fmt.Errorf("sync jsonl sink: %w", err)
 	}
-	if _, err := m.ledger.WriteString(id.String() + "\n"); err != nil {
-		return false, fmt.Errorf("write jsonl sink ledger: %w", err)
-	}
-	if err := m.ledger.Sync(); err != nil {
-		return false, fmt.Errorf("sync jsonl sink ledger: %w", err)
-	}
-	m.written[id] = true
-	return true, nil
+	return m.recordLocked(id.String())
 }
 
 // NewFactory returns a chunk.ManagerFactory for JSONL sinks.
