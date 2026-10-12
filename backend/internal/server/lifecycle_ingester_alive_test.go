@@ -156,18 +156,15 @@ func TestBuildIngesterAlive_FiltersOfflineNodes(t *testing.T) {
 
 // TestBuildIngesterAlive_OperatorStatesAlsoFiltered verifies that the
 // filter rejects every non-Live state, not just Unreachable.
-// Maintenance / Draining / Decommissioning all imply "this node is
-// not currently expected to be running the ingester" — leaving any
-// of them in the alive map would mislead the inspector the same way
-// Unreachable did.
+// Maintenance implies "this node is not currently expected to be running
+// the ingester" — leaving it in the alive map would mislead the inspector
+// the same way Unreachable did.
 func TestBuildIngesterAlive_OperatorStatesAlsoFiltered(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
 	for _, state := range []system.NodeState{
 		system.NodeStateMaintenance,
-		system.NodeStateDraining,
-		system.NodeStateDecommissioning,
 	} {
 		t.Run(state.String(), func(t *testing.T) {
 			t.Parallel()
@@ -182,23 +179,10 @@ func TestBuildIngesterAlive_OperatorStatesAlsoFiltered(t *testing.T) {
 			nodeAStr := nodeA.String()
 			nodeB := glid.New()
 			now := time.Now()
-			// Some operator states require a transition path; go via
-			// Draining for Decommissioning (the legal pre-state).
-			if state == system.NodeStateDecommissioning {
-				if err := cfgStore.PutNode(ctx, system.NodeConfig{
-					ID: nodeB, Name: "node-B", State: system.NodeStateDraining, StateSince: now,
-				}); err != nil {
-					t.Fatalf("PutNode draining: %v", err)
-				}
-				if err := cfgStore.SetNodeState(ctx, nodeB, system.NodeStateDecommissioning, now); err != nil {
-					t.Fatalf("SetNodeState Decommissioning: %v", err)
-				}
-			} else {
-				if err := cfgStore.PutNode(ctx, system.NodeConfig{
-					ID: nodeB, Name: "node-B", State: state, StateSince: now,
-				}); err != nil {
-					t.Fatalf("PutNode %s: %v", state, err)
-				}
+			if err := cfgStore.PutNode(ctx, system.NodeConfig{
+				ID: nodeB, Name: "node-B", State: state, StateSince: now,
+			}); err != nil {
+				t.Fatalf("PutNode %s: %v", state, err)
 			}
 			nodeBStr := nodeB.String()
 

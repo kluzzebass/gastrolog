@@ -393,7 +393,7 @@ func (s *LifecycleServer) SetNodeState(
 	}
 	state := command.NodeStateFromProto(req.Msg.GetState())
 	if state == system.NodeStateUnknown {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("state is required (one of LIVE, UNREACHABLE, MAINTENANCE, DRAINING, DECOMMISSIONING)"))
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("state is required (one of LIVE, UNREACHABLE, MAINTENANCE)"))
 	}
 	if err := s.cfgStore.SetNodeState(ctx, id, state, time.Now()); err != nil {
 		if errors.Is(err, system.ErrIllegalNodeStateTransition) || errors.Is(err, system.ErrNodeNotFound) || errors.Is(err, system.ErrCommandRejected) {
@@ -628,7 +628,7 @@ func (s *LifecycleServer) buildSystemStatus(ctx context.Context) *apiv1.WatchSys
 //
 // The raw FSM alive map records "this node started this ingester" — a bit
 // that stays set after a clean shutdown notification but lingers when a node
-// goes Unreachable / Maintenance / Decommissioning or just crashes, so
+// goes Unreachable / Maintenance or just crashes, so
 // surfacing it unfiltered reports N/N healthy with a node clearly offline.
 // Filtering by NodeConfig.EffectiveState() == NodeStateLive at the server
 // boundary means every UI surface (this proto, downstream caches, defensive

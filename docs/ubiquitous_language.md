@@ -522,14 +522,9 @@ one segmented file set, one batch-writer goroutine.
     to live on the broadcast fabric, not on a tick.
   - **Maintenance** — an operator declared the node absent; the cluster
     expects it back and keeps its placements.
-  - **Draining** — chunks are being transferred off the node ahead of its
-    removal; cancelling returns it to live.
-  - **Decommissioning** — the node is leaving: it receives no placements and
-    `DeleteNode` removes it. No state follows.
-
-  Legal transitions: live → unreachable | maintenance | draining;
-  unreachable → live | maintenance | draining; maintenance → live |
-  draining; draining → decommissioning | live.
+  Legal transitions: live → unreachable | maintenance; unreachable → live |
+  maintenance; maintenance → live. A node leaves the cluster by removal
+  (`cluster remove-node`, which deletes its NodeConfig), not by a state.
 
   **Offline** is not a node state. It is the stats surface's verdict on a
   node whose broadcast is older than the stats TTL, shown with how long it

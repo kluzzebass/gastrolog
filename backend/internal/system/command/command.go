@@ -720,10 +720,6 @@ func NodeStateToProto(s system.NodeState) gastrologv1.NodeState {
 		return gastrologv1.NodeState_NODE_STATE_UNREACHABLE
 	case system.NodeStateMaintenance:
 		return gastrologv1.NodeState_NODE_STATE_MAINTENANCE
-	case system.NodeStateDraining:
-		return gastrologv1.NodeState_NODE_STATE_DRAINING
-	case system.NodeStateDecommissioning:
-		return gastrologv1.NodeState_NODE_STATE_DECOMMISSIONING
 	default:
 		return gastrologv1.NodeState_NODE_STATE_UNSPECIFIED
 	}
@@ -739,10 +735,6 @@ func NodeStateFromProto(s gastrologv1.NodeState) system.NodeState {
 		return system.NodeStateUnreachable
 	case gastrologv1.NodeState_NODE_STATE_MAINTENANCE:
 		return system.NodeStateMaintenance
-	case gastrologv1.NodeState_NODE_STATE_DRAINING:
-		return system.NodeStateDraining
-	case gastrologv1.NodeState_NODE_STATE_DECOMMISSIONING:
-		return system.NodeStateDecommissioning
 	default:
 		return system.NodeStateUnknown
 	}

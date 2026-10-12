@@ -1146,13 +1146,6 @@ enum NodeState {
   // Maintenance: operator-declared absence. Placement does NOT rotate
   // off this state. Sticky — requires `cluster online` to clear.
   NODE_STATE_MAINTENANCE = 3;
-  // Draining: operator-initiated; chunks being transferred off the node
-  // in preparation for removal.
-  NODE_STATE_DRAINING = 4;
-  // Decommissioning: chunks moved; voter being removed from cluster-ctl Raft
-  // and vault-ctl groups. Transitions to absence-from-FSM (= Removed)
-  // when removal completes.
-  NODE_STATE_DECOMMISSIONING = 5;
 }
 
 message PutNodeConfigRequest {
