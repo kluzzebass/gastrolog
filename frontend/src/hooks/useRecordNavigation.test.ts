@@ -1,5 +1,6 @@
 import { describe, test, expect, mock } from "bun:test";
 import { renderHook, act } from "@testing-library/react";
+import { actAwaited, renderHookWithAbandonedRender } from "../../test/abandonedRender";
 import { useRecordNavigation } from "./useRecordNavigation";
 
 /** Build a minimal ProtoRecord-like object. */
@@ -17,8 +18,8 @@ function makeRecord(chunkId: string, pos: number, vaultId = "v1") {
 function makeDeps(overrides: Partial<Parameters<typeof useRecordNavigation>[0]> = {}) {
   return {
     isFollowMode: false,
-    recordsRef: { current: [] as import("../api/client").Record[] },
-    followRecordsRef: { current: [] as import("../api/client").Record[] },
+    records: [] as import("../api/client").Record[],
+    followRecords: [] as import("../api/client").Record[],
     selectedRowRef: { current: null },
     detailCollapsed: true,
     setDetailCollapsed: mock(() => {}),
@@ -40,12 +41,6 @@ describe("useRecordNavigation", () => {
       const { result } = renderHook(() => useRecordNavigation(deps));
       expect(result.current.selectedRecord).toBeNull();
     });
-
-    test("selectedRecordRef starts as null", () => {
-      const deps = makeDeps();
-      const { result } = renderHook(() => useRecordNavigation(deps));
-      expect(result.current.selectedRecordRef.current).toBeNull();
-    });
   });
 
   // ── setSelectedRecord ──────────────────────────────────────────────
@@ -57,14 +52,6 @@ describe("useRecordNavigation", () => {
       const rec = makeRecord("c1", 0);
       act(() => result.current.setSelectedRecord(rec));
       expect(result.current.selectedRecord).toBe(rec);
-    });
-
-    test("updates selectedRecordRef", () => {
-      const deps = makeDeps();
-      const { result } = renderHook(() => useRecordNavigation(deps));
-      const rec = makeRecord("c1", 0);
-      act(() => result.current.setSelectedRecord(rec));
-      expect(result.current.selectedRecordRef.current).toBe(rec);
     });
 
     test("setting to null clears the selection", () => {
@@ -124,7 +111,7 @@ describe("useRecordNavigation", () => {
       const rec1 = makeRecord("c1", 0);
       const rec2 = makeRecord("c1", 1);
       const deps = makeDeps({
-        recordsRef: { current: [rec1, rec2] },
+        records: [rec1, rec2],
       });
       const { result } = renderHook(() => useRecordNavigation(deps));
 
@@ -138,7 +125,7 @@ describe("useRecordNavigation", () => {
       const rec1 = makeRecord("c1", 0);
       const rec2 = makeRecord("c1", 1);
       const deps = makeDeps({
-        recordsRef: { current: [rec1, rec2] },
+        records: [rec1, rec2],
       });
       const { result } = renderHook(() => useRecordNavigation(deps));
 
@@ -152,7 +139,7 @@ describe("useRecordNavigation", () => {
       const rec1 = makeRecord("c1", 0);
       const rec2 = makeRecord("c1", 1);
       const deps = makeDeps({
-        recordsRef: { current: [rec1, rec2] },
+        records: [rec1, rec2],
       });
       const { result } = renderHook(() => useRecordNavigation(deps));
 
@@ -169,7 +156,7 @@ describe("useRecordNavigation", () => {
       const rec1 = makeRecord("c1", 0);
       const rec2 = makeRecord("c1", 1);
       const deps = makeDeps({
-        recordsRef: { current: [rec1, rec2] },
+        records: [rec1, rec2],
       });
       const { result } = renderHook(() => useRecordNavigation(deps));
 
@@ -184,7 +171,7 @@ describe("useRecordNavigation", () => {
       const rec1 = makeRecord("c1", 0);
       const rec2 = makeRecord("c1", 1);
       const deps = makeDeps({
-        recordsRef: { current: [rec1, rec2] },
+        records: [rec1, rec2],
       });
       const { result } = renderHook(() => useRecordNavigation(deps));
 
@@ -199,7 +186,7 @@ describe("useRecordNavigation", () => {
       const rec1 = makeRecord("c1", 0);
       const rec2 = makeRecord("c1", 1);
       const deps = makeDeps({
-        recordsRef: { current: [rec1, rec2] },
+        records: [rec1, rec2],
       });
       const { result } = renderHook(() => useRecordNavigation(deps));
 
@@ -210,13 +197,13 @@ describe("useRecordNavigation", () => {
       expect(result.current.selectedRecord).toBe(rec1);
     });
 
-    test("uses followRecordsRef in follow mode", () => {
+    test("uses followRecords in follow mode", () => {
       const searchRec = makeRecord("s1", 0);
       const followRec = makeRecord("f1", 0);
       const deps = makeDeps({
         isFollowMode: true,
-        recordsRef: { current: [searchRec] },
-        followRecordsRef: { current: [followRec] },
+        records: [searchRec],
+        followRecords: [followRec],
       });
       const { result } = renderHook(() => useRecordNavigation(deps));
 
@@ -227,7 +214,7 @@ describe("useRecordNavigation", () => {
     });
 
     test("no-op when records list is empty", () => {
-      const deps = makeDeps({ recordsRef: { current: [] } });
+      const deps = makeDeps({ records: [] });
       const { result } = renderHook(() => useRecordNavigation(deps));
       act(() => {
         globalThis.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
@@ -235,9 +222,58 @@ describe("useRecordNavigation", () => {
       expect(result.current.selectedRecord).toBeNull();
     });
 
+    test("navigates the records of the latest render", () => {
+      const old1 = makeRecord("old", 0);
+      const new1 = makeRecord("new", 0);
+      const new2 = makeRecord("new", 1);
+      const { result, rerender } = renderHook(
+        (props: { records: import("../api/client").Record[] }) =>
+          useRecordNavigation(makeDeps({ records: props.records })),
+        { initialProps: { records: [old1] } },
+      );
+
+      rerender({ records: [new1, new2] });
+      act(() => {
+        globalThis.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+      });
+      expect(result.current.selectedRecord).toBe(new1);
+    });
+
+    test("navigates from the committed selection, not one a thrown-away render set", async () => {
+      const rec1 = makeRecord("c1", 0);
+      const rec2 = makeRecord("c1", 1);
+      const rec3 = makeRecord("c1", 2);
+      const deps = makeDeps({ records: [rec1, rec2, rec3] });
+      const { result, abandon } = renderHookWithAbandonedRender(() => useRecordNavigation(deps));
+
+      act(() => result.current.setSelectedRecord(rec1));
+      const committed = result.current;
+      await abandon(undefined, () => committed.setSelectedRecord(rec3));
+
+      await actAwaited(() => {
+        globalThis.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+      });
+      expect(result.current.selectedRecord).toBe(rec2);
+    });
+
+    test("navigates the committed records, not those of a thrown-away render", async () => {
+      const committedRec = makeRecord("committed", 0);
+      const abandonedRec = makeRecord("abandoned", 0);
+      const { result, abandon } = renderHookWithAbandonedRender(
+        (records: import("../api/client").Record[]) => useRecordNavigation(makeDeps({ records })),
+        [committedRec],
+      );
+
+      await abandon([abandonedRec]);
+      await actAwaited(() => {
+        globalThis.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+      });
+      expect(result.current.selectedRecord).toBe(committedRec);
+    });
+
     test("ignores keyboard when target is an INPUT element", () => {
       const rec = makeRecord("c1", 0);
-      const deps = makeDeps({ recordsRef: { current: [rec] } });
+      const deps = makeDeps({ records: [rec] });
       const { result } = renderHook(() => useRecordNavigation(deps));
 
       const input = document.createElement("input");
@@ -255,7 +291,7 @@ describe("useRecordNavigation", () => {
   describe("Escape key", () => {
     test("deselects current record", () => {
       const rec = makeRecord("c1", 0);
-      const deps = makeDeps({ recordsRef: { current: [rec] } });
+      const deps = makeDeps({ records: [rec] });
       const { result } = renderHook(() => useRecordNavigation(deps));
 
       act(() => result.current.setSelectedRecord(rec));
@@ -270,7 +306,7 @@ describe("useRecordNavigation", () => {
     test("closes plan dialog first if showPlan is true", () => {
       const rec = makeRecord("c1", 0);
       const deps = makeDeps({
-        recordsRef: { current: [rec] },
+        records: [rec],
         showPlan: true,
       });
       const { result } = renderHook(() => useRecordNavigation(deps));

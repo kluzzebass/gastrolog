@@ -1,43 +1,7 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { renderHook, act } from "@testing-library/react";
-import { useState, useRef, useEffect } from "react";
-
-/**
- * Minimal reproduction of the polling pattern used in useSearchView.
- * Tests that the setInterval fires correctly and isn't reset by re-renders.
- */
-function usePolling(searchFn: () => void) {
-  const [pollInterval, setPollInterval] = useState<number | null>(null);
-
-  // Ref-stabilize the search function so the interval doesn't reset on re-render.
-  const searchRef = useRef(searchFn);
-  searchRef.current = searchFn;
-
-  useEffect(() => {
-    if (!pollInterval) return;
-    const id = setInterval(() => {
-      searchRef.current();
-    }, pollInterval);
-    return () => clearInterval(id);
-  }, [pollInterval]);
-
-  return { pollInterval, setPollInterval };
-}
-
-// Broken version: search in deps causes interval to reset every render.
-function usePollingBroken(searchFn: () => void) {
-  const [pollInterval, setPollInterval] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!pollInterval) return;
-    const id = setInterval(() => {
-      searchFn();
-    }, pollInterval);
-    return () => clearInterval(id);
-  }, [pollInterval, searchFn]);
-
-  return { pollInterval, setPollInterval };
-}
+import { renderHook } from "@testing-library/react";
+import { renderHookWithAbandonedRender } from "../../test/abandonedRender";
+import { usePolling } from "./usePolling";
 
 describe("usePolling", () => {
   let realSetInterval: typeof globalThis.setInterval;
@@ -45,6 +9,10 @@ describe("usePolling", () => {
   let intervalCallbacks: Map<number, () => void>;
   let nextId: number;
   let clearCount: number;
+
+  const tick = () => {
+    for (const cb of intervalCallbacks.values()) cb();
+  };
 
   beforeEach(() => {
     realSetInterval = globalThis.setInterval;
@@ -70,66 +38,69 @@ describe("usePolling", () => {
     globalThis.clearInterval = realClearInterval;
   });
 
-  test("ref-stabilized polling fires callback without interval reset on re-renders", () => {
-    const searchFn = mock(() => {});
+  test("polls once immediately when polling starts", () => {
+    const onPoll = mock(() => {});
+    const { rerender } = renderHook(({ ms }) => usePolling(ms, onPoll), {
+      initialProps: { ms: null as number | null },
+    });
+    expect(onPoll).not.toHaveBeenCalled();
 
-    const { result, rerender } = renderHook(
-      ({ fn }) => usePolling(fn),
-      { initialProps: { fn: searchFn } },
-    );
-
-    // Enable polling.
-    act(() => result.current.setPollInterval(5000));
+    rerender({ ms: 5000 });
+    expect(onPoll).toHaveBeenCalledTimes(1);
     expect(intervalCallbacks.size).toBe(1);
+  });
+
+  test("a cadence change restarts the interval and polls immediately", () => {
+    const onPoll = mock(() => {});
+    const { rerender } = renderHook(({ ms }) => usePolling(ms, onPoll), {
+      initialProps: { ms: 5000 as number | null },
+    });
+    rerender({ ms: 10_000 });
+    expect(onPoll).toHaveBeenCalledTimes(2);
+    expect(intervalCallbacks.size).toBe(1);
+  });
+
+  test("re-renders with a new callback keep the interval and tick the latest callback", () => {
+    const first = mock(() => {});
+    const { rerender } = renderHook(({ fn }) => usePolling(5000, fn), {
+      initialProps: { fn: first },
+    });
     const initialClearCount = clearCount;
 
-    // Simulate multiple re-renders with a new function reference each time.
+    let latest = first;
     for (let i = 0; i < 10; i++) {
-      rerender({ fn: mock(() => {}) });
+      latest = mock(() => {});
+      rerender({ fn: latest });
     }
 
-    // The interval should NOT have been cleared and recreated.
     expect(clearCount).toBe(initialClearCount);
     expect(intervalCallbacks.size).toBe(1);
 
-    // Fire the interval callback — should call the latest searchFn.
-    const cb = [...intervalCallbacks.values()][0]!;
-    cb();
-    // The ref always points to the latest fn, so the original mock won't be called.
-    // But the latest one (from last rerender) will be.
-    // Just verify cb doesn't throw and the interval survived re-renders.
-    expect(intervalCallbacks.size).toBe(1);
+    tick();
+    expect(latest).toHaveBeenCalledTimes(1);
+    expect(first).toHaveBeenCalledTimes(1); // the leading poll only
   });
 
-  test("broken version resets interval on every re-render", () => {
-    const searchFn = mock(() => {});
-
-    const { result, rerender } = renderHook(
-      ({ fn }) => usePollingBroken(fn),
-      { initialProps: { fn: searchFn } },
-    );
-
-    // Enable polling.
-    act(() => result.current.setPollInterval(5000));
-    const initialClearCount = clearCount;
-
-    // Simulate re-renders with new function references.
-    for (let i = 0; i < 10; i++) {
-      rerender({ fn: mock(() => {}) });
-    }
-
-    // The broken version clears and recreates the interval on every re-render.
-    expect(clearCount).toBeGreaterThan(initialClearCount);
-  });
-
-  test("disabling poll clears the interval", () => {
-    const searchFn = mock(() => {});
-    const { result } = renderHook(() => usePolling(searchFn));
-
-    act(() => result.current.setPollInterval(5000));
+  test("null stops polling", () => {
+    const onPoll = mock(() => {});
+    const { rerender } = renderHook(({ ms }) => usePolling(ms, onPoll), {
+      initialProps: { ms: 5000 as number | null },
+    });
     expect(intervalCallbacks.size).toBe(1);
 
-    act(() => result.current.setPollInterval(null));
+    rerender({ ms: null });
     expect(intervalCallbacks.size).toBe(0);
+  });
+
+  test("a tick never calls the callback of a render React threw away", async () => {
+    const committed = mock(() => {});
+    const abandoned = mock(() => {});
+    const { abandon } = renderHookWithAbandonedRender((fn: () => void) => usePolling(5000, fn), committed);
+
+    await abandon(abandoned);
+    tick();
+
+    expect(abandoned).not.toHaveBeenCalled();
+    expect(committed).toHaveBeenCalledTimes(2);
   });
 });

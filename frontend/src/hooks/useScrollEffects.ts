@@ -2,7 +2,7 @@
  * Scroll-related side effects extracted from useSearchView.
  * Infinite scroll, follow scroll tracking, post-search auto-scroll.
  */
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useEffectEvent } from "react";
 import type { MutableRefObject } from "react";
 import type { Record as ProtoRecord } from "../api/client";
 
@@ -13,9 +13,8 @@ interface ScrollEffectDeps {
   selectedRecord: ProtoRecord | null;
   recordsLength: number;
 
-  // Stable refs to avoid effect churn
-  loadMoreRef: MutableRefObject<(expr: string) => void>;
-  resetFollowNewCountRef: MutableRefObject<() => void>;
+  loadMore: (expr: string) => void;
+  resetFollowNewCount: () => void;
   expressionRef: MutableRefObject<string>;
 
   // Shared ref owned by parent hook
@@ -25,9 +24,12 @@ interface ScrollEffectDeps {
 export function useScrollEffects(deps: ScrollEffectDeps) {
   const {
     isFollowMode, isSearching, hasMore, selectedRecord, recordsLength,
-    loadMoreRef, resetFollowNewCountRef, expressionRef,
+    loadMore, resetFollowNewCount, expressionRef,
     selectedRowRef,
   } = deps;
+
+  const loadMoreForExpression = useEffectEvent(() => loadMore(expressionRef.current));
+  const onFollowScrolledToTop = useEffectEvent(() => resetFollowNewCount());
 
   const sentinelRef = useRef<HTMLDivElement>(null);
   const logScrollRef = useRef<HTMLDivElement>(null);
@@ -55,7 +57,7 @@ export function useScrollEffects(deps: ScrollEffectDeps) {
           document.visibilityState === "visible"
         ) {
           loadMoreGateRef.current = false;
-          loadMoreRef.current(expressionRef.current);
+          loadMoreForExpression();
         }
       },
       { root: scrollEl, rootMargin: "0px 0px 200px 0px" },
@@ -65,7 +67,7 @@ export function useScrollEffects(deps: ScrollEffectDeps) {
       observer.disconnect();
       scrollEl?.removeEventListener("scroll", openGate);
     };
-  }, [expressionRef, hasMore, isSearching, loadMoreRef]);
+  }, [hasMore, isSearching]);
 
   // Follow mode: track scroll position and auto-reset new-record counter.
   useEffect(() => {
@@ -77,11 +79,11 @@ export function useScrollEffects(deps: ScrollEffectDeps) {
     const onScroll = () => {
       const scrolled = el.scrollTop > 50;
       setIsScrolledDown(scrolled);
-      if (!scrolled) resetFollowNewCountRef.current();
+      if (!scrolled) onFollowScrolledToTop();
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, [isFollowMode, resetFollowNewCountRef]);
+  }, [isFollowMode]);
 
   // After search completes, scroll the selected row into view.
   useEffect(() => {
@@ -91,7 +93,7 @@ export function useScrollEffects(deps: ScrollEffectDeps) {
         scrollToSelectedRef.current = false;
       } else if (selectedRecord && hasMore) {
         scrollToSelectedRef.current = true;
-        loadMoreRef.current(expressionRef.current);
+        loadMoreForExpression();
       }
     }
     prevSearchingRef.current = isSearching;
@@ -104,7 +106,7 @@ export function useScrollEffects(deps: ScrollEffectDeps) {
       selectedRowRef.current.scrollIntoView({ block: "center" });
       scrollToSelectedRef.current = false;
     } else if (hasMore) {
-      loadMoreRef.current(expressionRef.current);
+      loadMoreForExpression();
     } else {
       scrollToSelectedRef.current = false;
     }
