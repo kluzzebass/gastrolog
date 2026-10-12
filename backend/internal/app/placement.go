@@ -944,9 +944,10 @@ func nodeEligibleForVault(v system.VaultConfig, nodeID string, nscs []system.Nod
 	case system.VaultTypeFile:
 		return nodeHasStorageClass(nscs, nodeID, v.StorageClass)
 	case system.VaultTypeJSONL:
-		// JSONL vaults have explicit node assignment via Path — only the
-		// node already holding the leader placement is eligible.
-		return system.LeaderNodeID(placements, nscs) == nodeID
+		// A JSONL vault's sink file lives on the node it is placed on, so
+		// once placed only that node is eligible; until then, any node is.
+		leader := system.LeaderNodeID(placements, nscs)
+		return leader == "" || leader == nodeID
 	default:
 		return false
 	}

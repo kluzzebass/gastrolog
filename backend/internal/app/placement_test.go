@@ -143,6 +143,47 @@ func TestPlacementMemoryVaultAnyNodeEligible(t *testing.T) {
 	}
 }
 
+// A new JSONL vault is placed on one node, and stays there: its sink file
+// lives on that node.
+func TestPlacementJSONLVaultIsPlacedAndStays(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, alerts := newTestPlacement(t, "node-1", []string{"node-2", "node-3"})
+
+	vaultID := glid.New()
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "sink", Type: system.VaultTypeJSONL, Path: "jsonl/sink.jsonl"})
+
+	pm.reconcile(ctx)
+	first := vaultNode(t, store, vaultID)
+	if first == "" {
+		t.Fatal("a new JSONL vault was not placed")
+	}
+	if hasAlert(alerts, noEligibleNodeAlarmType) {
+		t.Fatal("a new JSONL vault raised the no-eligible-node alarm")
+	}
+	pm.reconcile(ctx)
+	if got := vaultNode(t, store, vaultID); got != first {
+		t.Fatalf("the JSONL vault moved from %q to %q", first, got)
+	}
+}
+
+// A placed JSONL vault is not moved to another node: no other node holds its
+// sink file.
+func TestPlacementJSONLVaultIsNotMovedOffItsNode(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
+
+	vaultID := glid.New()
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "sink", Type: system.VaultTypeJSONL, Path: "jsonl/sink.jsonl"})
+	_ = store.SetVaultPlacements(ctx, vaultID, leaderPlacement("node-3"))
+
+	pm.reconcile(ctx)
+	if got := vaultNode(t, store, vaultID); got != "node-3" {
+		t.Fatalf("the JSONL vault placed on node-3 moved to %q", got)
+	}
+}
+
 // ---------- Stability ----------
 
 func TestPlacementStableAssignment(t *testing.T) {
