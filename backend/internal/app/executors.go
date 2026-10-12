@@ -345,6 +345,11 @@ func newExplainExecutor(o *orchestrator.Orchestrator, localNodeID string) cluste
 
 		for _, vid := range vaultIDs {
 			eng, err := o.LeaderQueryEngineForVault(vid)
+			if errors.Is(err, orchestrator.ErrVaultNotReady) {
+				// Left out, as the coordinator leaves a vault it leads out
+				// of its own plan while not ready.
+				continue
+			}
 			if err != nil {
 				return nil, 0, fmt.Errorf("vault %s: %w", vid, err)
 			}
@@ -358,38 +363,44 @@ func newExplainExecutor(o *orchestrator.Orchestrator, localNodeID string) cluste
 
 			totalChunks += int32(plan.TotalChunks) //nolint:gosec // G115: chunk count fits in int32
 			for _, cp := range plan.ChunkPlans {
-				chunkPlan := &gastrologv1.ChunkPlan{
-					VaultId:          cp.VaultID.ToProto(),
-					ChunkId:          glid.GLID(cp.ChunkID).ToProto(),
-					Sealed:           cp.Sealed,
-					RecordCount:      int64(cp.RecordCount),
-					ScanMode:         cp.ScanMode,
-					EstimatedRecords: int64(cp.EstimatedScan),
-					RuntimeFilters:   []string{cp.RuntimeFilter},
-					Steps:            server.PipelineStepsToProto(cp.Pipeline),
-					SkipReason:       cp.SkipReason,
-					NodeId:           []byte(localNodeID),
-				}
-				if !cp.WriteStart.IsZero() {
-					chunkPlan.WriteStart = timestamppb.New(cp.WriteStart)
-				}
-				if !cp.WriteEnd.IsZero() {
-					chunkPlan.WriteEnd = timestamppb.New(cp.WriteEnd)
-				}
-				for _, bp := range cp.BranchPlans {
-					chunkPlan.BranchPlans = append(chunkPlan.BranchPlans, &gastrologv1.BranchPlan{
-						Expression:       bp.BranchExpr,
-						Steps:            server.PipelineStepsToProto(bp.Pipeline),
-						Skipped:          bp.Skipped,
-						SkipReason:       bp.SkipReason,
-						EstimatedRecords: int64(bp.EstimatedScan),
-					})
-				}
-				allChunks = append(allChunks, chunkPlan)
+				allChunks = append(allChunks, chunkPlanToProto(cp, localNodeID))
 			}
 		}
 		return allChunks, totalChunks, nil
 	}
+}
+
+// chunkPlanToProto converts one chunk's plan, stamped with the node that
+// planned it.
+func chunkPlanToProto(cp query.ChunkPlan, localNodeID string) *gastrologv1.ChunkPlan {
+	chunkPlan := &gastrologv1.ChunkPlan{
+		VaultId:          cp.VaultID.ToProto(),
+		ChunkId:          glid.GLID(cp.ChunkID).ToProto(),
+		Sealed:           cp.Sealed,
+		RecordCount:      int64(cp.RecordCount),
+		ScanMode:         cp.ScanMode,
+		EstimatedRecords: int64(cp.EstimatedScan),
+		RuntimeFilters:   []string{cp.RuntimeFilter},
+		Steps:            server.PipelineStepsToProto(cp.Pipeline),
+		SkipReason:       cp.SkipReason,
+		NodeId:           []byte(localNodeID),
+	}
+	if !cp.WriteStart.IsZero() {
+		chunkPlan.WriteStart = timestamppb.New(cp.WriteStart)
+	}
+	if !cp.WriteEnd.IsZero() {
+		chunkPlan.WriteEnd = timestamppb.New(cp.WriteEnd)
+	}
+	for _, bp := range cp.BranchPlans {
+		chunkPlan.BranchPlans = append(chunkPlan.BranchPlans, &gastrologv1.BranchPlan{
+			Expression:       bp.BranchExpr,
+			Steps:            server.PipelineStepsToProto(bp.Pipeline),
+			Skipped:          bp.Skipped,
+			SkipReason:       bp.SkipReason,
+			EstimatedRecords: int64(bp.EstimatedScan),
+		})
+	}
+	return chunkPlan
 }
 
 // newFollowExecutor creates a cluster.FollowExecutor that runs a follow on

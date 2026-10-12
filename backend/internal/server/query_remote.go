@@ -3,6 +3,7 @@ package server
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
 	"iter"
@@ -13,24 +14,27 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/convert"
+	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
 	"gastrolog/internal/system"
 )
 
 // collectRemote opens streaming ForwardSearch RPCs to all remote vaults and
-// returns a merged sorted iterator over their records and the set of remote
-// vaults this search fanned out to. The iterator performs a k-way merge — at
-// most one record per remote vault is held in memory at any time.
+// returns a merged sorted iterator over their records and the remote vaults
+// that contributed to it. The iterator performs a k-way merge — at most one
+// record per remote vault is held in memory at any time.
 //
-// The second return is the per-vault stream-health signal: the remote vaults
-// contributing to this merged search. Because a remote stream failure aborts
-// the whole search (mergeIterators → mapSearchError, the same policy the
-// pipeline path uses for fail-on-remote-failure), any successfully-returned
-// response has been assembled from EVERY vault in this set — so the fanned-out
-// set is exactly the contributor set. nil when there are no remote vaults in
-// scope.
-func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) (iter.Seq2[chunk.Record, error], []glid.GLID) {
+// A remote vault whose leader answers that it is not ready is left out, as a
+// vault this node leads is left out of its own engine's search while not
+// ready. Any other remote stream failure aborts the whole search
+// (mergeIterators → mapSearchError, the same fail-on-remote-failure policy
+// the pipeline path uses), so a response that reaches the client was
+// assembled from every vault the contributors function names. It is read
+// once the merge has run: which vaults were not ready is known only after
+// each stream has answered. Both returns are nil when there are no remote
+// vaults in scope.
+func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) (iter.Seq2[chunk.Record, error], func() []glid.GLID) {
 	if s.remoteSearcher == nil || s.cfgStore == nil {
 		return nil, nil
 	}
@@ -76,30 +80,55 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) (iter.Se
 		return nil, nil
 	}
 
-	// The vaults this search fanned out to — the contributor set under the
-	// fail-on-remote-failure policy. Sorted for a deterministic wire order.
-	contributingVaults := make([]glid.GLID, 0, len(streams))
+	fannedOut := make([]glid.GLID, 0, len(streams))
 	for _, vs := range streams {
-		contributingVaults = append(contributingVaults, vs.vaultID)
+		fannedOut = append(fannedOut, vs.vaultID)
 	}
-	slices.SortFunc(contributingVaults, func(a, b glid.GLID) int {
+	slices.SortFunc(fannedOut, func(a, b glid.GLID) int {
 		return cmp.Compare(a.String(), b.String())
 	})
+	var notReadyMu sync.Mutex
+	notReady := make(map[glid.GLID]bool)
+	contributors := func() []glid.GLID {
+		notReadyMu.Lock()
+		defer notReadyMu.Unlock()
+		return slices.DeleteFunc(slices.Clone(fannedOut), func(id glid.GLID) bool { return notReady[id] })
+	}
 
-	// Convert each channel into an iter.Seq2[chunk.Record, error].
 	var iters []iter.Seq2[chunk.Record, error]
 	for _, vs := range streams {
-		iters = append(iters, channelToIter(vs.records, vs.errCh))
+		iters = append(iters, skipNotReadyVault(channelToIter(vs.records, vs.errCh), func(err error) {
+			s.logger.Debug("search: remote vault not ready, left out", "vault", vs.vaultID, "error", err)
+			notReadyMu.Lock()
+			notReady[vs.vaultID] = true
+			notReadyMu.Unlock()
+		}))
 	}
 
-	// If only one remote vault, return its iterator directly.
 	if len(iters) == 1 {
-		return iters[0], contributingVaults
+		return iters[0], contributors
 	}
+	return kWayMerge(iters, q.OrderBy, q.Reverse()), contributors
+}
 
-	// K-way merge of N iterators using a heap.
-	merged := kWayMerge(iters, q.OrderBy, q.Reverse())
-	return merged, contributingVaults
+// skipNotReadyVault ends one remote vault's record stream without records or
+// error when its leader answers, before any record, that the vault is not
+// ready. A not-ready answer after records have arrived is a failure like any
+// other: the vault's share would be incomplete.
+func skipNotReadyVault(it iter.Seq2[chunk.Record, error], onNotReady func(error)) iter.Seq2[chunk.Record, error] {
+	return func(yield func(chunk.Record, error) bool) {
+		answered := false
+		for rec, err := range it {
+			if err != nil && !answered && errors.Is(err, orchestrator.ErrVaultNotReady) {
+				onNotReady(err)
+				return
+			}
+			answered = true
+			if !yield(rec, err) {
+				return
+			}
+		}
+	}
 }
 
 // remoteHistogramVaults returns the remote vaults in q's scope, grouped by
@@ -120,7 +149,9 @@ func (s *QueryServer) remoteHistogramVaults(ctx context.Context, q query.Query) 
 //
 // ok is false when any remote vault fails to answer: a histogram missing a
 // vault's share would understate volume while looking authoritative, so the
-// caller shows none rather than a partial one.
+// caller shows none rather than a partial one. A vault whose leader answers
+// that it is not ready adds no share, as a vault this node leads adds none to
+// its own count while not ready.
 func (s *QueryServer) collectRemoteHistogram(ctx context.Context, q query.Query, grid *apiv1.HistogramGrid, byNode map[string][]glid.GLID) (buckets []*apiv1.HistogramBucket, ok bool) {
 	queryExpr := forwardedQueryExpression(q)
 	type vaultHistogram struct {
@@ -149,6 +180,9 @@ func (s *QueryServer) collectRemoteHistogram(ctx context.Context, q query.Query,
 	wg.Wait()
 
 	for _, f := range fetches {
+		if errors.Is(f.err, orchestrator.ErrVaultNotReady) {
+			continue
+		}
 		if f.err != nil {
 			s.logger.Warn("search histogram omitted: a remote vault did not answer",
 				"vault", f.vaultID, "node", f.nodeID, "error", f.err)
@@ -163,7 +197,7 @@ func (s *QueryServer) collectRemoteHistogram(ctx context.Context, q query.Query,
 // this node consumes. Each peer scans under the pipeline's own scan limit, as
 // the local scan does, never under the page size the pipeline's output is
 // capped at.
-func (s *QueryServer) collectRemoteForPipeline(ctx context.Context, q query.Query, pipeline *querylang.Pipeline) (iter.Seq2[chunk.Record, error], []glid.GLID) {
+func (s *QueryServer) collectRemoteForPipeline(ctx context.Context, q query.Query, pipeline *querylang.Pipeline) (iter.Seq2[chunk.Record, error], func() []glid.GLID) {
 	q.Limit = query.PipelineScanLimit(pipeline)
 	return s.collectRemote(ctx, q)
 }
@@ -425,6 +459,9 @@ func forwardedPipelineExpression(q query.Query, pipeline *querylang.Pipeline) st
 // start/end timestamps so all nodes use identical time windows (avoids bucket
 // misalignment from re-evaluating relative "last=5m" on each node).
 //
+// A remote vault whose leader answers that it is not ready adds no table, as
+// a vault this node leads adds nothing to its own pipeline while not ready.
+//
 // Fail-on-remote-failure: if ANY remote vault fails, the whole pipeline
 // query fails — a partial aggregate is silently wrong. A `| stats count` or
 // `| timechart` collapses many vaults into one number or table; dropping a
@@ -483,6 +520,9 @@ func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, 
 
 	var results []*query.TableResult
 	for i, resp := range responses {
+		if errors.Is(fetchErrors[i], orchestrator.ErrVaultNotReady) {
+			continue
+		}
 		if fetchErrors[i] != nil {
 			// Fail hard — a partial aggregate is a wrong number. Abort the
 			// whole pipeline query with the remote error, mapped the same

@@ -2,10 +2,10 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/glid"
 )
 
@@ -42,8 +42,9 @@ const readinessRefreshInterval = 500 * time.Millisecond
 
 // ErrVaultNotReady is returned when the vault exists locally but replicated
 // instance metadata (vault control-plane / vault-ctl FSM) has not applied far enough
-// for safe reads or writes. Callers should retry with backoff.
-var ErrVaultNotReady = errors.New("vault not ready")
+// for safe reads or writes. Callers should retry with backoff. It is the
+// cluster package's sentinel, so a peer's not-ready answer matches it too.
+var ErrVaultNotReady = cluster.ErrVaultNotReady
 
 // ReadinessErr reports whether the vault is ready for reads and writes on
 // this node. Returns nil when ready, ErrVaultNotReady with detail otherwise.
