@@ -7324,6 +7324,9 @@ type VaultRouteStats struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	VaultId        []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	RecordsMatched int64                  `protobuf:"varint,2,opt,name=records_matched,json=recordsMatched,proto3" json:"records_matched,omitempty"` // records that matched a route targeting this vault
+	// records a matched route sent this vault's way but it did not receive:
+	// the vault was disabled, or its sink went away mid-delivery
+	RecordsDropped int64 `protobuf:"varint,3,opt,name=records_dropped,json=recordsDropped,proto3" json:"records_dropped,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -7368,6 +7371,13 @@ func (x *VaultRouteStats) GetVaultId() []byte {
 func (x *VaultRouteStats) GetRecordsMatched() int64 {
 	if x != nil {
 		return x.RecordsMatched
+	}
+	return 0
+}
+
+func (x *VaultRouteStats) GetRecordsDropped() int64 {
+	if x != nil {
+		return x.RecordsDropped
 	}
 	return 0
 }
@@ -9672,10 +9682,11 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"routeStats\x12=\n" +
 	"\vrouted_rate\x18\a \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\n" +
 	"routedRate\x12?\n" +
-	"\fmatched_rate\x18\b \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\vmatchedRate\"U\n" +
+	"\fmatched_rate\x18\b \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\vmatchedRate\"~\n" +
 	"\x0fVaultRouteStats\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12'\n" +
-	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\"S\n" +
+	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\x12'\n" +
+	"\x0frecords_dropped\x18\x03 \x01(\x03R\x0erecordsDropped\"S\n" +
 	"\rPerRouteStats\x12\x19\n" +
 	"\broute_id\x18\x01 \x01(\fR\arouteId\x12'\n" +
 	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\"\x82\x01\n" +

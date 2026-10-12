@@ -56,6 +56,7 @@ type RouteStats struct {
 // VaultRouteStats is a point-in-time snapshot of per-vault routing counters.
 type VaultRouteStats struct {
 	Matched int64 // records routed to this vault
+	Dropped int64 // records a matched route sent its way that it did not receive
 }
 
 // PerRouteStats is a point-in-time snapshot of per-route routing counters.
@@ -1033,6 +1034,14 @@ func (o *Orchestrator) VaultRouteStatsList() map[glid.GLID]*VaultRouteStats {
 	result := make(map[glid.GLID]*VaultRouteStats, len(snap.PerVault))
 	for vaultID, matched := range snap.PerVault {
 		result[vaultID] = &VaultRouteStats{Matched: int64(matched)} //nolint:gosec // G115
+	}
+	for vaultID, dropped := range snap.PerVaultDropped {
+		vs := result[vaultID]
+		if vs == nil {
+			vs = &VaultRouteStats{}
+			result[vaultID] = vs
+		}
+		vs.Dropped = int64(dropped) //nolint:gosec // G115
 	}
 	return result
 }

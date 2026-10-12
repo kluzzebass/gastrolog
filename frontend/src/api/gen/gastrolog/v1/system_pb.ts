@@ -6208,6 +6208,14 @@ export class VaultRouteStats extends Message<VaultRouteStats> {
    */
   recordsMatched = protoInt64.zero;
 
+  /**
+   * records a matched route sent this vault's way but it did not receive:
+   * the vault was disabled, or its sink went away mid-delivery
+   *
+   * @generated from field: int64 records_dropped = 3;
+   */
+  recordsDropped = protoInt64.zero;
+
   constructor(data?: PartialMessage<VaultRouteStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -6218,6 +6226,7 @@ export class VaultRouteStats extends Message<VaultRouteStats> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "records_matched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "records_dropped", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultRouteStats {

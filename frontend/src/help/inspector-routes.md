@@ -57,6 +57,11 @@ across nodes. **No routes configured — every record goes unmatched.** stands
 in for the per-route table while the route table is empty; the per-vault
 table appears once a record has been delivered.
 
+A **Dropped** column joins the per-vault table once any vault has a drop:
+records a matched route sent that vault's way but the vault did not receive —
+it is [disabled](help:routing), or its delivery queue went away mid-flight
+(the vault was removed from this node). A drop is counted, never silent.
+
 The view says **No routing stats — no node has reported its routing counters
 yet.** until the first stats broadcast arrives after a start. Per-vault *rates* (append throughput, durability, queue
 pressure) live on each vault's card in the Vaults view and in the System

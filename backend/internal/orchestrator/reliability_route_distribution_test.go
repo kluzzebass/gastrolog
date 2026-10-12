@@ -59,6 +59,14 @@ func TestOrchPipeline_FailoverRouteMovesToTheNextDestination(t *testing.T) {
 	h.submitIngestRecords(h.nodeIDs[3], pipelineChunkMaxRecords, "failover-second")
 	h.waitSealedRecords(second, h.nodeIDs[0], pipelineChunkMaxRecords)
 	h.waitSealedRecords(first, h.nodeIDs[0], pipelineChunkMaxRecords)
+
+	// The ingesting node counts every record the route would have sent the
+	// disabled vault as dropped for it — visible in route stats, not silent.
+	stats := h.nodes[h.nodeIDs[3]].orch.VaultRouteStatsList()
+	if got := stats[first.id]; got == nil || got.Dropped != pipelineChunkMaxRecords || got.Matched != pipelineChunkMaxRecords {
+		t.Fatalf("route stats for the disabled vault = %+v, want %d matched before and %d dropped after it was disabled",
+			got, pipelineChunkMaxRecords, pipelineChunkMaxRecords)
+	}
 }
 
 // Round-robin splits records evenly across the destinations, each record
