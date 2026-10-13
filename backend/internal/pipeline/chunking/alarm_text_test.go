@@ -155,11 +155,42 @@ func TestAlarmDetailFollowsAVaultRename(t *testing.T) {
 }
 
 var (
-	// A padded Go duration: 3m0s, 12h0m0s, 1h0m30s.
-	paddedGoDuration = regexp.MustCompile(`\d+[hms]0[ms]`)
+	// A whole compound-duration token: 3m0s, 12h0m0s, 1h30m. Whole tokens
+	// only, so a run of the same characters inside an ID does not count.
+	compoundDuration = regexp.MustCompile(`\b\d+[hms](?:\d+[hms])+\b`)
+	// A zero-padded component, the mark of Go's time.Duration.String.
+	paddedComponent = regexp.MustCompile(`[hms]0[ms]`)
 	// A call-shaped token — min(2, placement) and friends.
 	callShaped = regexp.MustCompile(`\b[a-z][A-Za-z0-9_]*\([^)]*\)`)
 )
+
+// paddedGoDuration returns the first duration token in s spelled the way
+// time.Duration.String spells it (3m0s, 12h0m0s, 1h0m30s), or "".
+func paddedGoDuration(s string) string {
+	for _, tok := range compoundDuration.FindAllString(s, -1) {
+		if paddedComponent.MatchString(tok) {
+			return tok
+		}
+	}
+	return ""
+}
+
+func TestPaddedGoDurationMatchesDurationTokensOnly(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"retention give-up TTL of 3m0s":                 "3m0s",
+		"retried for 12h0m0s":                           "12h0m0s",
+		"after 1h0m30s":                                 "1h0m30s",
+		"after 1h30m":                                   "",
+		"chunk 06gj53h7p1tudau6h0sc9app4s is stuck":     "",
+		"vault 6h0sabcdefghijklmnopqrstu has no holder": "",
+		"no duration here":                              "",
+	} {
+		if got := paddedGoDuration(in); got != want {
+			t.Errorf("paddedGoDuration(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
 
 func TestAlarmDetailCarriesNoSourceNotation(t *testing.T) {
 	t.Parallel()
@@ -169,7 +200,7 @@ func TestAlarmDetailCarriesNoSourceNotation(t *testing.T) {
 		if m := callShaped.FindString(stripped); m != "" {
 			t.Errorf("%s detail contains source notation %q: %q", typeID, m, got.detail)
 		}
-		if m := paddedGoDuration.FindString(got.detail); m != "" {
+		if m := paddedGoDuration(got.detail); m != "" {
 			t.Errorf("%s detail spells a duration the Go way (%q) instead of via system.FormatDuration: %q",
 				typeID, m, got.detail)
 		}
@@ -209,7 +240,7 @@ func TestRestatementDetectorFiresOnTheOldGiveUpText(t *testing.T) {
 	if len(shared) <= 4 {
 		t.Fatalf("detector found only a %d-word overlap (%q) in text that plainly duplicates itself", len(shared), strings.Join(shared, " "))
 	}
-	if m := paddedGoDuration.FindString(oldDetail); m == "" {
+	if m := paddedGoDuration(oldDetail); m == "" {
 		t.Error("the padded-duration detector no longer matches 3m0s")
 	}
 	if m := callShaped.FindString(oldDetail); m == "" {
