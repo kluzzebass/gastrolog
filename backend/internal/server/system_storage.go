@@ -140,7 +140,8 @@ func (s *SystemServer) DeleteCloudService(
 	for _, v := range vaults {
 		if v.CloudServiceID != nil && *v.CloudServiceID == id {
 			return nil, connect.NewError(connect.CodeFailedPrecondition,
-				fmt.Errorf("cloud service %q is referenced by vault %q", req.Msg.Id, v.ID))
+				fmt.Errorf("cloud service %q (%s) is referenced by vault %q (%s)",
+					existing.Name, id, v.Name, v.ID))
 		}
 	}
 

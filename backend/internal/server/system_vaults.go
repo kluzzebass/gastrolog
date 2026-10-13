@@ -368,11 +368,12 @@ func (s *SystemServer) DeleteVault(
 	}
 
 	// Referential integrity: reject if any route references this vault as a destination.
-	if routeID, used, err := s.vaultReferencedByRoute(ctx, id); err != nil {
+	if route, err := s.routeReferencingVault(ctx, id); err != nil {
 		return nil, errInternal(err)
-	} else if used {
+	} else if route != nil {
 		return nil, connect.NewError(connect.CodeFailedPrecondition,
-			fmt.Errorf("vault %q is referenced as destination in route %q", req.Msg.Id, routeID))
+			fmt.Errorf("vault %q (%s) is referenced as destination in route %q (%s)",
+				existing.Name, id, route.Name, route.ID))
 	}
 
 	if !req.Msg.Force {

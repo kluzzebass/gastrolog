@@ -121,16 +121,17 @@ func (s *SystemServer) DeleteRoute(
 	return connect.NewResponse(&apiv1.DeleteRouteResponse{System: cfg}), nil
 }
 
-// vaultReferencedByRoute checks if a vault ID is used as a destination in any route.
-func (s *SystemServer) vaultReferencedByRoute(ctx context.Context, vaultID glid.GLID) (glid.GLID, bool, error) {
+// routeReferencingVault returns a route that names the vault as a
+// destination, or nil when no route does.
+func (s *SystemServer) routeReferencingVault(ctx context.Context, vaultID glid.GLID) (*system.RouteConfig, error) {
 	routes, err := s.sysStore.ListRoutes(ctx)
 	if err != nil {
-		return glid.Nil, false, err
+		return nil, err
 	}
-	for _, rt := range routes {
-		if slices.Contains(rt.Destinations, vaultID) {
-			return rt.ID, true, nil
+	for i := range routes {
+		if slices.Contains(routes[i].Destinations, vaultID) {
+			return &routes[i], nil
 		}
 	}
-	return glid.Nil, false, nil
+	return nil, nil
 }
