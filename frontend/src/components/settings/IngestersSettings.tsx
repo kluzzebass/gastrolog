@@ -85,7 +85,7 @@ function addIngesterFormReducer(state: AddIngesterFormState, action: AddIngester
   }
 }
 
-export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, onOpenInspector }: Readonly<{ dark: boolean; expandTarget?: string | null; onExpandTargetConsumed?: () => void; onOpenInspector?: (inspectorParam: string) => void }>) {
+export function IngestersSettings({ dark, expandTarget, onOpenInspector }: Readonly<{ dark: boolean; expandTarget?: string | null; onOpenInspector?: (inspectorParam: string) => void }>) {
   const { data: config, isLoading } = useConfig();
   const putIngester = usePutIngester();
   const deleteIngester = useDeleteIngester();
@@ -113,7 +113,6 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
     if (match) {
       setExpandedCards((prev) => ({ ...prev, [encode(match.id)]: true }));
     }
-    onExpandTargetConsumed?.();
   }
   const existingNames = new Set(ingesters.map((i) => i.name));
   const effectiveName = newName.trim() || namePlaceholder || newType;

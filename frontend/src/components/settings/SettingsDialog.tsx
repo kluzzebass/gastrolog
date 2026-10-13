@@ -86,6 +86,11 @@ const allTabs: TabDef[] = [
   { id: "logLevels", label: "Log Levels", icon: ServiceIcon, helpRef: "log-levels" },
 ];
 
+interface ExpandTarget {
+  tab: SettingsTab;
+  name: string;
+}
+
 /** Parse tab param — may include `:entityName` for deep-linking (e.g. "vaults:myVault"). */
 function parseTabParam(raw: string): { tab: SettingsTab; expandEntity: string | null } {
   const idx = raw.indexOf(":");
@@ -111,21 +116,32 @@ export function SettingsDialog({
 
   // Parse optional ":entityName" suffix from the tab param.
   const { tab, expandEntity } = parseTabParam(rawTab);
-  const [expandTarget, setExpandTarget] = useState<string | null>(expandEntity);
+
+  // The card to auto-expand belongs to the tab it was requested for. Leaving
+  // that tab drops it, so coming back later does not expand the card again.
+  const [expandTarget, setExpandTarget] = useState<ExpandTarget | null>(
+    expandEntity ? { tab, name: expandEntity } : null,
+  );
 
   // If the URL-provided expand entity changes (e.g. navigating from inspector), update.
   const [prevExpandEntity, setPrevExpandEntity] = useState(expandEntity);
-  if (expandEntity !== prevExpandEntity) {
+  const [prevTab, setPrevTab] = useState(tab);
+  if (expandEntity !== prevExpandEntity || tab !== prevTab) {
     setPrevExpandEntity(expandEntity);
-    if (expandEntity) setExpandTarget(expandEntity);
+    setPrevTab(tab);
+    if (expandEntity && expandEntity !== prevExpandEntity) {
+      setExpandTarget({ tab, name: expandEntity });
+    } else if (expandTarget && expandTarget.tab !== tab) {
+      setExpandTarget(null);
+    }
   }
 
   const navigateTo = (targetTab: SettingsTab, entityName?: string) => {
     onTabChange(targetTab);
-    setExpandTarget(entityName ?? null);
+    setExpandTarget(entityName ? { tab: targetTab, name: entityName } : null);
   };
 
-  const clearExpandTarget = () => setExpandTarget(null);
+  const expandTargetFor = (t: SettingsTab) => (expandTarget?.tab === t ? expandTarget.name : null);
 
   return (
     <Dialog onClose={onClose} ariaLabel="Settings" dark={dark}>
@@ -186,11 +202,11 @@ export function SettingsDialog({
           {tab === "lookups" && <LookupsSettings dark={dark} />}
           {tab === "users" && <UsersSettings dark={dark} noAuth={noAuth} />}
           {tab === "storage" && <StorageSettings dark={dark} onOpenInspector={onOpenInspector} />}
-          {tab === "ingesters" && <IngestersSettings dark={dark} expandTarget={expandTarget} onExpandTargetConsumed={clearExpandTarget} onOpenInspector={onOpenInspector} />}
+          {tab === "ingesters" && <IngestersSettings dark={dark} expandTarget={expandTargetFor("ingesters")} onOpenInspector={onOpenInspector} />}
           {tab === "routes" && <RoutesSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "policies" && <PoliciesSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "retention" && <RetentionPoliciesSettings dark={dark} onNavigateTo={navigateTo} />}
-          {tab === "vaults" && <VaultsSettings dark={dark} expandTarget={expandTarget} onExpandTargetConsumed={clearExpandTarget} onOpenInspector={onOpenInspector} />}
+          {tab === "vaults" && <VaultsSettings dark={dark} expandTarget={expandTargetFor("vaults")} onOpenInspector={onOpenInspector} />}
           {tab === "logLevels" && <LogLevelsSettings dark={dark} />}
         </div>
       </div>

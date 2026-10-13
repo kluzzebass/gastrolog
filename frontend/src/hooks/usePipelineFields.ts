@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useTransition } from "react";
+import { useState, useEffect, useEffectEvent, useRef, useTransition } from "react";
 import { queryClient } from "../api/client";
 
 interface PipelineFieldsResult {
@@ -12,8 +12,8 @@ const EMPTY: PipelineFieldsResult = { fields: [], completions: [] };
  * Calls the backend GetPipelineFields RPC with debouncing.
  * Only fires when expression contains a pipe.
  *
- * cursor and baseFields are read from refs at fire time so they
- * don't reset the debounce timer on every keystroke / cursor move.
+ * cursor and baseFields are read when the timer fires, so they don't
+ * reset the debounce timer on every keystroke / cursor move.
  * State updates use startTransition so they never block user input.
  */
 export function usePipelineFields(
@@ -26,11 +26,28 @@ export function usePipelineFields(
   const abortRef = useRef<AbortController | null>(null);
   const [, startTransition] = useTransition();
 
-  // Keep latest values in refs — read when the timer fires, not as deps.
-  const cursorRef = useRef(cursor);
-  cursorRef.current = cursor;
-  const baseFieldsRef = useRef(baseFields);
-  baseFieldsRef.current = baseFields;
+  const fetchFields = useEffectEvent(async (expr: string) => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const resp = await queryClient.getPipelineFields(
+        { expression: expr, cursor, baseFields },
+        { signal: controller.signal },
+      );
+      if (!controller.signal.aborted) {
+        startTransition(() => {
+          setResult({
+            fields: resp.fields,
+            completions: resp.completions,
+          });
+        });
+      }
+    } catch {
+      // Network error or abort — keep last result.
+    }
+  });
 
   useEffect(() => {
     clearTimeout(debounceRef.current);
@@ -41,37 +58,12 @@ export function usePipelineFields(
       return;
     }
 
-    debounceRef.current = setTimeout(async () => {
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      try {
-        const resp = await queryClient.getPipelineFields(
-          {
-            expression,
-            cursor: cursorRef.current,
-            baseFields: baseFieldsRef.current,
-          },
-          { signal: controller.signal },
-        );
-        if (!controller.signal.aborted) {
-          startTransition(() => {
-            setResult({
-              fields: resp.fields,
-              completions: resp.completions,
-            });
-          });
-        }
-      } catch {
-        // Network error or abort — keep last result.
-      }
-    }, 300);
+    debounceRef.current = setTimeout(() => fetchFields(expression), 300);
 
     return () => {
       clearTimeout(debounceRef.current);
     };
-  }, [expression]);  
+  }, [expression]);
 
   return result;
 }

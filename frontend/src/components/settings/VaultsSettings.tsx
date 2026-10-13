@@ -382,7 +382,7 @@ function RetentionPoliciesEditor({
 // Main component
 // ---------------------------------------------------------------------------
 
-export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onOpenInspector }: Readonly<{ dark: boolean; expandTarget?: string | null; onExpandTargetConsumed?: () => void; onOpenInspector?: (inspectorParam: string) => void }>) {
+export function VaultsSettings({ dark, expandTarget, onOpenInspector }: Readonly<{ dark: boolean; expandTarget?: string | null; onOpenInspector?: (inspectorParam: string) => void }>) {
   const { data: config, isLoading } = useConfig();
   const putVault = usePutVault();
   const { addToast } = useToast();
@@ -461,7 +461,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     if (match) {
       setExpandedCards((prev) => ({ ...prev, [encode(match.id)]: true }));
     }
-    onExpandTargetConsumed?.();
   }
 
   const handleCreate = () => {
