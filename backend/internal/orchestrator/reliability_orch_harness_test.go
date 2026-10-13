@@ -138,6 +138,9 @@ type orchRelHarness struct {
 	// placement leader uploads is readable by every home, as with a real
 	// provider.
 	cloudStore blobstore.Store
+	// nodeCloudStore, when non-nil, gives each node its own view of one
+	// bucket (withNodeCloudStores), so a test can see which node did what.
+	nodeCloudStore func(nodeID string) blobstore.Store
 }
 
 // pipelineClusterOpts carries the pipeline tuning for withPipelineCluster.
@@ -299,14 +302,26 @@ func withSharedCloudStore(store blobstore.Store) orchRelOption {
 	}
 }
 
-// chunkManagerFactory is the file chunk-manager factory every node uses: the
+// withNodeCloudStores binds each node's "memory" cloud service to the store
+// storeFor returns for it — per-node views of one bucket.
+func withNodeCloudStores(storeFor func(nodeID string) blobstore.Store) orchRelOption {
+	return func(h *orchRelHarness) {
+		h.nodeCloudStore = storeFor
+	}
+}
+
+// chunkManagerFactory is the file chunk-manager factory a node uses: the
 // production one, with "memory" cloud services bound to the shared bucket when
-// withSharedCloudStore is set.
-func (h *orchRelHarness) chunkManagerFactory() chunk.ManagerFactory {
-	if h.cloudStore == nil {
+// withSharedCloudStore is set, or to the node's view of it with
+// withNodeCloudStores.
+func (h *orchRelHarness) chunkManagerFactory(nodeID string) chunk.ManagerFactory {
+	shared := h.cloudStore
+	if h.nodeCloudStore != nil {
+		shared = h.nodeCloudStore(nodeID)
+	}
+	if shared == nil {
 		return chunkfile.NewFactory()
 	}
-	shared := h.cloudStore
 	return chunkfile.NewFactoryWithStores(func(provider string, params map[string]string, log *slog.Logger) (blobstore.Store, error) {
 		if provider == "memory" {
 			return shared, nil
@@ -849,7 +864,7 @@ func (h *orchRelHarness) startNode(id string) {
 		GroupManager:        groupMgr,
 		NodeAddressResolver: resolver,
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			vaultTypeKey: h.chunkManagerFactory(),
+			vaultTypeKey: h.chunkManagerFactory(id),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
 			vaultTypeKey: indexfile.NewFactory(),

@@ -79,7 +79,6 @@ type reconcilerHost interface {
 	schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID)
 	postSealInFlight(vaultID glid.GLID, chunkID chunk.ChunkID) bool
 	postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID)
-	schedulePipelineCloudUpload(vaultID glid.GLID, chunkID chunk.ChunkID)
 	noteRegisterSkip(vaultID glid.GLID, id chunk.ChunkID, reason string)
 	pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.ManifestEntry)
 	homeHoldsGLCB(vaultID glid.GLID, id chunk.ChunkID) bool
@@ -832,9 +831,6 @@ func (r *VaultLifecycleReconciler) onSeal(e vaultctlfsm.ManifestEntry) {
 	// copies again. When the build lags the seal, OnBuilt lands the copy.
 	if r.orch != nil && r.orch.homeHoldsGLCB(r.vaultID, e.ID) {
 		r.orch.onGLCBLanded(r.vaultID, r.vaultInst, e)
-	}
-	if r.orch != nil && r.orch.isPipelineIngestVault(r.vaultID) {
-		r.orch.schedulePipelineCloudUpload(r.vaultID, e.ID)
 	}
 }
 

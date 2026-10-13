@@ -259,11 +259,9 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, reg pipelineVau
 // onPipelineChunkBuilt handles a freshly-built pipeline GLCB on this home.
 // Queryability needs no action — the lazy on-miss GLCB resolver serves the
 // chunk on first lookup the moment its FSM entry and file both exist. The
-// build is a GLCB landing on this home (onGLCBLanded — the blob is final
-// whether or not the seal has committed, and the receipt here covers the
-// build-finishes-after-seal gap where onSeal fired before the file existed),
-// and once the chunk is fully Sealed it is also due its cloud upload. A
-// Sealing-only entry defers the upload to the later seal.
+// build is a GLCB landing on this home (onGLCBLanded), which covers the
+// build-finishes-after-seal gap where onSeal fired before the file existed.
+// A build that finishes before the seal lands at the seal instead.
 func (o *Orchestrator) onPipelineChunkBuilt(vaultID glid.GLID, fsm *vaultctlfsm.FSM, id chunk.ChunkID) {
 	e := fsm.Get(id)
 	if e == nil {
@@ -285,18 +283,16 @@ func (o *Orchestrator) onPipelineChunkBuilt(vaultID glid.GLID, fsm *vaultctlfsm.
 		return
 	}
 	o.onGLCBLanded(vaultID, ti, *e)
-	if e.State == chunk.ChunkStateSealed {
-		o.schedulePipelineCloudUpload(vaultID, id)
-	}
 }
 
 // onGLCBLanded runs what this home owes a chunk whose GLCB is now in its chunk
 // root: secondary indexes for its copy — any home can become the vault leader
-// that serves searches — and its holder receipt. Every path that puts a GLCB
-// on a home calls it: a local build, a replica catch-up pull, a
-// retention-transfer copy, and the seal apply for a copy the home already
-// holds. Both are owed only for the copy the cluster agreed on at seal; a copy
-// that is not is quarantined by the check, and its agreed copy pulled.
+// that serves searches — its holder receipt, and, on the vault's cloud
+// uploader, the chunk's cloud upload. Every path that puts a GLCB on a home
+// calls it: a local build, a replica catch-up pull, a retention-transfer copy,
+// and the seal apply for a copy the home already holds. All three are owed
+// only for the copy the cluster agreed on at seal; a copy that is not is
+// quarantined by the check, and its agreed copy pulled.
 func (o *Orchestrator) onGLCBLanded(vaultID glid.GLID, ti *VaultInstance, e vaultctlfsm.ManifestEntry) {
 	if !o.landedGLCBAgrees(vaultID, e) {
 		if !e.IsSealed() {
@@ -316,6 +312,9 @@ func (o *Orchestrator) onGLCBLanded(vaultID glid.GLID, ti *VaultInstance, e vaul
 	if ti.Indexes != nil {
 		o.scheduleIndexRebuildIfNeeded(context.Background(), vaultID, ti, manifestEntryToChunkMeta(e, true))
 	}
+	// Decided before the receipt is claimed, so a home's receipt on the FSM
+	// means it has already scheduled any upload it owes.
+	o.schedulePipelineCloudUpload(vaultID, e.ID)
 	if ti.Reconciler != nil {
 		ti.Reconciler.ackOwnHolderReceipt(e)
 	}

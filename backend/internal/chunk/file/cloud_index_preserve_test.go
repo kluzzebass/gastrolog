@@ -447,9 +447,9 @@ func TestLazyCloudResolutionRequiresCloudStore(t *testing.T) {
 	}
 }
 
-// TestCloudReadOnlySkipsUpload verifies that PostSealProcess with CloudReadOnly
-// does NOT upload to cloud.
-func TestCloudReadOnlySkipsUpload(t *testing.T) {
+// TestNonUploaderPostSealSkipsUpload verifies that PostSealProcess on a node
+// that is not the vault's cloud uploader does NOT upload to cloud.
+func TestNonUploaderPostSealSkipsUpload(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -457,12 +457,12 @@ func TestCloudReadOnlySkipsUpload(t *testing.T) {
 	store := blobstore.NewMemory()
 
 	cm, err := NewManager(Config{
-		Dir:            dir,
-		Now:            time.Now,
-		RotationPolicy: chunk.NewRecordCountPolicy(10000),
-		CloudStore:     store,
-		VaultID:        vaultID,
-		CloudReadOnly:  true,
+		Dir:             dir,
+		Now:             time.Now,
+		RotationPolicy:  chunk.NewRecordCountPolicy(10000),
+		CloudStore:      store,
+		VaultID:         vaultID,
+		IsCloudUploader: func() bool { return false },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -502,7 +502,7 @@ func TestCloudReadOnlySkipsUpload(t *testing.T) {
 		t.Fatalf("Meta: %v", err)
 	}
 	if meta.CloudBacked {
-		t.Error("CloudReadOnly manager should NOT upload — chunk should not be cloud-backed")
+		t.Error("non-uploader manager should NOT upload — chunk should not be cloud-backed")
 	}
 
 	// Verify nothing was uploaded to the store.
