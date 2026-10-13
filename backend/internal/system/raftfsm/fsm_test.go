@@ -1111,3 +1111,29 @@ func TestApplyCertificateNotifies(t *testing.T) {
 		t.Fatalf("delete notified %+v, want NotifyCertificateDeleted for %s", got[1], id)
 	}
 }
+
+// A vault delete notifies every node with the operator's delete-data choice
+// and the vault's name: each node deletes its share of the vault from that
+// notification, and a dropped flag would destroy records the operator kept or
+// keep records the operator destroyed.
+func TestApplyDeleteVaultNotifiesDeleteData(t *testing.T) {
+	t.Parallel()
+	for _, deleteData := range []bool{false, true} {
+		var got []Notification
+		fsm := New(WithOnApply(func(n Notification) {
+			got = append(got, n)
+		}))
+		id := newID()
+		applyCmd(t, fsm, command.NewPutVault(system.VaultConfig{ID: id, Name: "doomed"}))
+		applyCmd(t, fsm, command.NewDeleteVault(id, deleteData))
+
+		if len(got) != 2 {
+			t.Fatalf("delete_data=%t: got %d notifications, want 2: %+v", deleteData, len(got), got)
+		}
+		n := got[1]
+		if n.Kind != NotifyVaultDeleted || n.ID != id || n.Name != "doomed" || n.DeleteData != deleteData {
+			t.Fatalf("delete_data=%t: notified %+v, want NotifyVaultDeleted for %s named doomed with DeleteData=%t",
+				deleteData, n, id, deleteData)
+		}
+	}
+}

@@ -25,9 +25,10 @@ function isAbortError(err: unknown): boolean {
 export function useFollow(options?: { onError?: (err: Error) => void; maxRecords?: number }) {
   const maxRecords = options?.maxRecords ?? DEFAULT_MAX_RECORDS;
   const maxRecordsRef = useRef(maxRecords);
-  maxRecordsRef.current = maxRecords;
   const onErrorRef = useRef(options?.onError) as MutableRefObject<((err: Error) => void) | undefined>;
-  onErrorRef.current = options?.onError;
+  useEffect(() => {
+    onErrorRef.current = options?.onError;
+  });
 
   const [state, setState] = useState<FollowState>({
     records: [],
@@ -51,6 +52,7 @@ export function useFollow(options?: { onError?: (err: Error) => void; maxRecords
 
   // Trim buffer when maxRecords decreases while following.
   useEffect(() => {
+    maxRecordsRef.current = maxRecords;
     const buffer = bufferRef.current;
     if (buffer.length > maxRecords) {
       buffer.length = maxRecords;

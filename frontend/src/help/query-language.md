@@ -128,12 +128,14 @@ Filter by timestamp. Values are resolved in the browser using your local timezon
 |--------|-----------|-------------|
 | `start=TIME` | WriteTS | Inclusive lower bound |
 | `end=TIME` | WriteTS | Exclusive upper bound |
-| `source_start=TIME` | SourceTS | Lower bound on log origin time |
-| `source_end=TIME` | SourceTS | Upper bound on log origin time |
+| `source_start=TIME` | SourceTS (or IngestTS) | Lower bound on log origin time |
+| `source_end=TIME` | SourceTS (or IngestTS) | Upper bound on log origin time |
 | `ingest_start=TIME` | IngestTS | Lower bound on ingester receive time |
 | `ingest_end=TIME` | IngestTS | Upper bound on ingester receive time |
 
 WriteTS bounds (`start`/`end`) are used for [chunk](help:general-concepts) selection — chunks outside the time range are skipped entirely. SourceTS and IngestTS bounds are applied as runtime filters on individual records.
+
+Not every record has a source timestamp. A record without one is placed by its ingest timestamp wherever source time is used: `source_start`/`source_end`, `order=source_ts`, and `bin(…, source_ts)`. Its source timestamp still shows as empty.
 
 | Format | Examples | Notes |
 |--------|----------|-------|
@@ -154,6 +156,7 @@ Multi-word values must be quoted: `start="3 hours ago"`. Single-word values like
 
 - `limit=N` — maximum number of results
 - `reverse=true` — return results newest-first (default is oldest-first)
+- `order=source_ts` — order by source timestamp instead of ingest timestamp; records without a source timestamp sort by their ingest timestamp
 
 ## Scoping
 

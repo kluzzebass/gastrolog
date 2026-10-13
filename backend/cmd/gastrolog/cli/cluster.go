@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/server"
 )
 
 func newClusterCmd() *cobra.Command {
@@ -53,6 +54,10 @@ func newClusterStatusCmd() *cobra.Command {
 			p := newPrinter(outputFormat(cmd))
 			if outputFormat(cmd) == "json" {
 				return p.json(msg)
+			}
+			if msg.Removal != nil {
+				printRemoval(p, msg)
+				return nil
 			}
 
 			pairs := [][2]string{
@@ -122,6 +127,18 @@ func newClusterStatusCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// printRemoval reports a node the cluster removed: it has no topology or
+// Raft state to show, only what happened and the way back.
+func printRemoval(p *printer, msg *v1.GetClusterStatusResponse) {
+	p.kv([][2]string{
+		{"Local Node", formatIDBytes(msg.LocalNodeId)},
+		{"Removed At", msg.Removal.GetRemovedAt().AsTime().Format(time.RFC3339)},
+		{"Reason", msg.Removal.GetReason()},
+	})
+	_, _ = fmt.Fprintln(p.w)
+	_, _ = fmt.Fprintln(p.w, "This node was removed from the cluster and takes no part in it. "+server.RemovedNodeRemedy)
 }
 
 // raftLivenessRows builds the per-node Raft liveness table — parity with the

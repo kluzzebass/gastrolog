@@ -313,10 +313,7 @@ func (a *Aggregator) getTimestamp(rec chunk.Record) (time.Time, bool) {
 	case "ingest_ts":
 		return rec.IngestTS, true
 	case "source_ts":
-		if rec.SourceTS.IsZero() {
-			return time.Time{}, false
-		}
-		return rec.SourceTS, true
+		return chunk.EffectiveSourceTS(rec.SourceTS, rec.IngestTS), true
 	default:
 		// Try parsing from record attributes.
 		v, ok := rec.Attrs[a.binField]

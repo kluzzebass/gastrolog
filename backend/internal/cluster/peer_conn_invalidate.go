@@ -46,12 +46,17 @@ func peerAnswered(trailer metadata.MD) bool { return len(trailer.Get(peerStatusT
 
 // peerStatusError is a failed call's status as the peer returned it. It
 // carries the status unchanged, so callers read its code and message as if
-// unwrapped.
+// unwrapped, and it matches ErrVaultNotReady when the peer answered that the
+// vault is not ready.
 type peerStatusError struct{ err error }
 
 func (e *peerStatusError) Error() string              { return e.err.Error() }
 func (e *peerStatusError) Unwrap() error              { return e.err }
 func (e *peerStatusError) GRPCStatus() *status.Status { return status.Convert(e.err) }
+
+func (e *peerStatusError) Is(target error) bool {
+	return target == ErrVaultNotReady && isVaultNotReadyStatus(e.GRPCStatus())
+}
 
 func markPeerStatus(err error, trailer metadata.MD) error {
 	if err == nil || errors.Is(err, io.EOF) || !peerAnswered(trailer) {

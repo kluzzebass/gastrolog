@@ -9,10 +9,13 @@ import (
 	"io"
 	"io/fs"
 	"iter"
+	"slices"
 	"sync"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/cluster/tlsutil"
 	"gastrolog/internal/convert"
+	"gastrolog/internal/logging"
 	"gastrolog/internal/pipeline/collection"
 	"gastrolog/internal/query"
 
@@ -440,7 +443,12 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 // queryFailure is the status a failed forwarded query returns. A share of the
 // query that outgrew this node's memory budget leaves as ResourceExhausted, so
 // the coordinator reports the query as too large rather than as a fault here.
+// A vault that is not ready leaves as a not-ready answer, which the
+// coordinator handles as it handles a vault of its own that is not ready.
 func queryFailure(what string, err error) error {
+	if errors.Is(err, ErrVaultNotReady) {
+		return vaultNotReadyStatus(what, err)
+	}
 	code := codes.Internal
 	if _, ok := errors.AsType[*query.MemoryLimitError](err); ok {
 		code = codes.ResourceExhausted
@@ -870,29 +878,52 @@ func (s *Server) forwardSetNodeSuffrage(ctx context.Context, req *gastrologv1.Fo
 }
 
 // notifyEviction handles the NotifyEviction RPC — tells this node it has been
-// removed from the cluster. The eviction handler (if registered) is called
-// asynchronously so the RPC can return before shutdown begins.
-//
-// If the server is already shutting down (stopCtx cancelled), the eviction
-// notification is ignored. Otherwise the handler races graceful shutdown:
-// it would re-bootstrap a fresh raft system on this node *while* the
-// process is exiting — which leaves the pod stuck in Terminating until
-// kubelet force-kills it, blocking k8s rolling restarts.
-func (s *Server) notifyEviction(_ context.Context, req *gastrologv1.NotifyEvictionRequest) (*gastrologv1.NotifyEvictionResponse, error) {
-	if s.stopCtx != nil && s.stopCtx.Err() != nil {
-		s.logger.Info("ignoring eviction notification — server already shutting down",
-			"reason", req.GetReason())
-		// stopCtx.Err() signals "we're already shutting down", not an RPC
-		// failure. Returning success closes the eviction RPC cleanly while
-		// the node exits; surfacing the ctx error to the caller would make
-		// the cluster think the eviction failed and retry.
-		return &gastrologv1.NotifyEvictionResponse{}, nil //nolint:nilerr
+// removed from the cluster. Only the current leader, as its certificate names
+// it, may say so; while this node does not know its membership, nobody may.
+// The handler runs before the RPC returns, so a removal that arrives while
+// the server is stopping is still taken in before Stop finishes: a graceful
+// stop waits for in-flight calls.
+func (s *Server) notifyEviction(ctx context.Context, req *gastrologv1.NotifyEvictionRequest) (*gastrologv1.NotifyEvictionResponse, error) {
+	caller, err := s.authorizeEviction(ctx)
+	if err != nil {
+		logging.Default(s.logger).Warn("eviction notice refused", "caller_node_id", caller, "error", err)
+		return nil, err
 	}
-	s.logger.Warn("received eviction notification", "reason", req.GetReason())
+	s.logger.Warn("received eviction notification", "reason", req.GetReason(), "leader", caller)
 	if s.evictionHandler != nil {
-		go s.evictionHandler()
+		s.evictionHandler(req.GetReason())
 	}
 	return &gastrologv1.NotifyEvictionResponse{}, nil
+}
+
+// authorizeEviction returns the node the caller's certificate names and
+// whether it may tell this node it was removed.
+func (s *Server) authorizeEviction(ctx context.Context) (string, error) {
+	leaf, err := verifiedPeerLeaf(ctx)
+	if err != nil {
+		return "", err
+	}
+	caller := tlsutil.NodeIDFromCert(leaf)
+	_, leader := s.LeaderInfo()
+	return caller, evictionAuthorized(caller, leader, s.configuredIDs())
+}
+
+// evictionAuthorized decides whether caller may tell this node it was
+// removed: only the leader this node follows, listed in the configuration it
+// holds. An empty configuration means this node does not know its
+// membership, so it cannot tell who leads it.
+func evictionAuthorized(caller, leader string, configured []string) error {
+	switch {
+	case caller == "":
+		return status.Error(codes.Unauthenticated, "eviction notice: certificate names no node")
+	case len(configured) == 0:
+		return status.Error(codes.PermissionDenied, "eviction notice refused: this node does not know its membership yet")
+	case leader == "" || caller != leader:
+		return status.Errorf(codes.PermissionDenied, "eviction notice refused: only the current leader may send it, not %s", caller)
+	case !slices.Contains(configured, caller):
+		return status.Errorf(codes.PermissionDenied, "eviction notice refused: %s is not in this node's configuration", caller)
+	}
+	return nil
 }
 
 // listPeerManagedFiles handles the unary ListPeerManagedFiles RPC.

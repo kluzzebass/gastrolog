@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gastrolog/internal/cluster/tlsutil"
@@ -124,9 +125,26 @@ type Server struct {
 	// subscribers receives broadcast messages from peers.
 	subscribers subscriberRegistry
 
-	// evictionHandler is called when this node receives a NotifyEviction RPC,
-	// meaning it has been removed from the cluster and should shut down.
-	evictionHandler func()
+	// removedNodeCheck reports whether the cluster's removal record names a
+	// node. Consulted only for a call that is already refused, to say why.
+	removedNodeCheck atomic.Pointer[func(nodeID string) bool]
+	// refusedRemoved holds the removed nodes whose calls this node has
+	// logged refusing, so a removed node that keeps calling is logged once.
+	refusedRemoved sync.Map
+	// refusedAsRemoved is what runs when a member refuses this node as removed.
+	refusedAsRemoved atomic.Pointer[func(byPeer string)]
+	// ignoredRemovalClaims holds the non-members whose claims that this node
+	// was removed have been logged and ignored, so each is logged once.
+	ignoredRemovalClaims sync.Map
+	// removalClaims tallies the members that refused this node as removed.
+	removalClaims removalClaims
+	// configReads counts the configuration reads weighing those claims costs.
+	configReads atomic.Int64
+
+	// evictionHandler is called with the leader's reason when this node
+	// receives a NotifyEviction RPC, meaning it has been removed from the
+	// cluster.
+	evictionHandler func(reason string)
 
 	// removeNodeFn handles the full node removal on the leader: gate
 	// evaluation, Raft membership change, and eviction notification. Set
@@ -339,6 +357,7 @@ func (s *Server) SetRaft(r *hraft.Raft) {
 			Logger:                s.logger,
 			ServicePoolMaxPerPeer: s.cfg.ServicePoolMaxPerPeer,
 			ByteMetrics:           s.cfg.ByteMetrics,
+			OnRefusedAsRemoved:    s.observeRefusedAsRemoved,
 		})
 	}
 	if s.tm != nil {
@@ -483,9 +502,22 @@ func (s *Server) SetGroupApplyFn(fn func(ctx context.Context, groupID string, da
 	s.groupApplyFn = fn
 }
 
+// SetRemovedNodeCheck registers the removal-record lookup used to explain
+// refusing a node the cluster removed.
+func (s *Server) SetRemovedNodeCheck(fn func(nodeID string) bool) {
+	s.removedNodeCheck.Store(&fn)
+}
+
+// isRemoved reports whether the removal record names nodeID, as far as this
+// node knows; false before the lookup is registered.
+func (s *Server) isRemoved(nodeID string) bool {
+	check := s.removedNodeCheck.Load()
+	return check != nil && (*check)(nodeID)
+}
+
 // SetEvictionHandler registers the callback invoked when this node receives
 // a NotifyEviction RPC (i.e., it has been removed from the cluster).
-func (s *Server) SetEvictionHandler(fn func()) {
+func (s *Server) SetEvictionHandler(fn func(reason string)) {
 	s.evictionHandler = fn
 }
 
@@ -815,7 +847,27 @@ func (s *Server) requirePeerAuthority(ctx context.Context, method string) error 
 	if strings.HasSuffix(method, "/RequestMembership") {
 		return nil
 	}
-	return s.requireCurrentMember(leaf)
+	if err := s.requireCurrentMember(leaf); err != nil {
+		return s.explainRefusal(err, leaf, method)
+	}
+	return nil
+}
+
+// explainRefusal turns the refusal of a node the cluster removed into one
+// that says so, and logs the first such refusal per node with the identity
+// the certificate presents. Refusing a node that is merely not in this
+// node's configuration yet stays quiet: a joiner reaches lagging peers
+// before they apply its admission.
+func (s *Server) explainRefusal(err error, leaf *x509.Certificate, method string) error {
+	nodeID := tlsutil.NodeIDFromCert(leaf)
+	if nodeID == "" || !s.isRemoved(nodeID) {
+		return err
+	}
+	if _, logged := s.refusedRemoved.LoadOrStore(nodeID, struct{}{}); !logged {
+		logging.Default(s.logger).Warn("refusing cluster calls from a node the cluster removed",
+			"certificate_node_id", nodeID, "method", method)
+	}
+	return removedRefusal(nodeID, fmt.Sprintf("node %s was removed from this cluster", nodeID))
 }
 
 // verifiedPeerLeaf returns the certificate the peer presented, once the TLS

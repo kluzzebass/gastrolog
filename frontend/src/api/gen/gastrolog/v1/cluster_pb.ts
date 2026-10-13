@@ -751,7 +751,10 @@ export class NodeStats extends Message<NodeStats> {
    * its own): count/total are cumulative, avg is the rolling-window average
    * between stats ticks, max is the worst single append since the previous
    * tick. Election counters aggregate hashicorp/raft observer events across
-   * all groups — elections_per_min > ~3 sustained is a storm.
+   * all groups and count only elections in groups that have had a leader
+   * since this node started them: a group's initial leader election is not
+   * counted. elections_per_min is the count over the last minute; 3 or more
+   * is a storm.
    *
    * @generated from field: uint64 raft_wal_appends_total = 41;
    */
@@ -2808,8 +2811,53 @@ export class ForwardExportToVaultResponse extends Message<ForwardExportToVaultRe
 }
 
 /**
+ * RemovedNodeRefusal rides on the PermissionDenied status a member returns
+ * when it refuses a call from a node the cluster removed. It is what lets the
+ * refused node tell its own removal apart from any other refusal, including
+ * when it was down when the leader would have told it.
+ *
+ * @generated from message gastrolog.v1.RemovedNodeRefusal
+ */
+export class RemovedNodeRefusal extends Message<RemovedNodeRefusal> {
+  /**
+   * The removed node, as its certificate names it.
+   *
+   * @generated from field: string node_id = 1;
+   */
+  nodeId = "";
+
+  constructor(data?: PartialMessage<RemovedNodeRefusal>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RemovedNodeRefusal";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RemovedNodeRefusal {
+    return new RemovedNodeRefusal().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RemovedNodeRefusal {
+    return new RemovedNodeRefusal().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RemovedNodeRefusal {
+    return new RemovedNodeRefusal().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RemovedNodeRefusal | PlainMessage<RemovedNodeRefusal> | undefined, b: RemovedNodeRefusal | PlainMessage<RemovedNodeRefusal> | undefined): boolean {
+    return proto3.util.equals(RemovedNodeRefusal, a, b);
+  }
+}
+
+/**
  * NotifyEvictionRequest is sent by the leader to a node that has been removed
- * from the cluster. The evicted node should initiate a graceful shutdown.
+ * from the cluster. The node records its removal and serves only that from
+ * then on.
  *
  * @generated from message gastrolog.v1.NotifyEvictionRequest
  */

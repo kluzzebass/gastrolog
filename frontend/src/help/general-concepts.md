@@ -18,6 +18,8 @@ Every record carries three timestamps, each capturing a different moment in the 
 
 Having all three lets you answer different questions: "when did this happen?" (SourceTS), "when did we learn about it?" (IngestTS), "when was it stored?" (WriteTS).
 
+When a record has no SourceTS, searching, filtering and charting by source time use its IngestTS in its place; the record's SourceTS itself stays empty.
+
 ## Chunks
 
 Records are stored in **chunks** — bounded, append-only segments that hold a batch of records.

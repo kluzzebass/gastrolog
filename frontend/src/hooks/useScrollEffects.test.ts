@@ -9,8 +9,8 @@ function makeDeps(overrides: Partial<Parameters<typeof useScrollEffects>[0]> = {
     hasMore: false,
     selectedRecord: null,
     recordsLength: 0,
-    loadMoreRef: { current: mock(() => {}) },
-    resetFollowNewCountRef: { current: mock(() => {}) },
+    loadMore: mock(() => {}),
+    resetFollowNewCount: mock(() => {}),
     expressionRef: { current: "" },
     selectedRowRef: { current: null },
     ...overrides,
@@ -112,6 +112,41 @@ describe("useScrollEffects", () => {
       rerender();
       expect(result.current.sentinelRef).toBe(sentinel1);
       expect(result.current.logScrollRef).toBe(logScroll1);
+    });
+  });
+
+  // ── Auto-pagination toward the selected record ────────────────────
+
+  describe("auto-pagination", () => {
+    test("a finished search with the selection not yet loaded calls the latest loadMore with the current expression", () => {
+      const first = mock((_expr: string) => {});
+      const latest = mock((_expr: string) => {});
+      const selected = { raw: new Uint8Array([1]) } as unknown as import("../api/client").Record;
+      const base = makeDeps({ hasMore: true, selectedRecord: selected, expressionRef: { current: "level=error" } });
+      const { rerender } = renderHook(
+        (props: { isSearching: boolean; loadMore: (expr: string) => void }) =>
+          useScrollEffects({ ...base, ...props }),
+        { initialProps: { isSearching: true, loadMore: first } },
+      );
+
+      rerender({ isSearching: false, loadMore: latest });
+
+      expect(latest).toHaveBeenCalledWith("level=error");
+      expect(first).not.toHaveBeenCalled();
+    });
+
+    test("a finished search with no more pages does not load more", () => {
+      const loadMore = mock((_expr: string) => {});
+      const selected = { raw: new Uint8Array([1]) } as unknown as import("../api/client").Record;
+      const base = makeDeps({ hasMore: false, selectedRecord: selected, loadMore });
+      const { rerender } = renderHook(
+        (props: { isSearching: boolean }) => useScrollEffects({ ...base, ...props }),
+        { initialProps: { isSearching: true } },
+      );
+
+      rerender({ isSearching: false });
+
+      expect(loadMore).not.toHaveBeenCalled();
     });
   });
 

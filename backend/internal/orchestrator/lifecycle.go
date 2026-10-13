@@ -185,6 +185,9 @@ func (o *Orchestrator) Stop() error {
 	if cancel != nil {
 		cancel()
 	}
+	if o.cancelTeardowns != nil {
+		o.cancelTeardowns()
+	}
 	o.auxWg.Wait()
 
 	// Stop shared scheduler — waits for running jobs (index builds,

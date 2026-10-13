@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -286,6 +287,13 @@ func (m *GroupManager) GetGroup(groupID string) *Group {
 // DestroyGroup gracefully shuts down a group and removes it from the manager.
 // The group's persistent state on disk is NOT deleted (for recovery).
 func (m *GroupManager) DestroyGroup(groupID string) error {
+	return m.stopGroup(groupID, true)
+}
+
+// stopGroup shuts a running group down and removes it from the manager. A
+// leader snapshots first when snapshotLeader is set, so a group that lives on
+// recovers from a compact state.
+func (m *GroupManager) stopGroup(groupID string, snapshotLeader bool) error {
 	m.mu.Lock()
 	g, exists := m.groups[groupID]
 	if !exists {
@@ -297,7 +305,7 @@ func (m *GroupManager) DestroyGroup(groupID string) error {
 
 	// Shut down Raft BEFORE removing the transport group — Raft needs the
 	// transport channel for its shutdown sequence.
-	if g.Raft.State() == hraft.Leader {
+	if snapshotLeader && g.Raft.State() == hraft.Leader {
 		if f := g.Raft.Snapshot(); f.Error() != nil {
 			if !errors.Is(f.Error(), hraft.ErrNothingNewToSnapshot) {
 				m.logger.Warn("snapshot before shutdown failed",
@@ -320,25 +328,47 @@ func (m *GroupManager) DestroyGroup(groupID string) error {
 	return nil
 }
 
-// DecommissionGroup permanently retires a group: shuts it down like
-// DestroyGroup, then drops its state from the shared WAL so nothing pins its
-// registration, stable keys, or log entries there. Only for a group that is
-// being deleted cluster-wide — a decommissioned group that rejoined its
-// peers would vote from blank state. The WAL drop happens even when the
-// group is not running here: a node can hold WAL state for a group it never
-// started this boot.
+// DecommissionGroup permanently retires a group: shuts it down without the
+// final snapshot DestroyGroup takes, drops its state from the shared WAL so
+// nothing pins its registration, stable keys, or log entries there, and
+// removes its directory. Only for a group that is being deleted cluster-wide
+// — a decommissioned group that rejoined its peers would vote from blank
+// state. The WAL drop and the directory removal happen even when the group is
+// not running here: a node can hold state for a group it never started this
+// boot.
 func (m *GroupManager) DecommissionGroup(groupID string) error {
-	err := m.DestroyGroup(groupID)
+	err := m.stopGroup(groupID, false)
 	if errors.Is(err, ErrGroupNotFound) {
 		err = nil
 	}
-	if m.wal == nil {
-		return err
+	if m.wal != nil {
+		if dropErr := m.wal.DropGroup(groupID); dropErr != nil {
+			err = errors.Join(err, dropErr)
+		}
 	}
-	if dropErr := m.wal.DropGroup(groupID); dropErr != nil && err == nil {
-		err = dropErr
+	return errors.Join(err, m.removeGroupDir(groupID))
+}
+
+// removeGroupDir removes a group's directory and each parent the removal
+// leaves empty, up to but not including the base directory. A group ID that
+// does not name a directory strictly inside the base directory is refused.
+func (m *GroupManager) removeGroupDir(groupID string) error {
+	if m.baseDir == "" {
+		return nil
 	}
-	return err
+	base := filepath.Clean(m.baseDir)
+	dir := filepath.Join(base, groupID)
+	rel, err := filepath.Rel(base, dir)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("group %q does not name a directory under %s", groupID, base)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("remove group %q directory: %w", groupID, err)
+	}
+	// os.Remove refuses a non-empty directory, which ends the climb.
+	for parent := filepath.Dir(dir); parent != base && os.Remove(parent) == nil; parent = filepath.Dir(parent) {
+	}
+	return nil
 }
 
 // AddMember adds a node to a group. Automatically selects voter or nonvoter

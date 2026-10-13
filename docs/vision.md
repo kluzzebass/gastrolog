@@ -180,7 +180,7 @@ Replication is segment distribution followed by a per-home build:
 - **Segments.** The receiving node (the **origin**) completes a segment and publishes its metadata to the vault's vault-ctl group. Collection on each **home** of the vault pulls the bytes it lacks from a holder, verifies them, promotes them into `head/`, and commits a holder receipt. Bytes move by pull; the vault-ctl log carries only metadata.
 - **Chunks.** Every home builds its own GLCB and secondary indexes from the sealed manifest and commits a chunk holder receipt. A home that missed a build — down or wedged while the segments were released — pulls the GLCB from a peer home.
 - **Release.** The chunking leader releases a segment from the vault-ctl registry only once the chunks holding its records are held by the required homes; segment bytes are purged after that.
-- **Cloud-backed vaults.** The vault's placement leader uploads the sealed GLCB to the cloud service and commits the upload to the vault-ctl FSM; the cloud provider handles redundancy for the uploaded object. Records travel as segments until the seal, the same as in any other vault.
+- **Cloud-backed vaults.** The vault's placement leader — the **cloud uploader** — uploads each sealed GLCB once its own copy has landed, and commits the upload to the vault-ctl FSM; when the placement leader moves, the new one uploads every sealed chunk not yet cloud-backed. The cloud provider handles redundancy for the uploaded object. Records travel as segments until the seal, the same as in any other vault.
 
 ### The golden thread
 

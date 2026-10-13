@@ -558,11 +558,11 @@ func (o *Orchestrator) runAfterVaultCtlRestore(vaultID glid.GLID) {
 // run on the leadership-tracking goroutine.
 func (o *Orchestrator) onVaultCtlLeadGained(vaultID glid.GLID) {
 	// Cloud-upload catch-up on leadership change: a chunk that sealed while
-	// this node was not the vault's uploader never saw the live onSeal upload
-	// effect here. This replaces the retired 5s backfill tick's discovery role
-	// for the leadership-change case. Applies to both
+	// this node was not the vault's uploader skipped the live upload when its
+	// GLCB landed here. This replaces the retired 5s backfill tick's discovery
+	// role for the leadership-change case. Applies to both
 	// type=cloud vaults (gated on vault-ctl leadership) and cloud-backed
-	// pipeline vaults (gated on CloudStore/placement leadership); the catch-up
+	// pipeline vaults (gated on placement leadership); the catch-up
 	// is a no-op unless this node is actually the uploader.
 	o.cloudUploadCatchupForVault(vaultID)
 

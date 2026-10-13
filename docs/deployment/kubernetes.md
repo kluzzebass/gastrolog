@@ -97,22 +97,14 @@ This keeps pod-name = hostname = `GASTROLOG_NAME` consistent across
 `kubectl get pods`, the gastrolog UI, and CLI operations like
 `cluster remove-node gastrolog-3`.
 
-### Why HTTP token delivery instead of file-based?
+### Why the token is fetched over HTTP
 
-K8s pods don't natively share volumes between replicas. The
-file-based path (works in Compose and Swarm via shared named
-volumes) requires a `ReadWriteMany` storage class — uncommon, not
-portable to all K8s distros.
-
-The HTTP endpoint path (`gastrolog-o9z6o`) is the natural K8s fit:
-`gastrolog-0` serves the token at a known URL, joiners poll with
-backoff. The shared secret in the K8s Secret authenticates the
-request.
-
-There is no file-based alternative. Tokens expire, and one written to a
-shared volume at bootstrap would be read by pods that start arbitrarily
-later, so it would have to stay valid for every join the cluster ever
-sees. The endpoint mints a fresh token per request instead.
+Join tokens expire, so there is no token to put in a Secret or on a
+shared volume: one written at bootstrap would be read by pods that
+start arbitrarily later, so it would have to stay valid for every join
+the cluster ever sees. Instead `gastrolog-0` serves a known URL and
+mints a fresh token for each request that carries the shared secret
+from the K8s Secret; joiners poll it with backoff on their first boot.
 
 ### How the cluster forms
 
@@ -120,12 +112,13 @@ sees. The endpoint mints a fresh token per request instead.
    `GASTROLOG_CLUSTER_ADDR=auto` and resolves the pod's own IP via
    `hostname -i` (e.g. `10.244.1.17`). Binds + advertises on that
    IP:4566.
-2. `gastrolog-0` generates cluster TLS + the join token, mounts
+2. `gastrolog-0` generates cluster TLS and the key it mints join
+   tokens with (no token is stored anywhere), mounts
    the admin credentials from `/etc/gastrolog/admin_creds`,
    provisions the initial admin user, and starts serving:
    - `/healthz`, `/readyz` for K8s probes
-   - `/cluster/bootstrap-token` gated on the
-     `GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET`
+   - `/cluster/bootstrap-token`, minting a token for each request
+     that carries the `GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET`
    - The full Connect-RPC + UI on port 4564
 3. K8s schedules `gastrolog-1`, then `gastrolog-2`. Each polls
    `http://gastrolog-0.gastrolog-headless.gastrolog.svc.cluster.local:4564/cluster/bootstrap-token`
@@ -135,6 +128,12 @@ sees. The endpoint mints a fresh token per request instead.
    stable per-pod DNS (`gastrolog-0.gastrolog-headless...:4566`),
    join the Raft cluster.
 5. Both joiners settle as `FOLLOWER` / `VOTER` within ~10 seconds.
+
+The token fetch is first-boot only. A pod whose PVC already holds its
+cluster certificate restarts from it without contacting
+`/cluster/bootstrap-token`, which matters when every pod restarts at once
+(a Kubernetes node reboot): `gastrolog-0` opens port 4564 only after its
+Raft group has quorum, and that quorum needs the joiners' Raft ports up.
 
 ### Probes
 
@@ -186,6 +185,20 @@ To shrink, use `kubernetes-contract` / `kubernetes-scale` — they
 remove voters from Raft membership *before* `kubectl scale` so dead
 pods don't linger in `cluster status` as orphan voters, and they
 delete the now-unused PVCs after scale-down.
+
+A removed node does not rejoin — whether it was running when it was
+removed or was down and restarts later on the same PVCs. It stays
+`Running` but never `Ready`: it logs its removal and the remedy once at
+error level, `/readyz` answers 503 with a bare "removed from cluster",
+and `gastrolog --home /config cluster status` inside the pod (the Unix
+socket) reports when and why. It takes no part in the cluster and does
+not crash-loop. To bring that ordinal back as a new node, delete both of
+its PVCs, `config` and `vaults`, so the pod starts from an empty home and
+empty vault storage; it then enrols under a new node ID. Vault data
+directories are named by vault, not by node, so a new node handed the old
+`vaults` volume would open the removed node's chunks. Deleting only
+`/config/raft` is refused at start: the home still holds the old node's
+certificate.
 
 `gastrolog-0` should never be removed — it's the bootstrap and
 holds Raft state required for new joiners to enroll. The recipes

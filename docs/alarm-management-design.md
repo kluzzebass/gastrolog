@@ -182,7 +182,7 @@ Verdicts under the governing test:
 | `self-ingester-drops` | ingester/self | Capture channel overflowing; diagnostic records discarded | **Event** (demoted ✓) | — | Landed: `NodeStats.self_ingester_drops_total`. Capacity tuning, not operator action. Never logged: a line about dropped logs feeds the channel dropping them |
 | `raft-wal-latency` | statscollector | WAL append max over threshold | **Event** (demoted ✓) | — | Landed: transition-edge logs + stats (`RaftWalAppendMaxMs`) |
 | scheduler-stall | schedwatch | Runtime stalled past leader lease | **Event** (demoted ✓) | — | Landed: log + counters |
-| election-storm | statscollector | Elections/min over threshold | **Event** (demoted ✓) | — | Landed: transition-edge logs + stats |
+| election-storm | statscollector | Elections over the last minute at or above threshold, counting only groups that already had a leader (a new group's initial leader election is not churn) | **Event** (demoted ✓) | — | Landed: transition-edge logs + stats |
 
 Rows marked ✓ already landed; phase 1 is complete. Every surviving alarm
 gets a catalog entry in code (see below) carrying its response text — the UI

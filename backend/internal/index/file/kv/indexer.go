@@ -370,8 +370,8 @@ func (idx *Indexer) admitAndBuild(result *kvCollectResult) ([]index.KVKeyIndexEn
 }
 
 func (idx *Indexer) writeAllIndexes(chunkID chunk.ChunkID, keyEntries []index.KVKeyIndexEntry, valueEntries []index.KVValueIndexEntry, kvEntries []index.KVIndexEntry) error {
-	chunkDir := filepath.Join(idx.dir, chunkID.String())
-	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
+	chunkDir, err := chunk.MkdirChunkDir(idx.dir, chunkID)
+	if err != nil {
 		return fmt.Errorf("create index dir: %w", err)
 	}
 	if err := idx.writeIndex(chunkDir, keyIndexFileName, encodeKeyIndex(keyEntries, index.KVComplete)); err != nil {
@@ -387,8 +387,8 @@ func (idx *Indexer) writeAllIndexes(chunkID chunk.ChunkID, keyEntries []index.KV
 }
 
 func (idx *Indexer) writeCappedIndexes(chunkID chunk.ChunkID) error {
-	chunkDir := filepath.Join(idx.dir, chunkID.String())
-	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
+	chunkDir, err := chunk.MkdirChunkDir(idx.dir, chunkID)
+	if err != nil {
 		return fmt.Errorf("create index dir: %w", err)
 	}
 

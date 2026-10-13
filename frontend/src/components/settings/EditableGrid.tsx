@@ -224,6 +224,18 @@ function RowOverlay({ row, columns, overlayClass, keyClass, valClass }: Readonly
 // EditableGrid
 // ---------------------------------------------------------------------------
 
+interface RowIds {
+  ids: string[];
+  next: number;
+}
+
+/** Grows (with fresh IDs) or truncates the ID list to `length`. */
+function fitRowIds({ ids, next }: RowIds, length: number): RowIds {
+  if (ids.length >= length) return { ids: ids.slice(0, length), next };
+  const added = Array.from({ length: length - ids.length }, (_, i) => `r${next + i}`);
+  return { ids: [...ids, ...added], next: next + added.length };
+}
+
 export function EditableGrid({
   dark, columns, rows, keyColumnIndex = 0, readOnly = false, onColumnsChange, onRowsChange,
 }: Readonly<EditableGridProps>) {
@@ -233,14 +245,16 @@ export function EditableGrid({
   // IDs are assigned once at row creation and survive reorders/deletes.
   // Using stable IDs (not array indices) as React keys prevents remounting
   // on reorder and avoids the S6479 linter warning.
-  const stableIds = useRef<string[]>([]);
-  const idSeq = useRef(0);
+  const [rowIds, setRowIds] = useState(() => fitRowIds({ ids: [], next: 0 }, rows.length));
 
   // Sync ID list length with rows. Only grows/shrinks; explicit reorders and
   // deletes are handled in handleDragEnd and deleteRow respectively.
-  const ids = stableIds.current;
-  while (ids.length < rows.length) ids.push(`r${idSeq.current++}`);
-  if (ids.length > rows.length) ids.splice(rows.length);
+  let ids = rowIds.ids;
+  if (ids.length !== rows.length) {
+    const fitted = fitRowIds(rowIds, rows.length);
+    setRowIds(fitted);
+    ids = fitted.ids;
+  }
 
   // ── Row dnd-kit ──────────────────────────────────────────────────────────
   const [activeRowId, setActiveRowId] = useState<string | null>(null);
@@ -262,7 +276,7 @@ export function EditableGrid({
     const oldIdx = ids.indexOf(active.id as string);
     const newIdx = ids.indexOf(over.id as string);
     if (oldIdx === -1 || newIdx === -1) return;
-    stableIds.current = arrayMove([...ids], oldIdx, newIdx);
+    setRowIds((prev) => ({ ...prev, ids: arrayMove(prev.ids, oldIdx, newIdx) }));
     onRowsChange?.(arrayMove(rows, oldIdx, newIdx));
   };
 
@@ -370,7 +384,7 @@ export function EditableGrid({
   const deleteRow = (rowId: string) => {
     const idx = ids.indexOf(rowId);
     if (idx === -1) return;
-    stableIds.current.splice(idx, 1);
+    setRowIds((prev) => ({ ...prev, ids: prev.ids.filter((_, j) => j !== idx) }));
     onRowsChange?.(rows.filter((_, j) => j !== idx));
   };
 

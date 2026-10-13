@@ -104,7 +104,7 @@ func TestSweepClaimsOnlyTheAgreedCopy(t *testing.T) {
 			ctx := t.Context()
 			fx := buildSealedPipelineGLCB(t, ctx, 12, e1Payload, record.Attributes{"service": "api"})
 			orch := newTestOrch(t, Config{LocalNodeID: landingHomeNode})
-			registerPipelineHome(orch, fx.vaultID, true)
+			registerPipelineHome(t, orch, fx.vaultID, true)
 			ti, _, _ := fileVaultInstance(t, fx.vaultID)
 			acks := newAckRecorder()
 			ti.ApplyRaftAckChunkHolders = acks.ack

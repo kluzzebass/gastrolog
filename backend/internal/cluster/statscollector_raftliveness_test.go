@@ -210,3 +210,96 @@ func alertActive(c *alert.Collector, id string) bool {
 	}
 	return false
 }
+
+func newElectionCollector(live *stubRaftLiveness, spy *logSpy) *StatsCollector {
+	return NewStatsCollector(StatsCollectorConfig{
+		RaftLiveness: live,
+		Logger:       slog.New(spy),
+		NodeID:       "node-a",
+		NodeNameFn:   func() string { return "node-a" },
+	})
+}
+
+// One election seen by one short stats tick is one election in the window,
+// not a per-tick rate extrapolated to a minute: it neither reads as a storm
+// nor logs one.
+func TestStatsCollector_SingleElectionInOneTickIsNotAStorm(t *testing.T) {
+	t.Parallel()
+	spy := &logSpy{}
+	live := &stubRaftLiveness{elections: 4}
+	collector := newElectionCollector(live, spy)
+	t0 := time.Now()
+	tick := 5 * time.Second
+
+	collector.CollectLocalTick(t0)
+	live.elections++
+	stats := collector.CollectLocalTick(t0.Add(tick))
+	if stats.RaftElectionsPerMin != 1 {
+		t.Fatalf("elections/min = %v, want 1 (one election in the last minute)", stats.RaftElectionsPerMin)
+	}
+	if stats.RaftElectionsTotal != 5 {
+		t.Fatalf("elections total = %d, want 5", stats.RaftElectionsTotal)
+	}
+	if collectorStormActive(collector) {
+		t.Fatal("one election must not read as a storm")
+	}
+	if got := spy.count("Raft election storm"); got != 0 {
+		t.Fatalf("storm logs = %d, want 0", got)
+	}
+
+	// Between-tick snapshots report the same window.
+	if snap := collector.CollectLocalSnapshot(); snap.RaftElectionsPerMin != 1 {
+		t.Fatalf("snapshot elections/min = %v, want 1", snap.RaftElectionsPerMin)
+	}
+}
+
+// Elections spread across ticks accumulate in the window: three inside one
+// minute is a storm even though no single tick saw more than one. The storm
+// clears once the window slides past them, one line per edge.
+func TestStatsCollector_ElectionStormOverSlidingWindow(t *testing.T) {
+	t.Parallel()
+	spy := &logSpy{}
+	live := &stubRaftLiveness{}
+	collector := newElectionCollector(live, spy)
+	t0 := time.Now()
+	tick := 5 * time.Second
+
+	collector.CollectLocalTick(t0)
+	at := t0
+	for range 12 { // one minute of ticks, an election every fourth tick
+		at = at.Add(tick)
+		if at.Sub(t0)%(4*tick) == 0 {
+			live.elections++
+		}
+		collector.CollectLocalTick(at)
+	}
+	if live.elections != 3 {
+		t.Fatalf("test drove %d elections, want 3", live.elections)
+	}
+	if !collectorStormActive(collector) {
+		t.Fatal("three elections within a minute must read as a storm")
+	}
+	if got := spy.count("Raft election storm"); got != 1 {
+		t.Fatalf("storm logs = %d, want exactly 1 on the transition edge", got)
+	}
+
+	// Quiet ticks: the window slides past the elections one by one; the
+	// storm holds through the hysteresis band and clears at zero.
+	for range 12 {
+		at = at.Add(tick)
+		collector.CollectLocalTick(at)
+	}
+	stats := collector.CollectLocalTick(at.Add(tick))
+	if stats.RaftElectionsPerMin != 0 {
+		t.Fatalf("elections/min = %v, want 0 once the window holds no elections", stats.RaftElectionsPerMin)
+	}
+	if collectorStormActive(collector) {
+		t.Fatal("storm must clear once the window is quiet")
+	}
+	if got := spy.count("Raft election storm"); got != 1 {
+		t.Fatalf("storm logs = %d, want still 1", got)
+	}
+	if got := spy.count("back to calm"); got != 1 {
+		t.Fatalf("calm logs = %d, want exactly 1 on the recovery edge", got)
+	}
+}

@@ -328,7 +328,7 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
   localNodeId = new Uint8Array(0);
 
   /**
-   * @generated from field: string cluster_address = 8;
+   * @generated from field: string cluster_address = 7;
    */
   clusterAddress = "";
 
@@ -338,9 +338,17 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
    * node's stats older than this are no longer served, so a UI that still
    * shows them is showing a copy the cluster itself has let go of.
    *
-   * @generated from field: string stats_ttl = 9;
+   * @generated from field: string stats_ttl = 8;
    */
   statsTtl = "";
+
+  /**
+   * Set when the cluster removed the answering node. A removed node takes no
+   * part in the cluster, so it reports no topology and no Raft state.
+   *
+   * @generated from field: gastrolog.v1.NodeRemoval removal = 9;
+   */
+  removal?: NodeRemoval;
 
   constructor(data?: PartialMessage<GetClusterStatusResponse>) {
     super();
@@ -356,8 +364,9 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
     { no: 4, name: "nodes", kind: "message", T: ClusterNode, repeated: true },
     { no: 5, name: "local_stats", kind: "message", T: RaftStats },
     { no: 6, name: "local_node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 8, name: "cluster_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 9, name: "stats_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 7, name: "cluster_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 8, name: "stats_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 9, name: "removal", kind: "message", T: NodeRemoval },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetClusterStatusResponse {
@@ -374,6 +383,53 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
 
   static equals(a: GetClusterStatusResponse | PlainMessage<GetClusterStatusResponse> | undefined, b: GetClusterStatusResponse | PlainMessage<GetClusterStatusResponse> | undefined): boolean {
     return proto3.util.equals(GetClusterStatusResponse, a, b);
+  }
+}
+
+/**
+ * NodeRemoval is what a removed node knows about its own removal.
+ *
+ * @generated from message gastrolog.v1.NodeRemoval
+ */
+export class NodeRemoval extends Message<NodeRemoval> {
+  /**
+   * @generated from field: google.protobuf.Timestamp removed_at = 1;
+   */
+  removedAt?: Timestamp;
+
+  /**
+   * The reason the leader gave when it told the node.
+   *
+   * @generated from field: string reason = 2;
+   */
+  reason = "";
+
+  constructor(data?: PartialMessage<NodeRemoval>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.NodeRemoval";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "removed_at", kind: "message", T: Timestamp },
+    { no: 2, name: "reason", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeRemoval {
+    return new NodeRemoval().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): NodeRemoval {
+    return new NodeRemoval().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): NodeRemoval {
+    return new NodeRemoval().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: NodeRemoval | PlainMessage<NodeRemoval> | undefined, b: NodeRemoval | PlainMessage<NodeRemoval> | undefined): boolean {
+    return proto3.util.equals(NodeRemoval, a, b);
   }
 }
 

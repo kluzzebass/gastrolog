@@ -73,6 +73,9 @@ type vaultCollect struct {
 	wake *notify.Signal
 	// stopWorker cancels the per-vault worker; nil until the worker starts.
 	stopWorker context.CancelFunc
+	// workerDone is closed when the per-vault worker has exited; nil until
+	// the worker starts. Written with stopWorker, under Manager.mu.
+	workerDone chan struct{}
 
 	// retryTimer re-arms the wake after a failed pass. A failed obligation
 	// has no future event of its own: the publish that assigned it already
@@ -671,29 +674,38 @@ func (m *Manager) unwireVaultFSMCallbacks(v *vaultCollect) {
 	}
 }
 
-// UnregisterVault removes a vault from collection. stopWorker is captured
-// inside the SAME m.mu critical section as the map lookup/delete rather than
-// read again afterward: it is written exactly once (nil -> non-nil, never
-// back) by startWorkerLocked under m.mu, so reading the field itself outside
-// the lock is a data race against that write in general (see CollectOnce
-// below for the exploitable instance of this pattern).
-func (m *Manager) UnregisterVault(vaultID glid.GLID) {
+// UnregisterVault removes a vault from collection and returns a wait that
+// blocks until the vault's worker has exited, so nothing of the vault is
+// still being written once it returns. stopWorker and workerDone are
+// captured inside the SAME m.mu critical section as the map lookup/delete
+// rather than read again afterward: they are written exactly once (nil ->
+// non-nil, never back) by startWorkerLocked under m.mu, so reading the
+// fields outside the lock is a data race against that write in general (see
+// CollectOnce below for the exploitable instance of this pattern).
+func (m *Manager) UnregisterVault(vaultID glid.GLID) (wait func()) {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
 	delete(m.vaults, vaultID)
 	var stop context.CancelFunc
+	var done chan struct{}
 	if ok {
 		stop = v.stopWorker
+		done = v.workerDone
 	}
 	m.mu.Unlock()
 	if !ok {
-		return
+		return func() {}
 	}
 	m.unwireVaultFSMCallbacks(v)
 	if stop != nil {
 		stop()
 	}
 	v.stopRetryWake()
+	return func() {
+		if done != nil {
+			<-done
+		}
+	}
 }
 
 // Notify triggers one collect pass for a vault when Run is active. Use when
@@ -925,7 +937,10 @@ func (m *Manager) startWorkerLocked(v *vaultCollect) {
 	}
 	ctx, cancel := context.WithCancel(m.runCtx)
 	v.stopWorker = cancel
+	done := make(chan struct{})
+	v.workerDone = done
 	m.wg.Go(func() {
+		defer close(done)
 		// Waiters queued when the worker stops must not hang CollectOnce
 		// callers that passed a non-cancellable context.
 		defer func() { completeCollectWaiters(v.takeCollectWaiters(), ctx.Err()) }()

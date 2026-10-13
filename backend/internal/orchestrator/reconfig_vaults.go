@@ -63,13 +63,20 @@ func resolveVaultDir(params map[string]string, vaultsDir, vaultID string) map[st
 // Loads the full config internally to resolve the vault's vault IDs to vault configs.
 // Returns ErrDuplicateID if a vault with this ID already exists.
 func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig, factories Factories) error {
-	sys, err := o.loadSystem(ctx)
+	sys, deletions, err := o.lockWithoutVaultTeardown(ctx, vaultCfg.ID)
 	if err != nil {
-		return fmt.Errorf("load config for AddVault: %w", err)
+		return err
 	}
-
-	o.mu.Lock()
 	defer o.mu.Unlock()
+
+	if o.vaultDeletions.Load() != deletions {
+		if sys, err = o.currentSystemLocked(ctx, sys, deletions); err != nil {
+			return fmt.Errorf("reload config for AddVault: %w", err)
+		}
+		if sys != nil && findVaultConfig(sys.Config.Vaults, vaultCfg.ID) == nil {
+			return fmt.Errorf("%w: %s was deleted", ErrVaultNotFound, vaultCfg.ID)
+		}
+	}
 
 	if _, exists := o.vaults[vaultCfg.ID]; exists {
 		return fmt.Errorf("%w: %s", ErrDuplicateID, vaultCfg.ID)
@@ -195,11 +202,27 @@ func retentionPolicyLabel(c system.RetentionPolicyConfig) string {
 // a stale-disk-but-fresh-FSM state.
 func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 	o.mu.Lock()
-	defer o.mu.Unlock()
+	vault, err := o.checkVaultEmptyLocked(id)
+	if err != nil {
+		o.mu.Unlock()
+		return err
+	}
+	o.vaultDeletions.Add(1)
+	retired := o.retireVaultLocked(nil, id, false)
+	retired.dirs = nil
+	o.scheduleVaultTeardownLocked(retired)
+	o.mu.Unlock()
 
+	o.logger.Info("vault removed", "id", id, "name", vault.Name, "type", vault.Type())
+	return nil
+}
+
+// checkVaultEmptyLocked returns the vault when it is registered and holds no
+// data, by the rules RemoveVault describes. Caller holds o.mu.
+func (o *Orchestrator) checkVaultEmptyLocked(id glid.GLID) (*Vault, error) {
 	vault, exists := o.vaults[id]
 	if !exists {
-		return fmt.Errorf("%w: %s", ErrVaultNotFound, id)
+		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, id)
 	}
 
 	// Primary: FSM manifest. Returns (nil, nil) when the FSM isn't
@@ -209,11 +232,11 @@ func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 	// inspect.
 	fsmMetas, err := o.listClusterChunkMetasLocked(id)
 	if err != nil {
-		return fmt.Errorf("list FSM chunks for vault %s: %w", id, err)
+		return nil, fmt.Errorf("list FSM chunks for vault %s: %w", id, err)
 	}
 	for _, m := range fsmMetas {
 		if m.RecordCount > 0 || !m.Sealed {
-			return fmt.Errorf("%w: vault %s has data in FSM manifest", ErrVaultNotEmpty, id)
+			return nil, fmt.Errorf("%w: vault %s has data in FSM manifest", ErrVaultNotEmpty, id)
 		}
 	}
 
@@ -225,21 +248,18 @@ func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 	if vaultInst := vault.Instance; vaultInst != nil {
 		metas, err := vaultInst.Chunks.List()
 		if err != nil {
-			return fmt.Errorf("list chunks for vault %s: %w", id, err)
+			return nil, fmt.Errorf("list chunks for vault %s: %w", id, err)
 		}
 		for _, m := range metas {
 			if m.RecordCount > 0 || !m.Sealed {
-				return fmt.Errorf("%w: vault %s has data on local disk", ErrVaultNotEmpty, id)
+				return nil, fmt.Errorf("%w: vault %s has data on local disk", ErrVaultNotEmpty, id)
 			}
 		}
 		if active := vaultInst.Chunks.Active(); active != nil {
-			return fmt.Errorf("%w: vault %s has active chunk", ErrVaultNotEmpty, id)
+			return nil, fmt.Errorf("%w: vault %s has active chunk", ErrVaultNotEmpty, id)
 		}
 	}
-
-	o.teardownVault(id, vault)
-	o.logger.Info("vault removed", "id", id, "name", vault.Name, "type", vault.Type())
-	return nil
+	return vault, nil
 }
 
 // listClusterChunkMetasLocked is the FSM-manifest variant of
@@ -705,7 +725,7 @@ func (o *Orchestrator) buildLocalInstance(sys *system.System, vaultCfg system.Va
 		if tgt.NodeID != o.localNodeID {
 			continue
 		}
-		ti, err := o.buildPlacedInstance(sys, vaultCfg, factories, tgt.StorageID, true)
+		ti, err := o.buildPlacedInstance(sys, vaultCfg, factories, tgt.StorageID)
 		if err != nil {
 			return nil, fmt.Errorf("storage %s: %w", tgt.StorageID, err)
 		}
@@ -736,22 +756,22 @@ func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.V
 	// Read placements from VaultConfig (mirrored from vault placements via
 	// the FSM bridge).
 	storageID := system.LeaderStorageID(sys.PlacementsFor(vaultCfg.ID))
-	return o.buildPlacedInstance(sys, vaultCfg, factories, storageID, false)
+	return o.buildPlacedInstance(sys, vaultCfg, factories, storageID)
 }
 
 // buildPlacedInstance creates the VaultInstance for a placement on storageID:
 // on that file storage when it is one, otherwise — a memory vault's synthetic
 // storage, or no placement yet — with class-based resolution under the vaults
 // directory.
-func (o *Orchestrator) buildPlacedInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories, storageID string, isFollower bool) (*VaultInstance, error) {
+func (o *Orchestrator) buildPlacedInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories, storageID string) (*VaultInstance, error) {
 	var (
 		ti  *VaultInstance
 		err error
 	)
 	if storageID != "" && !strings.HasPrefix(storageID, system.SyntheticStoragePrefix) {
-		ti, err = o.buildInstanceForStorage(sys, vaultCfg, factories, storageID, isFollower)
+		ti, err = o.buildInstanceForStorage(sys, vaultCfg, factories, storageID)
 	} else {
-		ti, err = o.buildInstance(sys, vaultCfg, factories, isFollower)
+		ti, err = o.buildInstance(sys, vaultCfg, factories)
 	}
 	if err != nil {
 		return nil, err
@@ -760,25 +780,15 @@ func (o *Orchestrator) buildPlacedInstance(sys *system.System, vaultCfg system.V
 	return ti, nil
 }
 
-// buildInstance creates a single VaultInstance from a VaultConfig.
-// When isFollower is true, cloud backing params are stripped so the follower's
-// PostSealProcess only runs compress + index without uploading to cloud storage.
-// Cloud-backed vaults share a blob key (vault-ID/chunk-ID.glcb) — if the follower
-// also uploads, it overwrites the leader's blob with a different-sized version,
-// corrupting the leader's stored diskBytes and breaking all future cloud reads.
-func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories, isFollower bool) (*VaultInstance, error) {
+// buildInstance creates a single VaultInstance from a VaultConfig. Every
+// instance of a cloud-backed vault has the cloud store wired; which node
+// uploads is decided at each upload (installCloudUploaderCheck).
+func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories) (*VaultInstance, error) {
 	cfg := &sys.Config
 	factoryName := mapVaultTypeToFactory(vaultCfg.Type)
 
 	// Build params from instance system.
 	params := buildVaultParams(sys, vaultCfg, o.localNodeID)
-
-	// Followers keep cloud store access for reads (queries) but skip uploads.
-	// The leader owns the blob; the follower adopts it lazily via the
-	// cloud-backed resolver once the vault-ctl FSM carries the upload.
-	if isFollower {
-		params["_cloud_read_only"] = "true"
-	}
 
 	cmFactory, ok := factories.ChunkManagers[factoryName]
 	if !ok {
@@ -847,13 +857,14 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	}
 	ti.Reconciler = NewVaultLifecycleReconciler(o, vaultCfg.ID, ti, o.localNodeID, o.baseLogger)
 	o.installPipelineGLCBResolver(ti, vaultCfg.ID)
+	o.installCloudUploaderCheck(ti, vaultCfg.ID)
 	return ti, nil
 }
 
 // buildInstanceForStorage creates a VaultInstance whose data directory is
 // resolved from a specific file storage ID. Used for both leaders with
 // explicit storage placements and followers (one per node per instance).
-func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg system.VaultConfig, factories Factories, storageID string, isFollower bool) (*VaultInstance, error) {
+func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg system.VaultConfig, factories Factories, storageID string) (*VaultInstance, error) {
 	cfg := &sys.Config
 	fs := findFileStorageByID(&sys.Runtime, storageID)
 	if fs == nil {
@@ -862,10 +873,6 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 
 	// Build params normally, then override the dir with this storage's path.
 	params := buildVaultParams(sys, vaultCfg, o.localNodeID)
-	// Followers keep cloud store access for reads but skip uploads.
-	if isFollower {
-		params["_cloud_read_only"] = "true"
-	}
 	params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), vaultCfg.ID.String())
 
 	factoryName := mapVaultTypeToFactory(vaultCfg.Type)
@@ -928,6 +935,7 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 	}
 	ti.Reconciler = NewVaultLifecycleReconciler(o, vaultCfg.ID, ti, o.localNodeID, o.baseLogger)
 	o.installPipelineGLCBResolver(ti, vaultCfg.ID)
+	o.installCloudUploaderCheck(ti, vaultCfg.ID)
 	return ti, nil
 }
 

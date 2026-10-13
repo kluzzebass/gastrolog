@@ -53,19 +53,22 @@ func setupCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd ho
 	if found, err := clusterTLS.LoadFile(hd.ClusterTLSPath()); err != nil {
 		return nil, nil, fmt.Errorf("load cluster TLS file: %w", err)
 	} else if found {
+		if certID := tlsutil.NodeIDFromCert(clusterTLS.State().Cert.Leaf); certID != nodeID {
+			return nil, nil, fmt.Errorf("cluster certificate %s names node %s, not this home's node %s; "+
+				"start this machine from an empty home directory to join as a new node",
+				hd.ClusterTLSPath(), certID, nodeID)
+		}
 		logger.Info("cluster TLS loaded from local file")
 	}
 
-	// First boot of a joiner: enroll with a member before creating the
-	// cluster server. cfg.JoinToken may have been populated from a file or
-	// HTTP source by resolveJoinTokenFromSources before we got here, so the
-	// literal-token check still does the right thing.
-	if clusterTLS.State() == nil && cfg.JoinAddr != "" && cfg.JoinToken != "" {
-		enrolled, err := enrollInCluster(ctx, logger, cfg, hd, nodeID)
+	if clusterTLS.State() == nil {
+		enrolled, err := enrollOnFirstBoot(ctx, logger, cfg, hd, nodeID)
 		if err != nil {
 			return nil, nil, err
 		}
-		clusterTLS = enrolled
+		if enrolled != nil {
+			clusterTLS = enrolled
+		}
 	}
 
 	clusterSrv, err := cluster.New(cluster.Config{
@@ -82,6 +85,25 @@ func setupCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd ho
 	}
 
 	return clusterSrv, clusterTLS, nil
+}
+
+// enrollOnFirstBoot obtains a certificate for a node that holds none, and
+// returns nil when there is nothing to enrol with: a bootstrap node, or a
+// joiner given no token.
+//
+// The join token is resolved here and nowhere earlier. It buys exactly the
+// certificate this node lacks, so a node that already holds one has no use
+// for it — and must not wait for one: on a whole-cluster restart the node
+// serving tokens opens its HTTP listener only once its Raft group has quorum,
+// which needs this node's Raft transport up first.
+func enrollOnFirstBoot(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd home.Dir, nodeID string) (*cluster.ClusterTLS, error) {
+	if err := resolveJoinTokenFromSources(ctx, &cfg, logger); err != nil {
+		return nil, fmt.Errorf("resolve bootstrap token: %w", err)
+	}
+	if cfg.JoinAddr == "" || cfg.JoinToken == "" {
+		return nil, nil
+	}
+	return enrollInCluster(ctx, logger, cfg, hd, nodeID)
 }
 
 // enrollInCluster performs the Enroll RPC to obtain TLS material. Any member
@@ -571,91 +593,6 @@ func makeJoinClusterFunc(
 
 		logger.Info("runtime cluster join complete")
 		return nil
-	}
-}
-
-// makeEvictionHandler creates the callback invoked when this node is evicted
-// from the cluster. Reinitializes as a fresh single-node cluster.
-func makeEvictionHandler(
-	proxy *system.StoreProxy,
-	clusterSrv *cluster.Server,
-	clusterTLS *cluster.ClusterTLS,
-	hd home.Dir,
-	nodeID string,
-	orch *orchestrator.Orchestrator,
-	disp *configDispatcher,
-	logger *slog.Logger,
-) func() {
-	return func() {
-		logger.Warn("evicted from cluster — reinitializing as single-node")
-
-		rcs, ok := proxy.Inner().(*raftClusterCtlStore)
-		if !ok {
-			logger.Error("eviction reinit: config store is not raft-backed, shutting down instead")
-			p, _ := os.FindProcess(os.Getpid())
-			_ = p.Signal(os.Interrupt)
-			return
-		}
-
-		proxy.SetJoining()
-
-		logger.Info("eviction reinit: closing old raft system store")
-		if err := rcs.Close(); err != nil {
-			logger.Error("eviction reinit: close old store failed, shutting down", "error", err)
-			proxy.ClearJoining()
-			p, _ := os.FindProcess(os.Getpid())
-			_ = p.Signal(os.Interrupt)
-			return
-		}
-
-		raftDir := hd.RaftDir()
-		backupDir := raftDir + ".bak." + strconv.FormatInt(time.Now().UnixMilli(), 10)
-		logger.Info("eviction reinit: backing up old raft directory", "from", raftDir, "to", backupDir)
-		if err := os.Rename(raftDir, backupDir); err != nil {
-			logger.Error("eviction reinit: rename raft dir failed, shutting down", "error", err)
-			proxy.ClearJoining()
-			p, _ := os.FindProcess(os.Getpid())
-			_ = p.Signal(os.Interrupt)
-			return
-		}
-		pruneRaftBackups(raftDir, logger)
-
-		logger.Info("eviction reinit: preparing cluster server for reinit")
-		newTransport, err := clusterSrv.PrepareRejoin()
-		if err != nil {
-			logger.Error("eviction reinit: prepare rejoin failed, shutting down", "error", err)
-			p, _ := os.FindProcess(os.Getpid())
-			_ = p.Signal(os.Interrupt)
-			return
-		}
-
-		logger.Info("eviction reinit: opening fresh raft system store")
-		newStore, err := openRaftClusterCtlStore(raftStoreOpts{
-			Home: hd, NodeID: nodeID,
-			ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
-			Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},
-			transport: newTransport,
-		})
-		if err != nil {
-			logger.Error("eviction reinit: open new store failed, shutting down", "error", err)
-			p, _ := os.FindProcess(os.Getpid())
-			_ = p.Signal(os.Interrupt)
-			return
-		}
-
-		proxy.Swap(newStore)
-		logger.Info("eviction reinit: config store swapped")
-
-		cleanOrchestrator(orch, logger)
-
-		if err := restartClusterWithStore(newStore, proxy, clusterSrv, logger); err != nil {
-			logger.Error("eviction reinit: restart cluster server failed, shutting down", "error", err)
-			p, _ := os.FindProcess(os.Getpid())
-			_ = p.Signal(os.Interrupt)
-			return
-		}
-
-		logger.Info("eviction reinit complete — running as single-node cluster")
 	}
 }
 

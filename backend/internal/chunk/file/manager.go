@@ -75,17 +75,22 @@ const (
 //	                      handles slow networks (≈150 KiB/s floor)
 //	cloudDownloadTimeout — TOC reads are 48 bytes; 10s is generous
 //	cloudDeleteTimeout  — simple metadata op; 15s
+//	cloudListTimeout    — one vault's key prefix, paged; 60s
 var (
 	cloudHeadTimeout     = 10 * time.Second
 	cloudUploadTimeout   = 60 * time.Second
 	cloudDownloadTimeout = 10 * time.Second
 	cloudDeleteTimeout   = 15 * time.Second
+	cloudListTimeout     = 60 * time.Second
 )
 
 var (
 	ErrMissingDir      = errors.New("file chunk manager dir is required")
 	ErrManagerClosed   = errors.New("manager is closed")
 	ErrDirectoryLocked = errors.New("vault directory is locked by another process")
+	// ErrCloudWritesStopped refuses an upload once PurgeCloudObjects has
+	// started: the vault's cloud objects are being deleted for good.
+	ErrCloudWritesStopped = errors.New("cloud writes stopped: the vault's cloud objects are being purged")
 )
 
 type Config struct {
@@ -121,10 +126,10 @@ type Config struct {
 	// repoints CloudStore. Zero value when CloudStore is nil.
 	CloudServiceID glid.GLID
 
-	// CloudReadOnly, when true, enables cloud store reads (cursor, cache)
-	// but skips uploads in PostSealProcess. Used by follower nodes that
-	// share the leader's S3 bucket for reads without owning the blobs.
-	CloudReadOnly bool
+	// IsCloudUploader reports, at each upload, whether this node uploads the
+	// vault's sealed chunks. A node that does not still reads the cloud
+	// store. Nil means this manager is the uploader.
+	IsCloudUploader func() bool
 
 	// CacheEviction selects the warm-cache eviction policy: "lru" (default)
 	// or "ttl". The two are mutually exclusive — operators pick one mode,
@@ -269,6 +274,15 @@ type Manager struct {
 	remoteTSMu     sync.Mutex
 	storageClasses map[chunk.ChunkID]string // in-memory cache of cloud storage class per chunk
 	nextChunkID    *chunk.ChunkID           // if set, used instead of NewChunkID() on next open
+
+	// cloudWrites counts uploads between their start and their object write.
+	// PurgeCloudObjects sets cloudWritesStopped, cancels cloudWriteCtx and
+	// waits on cloudWrites, so no upload writes an object after the purge.
+	// cloudWritesStopped and cloudWriteCtx are guarded by mu.
+	cloudWrites        sync.WaitGroup
+	cloudWritesStopped bool
+	cloudWriteCtx      context.Context
+	cancelCloudWrites  context.CancelFunc
 
 	postSealActive sync.Map       // chunk.ChunkID → chan struct{} — closed when PostSealProcess finishes
 	postSealWg     sync.WaitGroup // tracks in-flight PostSealProcess calls (for Close only)
@@ -446,6 +460,13 @@ func initWriteOrder(state *chunkState, nextWrite uint64) {
 }
 
 const lockFileName = ".lock"
+
+// IsBookkeepingFile reports whether a file name in a manager's directory
+// names manager state rather than records: the directory lock and the cloud
+// index, a cache of what the cloud store holds.
+func IsBookkeepingFile(name string) bool {
+	return name == lockFileName || name == cloudIndexFile
+}
 
 func NewManager(cfg Config) (*Manager, error) {
 	if cfg.Dir == "" {
@@ -1997,8 +2018,7 @@ func (m *Manager) openLocked() error {
 	} else {
 		id = chunk.NewChunkID()
 	}
-	chunkDir := m.chunkDir(id)
-	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
+	if _, err := chunk.MkdirChunkDir(m.cfg.Dir, id); err != nil {
 		return err
 	}
 
@@ -2325,8 +2345,8 @@ func (f *importFiles) cleanup() {
 // openImportFiles creates the chunk directory and all four log files.
 // On failure, any already-created resources are cleaned up.
 func (m *Manager) openImportFiles(id chunk.ChunkID, createdAt time.Time) (*importFiles, error) {
-	dir := m.chunkDir(id)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	dir, err := chunk.MkdirChunkDir(m.cfg.Dir, id)
+	if err != nil {
 		return nil, err
 	}
 	m.logger.Debug("chunk-lifecycle: import dir created", "chunk", id.String(), "dir", dir)
@@ -3449,11 +3469,10 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 		m.RefreshDiskSizes(id)
 	}
 
-	// 5. Upload to cloud and delete local if cloud-backed.
-	// CloudReadOnly followers skip upload — they adopt the leader's blob
-	// lazily via the cloud-backed resolver once the vault FSM carries the
-	// upload.
-	if m.cfg.CloudStore != nil && !m.cfg.CloudReadOnly {
+	// 5. Upload to cloud and delete local if cloud-backed. A node that is
+	// not the cloud uploader adopts the uploader's object lazily through
+	// the cloud-backed resolver once the vault FSM carries the upload.
+	if m.cfg.CloudStore != nil && m.isCloudUploader() {
 		if err := m.uploadToCloud(id); err != nil {
 			m.logger.Warn("cloud upload failed, keeping local", "chunk", id, "error", err)
 		}
@@ -4015,8 +4034,8 @@ func (m *Manager) uploadedChunkIDs() []chunk.ChunkID {
 // chunk dir becomes the warm cache, structurally identical to a freshly-
 // sealed local chunk. See docs/obsoleted/vault_redesign.md decisions 6 and 9.
 func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCursor, error) {
-	dir := m.chunkDir(id)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	dir, err := chunk.MkdirChunkDir(m.cfg.Dir, id)
+	if err != nil {
 		return nil, fmt.Errorf("ensure chunk dir for cache: %w", err)
 	}
 	tmp, err := os.CreateTemp(dir, dataGLCBFileName+".tmp.*")
@@ -4433,6 +4452,53 @@ func (m *Manager) rebuildCloudListCache() {
 	m.cloudListCache = cache
 }
 
+// cloudWriteContextLocked returns the context every upload's object write
+// runs under; PurgeCloudObjects cancels it. Caller holds m.mu.
+func (m *Manager) cloudWriteContextLocked() context.Context {
+	if m.cloudWriteCtx == nil {
+		m.cloudWriteCtx, m.cancelCloudWrites = context.WithCancel(context.Background())
+	}
+	return m.cloudWriteCtx
+}
+
+// PurgeCloudObjects deletes every cloud object under the vault's key prefix.
+// It first stops this manager's uploads for good — refusing new ones,
+// cancelling the ones in flight and waiting for them to return — so no
+// upload lands after the objects are gone.
+func (m *Manager) PurgeCloudObjects(ctx context.Context) error {
+	m.mu.Lock()
+	m.cloudWritesStopped = true
+	m.cloudWriteContextLocked()
+	cancel := m.cancelCloudWrites
+	store := m.cfg.CloudStore
+	m.mu.Unlock()
+	cancel()
+	m.cloudWrites.Wait()
+	if store == nil {
+		return nil
+	}
+
+	var keys []string
+	listCtx, listCancel := context.WithTimeout(ctx, cloudListTimeout)
+	err := store.List(listCtx, m.cloudPrefix(), func(b blobstore.BlobInfo) error {
+		keys = append(keys, b.Key)
+		return nil
+	})
+	listCancel()
+	if err != nil {
+		return fmt.Errorf("list cloud objects of vault %s: %w", m.cfg.VaultID, err)
+	}
+	var errs []error
+	for _, key := range keys {
+		delCtx, delCancel := context.WithTimeout(ctx, cloudDeleteTimeout)
+		if err := store.Delete(delCtx, key); err != nil {
+			errs = append(errs, fmt.Errorf("delete cloud object %s: %w", key, err))
+		}
+		delCancel()
+	}
+	return errors.Join(errs...)
+}
+
 func (m *Manager) cloudPrefix() string {
 	return fmt.Sprintf("vault-%s/", m.cfg.VaultID)
 }
@@ -4492,17 +4558,32 @@ func (m *Manager) UploadToCloud(id chunk.ChunkID) error {
 	if m.cfg.CloudStore == nil {
 		return errors.New("cloud store not configured")
 	}
-	if m.cfg.CloudReadOnly {
-		return errors.New("cloud upload disabled on follower")
+	if !m.isCloudUploader() {
+		return chunk.ErrNotCloudUploader
 	}
 	return m.uploadToCloud(id)
 }
 
-// CloudStoreConfigured reports whether this manager can upload sealed chunks
-// to object storage (leader with a wired CloudStore). Used by cloud-health
-// evaluation for file vaults with cloud_service_id.
+// CloudStoreConfigured reports whether this manager has a cloud store wired:
+// it reads cloud-backed chunks and, while it is the vault's cloud uploader,
+// uploads sealed ones.
 func (m *Manager) CloudStoreConfigured() bool {
-	return m.cfg.CloudStore != nil && !m.cfg.CloudReadOnly
+	return m.cfg.CloudStore != nil
+}
+
+// SetCloudUploader installs the check every upload consults to learn whether
+// this node is the vault's cloud uploader at that moment.
+func (m *Manager) SetCloudUploader(isUploader func() bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cfg.IsCloudUploader = isUploader
+}
+
+func (m *Manager) isCloudUploader() bool {
+	m.mu.Lock()
+	isUploader := m.cfg.IsCloudUploader
+	m.mu.Unlock()
+	return isUploader == nil || isUploader()
 }
 
 // sealToGLCB packages a sealed multi-file chunk into a single
@@ -4529,8 +4610,8 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*glcb.Writer, int64, error) {
 	}
 	m.mu.Unlock()
 
-	dir := m.chunkDir(id)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	dir, err := chunk.MkdirChunkDir(m.cfg.Dir, id)
+	if err != nil {
 		return nil, 0, fmt.Errorf("ensure chunk dir: %w", err)
 	}
 
@@ -4664,6 +4745,14 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		m.mu.Unlock()
 		return chunk.ErrChunkNotSealed
 	}
+	if m.cloudWritesStopped {
+		m.mu.Unlock()
+		return ErrCloudWritesStopped
+	}
+	writeCtx := m.cloudWriteContextLocked()
+	m.cloudWrites.Add(1)
+	writeDone := sync.OnceFunc(m.cloudWrites.Done)
+	defer writeDone()
 	bm := glcb.BlobMeta{
 		ChunkID:         id,
 		VaultID:         m.cfg.VaultID,
@@ -4700,12 +4789,19 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	// multiple nodes from overwriting each other's uploads with slightly
 	// different compressed output, which causes InvalidRange errors when
 	// a node tries to read using its own (now stale) blob size.
-	headCtx, headCancel := context.WithTimeout(context.Background(), cloudHeadTimeout)
+	headCtx, headCancel := context.WithTimeout(writeCtx, cloudHeadTimeout)
 	existing, err := m.cfg.CloudStore.Head(headCtx, key)
 	headCancel()
 	if err == nil && existing.Size > 0 {
+		writeDone()
 		m.logger.Debug("cloud blob already exists, skipping upload", "chunk", id, "bytes", existing.Size)
 		return m.adoptCloudBlob(id, existing.Size, digest)
+	}
+	// Uploader status is checked again here, after the Head round-trip: an
+	// upload queued or in flight while the uploader moved to another node
+	// must leave the object to the new uploader rather than write it too.
+	if !m.isCloudUploader() {
+		return chunk.ErrNotCloudUploader
 	}
 
 	// Frame the uncompressed GLCB for transport: per-section zstd frames
@@ -4726,7 +4822,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		_ = pw.Close()
 	}()
 
-	uploadCtx, uploadCancel := context.WithTimeout(context.Background(), cloudUploadTimeout)
+	uploadCtx, uploadCancel := context.WithTimeout(writeCtx, cloudUploadTimeout)
 	err = m.cfg.CloudStore.Upload(
 		uploadCtx,
 		key,
@@ -4734,6 +4830,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		glcb.EncodeObjectMetadata(bm),
 	)
 	uploadCancel()
+	writeDone()
 	_ = pr.Close()
 	<-wrapped
 	m.trackCloudResult(err)

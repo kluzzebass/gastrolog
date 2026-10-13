@@ -52,6 +52,7 @@ import { useQueryHandlers } from "./useQueryHandlers";
 import { useHistogramHandlers } from "./useHistogramHandlers";
 import { useRecordNavigation } from "./useRecordNavigation";
 import { useScrollEffects } from "./useScrollEffects";
+import { usePolling } from "./usePolling";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -226,10 +227,6 @@ export function useSearchView() {
     reset: resetFollow,
     resetNewCount: resetFollowNewCount,
   } = useFollow({ onError: toastError, maxRecords: followBufferSize });
-  const recordsRef = useRef(records);
-  recordsRef.current = records;
-  const followRecordsRef = useRef(followRecords);
-  followRecordsRef.current = followRecords;
   const {
     chunks: explainChunks,
     direction: explainDirection,
@@ -261,21 +258,15 @@ export function useSearchView() {
   // Shared ref for the currently-selected DOM row — used by both navigation and scroll hooks.
   const selectedRowRef = useRef<HTMLElement>(null);
 
-  const { selectedRecord, setSelectedRecord, selectedRecordRef: _selectedRecordRef } = useRecordNavigation({
+  const { selectedRecord, setSelectedRecord } = useRecordNavigation({
     isFollowMode,
-    recordsRef,
-    followRecordsRef,
+    records,
+    followRecords,
     selectedRowRef,
     detailCollapsed, setDetailCollapsed, detailPinned,
     showPlan, setShowPlan,
     fetchContext, resetContext,
   });
-
-  // Ref-stabilize loadMore and resetFollowNewCount so effects don't churn.
-  const loadMoreRef = useRef(loadMore);
-  loadMoreRef.current = loadMore;
-  const resetFollowNewCountRef = useRef(resetFollowNewCount);
-  resetFollowNewCountRef.current = resetFollowNewCount;
 
   const scrollEffects = useScrollEffects({
     isFollowMode,
@@ -283,8 +274,8 @@ export function useSearchView() {
     hasMore,
     selectedRecord,
     recordsLength: records.length,
-    loadMoreRef,
-    resetFollowNewCountRef,
+    loadMore,
+    resetFollowNewCount,
     expressionRef,
     selectedRowRef,
   });
@@ -496,23 +487,7 @@ export function useSearchView() {
   const isPipelineResult = effectiveTableResult !== null;
   const queryIsPipeline = hasPipeOutsideQuotes(q);
 
-  // Ref-stabilize search and q so the polling interval doesn't reset on every render.
-  const searchRef = useRef(search);
-  searchRef.current = search;
-  const qRef = useRef(q);
-  qRef.current = q;
-
-  useEffect(() => {
-    if (!pollInterval || isFollowMode) return;
-    // Leading-edge fire on Off→on (and on any cadence change): operator
-    // expects movement immediately when picking a refresh interval, not
-    // after waiting one full tick.
-    searchRef.current(qRef.current, false, false, true);
-    const id = setInterval(() => {
-      searchRef.current(qRef.current, false, false, true);
-    }, pollInterval);
-    return () => clearInterval(id);
-  }, [pollInterval, isFollowMode]);
+  usePolling(isFollowMode ? null : pollInterval, () => search(q, false, false, true));
 
   const displayRecords = isFollowMode ? followRecords : records;
   const hasResults = displayRecords.length > 0;

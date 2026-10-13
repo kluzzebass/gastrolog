@@ -107,6 +107,13 @@ for append-heavy write patterns and time-ordered reads.
 - **Cloud-backed** — record bytes live in S3/Azure/GCS, not local disk; marked
   with `CloudBacked = true` in `ChunkMeta`. A cloud-backed vault is a file vault
   with `CloudServiceID` set; there is no separate "cloud" vault type.
+- **Cloud uploader** — the node that uploads a cloud-backed vault's sealed
+  chunks: its placement leader, read from the replicated placement at every
+  upload rather than fixed when the vault instance was built. It uploads a
+  chunk once its own agreed copy has landed; an upload still queued when the
+  role moves is left to the new cloud uploader, whose catch-up sweep picks up
+  every sealed chunk not yet cloud-backed. Every other home reads the cloud
+  store and never writes the object.
 - **Memory vault** — a pipeline vault whose homes serve its sealed GLCBs from
   RAM (held, not mapped) and whose **memory budget** bounds the bytes of its
   sealed chunks on each node: over budget, retention retires the oldest
@@ -489,6 +496,12 @@ gRPC transport:
   consistently; never "primary/secondary".
 - **Voter / Non-voter** — membership state. Voters participate in elections;
   non-voters just catch up.
+- **Initial leader election** — a Raft group's elections before this node
+  has seen it have a leader: on group creation (one per new vault-ctl group)
+  or node start. Not churn; the node's election counters skip it.
+- **Election storm** — three or more elections within the last minute in
+  groups that already had a leader. A diagnostic event (transition-edge log
+  + `NodeStats` rate), not an alarm.
 - **Snapshot** — FSM state serialized to disk; lets log be truncated.
 - **InstallSnapshot** — RPC for streaming a snapshot to a slow follower.
 
@@ -576,6 +589,24 @@ one segmented file set, one batch-writer goroutine.
   identity back. The machine returns as a new node, under a new node ID.
   See [`docs/cluster_enrollment.md`](cluster_enrollment.md).
 
+- **Removed node** — a node the cluster removed, as it sees itself. It
+  learns of its **node removal** from the leader, or, when it was down at
+  the time, from a member's **removed-node refusal** (a `PermissionDenied`
+  carrying `RemovedNodeRefusal`): a claim, counted only from a current
+  member of its configuration that is not itself removed and never as the
+  answer to an eviction notice, and acted on only once a majority of the
+  other voters have made it. The eviction notice counts only from the
+  leader it follows; a join refusal never counts. It shuts its member side down, records the
+  removal (time and reason) beside its node identity in its home's
+  cluster-ctl stable store, and from then on — in that process and on every
+  start of the same home — serves only the account of its removal: one
+  error-level log line with the remedy and `GetClusterStatusResponse.removal`
+  on its Unix socket; its TCP listener shows only the probes and a bare
+  "removed from cluster". It never rejoins, mints a new identity, or runs as
+  a cluster of its own; the remedy is an empty home and emptied vault
+  storage. A home holding the cluster certificate but no node identity is an
+  **incomplete home** and is refused at start.
+
 - **Admission** — the leader's answer to a membership request. The request
   carries no suffrage: a node outside the configuration enters as a nonvoter
   (learner), a member is re-added at its current suffrage, and a node in the
@@ -624,7 +655,11 @@ one segmented file set, one batch-writer goroutine.
   interval). Past it, `Get` returns nil and the node reads as offline. Carried
   to the UI as `GetClusterStatusResponse.stats_ttl` together with each
   `ClusterNode.stats_received_at`, so every stats surface dates its figures
-  and marks a sample older than the TTL as **stale**.
+  and marks a sample older than the TTL as **stale**. The responding node
+  reports its own stats as last collected for broadcast, dated by that
+  collection, and the system status stream sends the last snapshot built off
+  the request path — rebuilt on each stats update only while someone
+  subscribes — so neither waits on the subsystems a collection reads.
 
 - **Responding node** — the node that answered a given RPC. The API has no
   session affinity, so behind a load balancer each request may be answered by
@@ -728,6 +763,17 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   Raft the callback is nil and the instance is ready. Canonical definition in
   [`vault_readiness.go`](../backend/internal/orchestrator/vault_readiness.go).
   Checked by every read and write path before touching vault state.
+
+- **Not-ready answer** — how a node answers a forwarded query for a vault
+  that is not ready there: an `Unavailable` status carrying the
+  `VAULT_NOT_READY` `ErrorInfo` reason. On the calling node it matches
+  `ErrVaultNotReady` (the orchestrator's sentinel is the cluster package's),
+  so a coordinator handles a vault not ready on another node exactly as one
+  not ready on its own: a search, its histogram, a pipeline and Explain
+  leave it out. Distinct from a peer with no executor wired, which also
+  answers `Unavailable` but without the reason, and from a transport
+  failure; both of those still fail the query. See
+  [`vault_not_ready.go`](../backend/internal/cluster/vault_not_ready.go).
 
 ### Scheduler & Jobs
 
@@ -1005,6 +1051,31 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 - **Drain** — move all of a vault's chunks off this node, then remove the
   local instance. Used for decommission.
 
+- **Vault deletion** — the operator removing a vault from the config; every
+  node then deletes its share (`Orchestrator.DeleteVault`, from the
+  vault-deleted notification), whether or not the vault is registered there.
+  The delete drops the vault from the node's registries and returns; a
+  background **vault teardown** — a `vault-teardown:` scheduler job, one at a
+  time per vault, abandoned at shutdown — then decommissions its vault-ctl
+  group (WAL state and directory), stops its pipeline, closes the vault, and
+  removes the vault's directories. A vault re-created under the same ID waits
+  for a pending teardown, which would otherwise remove its files. The
+  directories removed are each
+  **pipeline root** candidate and each chunk-manager directory, all named by
+  the vault's ID. **Delete data** decides the files holding records — staging
+  segments, sealed chunks and their indexes, a cloud-backed vault's cloud
+  objects: with it they go — the cloud objects by key prefix, after the
+  vault's uploads are stopped and the in-flight ones have returned, so none
+  lands afterwards; without it they stay, unreachable, and only the
+  chunk-manager bookkeeping (lock file, cloud index) and the directories left
+  empty go. Config read before a deletion still names the vault: whatever
+  applies config under the orchestrator lock (routing reload, the pipeline
+  config reconcile, vault add, startup `ApplyConfig`) re-reads it when a
+  deletion was applied since the read, so the vault is not registered again.
+  A vault's pipeline root is created only by its registration, so a
+  write in flight when the root is removed fails rather than recreating it
+  (`paths.MkdirBelow`).
+
 - **GLCB catch-up** — a home missing a sealed chunk's GLCB (it missed the
   build and the source segments are released) pulls the blob from a peer
   home, verifies its record count against the manifest entry and its bytes
@@ -1167,8 +1238,11 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
 
 - **Contributing vaults** (`SearchResponse.contributing_vault_ids`) — the
   per-vault stream-health signal on a merged **search**: the remote vaults
-  the search fanned out to and merged. Distinct from a contribution report
-  because search is **fail-on-remote-failure** — a remote stream error
+  the search fanned out to and merged. A remote vault whose leader gave a
+  **not-ready answer** is left out of the search and of this set, as a vault
+  the coordinator leads is left out of its own engine's search while not
+  ready. Distinct from a contribution report
+  because search is **fail-on-remote-failure** — any other remote stream error
   aborts the whole search (there is no partial search), so every vault in
   this set contributed to any response the client actually receives. It is
   the positive record of the merge's cross-vault span, not a degraded
@@ -1572,7 +1646,10 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
 - **Timestamp index** — the per-chunk ingest-TS and source-TS indexes. They
   are sections inside the GLCB, located from its TOC tail, never separate
   files: they cannot go missing on their own, the inspector lists them as
-  `ts-index embedded`, and `reindex` rebuilds only the other indexes.
+  `ts-index embedded`, and `reindex` rebuilds only the other indexes. Both
+  hold one entry per record; the source-TS index (STSI) keys each record by
+  its EffectiveSourceTS. An index with no entries (a chunk with no records)
+  is present and empty, never read as missing.
 
 - **Assignment log** — the vault-ctl log view Collection rolls
   (`collection.LogReader.Roll` → `AssignedSegment`) to learn which published
@@ -1745,6 +1822,13 @@ Every record carries three timestamps, and they mean different things:
 For user-facing features, **default to SourceTS**; fall back to IngestTS
 if SourceTS is absent or obviously bogus. For internal ordering
 (GetContext, catch-up, indexes), use **WriteTS**.
+
+- **EffectiveSourceTS** (`chunk.EffectiveSourceTS`) — the fallback above,
+  applied at read time: a record's SourceTS, or its IngestTS when SourceTS
+  is zero. It is the record's place on the **source axis**, which
+  `order=source_ts`, `source_start`/`source_end`, `bin(…, source_ts)` and
+  the STSI all use. It never becomes the record's SourceTS: ingest leaves
+  SourceTS zero when the source gave none, and results show it zero.
 
 ### ID conventions
 

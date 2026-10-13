@@ -63,6 +63,7 @@ type LifecycleServer struct {
 	clusterAddress    string
 	peerStats         NodeStatsProvider
 	localStats        func() *apiv1.NodeStats
+	lastLocalStats    func() (*apiv1.NodeStats, time.Time)
 	clusterRouteRates func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)
 	joinClusterFn     func(ctx context.Context, memberAddr, joinToken string) error
 	removeNodeFn      cluster.RemoveNodeFunc
@@ -73,6 +74,7 @@ type LifecycleServer struct {
 	listVaultsFn      func(ctx context.Context) []*apiv1.VaultInfo
 	getStatsFn        func(ctx context.Context) *apiv1.GetStatsResponse
 	listStoragesFn    func(ctx context.Context) []*apiv1.StorageState
+	snapshots         *statusSnapshots
 	logger            *slog.Logger
 }
 
@@ -91,8 +93,16 @@ func NewLifecycleServer(orch *orchestrator.Orchestrator, shutdown func(drain boo
 		clusterAddress: clusterAddress,
 		peerStats:      peerStats,
 		localStats:     localStats,
+		snapshots:      newStatusSnapshots(),
 		logger:         compLifecycle.Apply(logging.Default(logger)),
 	}
+}
+
+// useStatusSnapshots shares one system-status snapshot cache between the
+// lifecycle servers of one server, so it is built once per update, not once
+// per listener.
+func (s *LifecycleServer) useStatusSnapshots(c *statusSnapshots) {
+	s.snapshots = c
 }
 
 // SetJoinClusterFunc sets the callback for the JoinCluster RPC.
@@ -112,6 +122,12 @@ func (s *LifecycleServer) SetRemoveNodeFunc(fn cluster.RemoveNodeFunc) {
 // SetNodeSuffrageFunc sets the callback for the SetNodeSuffrage RPC.
 func (s *LifecycleServer) SetNodeSuffrageFunc(fn func(ctx context.Context, nodeID string, voter bool) error) {
 	s.setNodeSuffrageFn = fn
+}
+
+// SetLastLocalStats wires the local node's last collected stats, which
+// cluster status reports for it.
+func (s *LifecycleServer) SetLastLocalStats(fn func() (*apiv1.NodeStats, time.Time)) {
+	s.lastLocalStats = fn
 }
 
 // SetStatsSignal wires the notification signal for system status streaming.
@@ -214,17 +230,11 @@ func (s *LifecycleServer) buildClusterNode(srv cluster.RaftServer, leaderID stri
 	}
 
 	isLocal := srv.ID == s.nodeID
-	// Attach per-node stats: real-time for local, last broadcast for peers.
-	// StatsReceivedAt travels with Stats so the UI can show how old a
-	// broadcast value is instead of presenting it as a live reading.
-	if isLocal && s.localStats != nil {
-		node.Stats = s.localStats()
-		if node.Stats != nil {
-			node.StatsReceivedAt = timestamppb.New(time.Now())
-		}
-	} else if s.peerStats != nil {
-		node.Stats = s.peerStats.Get(srv.ID)
-		if received := s.peerStats.StatsReceivedAt(srv.ID); node.Stats != nil && !received.IsZero() {
+	// StatsReceivedAt travels with Stats so the UI can show how old a value
+	// is instead of presenting it as a live reading.
+	if stats, received := s.nodeStats(srv.ID, isLocal); stats != nil {
+		node.Stats = stats
+		if !received.IsZero() {
 			node.StatsReceivedAt = timestamppb.New(received)
 		}
 	}
@@ -244,6 +254,18 @@ func (s *LifecycleServer) buildClusterNode(srv cluster.RaftServer, leaderID stri
 		}
 	}
 	return node
+}
+
+// nodeStats returns a node's last broadcast stats and when this node got
+// them: the local node's as it collected them, a peer's as it received them.
+func (s *LifecycleServer) nodeStats(id string, isLocal bool) (*apiv1.NodeStats, time.Time) {
+	switch {
+	case isLocal && s.lastLocalStats != nil:
+		return s.lastLocalStats()
+	case !isLocal && s.peerStats != nil:
+		return s.peerStats.Get(id), s.peerStats.StatsReceivedAt(id)
+	}
+	return nil, time.Time{}
 }
 
 // GetClusterStatus returns the current cluster topology and Raft state.
@@ -538,28 +560,39 @@ func (s *LifecycleServer) YieldLeadership(
 
 // WatchSystemStatus streams combined system status whenever stats update.
 // Replaces polling GetClusterStatus, Health, and GetRouteStats.
+//
+// It sends snapshots built off the request path (statusSnapshots), rebuilt
+// on each stats update while anyone subscribes, so a subscriber is answered
+// from the last one even while a build is held up. Only a server that has
+// never finished a build makes its first subscriber wait for one.
 func (s *LifecycleServer) WatchSystemStatus(
 	ctx context.Context,
 	req *connect.Request[apiv1.WatchSystemStatusRequest],
 	stream *connect.ServerStream[apiv1.WatchSystemStatusResponse],
 ) error {
-	// Send initial snapshot immediately.
-	if err := stream.Send(s.buildSystemStatus(ctx)); err != nil {
-		return err
-	}
-
-	if s.statsSignal == nil {
-		<-ctx.Done()
-		return nil
-	}
-
-	for {
-		ch := s.statsSignal.C()
+	snaps := s.snapshots
+	snaps.bind(s.buildSystemStatus, s.statsSignal)
+	updated := snaps.updated.C()
+	unsubscribe := snaps.subscribe()
+	defer unsubscribe()
+	if snaps.latest.Load() == nil {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-ch:
-			if err := stream.Send(s.buildSystemStatus(ctx)); err != nil {
+		case <-updated:
+		}
+	}
+	if err := stream.Send(snaps.latest.Load()); err != nil {
+		return err
+	}
+
+	for {
+		updated = snaps.updated.C()
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-updated:
+			if err := stream.Send(snaps.latest.Load()); err != nil {
 				return err
 			}
 		}

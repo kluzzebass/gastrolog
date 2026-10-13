@@ -195,7 +195,7 @@ func (s *QueryServer) searchDirect(
 
 	localResume := s.localResumePositions(resume)
 	localIter, getLocalToken := eng.Search(ctx, q, localResume)
-	remoteIter, contributingVaults := s.collectRemote(ctx, q)
+	remoteIter, contributors := s.collectRemote(ctx, q)
 
 	// Histogram is computed only on the FIRST page of a paginated search.
 	var histCh chan []*apiv1.HistogramBucket
@@ -234,7 +234,7 @@ func (s *QueryServer) searchDirect(
 		return token
 	}
 
-	return s.mergeAndStream(ctx, localIter, getToken, positionsOf(localResume), remoteIter, q.OrderBy, q.Reverse(), q.Limit, transform, nil, contributingVaults, serverStart, stream, histCh)
+	return s.mergeAndStream(ctx, localIter, getToken, positionsOf(localResume), remoteIter, q.OrderBy, q.Reverse(), q.Limit, transform, nil, contributors, serverStart, stream, histCh)
 }
 
 // guardedHistogram runs the page-1 histogram computation on its own
@@ -445,7 +445,7 @@ func (s *QueryServer) mergeAndStream(
 	limit int,
 	transform *query.RecordTransform,
 	histogram []*apiv1.HistogramBucket,
-	contributingVaults []glid.GLID,
+	contributors func() []glid.GLID,
 	serverStart time.Time,
 	stream *connect.ServerStream[apiv1.SearchResponse],
 	histCh chan []*apiv1.HistogramBucket,
@@ -526,6 +526,10 @@ func (s *QueryServer) mergeAndStream(
 		}
 	}
 
+	var contributingVaults []glid.GLID
+	if contributors != nil {
+		contributingVaults = contributors()
+	}
 	if err := stream.Send(&apiv1.SearchResponse{
 		Records:              sb.pending(),
 		ResumeToken:          tokenBytes,

@@ -26,6 +26,9 @@ var (
 	// from "the cloud store holds nothing", which are the same empty result
 	// otherwise.
 	ErrCloudStoreNotConfigured = errors.New("cloud store not configured for this vault")
+	// ErrNotCloudUploader is returned by an upload on a node that is not the
+	// vault's cloud uploader when the upload would have written the object.
+	ErrNotCloudUploader = errors.New("this node is not the vault's cloud uploader")
 	// ErrChunkSealed signals that an Append targeted a chunk the
 	// cluster (via vault-ctl Raft FSM) considers sealed. Returned by
 	// the Manager's append-side gate so the caller can rotate to a
@@ -303,6 +306,13 @@ type ChunkPostSealProcessor interface {
 // uploads that failed when S3 was unreachable.
 type ChunkCloudUploader interface {
 	UploadToCloud(id ChunkID) error
+}
+
+// CloudUploaderSetter is implemented by chunk managers whose uploads are
+// gated on this node being the vault's cloud uploader. The manager calls
+// isUploader at every upload, so the gate follows the uploader as it moves.
+type CloudUploaderSetter interface {
+	SetCloudUploader(isUploader func() bool)
 }
 
 // ChunkArchiver extends ChunkManager with storage-class lifecycle operations

@@ -854,3 +854,21 @@ func TestOpenReaderLookupFirstLast(t *testing.T) {
 		t.Fatal("expected to find middle token 'middle'")
 	}
 }
+
+// A build still running when its vault is deleted must not recreate the
+// removed chunk-manager directory it writes into.
+func TestIndexerBuildNeverRecreatesRemovedDir(t *testing.T) {
+	t.Parallel()
+	manager, chunkID := setupChunkManager(t, []chunk.Record{
+		{IngestTS: gotime.UnixMicro(1000), Attrs: chunk.Attributes{"service": "api", "k": "v"}, Raw: []byte("level=info service=api ok")},
+	})
+	indexDir := filepath.Join(t.TempDir(), "removed-vault")
+	indexer := NewIndexer(indexDir, manager, nil)
+
+	if err := indexer.Build(context.Background(), chunkID); err == nil {
+		t.Fatalf("build into a removed directory succeeded")
+	}
+	if _, err := os.Stat(indexDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("build recreated the removed directory: stat err=%v", err)
+	}
+}

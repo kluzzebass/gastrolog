@@ -166,3 +166,28 @@ func makeRecordForSeg(segID glid.GLID, seq uint32, ts time.Time, raw string) rec
 		Raw:      []byte(raw),
 	}
 }
+
+// A GLCB landing after its vault's root was removed must fail rather than
+// recreate the root: the chunk directory is created only below it.
+func TestEnsureGLCBDirNeedsVaultRoot(t *testing.T) {
+	t.Parallel()
+	vaultRoot := filepath.Join(t.TempDir(), "vault")
+	glcbPath := chunking.ChunkGLCBPath(filepath.Join(vaultRoot, "chunks"), chunk.NewChunkID())
+
+	if err := chunking.EnsureGLCBDir(glcbPath); err == nil {
+		t.Fatalf("EnsureGLCBDir succeeded with the vault root missing")
+	}
+	if _, err := os.Stat(vaultRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("vault root recreated: stat err=%v", err)
+	}
+
+	if err := os.Mkdir(vaultRoot, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := chunking.EnsureGLCBDir(glcbPath); err != nil {
+		t.Fatalf("EnsureGLCBDir under an existing vault root: %v", err)
+	}
+	if info, err := os.Stat(filepath.Dir(glcbPath)); err != nil || !info.IsDir() {
+		t.Fatalf("chunk dir not created: %v", err)
+	}
+}

@@ -124,17 +124,9 @@ func (s *Server) stopHTTPSLocked() {
 // token-free access for the local CLI. The socket file is removed on Stop.
 // Must be called after Serve has set up the handler.
 func (s *Server) ListenUnix(path string) error {
-	// Remove stale socket file from a previous unclean shutdown.
-	_ = os.Remove(path)
-
-	ln, err := net.Listen("unix", path)
+	ln, err := listenUnixSocket(path)
 	if err != nil {
-		return fmt.Errorf("listen unix %s: %w", path, err)
-	}
-	// Restrict socket to owner only.
-	if err := os.Chmod(path, 0o600); err != nil {
-		_ = ln.Close()
-		return fmt.Errorf("chmod unix socket: %w", err)
+		return err
 	}
 
 	// The socket skips JWT validation — the OS file permissions on the
@@ -165,4 +157,21 @@ func (s *Server) ListenUnix(path string) error {
 		}
 	}()
 	return nil
+}
+
+// listenUnixSocket listens on path, replacing a socket file left by an
+// unclean shutdown, and restricts the socket to its owner: the file
+// permissions are the socket's access control.
+func listenUnixSocket(path string) (net.Listener, error) {
+	_ = os.Remove(path)
+
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, fmt.Errorf("listen unix %s: %w", path, err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = ln.Close()
+		return nil, fmt.Errorf("chmod unix socket: %w", err)
+	}
+	return ln, nil
 }

@@ -1,12 +1,14 @@
 package app
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/home"
@@ -60,7 +62,8 @@ func TestResolveNodeID_FreshDirectoryGeneratesAndPersists(t *testing.T) {
 	hd := newTestHome(t)
 	logger := nodeIDTestLogger()
 
-	id, err := resolveNodeID(hd, logger)
+	ident, err := resolveNodeID(hd, logger)
+	id := ident.ID
 	if err != nil {
 		t.Fatalf("resolveNodeID: %v", err)
 	}
@@ -91,11 +94,13 @@ func TestResolveNodeID_IdempotentAcrossCalls(t *testing.T) {
 	hd := newTestHome(t)
 	logger := nodeIDTestLogger()
 
-	first, err := resolveNodeID(hd, logger)
+	firstIdentity, err := resolveNodeID(hd, logger)
+	first := firstIdentity.ID
 	if err != nil {
 		t.Fatalf("first resolveNodeID: %v", err)
 	}
-	second, err := resolveNodeID(hd, logger)
+	secondIdentity, err := resolveNodeID(hd, logger)
+	second := secondIdentity.ID
 	if err != nil {
 		t.Fatalf("second resolveNodeID: %v", err)
 	}
@@ -109,7 +114,8 @@ func TestResolveNodeID_StableStoreOverridesWipedFile(t *testing.T) {
 	hd := newTestHome(t)
 	logger := nodeIDTestLogger()
 
-	id, err := resolveNodeID(hd, logger)
+	ident, err := resolveNodeID(hd, logger)
+	id := ident.ID
 	if err != nil {
 		t.Fatalf("resolveNodeID: %v", err)
 	}
@@ -121,7 +127,8 @@ func TestResolveNodeID_StableStoreOverridesWipedFile(t *testing.T) {
 		t.Fatalf("remove advisory file: %v", err)
 	}
 
-	got, err := resolveNodeID(hd, logger)
+	gotIdentity, err := resolveNodeID(hd, logger)
+	got := gotIdentity.ID
 	if err != nil {
 		t.Fatalf("second resolveNodeID: %v", err)
 	}
@@ -140,7 +147,8 @@ func TestResolveNodeID_StaleAdvisoryFileIgnored(t *testing.T) {
 	logger := nodeIDTestLogger()
 
 	// Resolve once so StableStore has the canonical value.
-	id, err := resolveNodeID(hd, logger)
+	ident, err := resolveNodeID(hd, logger)
+	id := ident.ID
 	if err != nil {
 		t.Fatalf("resolveNodeID: %v", err)
 	}
@@ -155,7 +163,8 @@ func TestResolveNodeID_StaleAdvisoryFileIgnored(t *testing.T) {
 		t.Fatalf("WriteNodeIDFile: %v", err)
 	}
 
-	got, err := resolveNodeID(hd, logger)
+	gotIdentity, err := resolveNodeID(hd, logger)
+	got := gotIdentity.ID
 	if err != nil {
 		t.Fatalf("second resolveNodeID: %v", err)
 	}
@@ -191,5 +200,98 @@ func TestResolveNodeID_RejectsCorruptStableStoreValue(t *testing.T) {
 
 	if _, err := resolveNodeID(hd, logger); err == nil {
 		t.Fatal("expected error for corrupt stablestore value, got nil")
+	}
+}
+
+// withClusterCtlStore runs fn against the home's identity store directly.
+func withClusterCtlStore(t *testing.T, hd home.Dir, fn func(gs *raftwal.GroupStore)) {
+	t.Helper()
+	if err := os.MkdirAll(hd.ClusterCtlWALDir(), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	wal, err := raftwal.Open(hd.ClusterCtlWALDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn(wal.GroupStore("cluster-ctl"))
+	if err := wal.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A removal recorded beside the identity comes back with it on every
+// resolution, and the identity stays the one that was removed.
+func TestResolveNodeID_ReturnsTheRecordedRemoval(t *testing.T) {
+	t.Parallel()
+	hd := newTestHome(t)
+	logger := nodeIDTestLogger()
+
+	first, err := resolveNodeID(hd, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Removal != nil {
+		t.Fatalf("a fresh identity reports removal %+v", first.Removal)
+	}
+	removal := nodeRemoval{At: time.Date(2026, 10, 12, 9, 30, 0, 0, time.UTC), Reason: "removed from cluster by leader"}
+	withClusterCtlStore(t, hd, func(gs *raftwal.GroupStore) {
+		if err := recordNodeRemoval(gs, removal); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	for range 2 {
+		got, err := resolveNodeID(hd, logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.ID != first.ID {
+			t.Fatalf("identity %s after removal, want %s", got.ID, first.ID)
+		}
+		if got.Removal == nil || !got.Removal.At.Equal(removal.At) || got.Removal.Reason != removal.Reason {
+			t.Fatalf("removal %+v, want %+v", got.Removal, removal)
+		}
+	}
+}
+
+func TestResolveNodeID_RejectsCorruptRemoval(t *testing.T) {
+	t.Parallel()
+	hd := newTestHome(t)
+	if _, err := resolveNodeID(hd, nodeIDTestLogger()); err != nil {
+		t.Fatal(err)
+	}
+	withClusterCtlStore(t, hd, func(gs *raftwal.GroupStore) {
+		if err := gs.Set([]byte(nodeRemovalKey), []byte("{not json")); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if _, err := resolveNodeID(hd, nodeIDTestLogger()); err == nil {
+		t.Fatal("a corrupt removal record resolved")
+	}
+}
+
+// A home that lost its identity store but kept its certificate is not
+// pristine: minting there would pair a new identity with a certificate that
+// names another. The certificate need not even be readable.
+func TestResolveNodeID_RefusesACertificateWithoutItsIdentity(t *testing.T) {
+	t.Parallel()
+	for name, content := range map[string]string{
+		"loadable":   `{"ca_cert_pem":"","cluster_cert_pem":"","cluster_key_pem":""}`,
+		"unreadable": "\x00",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			hd := newTestHome(t)
+			if err := os.WriteFile(hd.ClusterTLSPath(), []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := resolveNodeID(hd, nodeIDTestLogger())
+			if !errors.Is(err, errIncompleteHome) {
+				t.Fatalf("resolveNodeID: %v, want the home refused as incomplete", err)
+			}
+			if raw, err := readStableStoreNodeID(t, hd); err != nil || len(raw) != 0 {
+				t.Fatalf("an identity was minted beside the certificate: %x (%v)", raw, err)
+			}
+		})
 	}
 }

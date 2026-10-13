@@ -56,9 +56,12 @@ Every row carries its meaning on hover.
   no leader contact since start).
 - **Raft liveness** rows, once the node has appended to its WAL —
   **WAL Append** average and max latency across every Raft group on the node,
-  **Elections** total and per minute, **Leader Losses** (leaderships this node
-  held and lost), and **Failed heartbeats** (replication heartbeats a follower did
-  not answer). Elections sustained above about 3/min is an election storm; a
+  **Elections** total and over the last minute, **Leader Losses** (leaderships
+  this node held and lost), and **Failed heartbeats** (replication heartbeats a
+  follower did not answer). Elections count only in groups that already had a
+  leader: the first leader election of a group — when a vault is created, or
+  when this node starts — is not churn and is not counted. Three or more
+  elections within a minute is an election storm, logged as a warning; a
   WAL max latency near 1s means bulk I/O is starving consensus.
 
 A node card with no rows says why: **No stats yet — waiting for this node's

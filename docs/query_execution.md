@@ -41,14 +41,21 @@ flowchart LR
 |-----------|--------|
 | `last=<dur>` | Sets `Start = now-dur`, `End = now` |
 | `start=<t>` / `end=<t>` | Explicit IngestTS bounds (RFC3339, RFC3339Nano, or Unix seconds — `parseTime()`) |
-| `source_start=` / `source_end=` | SourceTS bounds: the seek key under `order=source_ts`, a runtime filter otherwise. `start=`/`end=` stay ingest bounds under every ordering |
+| `source_start=` / `source_end=` | Bounds on the source axis: the seek key under `order=source_ts`, a runtime filter otherwise. `start=`/`end=` stay ingest bounds under every ordering |
 | `limit=<n>` | Max records to return |
 | `reverse=true` | Newest-first ordering |
-| `order=source_ts` | Switch ordering from default IngestTS |
+| `order=source_ts` | Switch ordering from default IngestTS to the source axis |
 | `pos=<n>` | Single record by position |
 
 Remaining tokens become filter predicates parsed by `querylang.ParsePipeline()`,
 producing a `BoolExpr` tree (AND/OR/NOT over token matches, KV predicates, globs).
+
+**The source axis.** `order=source_ts`, `source_start=`/`source_end=`,
+`bin(…, source_ts)` and a source-ordered timechart all place a record by
+`chunk.EffectiveSourceTS`: its SourceTS, or its IngestTS when it has none.
+SourceTS stays zero on the record and in results — only its place on the
+axis falls back — so sealed chunks (whose STSI holds every record under that
+key), open chunks sorted in memory, filters and bins agree on every record.
 
 ## Vault and Chunk Selection
 
@@ -82,15 +89,18 @@ in-memory.
 
 **`selectChunks`** filters chunks by time overlap. A chunk is included if its
 `[IngestStart, IngestEnd]` range intersects the query's `[lower, upper]` bounds;
-`source_start=`/`source_end=` bounds apply the same test to
-`[SourceStart, SourceEnd]`. Active chunks get the same test as sealed ones. A
+`source_start=`/`source_end=` bounds apply the same test to the chunk's
+source-axis range (`effectiveSourceBounds`, `query/search.go`):
+`[SourceStart, SourceEnd]` widened by `[IngestStart, IngestEnd]`, because a
+chunk's metadata does not say whether it holds records without a source
+timestamp, and those sit at their IngestTS. Active chunks get the same test as sealed ones. A
 bound that is still zero does not exclude a chunk, except that under a
 time-bounded query a Sealed or Sealing chunk with neither `IngestStart` nor
 `IngestEnd` known is excluded rather than treated as matching everything.
 
 **Sort order** (`chunkCmp`, `query/query.go`) is global across vaults, because
 lazy priming assumes adjacent chunks are time-ordered. Forward: ascending
-start (`IngestStart`, or `SourceStart` under `order=source_ts`). Reverse:
+start (`IngestStart`, or the source-axis range start under `order=source_ts`). Reverse:
 unsealed chunks first — they may hold records newer than their metadata —
 then descending end, then descending start.
 

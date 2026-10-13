@@ -2,12 +2,17 @@ package cli
 
 import (
 	"context"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/server"
 	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
 )
@@ -151,5 +156,133 @@ func TestVaultCreateAttachesEveryRetentionPolicy(t *testing.T) {
 	err := runVaultCreate(t, ts.URL, "--name", "bad", "--type", "memory", "--retention-policy", "keep-30d,nope")
 	if err == nil || !strings.Contains(err.Error(), `retention policy "nope" not found`) {
 		t.Fatalf("unknown policy in the list: err = %v, want the policy named", err)
+	}
+}
+
+// deleteRecordingStore records the delete_data flag each vault delete reaches
+// the config store with.
+type deleteRecordingStore struct {
+	*sysmem.Store
+	deleteData map[glid.GLID]bool
+}
+
+func (s *deleteRecordingStore) DeleteVault(ctx context.Context, id glid.GLID, deleteData bool) error {
+	s.deleteData[id] = deleteData
+	return s.Store.DeleteVault(ctx, id, deleteData)
+}
+
+// TestVaultDeleteCarriesDeleteData drives the genuine client→RPC→store path:
+// `vault delete --delete-data` asks for the vault's data files to be erased,
+// as the UI's "Delete data files" does, and without the flag they are kept.
+func TestVaultDeleteCarriesDeleteData(t *testing.T) {
+	ts, cfgStore := newDeleteRecordingServer(t)
+	ids := seedMemoryVaults(t, cfgStore, "kept", "erased")
+
+	run := func(extra ...string) error {
+		cmd := NewConfigCommand()
+		AddClientFlags(cmd)
+		cmd.SetArgs(append([]string{"vault", "delete", "--addr", ts.URL}, extra...))
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		return cmd.Execute()
+	}
+	if err := run("kept", "--force"); err != nil {
+		t.Fatalf("vault delete kept: %v", err)
+	}
+	if err := run("erased", "--force", "--delete-data"); err != nil {
+		t.Fatalf("vault delete erased --delete-data: %v", err)
+	}
+
+	for name, want := range map[string]bool{"kept": false, "erased": true} {
+		got, ok := cfgStore.deleteData[ids[name]]
+		if !ok {
+			t.Fatalf("vault %s: delete never reached the store", name)
+		}
+		if got != want {
+			t.Errorf("vault %s: delete_data = %t, want %t", name, got, want)
+		}
+	}
+}
+
+// newDeleteRecordingServer is a config server whose store records the
+// delete_data flag of every vault delete.
+func newDeleteRecordingServer(t *testing.T) (*httptest.Server, *deleteRecordingStore) {
+	t.Helper()
+	cfgStore := &deleteRecordingStore{Store: sysmem.NewStore(), deleteData: map[glid.GLID]bool{}}
+	orch, err := orchestrator.New(orchestrator.Config{
+		SystemLoader: cfgStore,
+		SegmentsDir:  filepath.Join(t.TempDir(), "segments"),
+	})
+	if err != nil {
+		t.Fatalf("orchestrator.New: %v", err)
+	}
+	t.Cleanup(func() { _ = orch.Stop() })
+	srv := server.New(orch, cfgStore, orchestrator.Factories{VaultsDir: t.TempDir()}, nil, server.Config{NoAuth: true})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts, cfgStore
+}
+
+// seedMemoryVaults stores a memory vault per name and returns their IDs.
+func seedMemoryVaults(t *testing.T, cfgStore *deleteRecordingStore, names ...string) map[string]glid.GLID {
+	t.Helper()
+	ids := map[string]glid.GLID{}
+	for _, name := range names {
+		id := glid.New()
+		ids[name] = id
+		if err := cfgStore.PutVault(context.Background(), system.VaultConfig{ID: id, Name: name, Type: system.VaultTypeMemory}); err != nil {
+			t.Fatalf("PutVault %s: %v", name, err)
+		}
+	}
+	return ids
+}
+
+// TestImportReplaceDeleteDataIsOptIn drives the genuine client→RPC→store
+// path: the vaults `config import --replace` deletes keep their data unless
+// --delete-data is given, and --delete-data without --replace is refused.
+func TestImportReplaceDeleteDataIsOptIn(t *testing.T) {
+	ts, cfgStore := newDeleteRecordingServer(t)
+	doc := filepath.Join(t.TempDir(), "empty.json")
+	if err := os.WriteFile(doc, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run := func(extra ...string) error {
+		cmd := NewConfigCommand()
+		AddClientFlags(cmd)
+		cmd.SetArgs(append([]string{"import", doc, "--addr", ts.URL}, extra...))
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		return cmd.Execute()
+	}
+
+	refused := seedMemoryVaults(t, cfgStore, "untouched")
+	err := run("--delete-data")
+	if err == nil || !strings.Contains(err.Error(), "needs --replace") {
+		t.Fatalf("--delete-data without --replace: err = %v, want refusal naming --replace", err)
+	}
+	if _, deleted := cfgStore.deleteData[refused["untouched"]]; deleted {
+		t.Fatalf("--delete-data without --replace deleted a vault")
+	}
+
+	for _, tc := range []struct {
+		args       []string
+		deleteData bool
+	}{
+		{args: []string{"--replace", "--yes"}, deleteData: false},
+		{args: []string{"--replace", "--yes", "--delete-data"}, deleteData: true},
+	} {
+		ids := seedMemoryVaults(t, cfgStore, "a", "b")
+		if err := run(tc.args...); err != nil {
+			t.Fatalf("config import %v: %v", tc.args, err)
+		}
+		for name, id := range ids {
+			got, ok := cfgStore.deleteData[id]
+			if !ok {
+				t.Fatalf("config import %v: vault %s never deleted", tc.args, name)
+			}
+			if got != tc.deleteData {
+				t.Errorf("config import %v: vault %s delete_data = %t, want %t", tc.args, name, got, tc.deleteData)
+			}
+		}
 	}
 }

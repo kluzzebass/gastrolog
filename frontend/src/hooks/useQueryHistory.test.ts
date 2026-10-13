@@ -1,4 +1,5 @@
 import { describe, expect, test, beforeEach } from "bun:test";
+import { StrictMode } from "react";
 import { renderHook, act } from "@testing-library/react";
 import { useQueryHistory } from "./useQueryHistory";
 
@@ -120,6 +121,43 @@ describe("useQueryHistory", () => {
 
     expect(result.current.entries).toHaveLength(0);
     expect(localStorage.getItem("gastrolog:query-history")).toBeNull();
+  });
+
+  test("remove persists the remaining entries", () => {
+    const { result } = renderHook(() => useQueryHistory());
+    act(() => {
+      result.current.add("keep");
+      result.current.add("drop");
+    });
+    act(() => {
+      result.current.remove("drop");
+    });
+
+    const stored = JSON.parse(localStorage.getItem("gastrolog:query-history") ?? "[]") as { query: string }[];
+    expect(stored.map((e) => e.query)).toEqual(["keep"]);
+  });
+
+  test("a history written by one mount is what the next mount loads", () => {
+    const first = renderHook(() => useQueryHistory());
+    act(() => {
+      first.result.current.add("older");
+      first.result.current.add("newer");
+    });
+    first.unmount();
+
+    const second = renderHook(() => useQueryHistory());
+    expect(second.result.current.entries.map((e) => e.query)).toEqual(["newer", "older"]);
+  });
+
+  test("add under StrictMode records and persists the query once", () => {
+    const { result } = renderHook(() => useQueryHistory(), { wrapper: StrictMode });
+    act(() => {
+      result.current.add("level=error");
+    });
+
+    expect(result.current.entries.map((e) => e.query)).toEqual(["level=error"]);
+    const stored = JSON.parse(localStorage.getItem("gastrolog:query-history") ?? "[]") as { query: string }[];
+    expect(stored.map((e) => e.query)).toEqual(["level=error"]);
   });
 
   test("loads from localStorage on init", () => {

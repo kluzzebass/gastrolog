@@ -29,7 +29,7 @@ type OrderBy int
 
 const (
 	OrderByIngestTS OrderBy = iota // default: order by IngestTS (primary timestamp)
-	OrderBySourceTS                // order by SourceTS
+	OrderBySourceTS                // order by chunk.EffectiveSourceTS
 )
 
 // String returns a human-readable name for the OrderBy value.
@@ -49,7 +49,7 @@ func (o OrderBy) RecordTS(rec chunk.Record) time.Time {
 	case OrderByIngestTS:
 		return rec.IngestTS
 	case OrderBySourceTS:
-		return rec.SourceTS
+		return chunk.EffectiveSourceTS(rec.SourceTS, rec.IngestTS)
 	}
 	return rec.IngestTS
 }
@@ -131,9 +131,10 @@ type Query struct {
 	Start time.Time // inclusive lower bound on IngestTS
 	End   time.Time // exclusive upper bound on IngestTS
 
-	// Time bounds on SourceTS (optional runtime filters).
-	SourceStart time.Time // inclusive lower bound on SourceTS
-	SourceEnd   time.Time // exclusive upper bound on SourceTS
+	// Time bounds on the source axis, chunk.EffectiveSourceTS
+	// (optional runtime filters).
+	SourceStart time.Time // inclusive lower bound
+	SourceEnd   time.Time // exclusive upper bound
 
 	// Optional filters (legacy API, ignored if BoolExpr is set)
 	Tokens []string         // filter by tokens (nil = no filter, AND semantics)
@@ -613,12 +614,11 @@ func chunkMatchesQuery(m chunk.ChunkMeta, q Query, lower, upper time.Time, chunk
 		return false
 	}
 
-	// Filter by SourceTS bounds if query specifies them.
-	// Chunk with no SourceTS data (both zero) is included.
-	if !q.SourceStart.IsZero() && !m.SourceEnd.IsZero() && m.SourceEnd.Before(q.SourceStart) {
+	sourceStart, sourceEnd := effectiveSourceBounds(m)
+	if !q.SourceStart.IsZero() && !sourceEnd.IsZero() && sourceEnd.Before(q.SourceStart) {
 		return false
 	}
-	if !q.SourceEnd.IsZero() && !m.SourceStart.IsZero() && !m.SourceStart.Before(q.SourceEnd) {
+	if !q.SourceEnd.IsZero() && !sourceStart.IsZero() && !sourceStart.Before(q.SourceEnd) {
 		return false
 	}
 
@@ -836,7 +836,6 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 		b.excludePosition(*startPos, q.Reverse())
 	}
 
-	// Add SourceTS filter if bounds are set.
 	if !q.SourceStart.IsZero() || !q.SourceEnd.IsZero() {
 		b.addFilter(sourceTimeFilter(q.SourceStart, q.SourceEnd))
 	}

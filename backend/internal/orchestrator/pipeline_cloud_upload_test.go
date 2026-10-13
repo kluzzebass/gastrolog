@@ -157,8 +157,9 @@ func waitBlobUploaded(t *testing.T, orch *Orchestrator, store blobstore.Store, w
 	})
 }
 
-// TestSchedulePipelineCloudUpload_SkipsPlacementFollower verifies nodes without
-// cloud write access do not upload.
+// TestSchedulePipelineCloudUpload_SkipsPlacementFollower verifies a node the
+// vault's placement names a follower does not upload, though it has the cloud
+// store wired and is the vault-ctl Raft leader.
 func TestSchedulePipelineCloudUpload_SkipsPlacementFollower(t *testing.T) {
 	t.Parallel()
 
@@ -167,9 +168,11 @@ func TestSchedulePipelineCloudUpload_SkipsPlacementFollower(t *testing.T) {
 	mock := &mockCloudBackedChunkManager{
 		chunks: []chunk.ChunkMeta{{ID: chunkID, Sealed: true}},
 	}
-	mock.cloudStoreConfigured.Store(false)
+	mock.cloudStoreConfigured.Store(true)
 
-	orch := newTestOrch(t, Config{LocalNodeID: "follower"})
+	cfg := newPlacementStore(t, vaultID)
+	setPlacementLeader(t, cfg, vaultID, "node-A", "follower")
+	orch := newTestOrch(t, Config{LocalNodeID: "follower", SystemLoader: cfg})
 	markPipelineIngestVault(t, orch, vaultID, true)
 	orch.RegisterVault(NewVault(vaultID, &VaultInstance{
 		VaultID: vaultID,

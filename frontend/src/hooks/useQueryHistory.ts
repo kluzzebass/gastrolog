@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 const STORAGE_KEY = "gastrolog:query-history";
 const MAX_ENTRIES = 50;
@@ -25,6 +25,14 @@ function save(entries: HistoryEntry[]) {
 export function useQueryHistory() {
   const [entries, setEntries] = useState<HistoryEntry[]>(load);
 
+  useEffect(() => {
+    if (entries.length === 0) {
+      localStorage.removeItem(STORAGE_KEY);
+    } else {
+      save(entries);
+    }
+  }, [entries]);
+
   const add = useCallback((rawQuery: string) => {
     const query = rawQuery.trim();
     if (!query) return;
@@ -32,26 +40,19 @@ export function useQueryHistory() {
     setEntries((prev) => {
       // Remove duplicate if it already exists.
       const filtered = prev.filter((e) => e.query !== query);
-      const next = [{ query, timestamp: Date.now() }, ...filtered].slice(
+      return [{ query, timestamp: Date.now() }, ...filtered].slice(
         0,
         MAX_ENTRIES,
       );
-      save(next);
-      return next;
     });
   }, []);
 
   const remove = useCallback((query: string) => {
-    setEntries((prev) => {
-      const next = prev.filter((e) => e.query !== query);
-      save(next);
-      return next;
-    });
+    setEntries((prev) => prev.filter((e) => e.query !== query));
   }, []);
 
   const clear = useCallback(() => {
     setEntries([]);
-    localStorage.removeItem(STORAGE_KEY);
   }, []);
 
   return { entries, add, remove, clear };

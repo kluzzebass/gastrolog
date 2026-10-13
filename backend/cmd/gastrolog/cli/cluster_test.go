@@ -1,9 +1,15 @@
 package cli
 
 import (
+	"bytes"
+	"strings"
 	"testing"
+	"time"
+
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/server"
 )
 
 // TestVaultHasStageActivity verifies the stage-counter table's row-inclusion
@@ -36,5 +42,29 @@ func TestVaultHasStageActivity(t *testing.T) {
 				t.Fatalf("vaultHasStageActivity(%s) = %v, want %v", tc.name, got, tc.want)
 			}
 		})
+	}
+}
+
+// A removed node's status says what happened and the way back, not a
+// topology it no longer has.
+func TestPrintRemoval(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	removedAt := time.Date(2026, 10, 12, 9, 30, 0, 0, time.UTC)
+	printRemoval(&printer{format: "table", w: &out}, &v1.GetClusterStatusResponse{
+		ClusterEnabled: true,
+		LocalNodeId:    []byte("06giv0bgl1pmffimofp5q1pgko"),
+		Removal:        &v1.NodeRemoval{RemovedAt: timestamppb.New(removedAt), Reason: "removed from cluster by leader"},
+	})
+	got := out.String()
+	for _, want := range []string{
+		"06giv0bgl1pmffimofp5q1pgko",
+		removedAt.Format(time.RFC3339),
+		"removed from cluster by leader",
+		server.RemovedNodeRemedy,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output lacks %q:\n%s", want, got)
+		}
 	}
 }

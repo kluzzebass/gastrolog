@@ -166,6 +166,14 @@ that decides.
 - Enrollment runs only on a node's first boot. A restarting node resumes
   with its stored certificate even when the join address and token are
   still configured (containerized deployments pass both on every boot)
+- A token source (`--bootstrap-token-url`) is contacted only when enrollment
+  is about to run — when the node's home holds no loadable certificate. A
+  restarting node never waits on it, so a whole-cluster restart does not
+  depend on the token-serving node, whose HTTP listener opens only once its
+  Raft group has quorum. Holding a certificate is the whole of what the token
+  would have bought: a certificate the cluster CA did not sign gets no
+  membership, and an unreadable certificate file stops the node rather than
+  being treated as absent
 
 ## Certificate Properties
 
@@ -195,6 +203,16 @@ A node whose local configuration is empty admits any valid certificate. An
 empty configuration means the membership is unknown rather than empty — a
 node that has just started, or a joiner that has not replicated yet and whose
 peers must be able to reach it to deliver the configuration at all.
+
+Refusals that involve a removed identity are logged by the refusing node with
+the identity presented: a `RequestMembership` from a removed node, and one
+whose request names a different node than its certificate
+(`requested_node_id`, `certificate_node_id`), are logged on the member that
+received it; any other call from a node in the removal record is refused as
+"removed from this cluster", with the `RemovedNodeRefusal` detail, and
+logged once per node. A non-member that is
+not in the removal record — a joiner reaching a peer that has not applied its
+admission yet — is refused without a log line.
 
 ## Certificate Rotation
 
@@ -253,6 +271,83 @@ has a new node ID, enrolls with a join token like any new node, and is
 admitted as a learner. A removal whose configuration change fails after the
 record was written leaves the node in the configuration but unable to
 re-address itself; retrying the removal completes it.
+
+### The removed node's side
+
+After the configuration change the leader tells the removed node
+(`NotifyEviction`). The node takes that notice only from the leader it
+follows, as the caller's certificate names it, and only while it knows its
+membership; from any other member, from a node outside its configuration,
+or while its configuration is empty, the notice is refused and logged.
+
+A node that was down then learns it from the members that refuse its
+calls: the refusal of a node in the removal record is a `PermissionDenied`
+carrying a `RemovedNodeRefusal` detail that names the node. A refusal is a
+claim, and a claim counts only when all of these hold:
+
+- the detail names the node itself;
+- it comes from the peer the node dialled, whose certificate names it;
+- that peer is in the configuration the node holds, and not in the node's
+  own removal record;
+- the call was not the eviction notice — whoever answers that one is the
+  node being removed.
+
+No single claim ends a membership. The node ends it once a majority of the
+other voters in its configuration have claimed it, each counted once. The
+tally starts over whenever its configuration changes (who is in it, or with
+what suffrage), and a claimant the node's removal record has since come to
+name stops counting. A restarted removed node dials every member it lists,
+and every genuine member refuses it, so it gets there quickly: with three
+voters both others, with two voters the one other. One member's word is
+never enough, because a removed node keeps its certificate and still answers
+whatever dials it — a member that has not yet seen the removal, or is cut
+off from the rest, still lists and dials it — and because a single
+compromised member would otherwise take out every node that dials it.
+
+The exception is any node whose own configuration has exactly one other
+voter: there, that voter is the majority, and its word alone ends the
+membership. That is a two-voter cluster, whatever learners it has, and also
+the interval in which a three-voter cluster is removing one voter and a
+member already holds the two-voter configuration.
+
+A claimant that keeps refusing is weighed again only once the node's Raft
+log has moved, and logged once per configuration: one claimant answering
+every call must not cost a configuration read and a log line each.
+
+A `RequestMembership` refused with the detail never counts on its own: the
+node at the join address is only known to hold a certificate the cluster CA
+signed, and a fresh home was never in a cluster to be removed from. Such a
+refusal stops that start with an error-level log line and records nothing;
+the next start asks again.
+
+The notification is taken in even while the node is stopping: a graceful
+stop waits for the call, so a removal that races a rolling restart is not
+lost.
+
+Either way the node shuts its member side down and records the removal in
+its home, in the cluster-ctl Raft stable store beside its node identity, so
+the two cannot be separated short of deleting both. It then serves only the
+account of the removal (see the Removed state in
+[node-lifecycle-design.md](node-lifecycle-design.md)): the full account —
+reason, time and remedy — on its Unix socket and in its log, and on its TCP
+listener, which authenticates nobody, only the probes and a bare "removed
+from cluster". Every later start of that home finds the record before it
+opens Raft, loads a certificate or contacts a peer, and serves the removal
+again. The node keeps its certificate and its identity; neither buys it
+anything.
+
+A home that holds `cluster-tls.json` but no node identity — its raft
+directory deleted, or only the identity store in it — is refused at start.
+Minting a new identity there would pair it with a certificate naming the old
+one, which no member admits. A home whose certificate names a different node
+than its identity is refused the same way. Both are local refusals with an
+operator-facing reason; the cluster's own checks above are what deny the
+identity regardless of what the node runs.
+
+Bringing the machine back as a new node takes an empty home and emptied
+vault storage. Vault data directories are named by vault, not by node, so a
+new node given a file storage at the old path would open the removed node's
+chunk directories for any vault placed on it.
 
 ## Constraints and Trade-offs
 
