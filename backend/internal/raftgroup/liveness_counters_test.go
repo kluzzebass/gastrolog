@@ -32,3 +32,42 @@ func TestLivenessCountersObserve(t *testing.T) {
 		t.Fatal("nil counters must read zero")
 	}
 }
+
+// A Raft instance's candidacies before it first sees a leader are its
+// initial leader election — on group creation or node start — and are not
+// counted. Once the instance has seen a leader, every candidacy counts.
+// Each instance is classified on its own: one group being established does
+// not make another group's initial election count.
+func TestGroupLivenessHoldsBackInitialElection(t *testing.T) {
+	t.Parallel()
+	var c LivenessCounters
+	fresh := &groupLiveness{counters: &c}
+	other := &groupLiveness{counters: &c}
+
+	// Split votes during the initial election: several candidacies.
+	fresh.observe(hraft.Observation{Data: hraft.RaftState(hraft.Candidate)})
+	fresh.observe(hraft.Observation{Data: hraft.RaftState(hraft.Follower)})
+	fresh.observe(hraft.Observation{Data: hraft.RaftState(hraft.Candidate)})
+	fresh.observe(hraft.Observation{Data: hraft.RaftState(hraft.Leader)})
+	fresh.observe(hraft.Observation{Data: hraft.LeaderObservation{LeaderID: "node-1"}})
+	if e, _, _ := c.Snapshot(); e != 0 {
+		t.Fatalf("elections = %d after an initial election, want 0", e)
+	}
+
+	other.observe(hraft.Observation{Data: hraft.RaftState(hraft.Candidate)})
+	if e, _, _ := c.Snapshot(); e != 0 {
+		t.Fatalf("elections = %d after another group's initial candidacy, want 0", e)
+	}
+
+	// The established group loses its leader and re-elects.
+	fresh.observe(hraft.Observation{Data: hraft.LeaderObservation{LeaderID: ""}})
+	fresh.observe(hraft.Observation{Data: hraft.RaftState(hraft.Candidate)})
+	fresh.observe(hraft.Observation{Data: hraft.RaftState(hraft.Candidate)})
+	elections, losses, _ := c.Snapshot()
+	if elections != 2 {
+		t.Fatalf("elections = %d after two candidacies in an established group, want 2", elections)
+	}
+	if losses != 1 {
+		t.Fatalf("leader losses = %d, want 1", losses)
+	}
+}

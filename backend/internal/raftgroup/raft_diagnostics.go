@@ -14,7 +14,9 @@ import (
 // archaeology.
 type LivenessCounters struct {
 	// ElectionsStarted counts candidate-state transitions (a node started or
-	// restarted an election for some group).
+	// restarted an election for some group) in groups that have had a leader
+	// since this node started them. A group's initial leader election, on
+	// creation or node start, is not churn and is not counted.
 	ElectionsStarted atomic.Uint64
 	// LeaderLosses counts leader observations with an empty leader — a group
 	// lost its leader from this node's perspective.
@@ -40,6 +42,27 @@ func (c *LivenessCounters) observe(obs hraft.Observation) {
 	case hraft.FailedHeartbeatObservation:
 		c.FailedHeartbeats.Add(1)
 	}
+}
+
+// groupLiveness feeds one Raft instance's observations into the node-level
+// counters, holding back candidacies until the instance has seen a leader.
+type groupLiveness struct {
+	counters  *LivenessCounters
+	sawLeader bool
+}
+
+func (g *groupLiveness) observe(obs hraft.Observation) {
+	switch d := obs.Data.(type) {
+	case hraft.LeaderObservation:
+		if d.LeaderID != "" {
+			g.sawLeader = true
+		}
+	case hraft.RaftState:
+		if d == hraft.Candidate && !g.sawLeader {
+			return
+		}
+	}
+	g.counters.observe(obs)
 }
 
 // Snapshot returns the current counter values.
@@ -68,9 +91,10 @@ func ObserveRaftDiagnostics(r *hraft.Raft, logger *slog.Logger, leaderLeaseTimeo
 			return false
 		}
 	}))
+	live := &groupLiveness{counters: counters}
 	go func() {
 		for obs := range ch {
-			counters.observe(obs)
+			live.observe(obs)
 			logRaftObservation(logger, r, obs, leaderLeaseTimeout)
 		}
 	}()
