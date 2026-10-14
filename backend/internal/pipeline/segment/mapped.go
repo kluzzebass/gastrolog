@@ -36,18 +36,18 @@ type MappedSegment struct {
 // ErrNotFinalized is returned when a mapped open sees no index tail.
 var ErrNotFinalized = errors.New("segment is not finalized")
 
-// warmPageCache reads the whole file sequentially through pread-style
+// prefetchPageCache reads the whole file sequentially through pread-style
 // syscalls before it is mapped. An mmap major fault pins its scheduler P
 // inside a non-preemptible kernel fault handler; when the GC needs a
 // stop-the-world point behind such a fault, EVERY P waits — one slow disk
 // fault becomes a whole-process stall, delaying Raft heartbeat senders,
 // receivers, and election timers alike (1.03s stalls measured, with
 // elections firing 8ms after the stall ends). Blocking syscalls release the
-// P within microseconds, so the cold bulk read happens HERE; the merge's
-// mmap accesses then hit warm pages as minor faults. On an already-cached
-// file this pass runs at memory speed. Best-effort: read errors are ignored
+// P within microseconds, so the bulk disk read happens HERE; the merge's
+// mmap accesses then hit page-cache-resident pages as minor faults. On an
+// already-cached file this pass runs at memory speed. Best-effort: read errors are ignored
 // — mmap surfaces real I/O problems on access.
-func warmPageCache(f *os.File, size int64) {
+func prefetchPageCache(f *os.File, size int64) {
 	buf := make([]byte, 1<<20)
 	for off := int64(0); off < size; off += int64(len(buf)) {
 		n, err := f.ReadAt(buf, off)
@@ -75,7 +75,7 @@ func OpenMapped(path string) (*MappedSegment, error) {
 		return nil, fmt.Errorf("%w: %d bytes", ErrHeaderTooSmall, size)
 	}
 
-	warmPageCache(f, size)
+	prefetchPageCache(f, size)
 
 	data, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {

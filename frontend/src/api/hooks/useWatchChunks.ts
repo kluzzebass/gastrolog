@@ -356,7 +356,7 @@ export function mergeMeta(existing: ChunkMeta | undefined, incoming: ChunkMeta):
   // until the next ListChunks refetch.
   if (incoming.cloudBytes > merged.cloudBytes) merged.cloudBytes = incoming.cloudBytes;
   // diskBytes is DIFFERENT: it's per-node LIVE local cache state, not
-  // monotone. Eviction legitimately drops it to 0; re-warm brings it back
+  // monotone. Eviction legitimately drops it to 0; re-download brings it back
   // up. No WatchChunks op currently announces eviction (cacheEvictionSweepAll
   // / EvictCache never call an Emit* helper — see cache_eviction.go), so
   // in practice a decrease only reaches this cache via a ListChunks

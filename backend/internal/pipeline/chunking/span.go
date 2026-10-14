@@ -14,7 +14,7 @@ var (
 	ErrSpanBounds = errors.New("span exceeds segment EventID order length")
 )
 
-// Span names a slice of one segment in EventID order (design-notes point 25).
+// Span names a slice of one segment in EventID order.
 // Start and Count are positions in EventID order, not on-disk frame offsets.
 type Span struct {
 	SegmentID glid.GLID

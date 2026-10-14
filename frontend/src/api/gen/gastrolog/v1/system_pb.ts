@@ -542,7 +542,7 @@ export class VaultConfig extends Message<VaultConfig> {
   cacheEviction = "";
 
   /**
-   * Warm-cache soft cap for cloud-backed chunks, as a size expression
+   * Cached-copy soft cap for cloud-backed chunks, as a size expression
    * ("1GiB"). Empty = unset (defaulted at creation for cloud vaults); "0"
    * rejected.
    *
@@ -551,7 +551,7 @@ export class VaultConfig extends Message<VaultConfig> {
   cacheBudget = "";
 
   /**
-   * Warm-cache eviction age (ttl mode only), as a duration expression ("1h",
+   * Cached-copy eviction age (ttl mode only), as a duration expression ("1h",
    * "7d"). Empty = unset.
    *
    * @generated from field: string cache_ttl = 14;

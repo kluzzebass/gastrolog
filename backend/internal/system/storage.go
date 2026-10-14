@@ -355,7 +355,7 @@ func StorageIDForNode(nodeID string, v VaultConfig, nscs []NodeStorageConfig) st
 			return ""
 		}
 		// Single storage class for all file vaults (local-only and
-		// cloud-backed alike). The active chunk and the warm cache
+		// cloud-backed alike). The active chunk and the cached copies
 		// live at the same path under chunkDir, so distinguishing
 		// "active" and "cache" classes serves no purpose.
 		for _, fs := range nscs[idx].FileStorages {

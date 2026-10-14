@@ -330,9 +330,9 @@ func (f *FSM) SnapshotReleaseScan(placement []string) *ReleaseScan {
 
 // SegmentSuperseded reports whether segID's records now live in chunks
 // replicated to HolderQuorum(placement) placed holders — the release/purge
-// signal that supersedes the raw segment (design-notes 39, refined R3: RF, not
-// home-set, so a dead home never pins the segment; the dead home catches up at
-// the chunk level). True only when the segment has been chunked (≥1 containing
+// signal that supersedes the raw segment. The threshold is RF, not the home
+// set, so a dead home never pins the segment; the dead home catches up at the
+// chunk level. True only when the segment has been chunked (≥1 containing
 // chunk) and every containing chunk is sealed and either held by enough members
 // of placement or cloud-backed, or has already aged out (tombstoned/expired —
 // the records are gone by retention, so the segment is equally free to drop).
@@ -365,7 +365,7 @@ func (f *FSM) segmentSupersededLocked(segID glid.GLID, placement []string) bool 
 // a segment: sealed and held by HolderQuorum(placement) members of placement,
 // sealed and cloud-backed, or already gone (its records aged out under
 // retention, which only deletes sealed chunks). A cloud-backed chunk's durable
-// copy is the uploaded object; its holders are warm caches that eviction
+// copy is the uploaded object; its holders keep cached copies that eviction
 // withdraws, and counting them would re-pin a segment every time a home evicts.
 func (f *FSM) chunkReplicatedLocked(id chunk.ChunkID, placement []string) bool {
 	entry := f.chunks[id]

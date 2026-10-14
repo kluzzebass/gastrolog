@@ -152,7 +152,7 @@ type ManifestEntry struct {
 	// CloudBytes is the compressed cloud object's transport size, set only
 	// by CmdUploadChunk (0 until uploaded). This entry never carried a real
 	// per-node local-disk-bytes fact — ManifestEntry is Raft-replicated
-	// cluster state, and local warm-cache footprint is node-local and
+	// cluster state, and local cached-copy footprint is node-local and
 	// lives in file.Manager's own chunkMeta/cloudIdx instead.
 	CloudBytes int64
 
@@ -243,7 +243,7 @@ func (e *ManifestEntry) IsSealed() bool {
 }
 
 // ToChunkMeta converts to the public chunk.ChunkMeta type. DiskBytes is
-// deliberately left zero: it's per-node live warm-cache state that only
+// deliberately left zero: it's per-node live cached-copy state that only
 // file.Manager's own chunkMeta/cloudIdx track, and this ManifestEntry-
 // sourced meta has no local Manager behind it. CloudBytes (the cloud
 // object size) is the one size fact the FSM actually carries for an

@@ -1978,8 +1978,9 @@ export class DiscardOpenChunkManifestCommand extends Message<DiscardOpenChunkMan
 }
 
 /**
- * ReleaseSegmentsCommand drops completed segment registry entries after chunk
- * replication (purge signaling). See chunking-design direction D.
+ * ReleaseSegmentsCommand drops completed segment registry entries once their
+ * records are durable in chunks (or every placement member holds them); each
+ * node then purges its staging copies of the released segments.
  *
  * @generated from message gastrolog.v1.ReleaseSegmentsCommand
  */
@@ -2395,7 +2396,7 @@ export class ManifestEntry extends Message<ManifestEntry> {
    * cloud_bytes is the compressed cloud object's transport size, set only
    * by CmdUploadChunk (0 until the chunk is uploaded). This entry never
    * carried a real per-node local-disk-bytes fact — ManifestEntry is
-   * Raft-replicated cluster state, and local warm-cache footprint is
+   * Raft-replicated cluster state, and local cached-copy footprint is
    * node-local; was misleadingly named disk_bytes. Renamed honestly,
    * gastrolog-33ul6h.
    *
@@ -2514,22 +2515,17 @@ export class ManifestEntry extends Message<ManifestEntry> {
 
   /**
    * Cloud storage class this chunk currently sits in, as last announced by
-   * CmdArchiveChunk. Empty means "not archived" — the same thing `archived`
-   * says, which is why that bool is now derived from this rather than tracked
-   * beside it.
+   * CmdArchiveChunk. Empty means "not archived"; `archived` is derived from
+   * this rather than tracked beside it.
    *
    * Named cloud_storage_class, not storage_class: in this system a bare
    * "storage class" is the uint32 local class on FileStorage / CloudService /
    * VaultConfig that says WHICH DISK a vault may live on. This is the string
-   * cloud archival tier ("GLACIER", "cold"), which docs/ubiquitous_language.md
+   * cloud archival class ("GLACIER", "cold"), which docs/ubiquitous_language.md
    * calls a "cloud storage class". Two different things, and the numeric one
    * owns the short name.
    *
-   * This is the AUTHORITATIVE current class. It used to live only in a
-   * node-local map on whichever node performed the archive, so the archival
-   * sweep's "already at the target class?" comparison read an empty string on
-   * the FSM path and a multi-step transition chain could never advance past
-   * its first step (gastrolog-35ygqv).
+   * This is the authoritative current class of the chunk's cloud object.
    *
    * @generated from field: string cloud_storage_class = 26;
    */

@@ -51,7 +51,7 @@ export function storageIncompleteReason(s: StorageEntry): string | undefined {
       return undefined;
     case "file":
       // Single storage class for both local-only and cloud-backed file
-      // vaults — the active chunk and warm cache live at the same chunkDir
+      // vaults — the active chunk and cached copies live at the same chunkDir
       // path, so no separate "active" or "cache" class is meaningful.
       return s.storageClass === "" ? "Pick a storage class" : undefined;
   }

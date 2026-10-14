@@ -40,7 +40,7 @@ func TestScanAttrsViaGLCBSealed(t *testing.T) {
 }
 
 // TestScanAttrsCloudBackedWithLocalGLCB drives the cloud-backed branch when the
-// warm cache still holds data.glcb: ScanAttrs routes through the local
+// cached copy still holds data.glcb: ScanAttrs routes through the local
 // projection cursor rather than skipping.
 func TestScanAttrsCloudBackedWithLocalGLCB(t *testing.T) {
 	m, err := NewManager(Config{Dir: t.TempDir()})
@@ -49,7 +49,7 @@ func TestScanAttrsCloudBackedWithLocalGLCB(t *testing.T) {
 	}
 	id, _ := buildSealedGLCB(t, m, 4)
 
-	// Flip to cloud-backed but keep the warm-cache data.glcb on disk.
+	// Flip to cloud-backed but keep the cached copy's data.glcb on disk.
 	m.mu.Lock()
 	m.lookupMeta(id).cloudBacked = true
 	m.mu.Unlock()
@@ -60,7 +60,7 @@ func TestScanAttrsCloudBackedWithLocalGLCB(t *testing.T) {
 }
 
 // TestScanAttrsCloudBackedNoLocalGLCBNoFetch pins the no-fetch contract: a
-// cloud-backed chunk with no warm-cache blob must NOT download — ScanAttrs
+// cloud-backed chunk with no cached copy must NOT download — ScanAttrs
 // returns nil with zero records scanned, leaving the histogram bucket hatched.
 func TestScanAttrsCloudBackedNoLocalGLCBNoFetch(t *testing.T) {
 	m, err := NewManager(Config{Dir: t.TempDir()})
@@ -73,7 +73,7 @@ func TestScanAttrsCloudBackedNoLocalGLCBNoFetch(t *testing.T) {
 	m.lookupMeta(id).cloudBacked = true
 	m.mu.Unlock()
 
-	// Drop the warm-cache blob so no local GLCB remains.
+	// Drop the cached copy so no local GLCB remains.
 	m.evictMappedGLCB(id)
 	if err := os.Remove(glcbPath); err != nil {
 		t.Fatalf("remove data.glcb: %v", err)

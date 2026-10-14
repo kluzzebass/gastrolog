@@ -1,70 +1,86 @@
 # GastroLog File Formats
 
-All multi-byte integers are **little-endian**. GLIDs are stored as raw 16-byte values (UUIDv7-shaped; see "IDs: GLID and encoding" below). Timestamps are stored as **int64 Unix nanoseconds**.
+All multi-byte integers are **little-endian**. GLIDs are stored as raw 16-byte values (UUIDv7-shaped; see [Identifiers](#identifiers) below). Timestamps are stored as **int64 Unix nanoseconds**.
 
 ## Directory Layout
 
 ```
 <home>/
-  node_id                   Persistent GLID (UUIDv7-shaped) node identity
-  node_name                 Human-readable petname
-  config.json / config.db   Config store (format depends on store type)
+  node_id                   Advisory copy of the node's GLID; the identity itself lives in the cluster-ctl Raft stable store
+  node_name                 Human-readable petname (the config store is authoritative)
   gastrolog.sock            Unix domain socket for local CLI access
-  cluster-tls.json          Cluster mTLS certificates and join token
+  cluster-tls.json          Cluster CA cert, this node's cluster cert and private key (PEM, mode 0600)
 
   raft/
-    raft.db                 BoltDB: Raft log + stable store
-    snapshots/              Raft file snapshot store
+    wal/                    cluster-ctl Raft log + stable store (raftwal)
+    groups/
+      wal/                  raftwal shared by every vault-ctl group on this node
+      cluster-ctl/          cluster-ctl Raft file snapshots
+      vault/<vault-id>/ctl/ vault-ctl Raft file snapshots
 
-  stores/                   Per-vault data ("stores" for backward compat)
-    <vault-id>/
-      .lock                 Exclusive lock file for vault directory
-      cloud.idx             B+ tree cache of cloud-backed chunk metadata (if cloud enabled)
+  segments/
+    <vault-id>/             Pipeline root of a vault this node holds no file-storage placement for
+      working/<segment-id>    Segment being appended (Segmentation)
+      completed/<segment-id>  Completed segment, published to vault-ctl
+      pre-head/<segment-id>   In-flight pull on a home (Collection)
+      head/<segment-id>       Verified segment awaiting chunking
+      chunks/
+        <chunk-id>/
+          data.glcb           GLCB this home built from a sealed manifest
 
+  vaults/
+    <vault-id>/             File chunk manager directory of a vault (default location)
+      .lock                 Exclusive lock file for the directory
+      cloud.idx             B+ tree of cloud-backed chunk metadata (cloud-backed vaults)
       <chunk-id>/
-        raw.log             Raw log bytes (append-only)
-        idx.log             Record metadata entries (append-only)
-        attr.log            Record attributes (append-only)
-        attr_dict.log       Attribute string dictionary (append-only)
-        ingest.bt           B+ tree: IngestTS → record position (active only)
-        source.bt           B+ tree: SourceTS → record position (active only)
-        ingest.idx          IngestTS timestamp index (sealed only)
-        source.idx          SourceTS timestamp index (sealed only)
-        token.idx           Token inverted index (sealed only)
-        json.idx            Structural JSON index (sealed only)
-        attr_key.idx        Attribute key inverted index (sealed only)
-        attr_val.idx        Attribute value inverted index (sealed only)
-        attr_kv.idx         Attribute key-value pair index (sealed only)
-        kv_key.idx          Heuristic KV key inverted index (sealed only)
-        kv_val.idx          Heuristic KV value inverted index (sealed only)
-        kv_kv.idx           Heuristic KV pair index (sealed only)
+        data.glcb           Sealed chunk, or the cached copy of a cloud-backed chunk
+        raw.log             Raw log bytes (unsealed chunk written by the chunk manager)
+        idx.log             Record metadata entries (unsealed)
+        attr.log            Record attributes (unsealed)
+        attr_dict.log       Attribute string dictionary (unsealed)
+        ingest.bt           B+ tree: IngestTS → record position (unsealed)
+        source.bt           B+ tree: SourceTS → record position (unsealed)
+        token.idx           Token inverted index
+        json.idx            Structural JSON index
+        attr_key.idx        Attribute key inverted index
+        attr_val.idx        Attribute value inverted index
+        attr_kv.idx         Attribute key-value pair index
+        kv_key.idx          Heuristic KV key inverted index
+        kv_val.idx          Heuristic KV value inverted index
+        kv_kv.idx           Heuristic KV pair index
 
   managed-files/
     <file-id>/
-      <filename>            Uploaded managed files (lookups, MMDB, etc.)
+      data                  Uploaded managed file (lookups, MMDB, etc.)
 ```
+
+A vault placed on a file storage keeps both trees on that storage instead of in
+the home: the pipeline root at `<storage>/segments/<vault-id>/` and the chunk
+manager directory at `<storage>/vaults/<vault-id>/<vault-id>/`. The chunk
+manager directory defaults to `vaults/<vault-id>` under `--vaults` (the home
+when unset); a vault's `dir` parameter overrides it.
 
 ### Identifiers
 
-All entity identifiers (vault, chunk, file, node, etc.) are **GLIDs**: UUIDv7 values encoded as 26-character lowercase base32hex strings (RFC 4648, no padding). The base32hex alphabet (`0-9a-v`) preserves lexicographic sort order, so directory listings are naturally ordered by creation time. On the proto wire format, GLIDs are raw 16-byte values.
+All entity identifiers (vault, chunk, segment, file, node, etc.) are **GLIDs**: UUIDv7 values encoded as 26-character lowercase base32hex strings (RFC 4648, no padding). The base32hex alphabet (`0-9a-v`) preserves lexicographic sort order, so directory listings are naturally ordered by creation time. On the proto wire format, GLIDs are raw 16-byte values.
 
 | Placeholder     | Description                                                  |
 |-----------------|--------------------------------------------------------------|
 | `<home>`        | GastroLog data directory (set via `--home` flag)             |
 | `<vault-id>`    | GLID of the vault that owns the chunks                       |
 | `<chunk-id>`    | GLID of the chunk (UUIDv7, time-ordered)                     |
+| `<segment-id>`  | GLID of the segment                                          |
 | `<file-id>`     | GLID of the managed file                                     |
 
 ### Notes
 
-- `stores/` is the vault container directory (name kept for backward compatibility with existing data).
-- Each chunk is self-contained: all data needed to reconstruct records is stored within the chunk directory.
-- **Active chunks** have B+ tree indexes (`*.bt`) for mutable writes. **Sealed chunks** replace them with flat sorted indexes (`*.idx`) optimized for read-only access.
-- Managed files (under `managed-files/`) are user-uploaded data files used by lookup tables, MMDB databases, etc. They are replicated across cluster nodes via the Raft-managed file system.
+- The pipeline writes records into segments and builds each sealed chunk's `data.glcb` under the pipeline root's `chunks/`. The chunk manager directory holds what is node-local about a chunk: its secondary indexes, the cached copy of a cloud-backed chunk, and chunks the chunk manager writes itself (record imports).
+- A chunk the chunk manager writes starts as `raw.log` + `idx.log` + `attr.log` + `attr_dict.log` with B+ tree timestamp indexes (`*.bt`); at seal it is converted to `data.glcb`, whose embedded TS indexes replace the B+ trees.
+- Managed files (under `managed-files/`) are user-uploaded data files used by lookup tables, MMDB databases, etc. Their metadata is cluster-ctl configuration; each node pulls the bytes from a peer (`PullManagedFile`) and verifies them against the recorded SHA-256.
 
 ## Common Header Pattern
 
-All binary files share a common 4-byte header prefix:
+Every binary file in this document starts with a common 4-byte header prefix:
 
 | Field     | Size | Description                              |
 |-----------|------|------------------------------------------|
@@ -82,9 +98,10 @@ All binary files share a common 4-byte header prefix:
 | `0x61` | `a`  | attr.log          |
 | `0x64` | `d`  | attr_dict.log     |
 | `0x62` | `b`  | ingest.bt / source.bt |
-| `0x67` | `g`  | cloud blob (GLCB) |
-| `0x49` | `I`  | ingest.idx        |
-| `0x73` | `s`  | source.idx        |
+| `0x67` | `g`  | data.glcb (GLCB)  |
+| `0x53` | `S`  | segment           |
+| `0x49` | `I`  | IngestTS index section (ITSI) — GLCB TOC section type |
+| `0x73` | `s`  | SourceTS index section (STSI) — GLCB TOC section type |
 | `0x6B` | `k`  | token.idx         |
 | `0x4A` | `J`  | json.idx          |
 | `0x4B` | `K`  | attr_key.idx      |
@@ -251,13 +268,13 @@ Append-only file containing fixed-size metadata entries for each record. The chu
 +---------------------------+
 |     Header (12 bytes)     |
 +---------------------------+
-|     Entry 0 (58 bytes)    |
+|     Entry 0 (74 bytes)    |
 +---------------------------+
-|     Entry 1 (58 bytes)    |
+|     Entry 1 (74 bytes)    |
 +---------------------------+
 |     ...                   |
 +---------------------------+
-|     Entry N-1 (58 bytes)  |
+|     Entry N-1 (74 bytes)  |
 +---------------------------+
 ```
 
@@ -267,11 +284,11 @@ Append-only file containing fixed-size metadata entries for each record. The chu
 |--------|------|-----------|------------------------------------------|
 | 0      | 1    | signature | `0x69` (`'i'`)                           |
 | 1      | 1    | type      | `0x69` (`'i'`)                           |
-| 2      | 1    | version   | `0x02`                                   |
+| 2      | 1    | version   | `0x01`                                   |
 | 3      | 1    | flags     | Bit 0: sealed (`0x01` = sealed)          |
 | 4      | 8    | createdAt | Chunk creation timestamp (int64 Unix nanos) |
 
-### Entry (58 bytes each)
+### Entry (74 bytes each)
 
 | Offset | Size | Field         | Description                                   |
 |--------|------|---------------|-----------------------------------------------|
@@ -284,76 +301,37 @@ Append-only file containing fixed-size metadata entries for each record. The chu
 | 36     | 2    | attrSize      | Length of encoded attributes in bytes (uint16)|
 | 38     | 4    | ingestSeq     | Per-ingester rolling sequence counter (uint32)|
 | 42     | 16   | ingesterID    | Ingester GLID (raw bytes)                     |
+| 58     | 16   | nodeID        | Emitting node GLID (raw bytes)                |
 
 ### Position Semantics
 
 Record positions throughout the system are **record indices** (0, 1, 2, ...), not byte offsets. To compute the file offset for record N:
 
 ```
-idx_file_offset = 12 + (N * 58)
+idx_file_offset = 12 + (N * 74)
 ```
 
 This enables O(1) seeking by record number and trivial bidirectional traversal.
 
 ### Deriving ChunkMeta
 
-The `ChunkMeta` is derived from idx.log without a separate metadata file:
+The chunk manager derives an unsealed chunk's metadata from idx.log without a separate metadata file (`loadChunkMeta`):
 
-| ChunkMeta Field | Source                                      |
-|-----------------|---------------------------------------------|
-| ID              | Directory name (authoritative)              |
-| StartTS         | Entry 0, writeTS field                      |
-| EndTS           | Last entry, writeTS field                   |
-| Sealed          | flags byte in header (bit 0)                |
-
----
-
-## ingest.idx / source.idx -- Timestamp Indexes
-
-Sorted timestamp indexes mapping IngestTS or SourceTS to record positions within a chunk. Only built for sealed chunks. Both files share the same format; they differ only in the type byte (`'I'` for ingest, `'s'` for source).
-
-### Layout
-
-```
-+---------------------------+
-|     Header (8 bytes)      |
-+---------------------------+
-|     Entry 0 (12 bytes)    |
-+---------------------------+
-|     Entry 1               |
-+---------------------------+
-|     ...                   |
-+---------------------------+
-|     Entry N-1             |
-+---------------------------+
-```
-
-### Header (8 bytes)
-
-| Offset | Size | Field      | Description                                       |
-|--------|------|------------|---------------------------------------------------|
-| 0      | 1    | signature  | `0x69` (`'i'`)                                    |
-| 1      | 1    | type       | `0x49` (`'I'`) for ingest, `0x73` (`'s'`) for source |
-| 2      | 1    | version    | `0x01`                                            |
-| 3      | 1    | flags      | Bit 0: complete (`0x01`)                          |
-| 4      | 4    | entryCount | Number of index entries (uint32)                  |
-
-### Entry (12 bytes each)
-
-| Offset | Size | Field     | Description                          |
-|--------|------|-----------|--------------------------------------|
-| 0      | 8    | timestamp | Timestamp (int64 Unix nanos)         |
-| 8      | 4    | recordPos | Record index (uint32)                |
-
-**Total file size: 8 + (entryCount × 12) bytes**
-
-Entries are sorted by timestamp for binary search. Used by the query engine to seek to the first record at or after a given time.
+| ChunkMeta Field             | Source                                      |
+|-----------------------------|---------------------------------------------|
+| ID                          | Directory name (authoritative)              |
+| RecordCount                 | `(fileSize - 12) / 74`                      |
+| WriteStart                  | Entry 0, writeTS field                      |
+| WriteEnd                    | Last entry, writeTS field                   |
+| IngestStart / IngestEnd     | Min / max ingestTS over every entry         |
+| SourceStart / SourceEnd     | Min / max non-zero sourceTS over every entry |
+| Sealed                      | flags byte in header (bit 0)                |
 
 ---
 
 ## token.idx -- Token Index
 
-Inverted index mapping each token to the list of record indices where that token appears within a chunk. Only built for sealed chunks.
+Inverted index mapping each token to the list of record indices where that token appears within a chunk. Built for sealed chunks.
 
 ### Tokenization Rules
 
@@ -380,16 +358,17 @@ Each record is deduplicated: a token appears at most once per record in the post
 +---------------------------+
 ```
 
-### Header (24 bytes)
+### Header (8 bytes)
 
 | Offset | Size | Field    | Description                        |
 |--------|------|----------|------------------------------------|
 | 0      | 1    | signature| `0x69` (`'i'`)                     |
 | 1      | 1    | type     | `0x6B` (`'k'`)                     |
 | 2      | 1    | version  | `0x01`                             |
-| 3      | 1    | flags    | `0x00` (reserved)                  |
-| 4      | 16   | chunkID  | Chunk GLID (raw bytes)             |
-| 20     | 4    | keyCount | Number of distinct tokens (uint32) |
+| 3      | 1    | flags    | Bit 0: complete (`0x01`)           |
+| 4      | 4    | keyCount | Number of distinct tokens (uint32) |
+
+The chunk is identified by the directory the file sits in, not by the file.
 
 ### Key Table Entry (variable size)
 
@@ -406,15 +385,15 @@ Key entries are sorted by token string for deterministic output and binary searc
 
 Flat array of `uint32` record indices (4 bytes each). Each key entry references a contiguous slice of this blob via `postingOffset` (byte offset from the start of the posting blob) and `postingCount` (number of indices).
 
-**Total file size: 24 + (sum of key entry sizes) + (totalIndices x 4) bytes**
+**Total file size: 8 + (sum of key entry sizes) + (totalIndices x 4) bytes**
 
 ---
 
 ## ingest.bt / source.bt -- B+ Tree Indexes
 
-File-backed B+ trees mapping timestamps to record positions within the active chunk. `ingest.bt` indexes IngestTS; `source.bt` indexes SourceTS. Both use the same on-disk format.
+File-backed B+ trees mapping timestamps to record positions within an unsealed chunk the chunk manager writes. `ingest.bt` indexes IngestTS; `source.bt` indexes SourceTS. Both use the same on-disk format.
 
-These indexes exist **only while the chunk is active** — they are deleted at seal time. Sealed chunks use `_time.idx` and `_token.idx` instead.
+These indexes exist **only while the chunk is unsealed** — they are deleted when the chunk is converted to `data.glcb`, whose embedded IngestTS and SourceTS index sections take their place.
 
 ### Page Structure
 
@@ -477,35 +456,126 @@ Duplicate keys are allowed; entries with equal keys are secondarily ordered by v
 
 ---
 
+## Segment -- Pipeline Segment File
+
+The unit the pipeline writes records into and moves between nodes
+(`backend/internal/pipeline/segment`). Segmentation appends to a segment in
+`working/`; at completion the writer appends the index tails, sets the
+complete flag and renames the file into `completed/`. Homes pull completed
+segments into `pre-head/` and promote them to `head/`, where chunking reads
+them. The file name is the segment GLID.
+
+### Layout
+
+```
++-------------------------------+
+|     Header (104 bytes)        |
++-------------------------------+
+|     Record frames             |
+|  [frameLen:u32][frame] × N    |
++-------------------------------+
+|  EventID index (N × 48)       |   completed segments only
++-------------------------------+
+|  SourceTS index (M × 12)      |   completed segments only
++-------------------------------+
+```
+
+The header is rewritten in place after every append, record first and header
+second, so the header is never ahead of the data. `dataEnd` is the recovery
+anchor: on open, the frame starting at `dataEnd` is the last committed record,
+and bytes past its end are a torn append and are discarded.
+
+### Header (104 bytes)
+
+| Offset | Size | Field               | Description                                                        |
+|--------|------|---------------------|--------------------------------------------------------------------|
+| 0      | 1    | signature           | `0x69` (`'i'`)                                                     |
+| 1      | 1    | type                | `0x53` (`'S'`)                                                     |
+| 2      | 1    | version             | `0x01`                                                             |
+| 3      | 1    | flags               | Bit 0: complete (`0x01`)                                           |
+| 4      | 16   | segmentID           | Segment GLID (raw bytes)                                           |
+| 20     | 16   | vaultID             | Vault GLID (raw bytes)                                             |
+| 36     | 4    | recordCount         | Records appended (uint32)                                          |
+| 40     | 4    | dataEnd             | Byte offset where the last written record starts (uint32)          |
+| 44     | 8    | firstIngestTS       | IngestTS of the first record (int64 Unix nanos)                    |
+| 52     | 8    | lastIngestTS        | IngestTS of the last record (int64 Unix nanos)                     |
+| 60     | 4    | indexOffset         | Byte offset of the EventID index (uint32, 0 while working)         |
+| 64     | 8    | segmentChecksum     | XXH64 of the record bytes `[104, end of the frame at dataEnd)`     |
+| 72     | 4    | indexChecksum       | CRC32 (IEEE) of the EventID index                                  |
+| 76     | 8    | firstSourceTS       | Min non-zero SourceTS (int64 Unix nanos, 0 = none)                 |
+| 84     | 8    | lastSourceTS        | Max non-zero SourceTS (int64 Unix nanos, 0 = none)                 |
+| 92     | 4    | sourceIndexOffset   | Byte offset of the SourceTS index (uint32)                         |
+| 96     | 4    | sourceIndexCount    | SourceTS index entries (uint32)                                    |
+| 100    | 4    | sourceIndexChecksum | CRC32 (IEEE) of the SourceTS index                                 |
+
+The segment checksum is XXH64 rather than a CRC because every frame ends in
+its own CRC32: a CRC rolled over `body ++ CRC(body)` is constant, so it would
+not detect a same-length substitution.
+
+### Record Frame (variable size)
+
+Each frame is preceded by its `frameLen:u32` (body length, excluding the prefix):
+
+| Offset | Size     | Field      | Description                                          |
+|--------|----------|------------|------------------------------------------------------|
+| 0      | 16       | ingesterID | EventID: ingester GLID                               |
+| 16     | 16       | nodeID     | EventID: ingesting node GLID                         |
+| 32     | 8        | ingestTS   | EventID: ingest timestamp (int64 Unix nanos)         |
+| 40     | 4        | ingestSeq  | EventID: per-ingester sequence (uint32)              |
+| 44     | 8        | sourceTS   | Source timestamp (int64 Unix nanos, 0 = none)        |
+| 52     | 8        | writeTS    | Write timestamp (int64 Unix nanos)                   |
+| 60     | varies   | attrs      | `[count:u16]` then `[keyLen:u16][key][valLen:u16][val]` × count, keys sorted |
+| varies | 4        | rawLen     | Length of the raw log body (uint32)                  |
+| varies | rawLen   | raw        | Raw log message bytes                                |
+| varies | 4        | crc        | CRC32 (IEEE) of every preceding byte of the body     |
+
+The fixed-width EventID leads the frame so the merge that builds a chunk can
+order records by reading only the length prefix and the EventID.
+
+### EventID Index (recordCount × 48 bytes)
+
+One entry per record, sorted by EventID (then file position): the 44-byte
+EventID followed by `filePos:u32`, the byte offset of the record's frame length
+prefix. A position in EventID order is an index into this array.
+
+### SourceTS Index (sourceIndexCount × 12 bytes)
+
+One 12-byte entry (`timestamp:i64`, `pos:u32`) per record with a non-zero
+SourceTS, sorted by timestamp then position; `pos` is the record's EventID-order
+position. Records without a SourceTS have no entry.
+
+---
+
 ## GLCB -- GastroLog Chunk Blob
 
-Single-file, self-describing format for sealed chunks. Used universally:
-local-only vaults store one `data.glcb` per sealed chunk; cloud-backed
-vaults upload the same bytes to object storage (re-framed per section as a
-transport layer — see "Cloud transport framing" below) and keep a local
-cache copy with the same `data.glcb` name (gastrolog-69fd5; see [`docs/obsoleted/vault_redesign.md`](./obsoleted/vault_redesign.md)
-decisions 6 and 9). The on-disk format is unconditionally **uncompressed**:
+Single-file, self-describing format for sealed chunks (`backend/internal/chunk/glcb`).
+Every home stores one `data.glcb` per sealed chunk; a cloud-backed vault
+uploads the same bytes to object storage, re-framed per section as a
+transport layer (see "Cloud transport framing" below), and keeps a cached
+copy under the same `data.glcb` name. The on-disk format is **uncompressed**:
 every section is directly readable without a decompression step.
 
-Sorted IngestTS and SourceTS indexes are embedded after the records
-section, with a TOC footer. This enables time-range seeking against the
-local file (or against a downloaded cache copy) without rescanning records.
+Sorted IngestTS and SourceTS indexes are embedded after the record index,
+with a TOC footer. This enables time-range seeking against the local file
+(or against a downloaded cache copy) without rescanning records.
 
 ### Layout
 
 ```
 +---------------------------+
-|     Header (96 bytes)     |
+|     Preamble (4 bytes)    |
++---------------------------+
+|  Layout metadata (128 B)  |
++---------------------------+
+|     Records section       |
+|  [frameLen:u32][frame] ×  |
+|     recordCount           |
 +---------------------------+
 |     Dictionary            |
 |   (dictEntries entries)   |
 +---------------------------+
 |     Record Index          |
 |   (recordCount × 12)      |
-+---------------------------+
-|     Records section       |
-|  [frameLen:u32][frame] ×  |
-|     recordCount           |
 +---------------------------+
 |   IngestTS Index          |
 |   (recordCount × 12)      |
@@ -520,7 +590,11 @@ local file (or against a downloaded cache copy) without rescanning records.
 +---------------------------+
 ```
 
-### Header (96 bytes)
+The records section starts at byte 132. A writer stages record frames in a
+work file beside the finished blob and writes the fixed prefix, the records
+and the variable sections at finalize, then renames the blob into place.
+
+### Preamble (4 bytes)
 
 | Offset | Size | Field        | Description                                  |
 |--------|------|--------------|----------------------------------------------|
@@ -528,17 +602,31 @@ local file (or against a downloaded cache copy) without rescanning records.
 | 1      | 1    | type         | `0x67` (`'g'`)                               |
 | 2      | 1    | version      | `0x01`                                       |
 | 3      | 1    | flags        | Reserved (`0x00`)                            |
-| 4      | 16   | chunkID      | Chunk GLID (raw bytes)                       |
-| 20     | 16   | vaultID      | Vault GLID (raw bytes)                       |
-| 36     | 4    | recordCount  | Total records (uint32)                       |
-| 40     | 8    | writeStart   | Min WriteTS (int64 Unix nanos)               |
-| 48     | 8    | writeEnd     | Max WriteTS (int64 Unix nanos)               |
-| 56     | 8    | ingestStart  | Min IngestTS (int64 Unix nanos)              |
-| 64     | 8    | ingestEnd    | Max IngestTS (int64 Unix nanos)              |
-| 72     | 8    | sourceStart  | Min SourceTS (int64 Unix nanos, 0 = none)    |
-| 80     | 8    | sourceEnd    | Max SourceTS (int64 Unix nanos, 0 = none)    |
-| 88     | 4    | dictEntries  | Number of dictionary entries (uint32)        |
-| 92     | 4    | dictSize     | Total bytes of dictionary section (uint32)   |
+
+### Layout Metadata (128 bytes, at offset 4)
+
+Offsets below are relative to the start of the block; absolute offset = 4 + relative.
+
+| Offset | Size | Field             | Description                                          |
+|--------|------|-------------------|------------------------------------------------------|
+| 0      | 16   | chunkID           | Chunk GLID (raw bytes)                               |
+| 16     | 16   | vaultID           | Vault GLID (raw bytes)                               |
+| 32     | 4    | recordCount       | Total records (uint32)                               |
+| 36     | 8    | writeStart        | Min WriteTS (int64 Unix nanos)                       |
+| 44     | 8    | writeEnd          | Max WriteTS (int64 Unix nanos)                       |
+| 52     | 8    | ingestStart       | Min IngestTS (int64 Unix nanos)                      |
+| 60     | 8    | ingestEnd         | Max IngestTS (int64 Unix nanos)                      |
+| 68     | 8    | sourceStart       | Min non-zero SourceTS (int64 Unix nanos, 0 = none)   |
+| 76     | 8    | sourceEnd         | Max non-zero SourceTS (int64 Unix nanos, 0 = none)   |
+| 84     | 4    | dictEntries       | Number of dictionary entries (uint32)                |
+| 88     | 4    | dictSize          | Total bytes of the dictionary section (uint32)       |
+| 92     | 4    | recordsOff        | Absolute offset of the records section (uint32, 132) |
+| 96     | 4    | recordsSize       | Bytes in the records section (uint32)                |
+| 100    | 4    | dictOff           | Absolute offset of the dictionary (uint32)           |
+| 104    | 4    | indexOff          | Absolute offset of the record index (uint32)         |
+| 108    | 4    | indexSize         | Bytes in the record index (uint32)                   |
+| 112    | 1    | ingestTSMonotonic | `1` when IngestTS never decreases in record (merge) order |
+| 113    | 15   | —                 | Zero                                                 |
 
 ### Dictionary (variable size)
 
@@ -557,7 +645,7 @@ Flat array of offset/size pairs enabling O(1) random access to any record:
 
 | Offset | Size | Field         | Description                                         |
 |--------|------|---------------|-----------------------------------------------------|
-| 0      | 8    | offset        | Byte offset into the records section (uint64)       |
+| 0      | 8    | offset        | Offset of the frame body, relative to the records section start (past the u32 frameLen prefix) (uint64) |
 | 8      | 4    | size          | Frame size excluding the u32 frameLen prefix (uint32)|
 
 ### Records Section (uncompressed)
@@ -581,13 +669,13 @@ Each record is written as `[frameLen:u32][frame body]`, frame after frame, with 
 
 ### Compression
 
-The on-disk format is uncompressed. Cloud-backed vaults wrap the entire blob with a single zstd stream **only on transport** (uploaded as `chunk.glcb.zst`); the local cache, after `DownloadAndUnwrap`, is a plain `data.glcb` byte-for-byte equivalent to a freshly-sealed local chunk. See [`docs/obsoleted/vault_redesign.md`](./obsoleted/vault_redesign.md) decisions 6 and 9.
+The on-disk format is uncompressed. Compression exists **only on transport**: a cloud-backed vault uploads the blob as a transport-framed object whose frames are each zstd-compressed (see "Cloud transport framing" below); the local cache, after `DownloadAndUnwrap`, is a plain `data.glcb` byte-for-byte equivalent to a freshly-sealed local chunk.
 
-Content reads on cloud-backed chunks download the whole object (reassembled once), populate the warm cache, and serve subsequent reads via the local-cursor fast path. Index sections are the exception: the transport framing (below) lets a reader fetch one section — footer, directory, one frame — in KB-scale range GETs, which is how cold chunks answer histogram rank lookups exactly without a warm-cache fill.
+Content reads on cloud-backed chunks download the whole object (reassembled once), populate the cached copy, and serve subsequent reads via the local-cursor fast path. Index sections are the exception: the transport framing (below) lets a reader fetch one section — footer, directory, one frame — in KB-scale range GETs, which is how uncached chunks answer histogram rank lookups exactly without a download.
 
 ### Embedded TS Indexes
 
-Two sorted timestamp indexes are appended after the records section. Each index uses the same 12-byte entry format as `ingest.idx`/`source.idx`:
+Two sorted timestamp index sections follow the record index. Each is a flat array of 12-byte entries (`tsindex.EntrySize`), sorted by timestamp then record position:
 
 | Offset | Size | Field     | Description                          |
 |--------|------|-----------|--------------------------------------|
@@ -601,7 +689,7 @@ No header — the TOC provides section offsets and sizes. Entry count is derived
 
 ### TOC Entries (entryCount × 42 bytes)
 
-Each TOC entry describes one section in the blob (e.g. IngestTS index, SourceTS index). Readers look up entries by section type to find offset + size + content hash.
+Each TOC entry describes one section in the blob. Readers look up entries by section type to find offset + size + content hash. The writer emits three entries, each at section version 1: the layout metadata (`'B'`, offset 4), the IngestTS index (`'I'`) and the SourceTS index (`'s'`).
 
 | Offset | Size | Field    | Description                                       |
 |--------|------|----------|---------------------------------------------------|
@@ -631,15 +719,19 @@ hashes to it.
 
 ### Blob Object Metadata
 
-When uploaded, the following user-defined metadata is set on the cloud object for filtering without download:
+When uploaded, the following user-defined metadata is set on the cloud object, so a listing can reconstruct chunk metadata without downloading the object (`glcb.EncodeObjectMetadata`):
 
-| Key            | Value                              |
-|----------------|------------------------------------|
-| `chunk_id`     | 26-char base32hex chunk ID         |
-| `vault_id`     | GLID string (26-char base32hex)    |
-| `record_count` | Decimal string                     |
-| `start_ts`     | RFC 3339 timestamp                 |
-| `end_ts`       | RFC 3339 timestamp                 |
+| Key            | Value                                             |
+|----------------|---------------------------------------------------|
+| `chunk_id`     | 26-char base32hex chunk ID                        |
+| `vault_id`     | 26-char base32hex vault ID                        |
+| `record_count` | Decimal string                                    |
+| `raw_bytes`    | Decimal string: bytes in the records section      |
+| `write_start` / `write_end`   | RFC 3339 (nanosecond) timestamps   |
+| `ingest_start` / `ingest_end` | RFC 3339 (nanosecond) timestamps   |
+| `source_start` / `source_end` | RFC 3339 (nanosecond) timestamps   |
+
+A time key whose bound is zero is omitted rather than written as the epoch.
 
 The cloud object key is `vault-<vault>/<chunk>.glcb`; the bytes carry the transport framing below and reassemble into a byte-identical plain `data.glcb` on download.
 
@@ -766,11 +858,10 @@ All file formats include validation checks on decode:
 | attr_dict.log  | Min size (4 bytes), signature, type, version                   |
 | ingest.bt      | Signature+type, version, codec size match on reopen            |
 | source.bt      | Signature+type, version, codec size match on reopen            |
-| ingest.idx     | Min size, signature+type, version, complete flag               |
-| source.idx     | Min size, signature+type, version, complete flag               |
 | token.idx      | Min size, signature+type, version, key size, posting size      |
 | json.idx       | Min size, signature+type, version, complete flag, status byte  |
 | attr_*.idx     | Min size, signature+type, version, complete flag               |
 | kv_*.idx       | Min size, signature+type, version, complete flag, status byte  |
+| segment        | Signature+type, version, header/record reconciliation, XXH64 segment checksum, per-frame CRC32, index and SourceTS index CRC32 + layout |
 | data.glcb (GLCB) | Signature+type, version, TOC footer magic + entry hashes     |
 | lookup table   | Min size (20), signature+type, version, complete flag          |

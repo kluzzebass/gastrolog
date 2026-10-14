@@ -384,11 +384,11 @@ message VaultConfig {
   // removed the mirror).
   repeated VaultPlacement placements = 11;
   string cache_eviction = 12;               // "lru" (default) or "ttl"
-  // Warm-cache soft cap for cloud-backed chunks, as a size expression
+  // Cached-copy soft cap for cloud-backed chunks, as a size expression
   // ("1GiB"). Empty = unset (defaulted at creation for cloud vaults); "0"
   // rejected.
   string cache_budget = 13;
-  // Warm-cache eviction age (ttl mode only), as a duration expression ("1h",
+  // Cached-copy eviction age (ttl mode only), as a duration expression ("1h",
   // "7d"). Empty = unset.
   string cache_ttl = 14;
   string retention_disposition = 15;         // "delete", "route", or "transfer" — what retention does with aged-out records

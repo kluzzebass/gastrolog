@@ -15,7 +15,7 @@ import (
 // buildLargeBlob writes a GLCB of roughly targetBytes to a temp file and
 // returns its path and actual on-disk size. Raw payloads are pseudo-random so
 // zstd cannot shrink the blob away — the mapping we drain is the size we ask
-// for, which is what makes the page-cache warm meaningful to measure.
+// for, which is what makes the page-cache prefetch meaningful to measure.
 func buildLargeBlob(tb testing.TB, targetBytes int64) (string, int64) {
 	tb.Helper()
 	const rawBytes = 2048
@@ -63,7 +63,7 @@ func buildLargeBlob(tb testing.TB, targetBytes int64) (string, int64) {
 }
 
 // drainAll reads every record front-to-back, the access pattern the retention
-// fan-out drain produces and the one PrewarmSequential targets.
+// fan-out drain produces and the one PrefetchSequential targets.
 func drainAll(tb testing.TB, rd *glcb.Reader, count uint32) {
 	for pos := uint32(0); pos < count; pos++ {
 		if _, err := rd.ReadFanOutRecord(pos); err != nil {
@@ -72,24 +72,25 @@ func drainAll(tb testing.TB, rd *glcb.Reader, count uint32) {
 	}
 }
 
-// BenchmarkPrewarmDrain compares a sequential full-chunk drain with and without
-// the madvise prewarm.
+// BenchmarkPrefetchDrain compares a sequential full-chunk drain with and without
+// the madvise prefetch.
 //
-// COLD-CACHE CAVEAT: there is no root-free way to purge the OS page cache on
+// PAGE-CACHE CAVEAT: there is no root-free way to purge the OS page cache on
 // macOS (`purge` needs root; Linux drop_caches needs root too). Each iteration
 // re-opens the same file, so after the first pass the blob is fully resident —
-// this measures the WARM-cache drain. On a dev Mac with fast NVMe and a warm
-// cache the prewarm delta is expected to be noise (madvise on already-resident
-// pages is nearly free; there are no major faults to eliminate). The benchmark
-// exists to (a) prove the wired warm adds no meaningful overhead and (b) give a
-// real seam to re-measure on a disk-saturated, cold-cache host — where 1io54g's
+// this measures the drain of a page-cache-resident blob. On a dev Mac with fast
+// NVMe and a resident blob the prefetch delta is expected to be noise (madvise
+// on already-resident pages is nearly free; there are no major faults to
+// eliminate). The benchmark exists to (a) prove the wired prefetch adds no
+// meaningful overhead and (b) give a real seam to re-measure on a
+// disk-saturated host whose page cache does not hold the blob — where the
 // major-fault stalls actually occur. Interpret single-host numbers accordingly.
-func BenchmarkPrewarmDrain(b *testing.B) {
+func BenchmarkPrefetchDrain(b *testing.B) {
 	const target = 128 << 20 // 128 MiB
 	path, size := buildLargeBlob(b, target)
 	b.Logf("GLCB on-disk size: %d bytes (%.1f MiB)", size, float64(size)/(1<<20))
 
-	run := func(b *testing.B, prewarm bool) {
+	run := func(b *testing.B, prefetch bool) {
 		b.SetBytes(size)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -101,8 +102,8 @@ func BenchmarkPrewarmDrain(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			if prewarm {
-				rd.PrewarmSequential()
+			if prefetch {
+				rd.PrefetchSequential()
 			}
 			drainAll(b, rd, rd.Meta().RecordCount)
 			_ = rd.Close()
@@ -110,6 +111,6 @@ func BenchmarkPrewarmDrain(b *testing.B) {
 		}
 	}
 
-	b.Run("NoPrewarm", func(b *testing.B) { run(b, false) })
-	b.Run("Prewarm", func(b *testing.B) { run(b, true) })
+	b.Run("NoPrefetch", func(b *testing.B) { run(b, false) })
+	b.Run("Prefetch", func(b *testing.B) { run(b, true) })
 }

@@ -31,7 +31,7 @@ Concrete shape:
 - **Hotcache footer**: a small (KB-scale) dense blob at the end of every sealed chunk file containing the FST roots, posting-list directory, bloom filters, and column metadata. A remote node opens the chunk by reading the footer alone via one HTTP range GET, then planning targeted byte-range fetches into the body.
 - **Optional, layered on top**: CLP-style template extraction (or pure-Go Drain) at ingest, with the variable streams stored in the columnar fast-field store. Skip if you want to keep the chunk format format-agnostic; revisit when ratio matters more than format simplicity.
 
-The single biggest performance lever from production systems (Lucene, ClickHouse, Splunk, Husky, Quickwit) is **always decide-then-decompress**, never decompress-then-search. Every component above respects that ordering. The single biggest engineering lever is **the codec abstraction** — Lucene proved this in 2010 and Bluge proved it works in Go; pick a versioned codec interface from day one so the chunk format can evolve without rewrites.
+The single biggest performance lever from production systems (Lucene, ClickHouse, Splunk, Husky, Quickwit) is **always decide-then-decompress**, never decompress-then-search. Every component above respects that ordering. The single biggest engineering lever is **the codec abstraction** — Lucene proved this in 2010 and Bluge proved it works in Go; pick a codec interface with pluggable index types per field from day one. Before GastroLog v1.0.0 the format changes in place: no version dispatch and no readers for old layouts. Conversion code bloated the codebase once and was cut out; a cluster with an older format is reinitialized.
 
 What this is **not**: it is not Loki's "scan everything" model (only works with strict label discipline that GastroLog's "any vault, any storage shape" doesn't enforce); it is not Honeycomb Retriever's pure-column-scan model (works for analytics queries on wide events, loses to bloom-skipping for grep-style log queries); and it is not a CLP-only design (cgo cost is real, and CLP's search engine is not exposed in `clp-ffi-go` as of April 2026).
 
@@ -195,26 +195,30 @@ Approaches compose well or poorly. The matrix below names the pairs that are exp
 
 **Phase 0 — Spike and benchmark (1–2 weeks).** Before committing format, build a minimal per-chunk index against an existing GLCB chunk: Vellum FST over a single tokenized field + Roaring posting list per term + a flat bloom over all tokens in the chunk. Measure (a) build time at seal, (b) index size as a fraction of the chunk's raw payload, (c) search latency vs the current scan path. Concrete acceptance: 5× search speedup on `level=error` style queries, ≤15% index size overhead. **Open issue: spike issue, no production code.**
 
-**Phase 1 — Codec abstraction + base format (3–4 weeks).** Land a versioned codec interface for the GLCB chunk format, modeled on Lucene's `Codec` and Bluge's Ice. The interface MUST allow:
+**Phase 1 — Codec abstraction + base format (3–4 weeks).** Land a codec interface for the GLCB chunk format, modeled on Lucene's `Codec` and Bluge's Ice. The interface MUST allow:
 - mmap-based reads
-- format version embedded in the chunk header
-- old chunks readable after format evolution (no rewrite required)
 - pluggable index types per field
+
+It MUST NOT dispatch on a format version or keep old layouts readable. Before v1.0.0 the GLCB changes in place, and a cluster holding older chunks is reinitialized.
+
+The base format MUST also include:
+- **Block-framed body.** Records are framed per block, matching the bloom blocks. Each block is its own compressed frame in the cloud object, so a planned range read fetches only the matching blocks. Today the body before the first index section is one transport frame, which would force a whole-body download.
+- **Two-level sealed digest.** The digest recorded in the vault-ctl manifest at seal covers the object's directory of per-section and per-block hashes. Each range read is checked against its directory entry, so a footer-only open or a block read is verified against the manifest without the whole object.
 
 Land v1 of the codec with: per-field FST term dict (Vellum), per-term Roaring posting list, per-block bloom filter (`bits-and-blooms/bloom`), and the hotcache footer with the index directory. Do NOT add columnar fast fields or CLP yet.
 
 **Phase 2 — Cross-node footer-only opening (1–2 weeks).** Teach the cluster's chunk forwarder and the cloud-backed reader to fetch just the hotcache footer for remote chunks. Search planner uses the footer to decide which body byte ranges to fetch. Quickwit's `quickwit-search` is the reference. Concrete acceptance: cross-node search of cloud-backed chunks issues O(log N) range GETs instead of full-blob fetches.
 
-**Phase 3 — Columnar fast fields (3–4 weeks).** Add SoA columnar storage for low-cardinality numeric and enum fields (level, status, response time buckets). Bit-pack, GCD-encode, dictionary-encode as appropriate. Read-only at search time, no rewrite of historical chunks (codec abstraction earns its keep here).
+**Phase 3 — Columnar fast fields (3–4 weeks).** Add SoA columnar storage for low-cardinality numeric and enum fields (level, status, response time buckets). Bit-pack, GCD-encode, dictionary-encode as appropriate. Read-only at search time. The format changes in place: chunks sealed before the change are not readable after it, and the cluster is reinitialized.
 
 **Phase 4 — Optional: template extraction (variable scope).** Either path 1 (Drain + custom columnar variable store, pure Go) or path 2 (`clp-ffi-go` for IR encoding only). Path 1 is the safer default; path 2 is on the table if the compression ratio gap proves to matter. **Defer the decision** until production data shows the gap is worth the cgo cost.
 
 ### 5.2 Concrete next-step issues to file
 
 1. **Spike: per-chunk Vellum + Roaring + bloom prototype.** Acceptance: benchmark report, decision on continuing.
-2. **Codec abstraction for GLCB chunk format.** Versioned interface, format header bump, migration story for existing chunks.
+2. **Codec abstraction for GLCB chunk format.** Pluggable per-field index types, block-framed body and the two-level digest. The format changes in place, with no version dispatch and no migration.
 3. **Hotcache footer in chunk format.** On-disk layout, builder API, remote-open path in cluster forwarder.
-4. **Per-field inverted index v1.** FST + Roaring + bloom for tokenized string fields. Default on for newly-sealed chunks; opt-in for replay of historical chunks.
+4. **Per-field inverted index v1.** FST + Roaring + bloom for tokenized string fields. Built at seal for every chunk.
 5. **Columnar fast fields v1.** Bit-packed/dictionary-encoded numeric columns. Aggregations (count, sum, avg) read columns directly.
 6. **Cross-node search via footer-only open.** Forwarder fetches footer; search planner issues targeted byte-range GETs. Tested against the cluster reliability matrix in [gastrolog-5ff7z](https://github.com/kluzzebass/gastrolog/issues).
 7. **Decision issue (defer): template extraction strategy.** Path 1 vs path 2 vs none. Decide after Phase 1 production data is available.
@@ -230,15 +234,18 @@ Land v1 of the codec with: per-field FST term dict (Vellum), per-term Roaring po
 ### 5.4 Integration points with the GLCB chunk format ([gastrolog-2n697](https://github.com/kluzzebass/gastrolog/issues))
 
 The current GLCB blob carries:
-- A header with format version + flags
-- The uncompressed body (records + record index; cloud objects carry per-section transport frames with a raw tail directory — gastrolog-67uqn4 — so individual sections are range-readable)
-- Embedded TS indexes (per gastrolog-2n697)
+- A preamble and layout block.
+- The uncompressed body: records, string dictionary and record index. It is uncompressed on local disk so it can be mmapped.
+- The ingest and source timestamp indexes as TOC sections.
+- A TOC and footer carrying the blob digest.
 
-The proposed extension:
-- Bump the format version
-- Add a **hotcache footer** at the tail of the file: index directory, FST roots, bloom filters, column metadata
-- The body stays uncompressed; index data lives in the footer (zstd'd or not — the footer is small enough that compression ratio matters less than parse speed)
-- Old chunks (without footer) remain readable; the codec dispatches on the format version in the header
+The cloud object re-frames the blob for range reads: one zstd frame for the body, one per index section, the original tail, a directory of frame hashes, and a transport footer. Individual index sections are range-readable today. The body is not, because it is one frame.
+
+The extension, made in place:
+- Frame the body per block, so blocks are range-readable.
+- Add the index sections and a **hotcache footer** at the tail: index directory, FST roots, bloom filters, column metadata. The footer is small enough that parse speed matters more than compression ratio.
+- Make the sealed digest two-level, covering the directory of section and block hashes.
+- Chunks sealed under the previous layout are not read. The cluster is reinitialized.
 
 This is the same shape as Quickwit splits (Tantivy index + hotcache footer) and works equally well for local file chunks and S3-backed cloud-backed chunks — the footer is the universal "open me cheaply" entry point.
 

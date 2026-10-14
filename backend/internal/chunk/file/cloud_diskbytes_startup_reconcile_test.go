@@ -14,7 +14,7 @@ import (
 // corruptCloudDiskBytes directly overwrites a cloud-index entry's persisted
 // diskBytes, bypassing updateCloudDiskBytes — simulating the crash window
 // the reconciliation pass exists to close: a local mutation (eviction's
-// os.Remove, a re-warm's rename) that landed without its paired index
+// os.Remove, a re-download's rename) that landed without its paired index
 // update (process died in between).
 func corruptCloudDiskBytes(t *testing.T, cm *Manager, id chunk.ChunkID, diskBytes int64) {
 	t.Helper()
@@ -72,7 +72,7 @@ func TestStartupReconcilesStalePositiveDiskBytes(t *testing.T) {
 		t.Fatalf("Meta before crash simulation: %v", err)
 	}
 	if meta.DiskBytes <= 0 {
-		t.Fatalf("fixture setup: expected a cached warm copy, DiskBytes = %d", meta.DiskBytes)
+		t.Fatalf("fixture setup: expected a cached copy, DiskBytes = %d", meta.DiskBytes)
 	}
 
 	// Simulate the crash: the local file is gone (as eviction would leave
@@ -102,7 +102,7 @@ func TestStartupReconcilesStalePositiveDiskBytes(t *testing.T) {
 }
 
 // TestStartupReconcilesStaleZeroDiskBytes pins the mirror crash window: a
-// completed re-warm (or upload) whose rename landed but whose paired
+// completed re-download (or upload) whose rename landed but whose paired
 // updateCloudDiskBytes call didn't leaves a persisted 0 next to a real,
 // present file. A restart must stat the file and correct the claim up to
 // its actual size.
@@ -121,7 +121,7 @@ func TestStartupReconcilesStaleZeroDiskBytes(t *testing.T) {
 	}
 	wantSize := meta.DiskBytes
 	if wantSize <= 0 {
-		t.Fatalf("fixture setup: expected a cached warm copy, DiskBytes = %d", wantSize)
+		t.Fatalf("fixture setup: expected a cached copy, DiskBytes = %d", wantSize)
 	}
 
 	// Simulate the crash: the persisted entry regressed to 0 (as if the

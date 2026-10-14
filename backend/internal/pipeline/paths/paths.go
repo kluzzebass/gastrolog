@@ -11,7 +11,7 @@ import (
 	"gastrolog/internal/glid"
 )
 
-// On-disk storage area names for the pipeline (design-notes: Storage areas).
+// On-disk storage area names for the pipeline.
 const (
 	Working   = "working"
 	Completed = "completed"

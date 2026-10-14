@@ -19,8 +19,8 @@ import (
 )
 
 // The transport format exists so a byte range of the cloud object means
-// something: per-section zstd frames plus a raw directory at the tail. A cold
-// chunk's TS index is then reachable in KB-scale range GETs instead of a
+// something: per-section zstd frames plus a raw directory at the tail. An
+// uncached chunk's TS index is then reachable in KB-scale range GETs instead of a
 // full-blob fetch, while the bulk — and any future fat index section — stays
 // compressed.
 
@@ -134,7 +134,7 @@ func (f *countingFetcher) DownloadRange(ctx context.Context, key string, off, le
 	return f.store.DownloadRange(ctx, key, off, length)
 }
 
-// The point of the whole exercise: a cold chunk's ITSI resolves through
+// The point of the whole exercise: an uncached chunk's ITSI resolves through
 // range GETs, decodes through the section registry, and answers exactly
 // like the local mmap view.
 func TestFetchRemoteSectionMatchesLocalView(t *testing.T) {

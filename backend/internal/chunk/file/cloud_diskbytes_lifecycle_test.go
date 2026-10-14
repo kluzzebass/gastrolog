@@ -12,19 +12,19 @@ import (
 // TestCloudDiskBytesLifecycle drives the real Manager through the full
 // cloud-backed chunk lifecycle against a fake blob store, pinning the
 // size measurements: DiskBytes always means the chunk's LOCAL on-disk
-// footprint (the warm-cache state), never the compressed cloud object
+// footprint (the cached-copy state), never the compressed cloud object
 // size — and CloudBytes always means the cloud object size, never the
 // local footprint.
 //
-//   - sealed -> uploaded: the local data.glcb stays on disk as the warm
-//     cache (upload only deletes the redundant multi-file artifacts), so
+//   - sealed -> uploaded: the local data.glcb stays on disk as the cached
+//     copy (upload only deletes the redundant multi-file artifacts), so
 //     DiskBytes must still reflect that local file's real size, not the
 //     compressed blob's transport size. CloudBytes must record the blob
 //     size.
 //   - evicted: DiskBytes drops to 0 (nothing local to reclaim) and the
 //     disk claim (chunk.DiskClaim) follows it to 0. CloudBytes is
 //     unchanged — the object is still in the cloud store.
-//   - re-warmed: reading the chunk downloads it back into the local
+//   - re-downloaded: reading the chunk downloads it back into the local
 //     cache; DiskBytes reports the newly-cached file's size again.
 func TestCloudDiskBytesLifecycle(t *testing.T) {
 	t.Parallel()
@@ -41,11 +41,11 @@ func TestCloudDiskBytesLifecycle(t *testing.T) {
 	glcbPath := filepath.Join(cm.chunkDir(id), dataGLCBFileName)
 	localInfo, err := os.Stat(glcbPath)
 	if err != nil {
-		t.Fatalf("stat warm cache after upload: %v", err)
+		t.Fatalf("stat cached copy after upload: %v", err)
 	}
 	localSize := localInfo.Size()
 
-	// --- sealed -> uploaded: warm cache still on disk ---
+	// --- sealed -> uploaded: cached copy still on disk ---
 	meta, err := cm.Meta(id)
 	if err != nil {
 		t.Fatalf("Meta after upload: %v", err)
@@ -54,7 +54,7 @@ func TestCloudDiskBytesLifecycle(t *testing.T) {
 		t.Fatalf("expected chunk to be cloud-backed after upload")
 	}
 	if meta.DiskBytes != localSize {
-		t.Errorf("post-upload DiskBytes = %d, want local warm-cache file size %d (must not be the compressed blob size)", meta.DiskBytes, localSize)
+		t.Errorf("post-upload DiskBytes = %d, want local cached-copy file size %d (must not be the compressed blob size)", meta.DiskBytes, localSize)
 	}
 	if meta.CloudBytes <= 0 {
 		t.Errorf("post-upload CloudBytes = %d, want > 0 (the uploaded blob's transport size)", meta.CloudBytes)
@@ -77,7 +77,7 @@ func TestCloudDiskBytesLifecycle(t *testing.T) {
 		t.Fatalf("EvictCacheLRU: evicted = %d, want 1", evicted)
 	}
 	if _, err := os.Stat(glcbPath); !os.IsNotExist(err) {
-		t.Fatalf("expected warm cache file removed after eviction, stat err=%v", err)
+		t.Fatalf("expected cached copy file removed after eviction, stat err=%v", err)
 	}
 
 	meta, err = cm.Meta(id)
@@ -94,35 +94,35 @@ func TestCloudDiskBytesLifecycle(t *testing.T) {
 		t.Errorf("DiskClaim after eviction = %d, want 0 (evicted cloud chunk reclaims nothing locally)", got)
 	}
 
-	// --- re-warmed: reading downloads it back into the local cache ---
+	// --- re-downloaded: reading downloads it back into the local cache ---
 	openAndDrain(t, cm, id)
 
-	rewarmedInfo, err := os.Stat(glcbPath)
+	redownloadedInfo, err := os.Stat(glcbPath)
 	if err != nil {
-		t.Fatalf("stat warm cache after re-warm: %v", err)
+		t.Fatalf("stat cached copy after re-download: %v", err)
 	}
 
 	meta, err = cm.Meta(id)
 	if err != nil {
-		t.Fatalf("Meta after re-warm: %v", err)
+		t.Fatalf("Meta after re-download: %v", err)
 	}
-	if meta.DiskBytes != rewarmedInfo.Size() {
-		t.Errorf("post-re-warm DiskBytes = %d, want re-cached file size %d", meta.DiskBytes, rewarmedInfo.Size())
+	if meta.DiskBytes != redownloadedInfo.Size() {
+		t.Errorf("post-re-download DiskBytes = %d, want re-cached file size %d", meta.DiskBytes, redownloadedInfo.Size())
 	}
 	if meta.DiskBytes == 0 {
-		t.Errorf("post-re-warm DiskBytes must be > 0")
+		t.Errorf("post-re-download DiskBytes must be > 0")
 	}
 	if meta.CloudBytes != cloudBytesAfterUpload {
-		t.Errorf("post-re-warm CloudBytes = %d, want unchanged %d", meta.CloudBytes, cloudBytesAfterUpload)
+		t.Errorf("post-re-download CloudBytes = %d, want unchanged %d", meta.CloudBytes, cloudBytesAfterUpload)
 	}
 	if got := chunk.DiskClaim(meta, nil); got != meta.DiskBytes {
-		t.Errorf("DiskClaim after re-warm = %d, want %d", got, meta.DiskBytes)
+		t.Errorf("DiskClaim after re-download = %d, want %d", got, meta.DiskBytes)
 	}
 }
 
 // TestCloudDiskBytesLifecycle_List pins that List() reports the same
 // live DiskBytes as Meta() for a cloud-backed chunk across the
-// evict/re-warm cycle — List() is served from the cached cloudListCache,
+// evict/re-download cycle — List() is served from the cached cloudListCache,
 // which must be invalidated whenever the live local footprint changes.
 func TestCloudDiskBytesLifecycle_List(t *testing.T) {
 	t.Parallel()
@@ -164,6 +164,6 @@ func TestCloudDiskBytesLifecycle_List(t *testing.T) {
 
 	openAndDrain(t, cm, id)
 	if m := findMeta(t); m.DiskBytes <= 0 {
-		t.Errorf("List() post-re-warm DiskBytes = %d, want > 0 (cloudListCache must be invalidated on re-warm)", m.DiskBytes)
+		t.Errorf("List() post-re-download DiskBytes = %d, want > 0 (cloudListCache must be invalidated on re-download)", m.DiskBytes)
 	}
 }

@@ -1,6 +1,16 @@
 Rolling Upgrade Invariants and Algorithm
 ========================================
 
+Status: partly built.
+
+- **Holds today:** rolling restarts work, and protobuf encoding keeps added
+  fields compatible across binary versions (I1–I3).
+- **Not built:** feature gating (I4) and its machinery, meaning the cluster
+  feature level and the per-node binary version.
+- **Consequence:** a node on an older binary skips an unknown command type
+  with an error result while upgraded nodes apply it, so the replicas'
+  state diverges.
+
 Core Safety Invariants
 ----------------------
 

@@ -1,6 +1,5 @@
 // Seal-pip state derivation. Pure functions so the grammar is
-// unit-testable apart from rendering. Design reference:
-// docs/mockups/seal-pips.html.
+// unit-testable apart from rendering.
 //
 // Vocabulary: a CHUNK SEAL is the cluster-wide fact (CmdSealChunk applied,
 // record membership frozen — happens once). A COPY SEAL is one home's

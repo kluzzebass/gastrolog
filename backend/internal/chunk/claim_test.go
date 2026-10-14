@@ -67,7 +67,7 @@ func TestDiskClaim(t *testing.T) {
 
 // TestDiskClaimMixedVaultSum pins the guard-footprint / size-drain-trigger
 // aggregate over a vault holding all three chunk shapes at once: a plain
-// local chunk, a cached cloud-backed chunk (warm local copy), and an
+// local chunk, a cached cloud-backed chunk (cached copy on disk), and an
 // evicted cloud-backed chunk (no local copy). Guards against a regression
 // where an evicted cloud chunk's claim silently falls back to its logical
 // Bytes (double counting: the object still exists in the cloud store,

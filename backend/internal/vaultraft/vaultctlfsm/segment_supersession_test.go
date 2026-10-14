@@ -35,10 +35,10 @@ func buildChunkedSegment(t *testing.T, f *FSM) (glid.GLID, chunk.ChunkID) {
 // two live homes plus one that never acks anything.
 var supersessionHomes = []string{"live-a", "live-b", "dead-home"}
 
-// TestSegmentSupersededByReplicatedChunk is R3's core invariant: a segment
-// becomes superseded (releasable) once the chunk holding its records reaches the
-// RF threshold among the LIVE homes — the dead home that never held the raw
-// segment does not gate it (design-notes 39/R3, the completed/ leak fix).
+// TestSegmentSupersededByReplicatedChunk pins that a segment becomes
+// superseded (releasable) once the chunk holding its records reaches the RF
+// threshold among the LIVE homes — the dead home that never held the raw
+// segment does not gate it, so its completed/ copies cannot leak.
 func TestSegmentSupersededByReplicatedChunk(t *testing.T) {
 	t.Parallel()
 	f := New()
@@ -70,7 +70,7 @@ func TestSegmentSupersededByReplicatedChunk(t *testing.T) {
 
 // TestSegmentSupersededByCloudBackedChunk: a cloud-backed chunk's durable copy
 // is the uploaded object, so it supersedes its segments with no holder at all —
-// the state every home reaches once warm-cache eviction has withdrawn its
+// the state every home reaches once cached-copy eviction has withdrawn its
 // receipt. Before the upload commits, the same zero-holder chunk supersedes
 // nothing.
 func TestSegmentSupersededByCloudBackedChunk(t *testing.T) {

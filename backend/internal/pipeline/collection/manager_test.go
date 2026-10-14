@@ -255,11 +255,11 @@ func TestCollectOnceReceiptsSegmentAlreadyInHead(t *testing.T) {
 	}
 }
 
-// TestCollectOnceReceiptsSegmentPromotedAfterLayoutWarm covers the production
-// race: the first collect pass warms the layout cache while head/ is still
+// TestCollectOnceReceiptsSegmentPromotedAfterLayoutCached covers the production
+// race: the first collect pass populates the layout cache while head/ is still
 // sparse, then distribution promotes a new local segment to head/ before the
 // holder receipt is recorded. The next pass must receipt it without pulling.
-func TestCollectOnceReceiptsSegmentPromotedAfterLayoutWarm(t *testing.T) {
+func TestCollectOnceReceiptsSegmentPromotedAfterLayoutCached(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
 	segA := glid.New()
@@ -291,7 +291,7 @@ func TestCollectOnceReceiptsSegmentPromotedAfterLayoutWarm(t *testing.T) {
 		t.Fatalf("receipts after first pass = %d, want 1", receipts.count())
 	}
 
-	// Simulate LocalHolder: segment B lands in head/ after the layout cache warmed.
+	// Simulate LocalHolder: segment B lands in head/ after the layout cache was populated.
 	segBBytes := writeSegmentBytes(t, vaultID, segB, "local-b")
 	prePath := pullToPreHead(t, root, segB, segBBytes)
 	if _, _, err := collection.PromoteVerified(prePath, root, 0); err != nil {
@@ -306,7 +306,7 @@ func TestCollectOnceReceiptsSegmentPromotedAfterLayoutWarm(t *testing.T) {
 		t.Fatal(err)
 	}
 	if receipts.count() != 2 {
-		t.Fatalf("receipts after second pass = %d, want 2 (promoted-after-warm segment)", receipts.count())
+		t.Fatalf("receipts after second pass = %d, want 2 (segment promoted after the layout was cached)", receipts.count())
 	}
 }
 

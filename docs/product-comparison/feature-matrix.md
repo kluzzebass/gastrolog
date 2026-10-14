@@ -9,7 +9,7 @@ Log-platform capabilities beside Splunk, Graylog, Elastic, OpenSearch, Grafana +
 | **Y** | Commonly available in the core product experience for that column (still may need a specific edition or deployment—follow the feature link to the note). |
 | **P** | Partial, add-on, cloud-vs-self-managed split, or “possible but not the default story.” |
 | **N** | Absent, out of scope for the product, or not meaningful in the same way. |
-| **V** | **Varies** a lot by edition, license tier, or operator setup—treat as “dig in peer docs before assuming.” |
+| **V** | **Varies** a lot by edition, license level, or operator setup—treat as “dig in peer docs before assuming.” |
 
 **Gastrolog:** what ships **today** in this repo. **Peers:** deliberately high level—edition and topology change the story; the linked notes carry the caveats.
 
@@ -41,8 +41,8 @@ Log-platform capabilities beside Splunk, Graylog, Elastic, OpenSearch, Grafana +
 | [**SSO**](#note-sso) | N | Y | V | V | Y | Y | Y | Y |
 | [**Multi-tenant customer isolation**](#note-multitenant) | N | P | P | P | Y | Y | Y | P |
 | [**Multi-node / distributed storage**](#note-cluster) | Y | Y | Y | Y | Y | Y | Y | Y |
-| [**Central tier HA**](#note-central-ha) | Y | Y | Y | Y | Y | P | Y | Y |
-| [**Tiered or archive storage**](#note-tiered) | Y | Y | Y | Y | Y | P | Y | Y |
+| [**Central cluster HA**](#note-central-ha) | Y | Y | Y | Y | Y | P | Y | Y |
+| [**Archive storage and data movement by age**](#note-archive) | Y | Y | Y | Y | Y | P | Y | Y |
 | [**Audit trail**](#note-audit) | N | Y | Y | Y | P | P | Y | Y |
 | [**PII masking or ingest redaction**](#note-masking) | N | Y | P | Y | Y | P | Y | Y |
 | [**Multi-phase / subquery-style composition**](#note-subquery) | N | Y | P | P | P | P | P | Y |
@@ -55,7 +55,7 @@ Log-platform capabilities beside Splunk, Graylog, Elastic, OpenSearch, Grafana +
 2. Update **Gastrolog** cells when shipped behavior changes; keep prose here aligned with the product, not with aspirational write-ups elsewhere.
 3. When a peer column is wrong for a specific edition, fix the cell and extend that row’s note—do not turn this matrix into vendor marketing.
 
-Last reviewed: **2026-04-19**.
+Gastrolog column last reviewed against the code: **2026-10-13**. Peer columns last reviewed: **2026-04-19**.
 
 ## Notes
 
@@ -77,7 +77,7 @@ Last reviewed: **2026-04-19**.
 **Ingest-time pipelines.** **Parse, enrich, drop, sample, route before durable store**—ingest-time pipeline processors. Vendors routinely highlight **processors at ingest** (Datadog *pipelines & processors*, Graylog *pipelines* / data management, Elastic *ingest pipelines*, Splunk *props/transforms* and *Edge Processing*, OpenSearch ingest processors, Sumo *field extraction* / parsing). **Grafana + Loki:** processing is often an agent (for example Alloy) ahead of Loki—**P** for “in the same shipped log product box” depending on how you draw the boundary. **Gastrolog:** **P**—**transform stages on ingest** (parse, enrich, redact, sample in the route) are **not** shipped yet, but **filter-based routing** and **per-route distribution** (fan-out, round-robin, or failover between vault destinations) already cover part of the “shape where data lands before storage” story as a **stopgap** until full ingest pipelines exist.
 
 <a id="note-ingester-ha"></a>
-**Ingester HA.** **Ingestion path**—keeping ingestion available across the cluster (contrast [central tier HA](#note-central-ha) for the serving tier). **Gastrolog:** **Y**—the normal pattern for **passive** (listener) ingesters is **several nodes, same listener on each**, with **load-balanced** inbound traffic (VIP, DNS, Kubernetes Service, anycast, etc.) so senders use one logical endpoint while the cluster absorbs the load in parallel—syslog, HTTP push, and similar protocols. **Singleton** placement is the **other** mode: exactly one active instance of that ingester in the cluster, moved to another node if its node fails. **Active** (pull) ingesters: scale across nodes when the source supports parallel or partitioned readers; singleton when only one consumer should run. **Peers:** **P**—similar outcomes usually mix load balancers, per-host agents, Kubernetes, or vendor-specific topology rather than this exact packaged combination.
+**Ingester HA.** **Ingestion path**—keeping ingestion available across the cluster (contrast [central cluster HA](#note-central-ha) for the serving side). **Gastrolog:** **Y**—the normal pattern for **passive** (listener) ingesters is **several nodes, same listener on each**, with **load-balanced** inbound traffic (VIP, DNS, Kubernetes Service, anycast, etc.) so senders use one logical endpoint while the cluster absorbs the load in parallel—syslog, HTTP push, and similar protocols. **Singleton** placement is the **other** mode: exactly one active instance of that ingester in the cluster, moved to another node if its node fails. **Active** (pull) ingesters: scale across nodes when the source supports parallel or partitioned readers; singleton when only one consumer should run. **Peers:** **P**—similar outcomes usually mix load balancers, per-host agents, Kubernetes, or vendor-specific topology rather than this exact packaged combination.
 
 <a id="note-fulltext"></a>
 **Full-text search.** **Raw log message body**—full-text search on line contents, not only on labels/parsed fields. **Grafana + Loki:** **P**—query model is label-scoped; line-level “grep the heap” exists but is not the same operational profile as inverted-index full-text search in Elasticsearch-class backends.
@@ -107,13 +107,13 @@ Last reviewed: **2026-04-19**.
 **Notebook, case, or investigation object.** **Shared incident context**—notebook, case, or investigation object beyond a single saved query. Graylog lists **Investigations**; Splunk and Datadog push **case-like** investigation workflows in broader platform messaging. **Elastic / OpenSearch / Grafana:** **P**—depends on Observability/Security apps or external tools. **Gastrolog:** **N**—shared investigation / case objects and handoff workflows are **not** shipped.
 
 <a id="note-alerting"></a>
-**Alerting from log conditions.** This row is **user- or operator-defined monitoring on log data** (saved search / scheduled query / “when this log pattern crosses a threshold, notify”)—what Splunk alerts, Datadog log monitors, Graylog event definitions, OpenSearch Alerting, Grafana alert rules on Loki queries, etc., sell. **Gastrolog:** **N**—there is **no** productized “define a query + threshold + destination” log alerting. What exists today is **internal system alerting** (for example rotation/retention throughput, channel pressure, ingest drops) surfaced in the UI for cluster operators—not the same capability as this row. If log-condition alerting ships later, change this cell (and optionally split a separate row for **platform health alerts**).
+**Alerting from log conditions.** This row is **user- or operator-defined monitoring on log data** (saved search / scheduled query / “when this log pattern crosses a threshold, notify”)—what Splunk alerts, Datadog log monitors, Graylog event definitions, OpenSearch Alerting, Grafana alert rules on Loki queries, etc., sell. **Gastrolog:** **N**—there is **no** productized “define a query + threshold + destination” log alerting. What exists today is a short standing list of system **alarms**—conditions that require an operator action, such as low disk space, pipeline backlog, retention rate, or an under-replicated or leaderless vault—surfaced in the UI for cluster operators. That is not the same capability as this row. If log-condition alerting ships later, change this cell (and optionally split a separate row for **platform alarms**).
 
 <a id="note-ml"></a>
 **ML / anomaly / pattern on logs.** Edition and packaging vary widely for peers (**P** where ML is add-on, security SKU, or metrics-first). **Gastrolog:** **N** relative to shipping Watchdog / MLTK / Elastic ML–style product surfaces on logs.
 
 <a id="note-rbac"></a>
-**Fine-grained data-plane RBAC.** **Index / stream / row / field / restriction-query style**—fine-grained data-plane RBAC. **Gastrolog:** **N**—JWT with coarse `admin` / `user`; no per-vault/stream restriction queries or field-level document security comparable to Splunk role filters, Datadog restriction queries, or Elasticsearch DLS/FLS. **Grafana + Loki:** **P**—orgs/folders/datasource permissions are strong for the *UI*; row-level log restriction is weaker than index/DLS patterns in Elastic.
+**Fine-grained data-plane RBAC.** **Index / stream / row / field / restriction-query style**—fine-grained data-plane RBAC. **Gastrolog:** **N**—JWT with coarse `admin` / `user`, and any authenticated user reads every vault by design until a full access-control system exists; no per-vault/stream restriction queries or field-level document security comparable to Splunk role filters, Datadog restriction queries, or Elasticsearch DLS/FLS. **Grafana + Loki:** **P**—orgs/folders/datasource permissions are strong for the *UI*; row-level log restriction is weaker than index/DLS patterns in Elastic.
 
 <a id="note-roles"></a>
 **Many custom roles.** **Beyond a fixed small role set**—many named/custom roles. **Gastrolog:** small built-in set (`admin` / `user`); not a large custom RBAC matrix.
@@ -128,10 +128,10 @@ Last reviewed: **2026-04-19**.
 **Multi-node / distributed storage.** **Under one product**—multi-node or distributed storage as part of the same platform story. **Y** for every column only means “a scaled or distributed deployment is a normal part of the story,” not a ranking. **Gastrolog** is included on the same basis as peers—not as a special case.
 
 <a id="note-central-ha"></a>
-**Central tier HA.** **API, query, and config resilience across nodes**—no user-facing requirement to attach to a single “query primary.” Pair with [ingester HA](#note-ingester-ha) for the ingestion side. **Gastrolog:** **Y**—design target is that routine **client** use does not depend on one special “query primary”; replicated cluster config, cross-node query fan-out, ingest forwarding to owning nodes, and per-vault leader election with replication cover the path. **Peers:** **Y** for mature enterprise or SaaS stacks where clustered search/indexers and HA control planes are the norm. **Grafana + Loki:** **P**—HA is standard in real deployments, but what counts as “the product” is often several services and charts you wire yourself.
+**Central cluster HA.** **API, query, and config resilience across nodes**—no user-facing requirement to attach to a single “query primary.” Pair with [ingester HA](#note-ingester-ha) for the ingestion side. **Gastrolog:** **Y**—design target is that routine **client** use does not depend on one special “query primary”; replicated cluster config, cross-node query fan-out, ingest forwarding to owning nodes, and per-vault leader election with replication cover the path. **Peers:** **Y** for mature enterprise or SaaS stacks where clustered search/indexers and HA control planes are the norm. **Grafana + Loki:** **P**—HA is standard in real deployments, but what counts as “the product” is often several services and charts you wire yourself.
 
-<a id="note-tiered"></a>
-**Tiered or archive storage.** **Hot vs warm vs cheap / archive paths**—tiered or archive storage. **Grafana + Loki:** **P**—object storage and retention exist, but the bundled “ILM vs frozen tier” story differs from Elasticsearch-class index lifecycle. Other columns: **Y** at a high level (hot/warm/cold or archive paths exist in mainstream docs); details are edition-specific. Graylog and Splunk also market hot/warm/cold or indexing-tier stories in their own terms.
+<a id="note-archive"></a>
+**Archive storage and data movement by age.** **Cheaper or offline storage for older data, and a way to move data there as it ages.** Peers market this as temperature-layered storage in their own terms (Elasticsearch ILM phases such as hot/warm/cold/frozen, Splunk hot/warm/cold buckets, Graylog index-set rotation and archiving); **Y** at a high level, details are edition-specific. **Grafana + Loki:** **P**—object storage and retention exist, but there is no bundled index-lifecycle story comparable to Elasticsearch ILM. **Gastrolog:** **Y**, by a different design—there is no hot/warm/cold layering of storage, and none is planned. Each vault owns one storage shape: a **cloud-backed** vault keeps sealed chunk bytes in S3, Azure, or GCS, and an archival lifecycle of **cloud storage class** transitions (for example to `GLACIER` after a number of days, or on demand via `ArchiveChunk`, with `RestoreChunk` to read it back) moves them to offline archival storage. Data moves between vaults by **late-bound retention routing**: a vault's retention disposition is `delete`, `route` (re-emit expiring records through the routing engine), or `transfer` (re-home sealed chunks unchanged into a named target vault).
 
 <a id="note-audit"></a>
 **Audit trail.** **Queries, exports, admin actions**—compliance-oriented audit trail. **Gastrolog:** **N**—not shipped. Peers commonly ship admin/query audit logs in enterprise offerings; **OpenSearch** / **Grafana** cells are **P** because audit features often depend on Security plugin / Grafana Enterprise / deployment choices.

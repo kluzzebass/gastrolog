@@ -1,7 +1,7 @@
 package orchestrator
 
-// CacheEvictor is implemented by chunk managers that hold a warm cache of
-// cloud-backed chunk content (chunk/file.Manager). The orchestrator's
+// CacheEvictor is implemented by chunk managers that hold cached copies of
+// cloud-backed chunks (chunk/file.Manager). The orchestrator's
 // scheduled sweep calls EvictCache to apply whatever LRU + TTL policies
 // the manager was configured with at construction time.
 type CacheEvictor interface {
@@ -18,7 +18,7 @@ const (
 
 // cacheEvictionSweepAll fans out EvictCache across every vault instance on
 // this node: every home holds local copies of cloud-backed chunks, so the
-// warm-cache policy applies on each one, not only on the placement leader.
+// cache policy applies on each one, not only on the placement leader.
 // No-op for managers that don't implement CacheEvictor (memory-mode vaults)
 // or that have no eviction policy configured (every EvictCache call
 // short-circuits when CacheBudgetBytes and CacheTTL are both zero).
@@ -68,13 +68,13 @@ func (o *Orchestrator) cacheEvictionSweepAll() {
 	}
 }
 
-// startCacheEvictionSweep registers the periodic warm-cache eviction
+// startCacheEvictionSweep registers the periodic cached-copy eviction
 // sweep. Each tick walks every vault instance on this node and asks its
 // chunk manager to apply its configured eviction policies.
 func (o *Orchestrator) startCacheEvictionSweep() error {
 	if err := o.scheduler.AddJob(cacheEvictionJobName, sweepCron(cacheEvictionSchedule), o.cacheEvictionSweepAll); err != nil {
 		return err
 	}
-	o.scheduler.Describe(cacheEvictionJobName, "Warm-cache eviction (LRU + TTL on cloud-backed chunks)")
+	o.scheduler.Describe(cacheEvictionJobName, "Cached-copy eviction (LRU + TTL on cloud-backed chunks)")
 	return nil
 }

@@ -280,8 +280,8 @@ func TestConfigImportReplaceRemovesStaleEntities(t *testing.T) {
 	}
 
 	// The archival chain must survive the round trip intact. An empty class
-	// here would read as "delete at this age" rather than "move to a colder
-	// storage class" — losing this field on the round trip is a data-destroying
+	// here would read as "delete at this age" rather than "move to the next
+	// cloud storage class in the transition chain" — losing this field on the round trip is a data-destroying
 	// outcome,
 	// not a cosmetic one.
 	if got := services[0].Transitions; len(got) != 2 {
@@ -609,7 +609,7 @@ func seedEveryConfigType(t *testing.T, ctx context.Context, addr string, store *
 			// is exported by its PROTO field name (UseProtoNames) and an
 			// absent class does not mean "unset" — it means DELETE the chunk
 			// at that age. A round trip that drops it would turn a
-			// move-to-colder-storage policy into an expiry policy, silently.
+			// move-to-a-later-class policy into an expiry policy, silently.
 			Transitions: []*v1.CloudStorageTransition{
 				{After: "30d", CloudStorageClass: "GLACIER"},
 				{After: "365d", CloudStorageClass: "DEEP_ARCHIVE"},

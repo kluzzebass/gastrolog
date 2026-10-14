@@ -17,7 +17,7 @@ import (
 // peerInspectorTimeout caps how long a single peer's inspector RPC may
 // block before it's elided from the response. Sized to be comfortably
 // above any healthy peer's round-trip on small metadata payloads
-// (typical: tens of ms; warm-cache worst case: a few hundred ms) and
+// (typical: tens of ms; worst case: a few hundred ms) and
 // well below any operator's tolerance for a frozen UI. A paused or
 // partitioned peer hits this limit and is dropped from the merged
 // result, leaving the UI usable instead of frozen.

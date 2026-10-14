@@ -815,7 +815,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 		return nil, err
 	}
 
-	// Wire the FSM-backed integrity verifier so cold-cache cloud downloads
+	// Wire the FSM-backed integrity verifier so uncached-chunk cloud downloads
 	// reject blobs whose digest doesn't match what the leader stamped at
 	// upload time.
 	setIntegrityVerifier(cm, o.IntegrityVerifier())
@@ -1331,7 +1331,7 @@ func buildVaultRaftCallbacks(raft func() *hraft.Raft, ready func() bool, fsm fun
 }
 
 // setIntegrityVerifier wires the manifest-backed digest verifier into a chunk
-// manager that supports it. Cold-cache cloud downloads consult the FSM-recorded
+// manager that supports it. Uncached-chunk cloud downloads consult the FSM-recorded
 // hash and reject blobs whose actual digest doesn't match.
 func setIntegrityVerifier(cm chunk.ChunkManager, v chunk.IntegrityVerifier) {
 	if v == nil {
@@ -1630,7 +1630,7 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNode
 
 	case system.VaultTypeFile:
 		// Single storage class for all file vaults — local-only and
-		// cloud-backed alike. The active chunk and warm cache live at
+		// cloud-backed alike. The active chunk and cached copies live at
 		// the same chunkDir path.
 		if vaultCfg.IsCloud() {
 			addCloudParams(params, &sys.Config, vaultCfg)
@@ -1644,9 +1644,9 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNode
 	return params
 }
 
-// addCacheParams threads the vault's warm-cache config into the factory param
-// map. Without these keys the file manager reads empty and runs with an
-// unbounded warm cache regardless of config. The expressions pass through
+// addCacheParams threads the vault's cache config into the factory param
+// map. Without these keys the file manager reads empty and keeps cached
+// copies unbounded regardless of config. The expressions pass through
 // verbatim: the params map is strings and the factory resolves them with
 // the shared parser.
 func addCacheParams(params map[string]string, vaultCfg system.VaultConfig) {

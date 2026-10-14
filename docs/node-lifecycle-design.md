@@ -1,16 +1,29 @@
 # Node Lifecycle: States, Transitions, and Learner Promotion
 
-This document defines cluster node lifecycle and the learner-based join model. The node states and transitions, the `Unreachable` liveness sweep with event-driven auto-clear, the soft-offline placement guard, the operator CLI verbs, and learner-based join with event-driven promoters for cluster-ctl and every vault-ctl group are built.
+Status: implemented. Node states and transitions live on `NodeConfig` in
+the cluster-ctl FSM (`backend/internal/system/storage.go`); the
+`Unreachable` sweep and its event-driven auto-clear are in
+`backend/internal/app/node_liveness.go`; the soft-offline placement guard
+is in `backend/internal/app/placement.go`; learner promotion is in
+`backend/internal/app/learner_promoter.go` with the cluster-ctl and
+vault-ctl group adapters beside it.
 
 ## Context
 
-The current node-lifecycle treats node liveness as binary: a node is either in `LivePeers` (Raft contact current within ~4s) or it is not. Every cluster decision — placement rotation, peer routing, decommission — derives from this single bit. The recent wave of fixes (gastrolog-2yeie series) hardened the *membership* layer but did not introduce gradations between "live" and "decommissioned." That gap is what allows transient absence (k8s rolling restart) to be misclassified as permanent removal, triggering placement rotation that orphans chunks on the absent node's disk.
+A node's liveness is not binary. Transient absence — a Kubernetes rolling
+restart, a network blip — must not be read as permanent removal: rotating a
+vault's placement off an absent node orphans the chunks on its disk, and at
+RF=1 that is the only copy. Kubernetes cannot tell GastroLog whether a
+SIGTERM is a restart or a scale-down, so the cluster never removes a node
+on its own; removal is always an operator action.
 
-This design introduces explicit node states with deliberate transitions, separates **cluster-detected absence** (`Unreachable`) from **operator-declared absence** (`Maintenance`) — both of which share the *soft-offline* property of "do not rotate placement off this node" — and folds in a learner-based join model so new nodes do not count toward Raft quorum until they are caught up.
-
-The category "soft-offline" describes any state where the cluster considers the node temporarily not-fully-participating without considering it removed. Two concrete states fall in this category: `Unreachable` (cluster's automatic detection) and `Maintenance` (operator's deliberate declaration). They share the placement-rotation gate but differ in their entry/exit semantics and operator UX.
-
-The record write path is the segment pipeline; how this design meets it is described in "Relationship to the segment pipeline" below.
+Node lifecycle therefore has explicit states with deliberate transitions.
+**Cluster-detected absence** (`Unreachable`) and **operator-declared
+absence** (`Maintenance`) are both *soft-offline*: the cluster considers the
+node temporarily not fully participating, without considering it removed.
+They share the placement-rotation gate and differ in how they are entered
+and left. New nodes join as Raft learners and do not count toward quorum
+until they have caught up.
 
 ## States
 
@@ -35,15 +48,62 @@ stateDiagram-v2
 
 ### Per-state semantics
 
-**Live** — heartbeats current; full participation. Placement may rotate to or from this node. Vault-ctl Raft groups: voter (or learner during initial join). Receives reads and writes when leader.
+**Live** — contact current; full participation. Placement may rotate to or
+from this node. Vault-ctl Raft groups: voter (or learner during initial
+join). Receives reads and writes when leader.
 
-**Unreachable** (soft-offline; cluster-detected) — contact has lapsed past the threshold (`GLOG_UNREACHABLE_THRESHOLD`, default 5 min). **Placement does NOT rotate off this node.** Vault-ctl Raft groups: still a voter (unreachable; quorum maintained by other voters). Reads addressed to this node fail with connection error (no change to current read routing). Auto-trigger entry: contact lapse exceeds the threshold. Auto-clear: contact resumes. A warning alarm fires once the node has stayed Unreachable longer than the alert threshold (`GLOG_UNREACHABLE_ALERT_THRESHOLD`, default 5 min); alert tone is "noticed a problem" — operator may want to act.
+**Unreachable** (soft-offline; cluster-detected) — contact has lapsed past
+the threshold (`GLOG_UNREACHABLE_THRESHOLD`, default 5 min). **Placement
+does NOT rotate off this node.** Vault-ctl Raft groups: still a voter
+(quorum maintained by the other voters). Reads addressed to the node fail
+with a connection error. Entered automatically on contact lapse; cleared
+automatically when contact resumes. Once the node has stayed Unreachable
+longer than `GLOG_UNREACHABLE_ALERT_THRESHOLD` (default 5 min), every node
+raises the High alarm `node-unreachable:<node>`.
 
-**Maintenance** (soft-offline; operator-declared) — operator has explicitly placed this node in maintenance mode via `cluster maintenance <node>`. Cluster behavior identical to `Unreachable` for placement-rotation and quorum participation. The differences: entry is operator-initiated and sticky (contact resumption does NOT auto-clear), exit requires explicit `cluster online <node>`, and alerts are informational rather than warning ("this is intentional"). The state captures operator intent that may persist across transient reachability changes — e.g., the operator is preparing the underlying host for kernel maintenance and wants the cluster to ignore brief reachability flaps during the window.
+**Maintenance** (soft-offline; operator-declared) — the operator has placed
+the node in maintenance with `cluster maintenance <node>`. Cluster
+behavior is identical to `Unreachable` for placement rotation and quorum
+participation. The differences: entry is operator-initiated and sticky
+(contact resumption does NOT clear it), exit requires `cluster online
+<node>`, and it raises no alarm — the state is intentional. It captures
+operator intent that persists across transient reachability changes, e.g.
+host maintenance during which the cluster should ignore reachability flaps.
 
-**Removed** — the operator removed the node with `cluster remove-node`, which refuses a removal that would leave a vault without a copy or below its replication factor. Voter removed from cluster-ctl Raft and all vault-ctl groups; NodeConfig deleted from cluster-ctl FSM. Node is no longer addressable. Any files remaining on retained PVCs are orphaned and handled by the orphaned-PVC sweep (separate issue).
+**Removed** — the operator removed the node with `cluster remove-node`.
+Removal is refused when it would leave a vault without a copy, or below its
+replication factor with no eligible node to re-place onto; `--force`
+overrides both gates with explicit acknowledgement. The voter is removed
+from cluster-ctl Raft and all vault-ctl groups and its NodeConfig is
+deleted from the cluster-ctl FSM. `cluster demote-self` is the same removal
+issued by a node against itself, for a preStop hook on a permanent
+scale-down; it forces past the orphan gate and allows a removal that only
+drops a vault below its replication factor, leaving re-placement to the
+placement manager. The shipped Kubernetes manifest does not use it (see
+"Relationship to the segment pipeline").
 
-The removed node does not come back on its own. It learns of its removal either from the leader, which tells it after the configuration change, or — when it was down at the time — from the members that refuse its calls as removed, once a majority of the other voters in its configuration have. Either way it shuts its member side down in order — vaults, Raft groups, cluster port, whatever point of startup it had reached — records the removal beside its node identity in its home, and from then on serves only the account of its removal: its log states it once at error level with the remedy, and `cluster status` over its Unix socket reports it (`GetClusterStatusResponse.removal`) with `cluster yield-leadership` answering that nothing was transferred. Its TCP listener, which authenticates nobody, keeps `/healthz` at 200 so the process is not restarted and answers everything else, `/readyz` included, with a bare "removed from cluster". Every later start of the same home comes up the same way, without opening Raft or contacting a peer. It never mints a new identity, never runs as a cluster of its own, and leaves its vault data where it was. The way back is the operator's: start the machine from an empty home and with its vault storage emptied, and it enrols as a new node under a new node ID. A home that holds the cluster certificate but has lost its node identity (its raft directory, or just the identity store in it) is refused at start rather than given a new identity the certificate does not name.
+The removed node does not come back on its own. It learns of its removal
+either from the leader, which tells it after the configuration change, or —
+when it was down at the time — from the members that refuse its calls as
+removed, once a majority of the other voters in its configuration have.
+Either way it shuts its member side down in order — vaults, Raft groups,
+cluster port, whatever point of startup it had reached — records the
+removal beside its node identity in its home, and from then on serves only
+the account of its removal: its log states it once at error level with the
+remedy, and `cluster status` over its Unix socket reports it
+(`GetClusterStatusResponse.removal`) with `cluster yield-leadership`
+answering that nothing was transferred. Its TCP listener, which
+authenticates nobody, keeps `/healthz` at 200 so the process is not
+restarted and answers everything else, `/readyz` included, with a bare
+"removed from cluster". Every later start of the same home comes up the
+same way, without opening Raft or contacting a peer. It never mints a new
+identity, never runs as a cluster of its own, and leaves its vault data
+where it was. The way back is the operator's: start the machine from an
+empty home and with its vault storage emptied, and it enrols as a new node
+under a new node ID. A home that holds the cluster certificate but has lost
+its node identity (its raft directory, or just the identity store in it) is
+refused at start rather than given a new identity the certificate does not
+name.
 
 ## Behavior gates by state
 
@@ -52,143 +112,218 @@ The removed node does not come back on its own. It learns of its removal either 
 | Placement may rotate TO | yes | no | no | no |
 | Placement may rotate FROM | yes | **no (gate)** | **no (gate)** | n/a |
 | New placements assigned | yes | no | no | no |
+| Member counts toward replication factor | yes | no | no | n/a |
 | Receives reads when leader | yes | yes (likely fails) | yes (may succeed if reachable) | n/a |
 | Receives writes when leader | yes | yes (likely fails) | yes (may succeed if reachable) | n/a |
 | Counts for Raft quorum | yes (if voter) | yes (if voter) | yes (if voter) | no |
-| Heartbeat tracked | yes | yes (lapsed) | yes | no |
+| Contact tracked | yes | yes (lapsed) | yes | no |
 
-The **"Placement may rotate FROM Unreachable/Maintenance = no"** rows are the load-bearing gate for the RF=1 rolling-redeploy scenario and for operator maintenance windows. Both soft-offline states share the same placement-rotation gate; the placement guard in [placement.go](backend/internal/app/placement.go) treats them identically.
+The **"Placement may rotate FROM Unreachable/Maintenance = no"** rows are
+the load-bearing gate for the RF=1 rolling-redeploy scenario and for
+operator maintenance windows. Both soft-offline states share the same
+placement-rotation gate; the placement guard in
+[placement.go](../backend/internal/app/placement.go) treats them
+identically.
 
-The **"New placements assigned"** row is one predicate, `acceptsNewPlacements` in [placement.go](backend/internal/app/placement.go): only a `Live` node takes a leader or follower placement it does not already hold. The placement manager applies it (together with a current heartbeat) when it picks a leader or a backfill follower, and the remove-node RF-preservation gate applies the same predicate when it counts the spares a removed node's placements could move to, so the gate never approves a removal on the strength of a spare the placer will not use.
+The **"New placements assigned"** row is one predicate,
+`acceptsNewPlacements` in [placement.go](../backend/internal/app/placement.go):
+only a `Live` node takes a leader or follower placement it does not already
+hold. The placement manager applies it (together with current contact)
+when it picks a leader or a backfill follower, and the remove-node
+RF-preservation gate applies the same predicate when it counts the spares a
+removed node's placements could move to, so the gate never approves a
+removal on the strength of a spare the placer will not use.
 
-A placement member on a soft-offline node is retained but is not a working replica, so it does not count toward the vault's replication factor: the placement manager backfills a follower onto a `Live` node, and trims that surplus again once the node is back to `Live` (the original member is kept). Heartbeat liveness on its own changes nothing about an existing placement — a `Live` node whose heartbeat has lapsed, as during a pod restart, keeps every placement it holds and still counts — because only the lifecycle state machine may read absence as more than transient. A member is dropped only when its node has departed (no `NodeConfig` and no heartbeat) or its storage no longer matches the vault.
+A placement member on a soft-offline node is retained but is not a working
+replica (`countsTowardReplication`), so it does not count toward the
+vault's replication factor: the placement manager backfills a follower onto
+a `Live` node, and trims that surplus again once the node is back to `Live`
+(the original member is kept). Contact loss on its own changes nothing
+about an existing placement — a `Live` node whose contact has lapsed, as
+during a pod restart, keeps every placement it holds and still counts —
+because only the lifecycle state machine may read absence as more than
+transient. A member is dropped only when its node has departed (no
+`NodeConfig` and no contact) or its storage no longer matches the vault.
 
-The reads/writes row differs slightly between `Unreachable` and `Maintenance` only in expected outcome: an `Unreachable` node is by definition out of contact, so reads to it will almost always fail; a `Maintenance` node may or may not be reachable depending on what the operator is doing (it may be fully functional and just flagged as "leave me alone"). The cluster's *behavior* is the same in both — try the node, observe success or failure — but the *probability of success* differs.
+The reads/writes rows differ between `Unreachable` and `Maintenance` only in
+expected outcome: an `Unreachable` node is by definition out of contact, so
+reads to it almost always fail; a `Maintenance` node may be fully
+functional and merely flagged "leave me alone". The cluster's *behavior* is
+the same in both — try the node, observe success or failure.
 
 ## Storage layout for state
 
-Node state lives on the existing `NodeConfig` system-FSM record per node. Schema addition:
+Node state lives on the `NodeConfig` cluster-ctl FSM record:
 
 ```go
 type NodeConfig struct {
     ID         glid.GLID
-    Address    string
-    // ... existing fields ...
-
-    State      NodeState  // NEW: Live / Unreachable / Maintenance
-    StateSince time.Time  // NEW: when the current state was entered
+    // ...
+    State      NodeState // Live / Unreachable / Maintenance
+    StateSince time.Time // when the current state was entered
 }
 ```
 
-`Removed` is not a stored state; it is the absence of the NodeConfig entry, reached via `DeleteNode`.
+`Removed` is not a stored state; it is the absence of the NodeConfig entry,
+reached via `DeleteNode`. A record with no state set reads as `Live`
+(`EffectiveState`).
 
 ## Transitions in detail
 
 | From → To | Trigger | Mechanism |
 |---|---|---|
-| Live → Unreachable | `time.Since(peerState.LastSeen(node)) > unreachableThreshold` | Leader-side sweep on a low-frequency tick (e.g. 30s) proposes `CmdSetNodeState{node, Unreachable}` |
-| Live → Maintenance | `cluster maintenance <node>` CLI | RPC proposes `CmdSetNodeState{node, Maintenance}` |
-| Unreachable → Live | contact resumes | Event-driven, not the sweep: a peer's stats broadcast or PeerState's contact-resumed hook wakes `nodeLiveness.Run` (`backend/internal/app/node_liveness.go`), and the cluster-ctl leader proposes `CmdSetNodeState{node, Live}` for every Unreachable node whose contact is current again |
-| Unreachable → Maintenance | `cluster maintenance <node>` CLI | Operator commits to the offline state; auto-restore-on-contact behavior is replaced with sticky operator control |
-| Maintenance → Live | `cluster online <node>` CLI | Operator clears maintenance |
-| any → Removed | `cluster remove-node <node>` CLI | Refused when it would leave a vault without a copy or below its replication factor; otherwise the voter is removed from cluster-ctl Raft and every vault-ctl group, the NodeConfig deleted, and the node told (or, if it is down, refused as removed when it calls in); it records the removal in its home and serves only that from then on |
+| Live → Unreachable | `time.Since(peerState.LastSeen(node)) > threshold` | The cluster-ctl leader's `node-unreachable-sweep` scheduler job (every 30 s) proposes `SetNodeState{node, Unreachable}`, with `StateSince` set to the last-seen instant |
+| Live → Maintenance | `cluster maintenance <node>` | `SetNodeState` RPC proposes `{node, Maintenance}` |
+| Unreachable → Live | contact resumes | Event-driven, not the sweep: a peer's stats broadcast or PeerState's contact-resumed hook wakes `nodeLiveness.Run`, and the cluster-ctl leader proposes `{node, Live}` for every Unreachable node whose contact is current again |
+| Unreachable → Maintenance | `cluster maintenance <node>` | Operator commits to the offline state; auto-clear on contact is replaced with sticky operator control |
+| Maintenance → Live | `cluster online <node>` | Operator clears maintenance |
+| any → Removed | `cluster remove-node <node>` | Refused when it would leave a vault without a copy or below its replication factor (unless `--force`); otherwise the voter is removed from cluster-ctl Raft and every vault-ctl group, the NodeConfig deleted, and the node told (or, if it is down, refused as removed when it calls in); it records the removal in its home and serves only that from then on |
 
-`peerState.LastSeen` is the most recent moment this node had positive evidence a peer was alive: Raft contact on any group it shares with the peer, or the arrival of the peer's stats broadcast, whichever is newer. Raft contact is what makes it fresh — the cluster-ctl group spans every node, so the cluster-ctl leader, which is the node that runs the liveness sweep, is replicating to every peer several times a second.
+The FSM apply validator (`ValidateNodeStateTransition`) rejects any other
+transition; re-applying the current state is a no-op success. The sweep
+never touches `Maintenance`, and never moves a node with no positive contact
+evidence yet (zero `LastSeen`).
+
+`peerState.LastSeen` is the most recent moment this node had positive
+evidence a peer was alive: Raft contact on any group it shares with the
+peer, or the arrival of the peer's stats broadcast, whichever is newer.
+Raft contact is what keeps it fresh — the cluster-ctl group spans every
+node, so the cluster-ctl leader, which runs the sweep, replicates to every
+peer several times a second. The verdict is stored rather than derived at
+read time because each node's `LastSeen` differs under an asymmetric
+partition; placement guards on different nodes must read one replicated
+value.
 
 ## Operator CLI surface
 
 ```
 gastrolog cluster maintenance <node>     # Live | Unreachable → Maintenance
 gastrolog cluster online <node>          # Maintenance → Live
-gastrolog cluster remove-node <node>     # remove from the cluster (refused if it would orphan a vault or drop it below RF)
+gastrolog cluster remove-node <node>     # remove from the cluster (refused if it would orphan a vault or drop it below RF; --force overrides)
+gastrolog cluster promote <node>         # cluster-ctl learner → voter
+gastrolog cluster demote <node>          # cluster-ctl voter → nonvoter
+gastrolog cluster yield-leadership       # hand off Raft leadership if this node holds it
+gastrolog cluster demote-self            # remove this node (preStop hook for a permanent scale-down)
 ```
 
-Cluster-detected soft-offline (`Unreachable`) is not something the operator manually invokes; the cluster auto-detects it via contact lapse, and the operator promotes it to `Maintenance` via `cluster maintenance` if sticky operator control is desired.
+`Unreachable` is not something the operator invokes; the cluster detects
+it, and the operator promotes it to `Maintenance` when sticky control is
+wanted.
 
 ## API surface principles
 
-The CLI verbs and status RPCs above must satisfy these properties:
+The CLI verbs and status RPCs satisfy these properties:
 
-- **Idempotent verbs.** Calling `cluster maintenance <node>` twice has the same effect as calling it once: the second call returns success with no state change, not an error. Same for `cluster online` and `cluster promote`. A consumer that retries on transient failure must be safe to do so.
-- **Watchable status.** Node states and per-node metadata (state, `StateSince`, last-seen, etc.) are accessible via a server-stream RPC, not just point-in-time queries. Consumers can react to state transitions without polling.
-- **Machine-readable output.** Every state-querying CLI verb supports `--output json` (or equivalent structured output) for parseable consumption.
-- **Stable state names.** `Live` / `Unreachable` / `Maintenance` are part of the API contract once released. Renaming or splitting them post-release is a breaking change.
-- **No hidden state.** Every operationally-relevant fact about a node (current state, entry timestamp, transition history, alert-relevant counters) is observable via the status API. Decisions made by external systems cannot rely on state that the API doesn't surface.
-- **Command/query separation.** Verbs that mutate state (`maintenance`, `online`) are distinct from verbs that read state (`status`, `inspect`). Mutating verbs return the new state; querying verbs do not mutate.
-
-These are good properties for any cluster CLI regardless of whether an external orchestrator (Kubernetes operator, deployment automation, runbook script) ever consumes them. Designing for them up front avoids retrofitting if an external controller is added later.
+- **Idempotent verbs.** `cluster maintenance <node>` twice has the same
+  effect as once: the second call succeeds with no state change. Same for
+  `cluster online` and `cluster promote`. A consumer that retries on
+  transient failure is safe.
+- **Watchable status.** Node state, `StateSince` and last-seen are on
+  `ClusterNode`, served by `GetClusterStatus` and streamed by
+  `WatchSystemStatus`; consumers react to transitions without polling.
+- **Machine-readable output.** State-querying and state-changing CLI verbs
+  honor `--output json` (`-o json`).
+- **Stable state names.** `Live` / `Unreachable` / `Maintenance` are part of
+  the API contract. Renaming or splitting them is a breaking change.
+- **No hidden state.** Every operationally relevant fact about a node —
+  current state, entry timestamp, last contact, suffrage — is on the status
+  API. Transition history is the log stream: each transition is a slog line
+  the self ingester captures.
+- **Command/query separation.** Verbs that mutate state (`maintenance`,
+  `online`) are distinct from verbs that read state (`status`, `inspect`);
+  the mutating verbs report the resulting state, the querying verbs do not
+  mutate.
 
 ## UI surface
 
-Cluster overview shows per-node state with color/icon coding. The two soft-offline states are visually distinguishable: `Unreachable` uses a warning tone (cluster noticed a problem), `Maintenance` uses an informational tone (operator action). Duration is shown for both. Alerts trigger with operator-action suggestions when `Unreachable` duration exceeds an operator-tuned threshold; `Maintenance` alerts are silent or low-priority.
+The node lists show per-node state with a badge (`NodeStateBadge`,
+`nodeStateView.ts`): `Unreachable` uses the warn tone (the cluster noticed a
+problem), `Maintenance` the info tone (operator intent), each with its
+duration from `StateSince`; `Live` shows no badge. Settings → Nodes offers
+Promote, Demote and Remove. Entering and leaving `Maintenance` is a CLI verb
+only (`cluster maintenance` / `cluster online`).
 
 ## Learner-based join
 
 ### Mechanism
 
-New nodes joining via `JoinCluster` are added as **non-voting learners** in two layers:
+New nodes are added as **non-voting learners** in two layers:
 
-1. **Cluster-ctl Raft** — a joining node asks to be admitted as a nonvoter, and the cluster-ctl leader adds it with `AddNonvoter` (`resolveSuffrageOp`, `backend/internal/app/cluster.go`). A restarting voter rejoins as a voter.
-2. **Every vault-ctl Raft group** — `RefreshVaultCtlMembers` hands the cluster's nodes to the vault-ctl leader manager, and on each group's leader `vaultCtlLeaderManager.reconcile` ([`vault_ctl_leader_manager.go`](backend/internal/orchestrator/vault_ctl_leader_manager.go)) adds a node that is not yet in the group with `AddNonvoter`.
+1. **Cluster-ctl Raft** — a joining node asks to be admitted as a nonvoter,
+   and the cluster-ctl leader adds it with `AddNonvoter` (`resolveSuffrageOp`,
+   `backend/internal/app/cluster.go`). A restarting voter rejoins as a
+   voter.
+2. **Every vault-ctl Raft group** — `RefreshVaultCtlMembers` hands the
+   cluster's nodes to the vault-ctl leader manager, and on each group's
+   leader `vaultCtlLeaderManager.reconcile`
+   ([`vault_ctl_leader_manager.go`](../backend/internal/orchestrator/vault_ctl_leader_manager.go))
+   adds a node that is not yet in the group with `AddNonvoter`.
 
-The new node receives replicated state via Raft log replication (and snapshots if far behind). It does NOT count toward quorum during this phase.
+The new node receives replicated state via Raft log replication (and
+snapshots if far behind). It does not count toward quorum while a learner.
 
-### Promotion: per-group, FSM apply-index match
+### Promotion: per-group, applied-index match
 
-Promotion is event-driven and runs per group **on the group's leader** (`learnerPromoter`, `backend/internal/app/learner_promoter.go`). A learner's applied index reaches the leader only through the learner's stats broadcast, so each broadcast — and each leadership gain — triggers one evaluation pass over the groups this node leads; there is no periodic sweep. The leader promotes a learner with `AddVoter` once the learner's last broadcast applied index is within the group's catch-up tolerance of the leader's applied index: zero entries for cluster-ctl, 100 for a vault-ctl group (an active group commits faster than the broadcast interval). Cluster-ctl Raft uses the same evaluator.
+Promotion is event-driven and runs per group **on the group's leader**
+(`learnerPromoter`). A learner's applied index reaches the leader only
+through the learner's NodeStats broadcast — hashicorp/raft exposes no
+per-peer match index — so each broadcast, and each leadership gain,
+triggers one evaluation pass over the groups this node leads; there is no
+periodic sweep. The leader promotes a learner with `AddVoter` once the
+learner's last broadcast applied index is within the group's catch-up
+tolerance of the leader's applied index: zero entries for cluster-ctl, 100
+for a vault-ctl group (an active group commits faster than the broadcast
+interval). A learner with no broadcast evidence yet is never promoted. Each
+group promotes at most one learner per pass, because hashicorp/raft commits
+configuration changes one at a time. Cluster-ctl and vault-ctl use the same
+evaluator.
 
-**Why per-group:** vault-ctl groups are independent. A learner caught up in vault A can be promoted there even while still catching up on vault B. Convergence is incremental.
+**Why per-group:** vault-ctl groups are independent. A learner caught up in
+vault A is promoted there while still catching up on vault B. Convergence is
+incremental.
 
-**Why apply-index match (not log-index threshold):** the most rigorous criterion. "Has applied every command the leader has applied" is the strongest correctness statement before counting toward quorum. Log-index thresholds admit learners that have replicated entries but not yet applied them — fine for some systems, but vault-ctl groups have FSM-sensitive operations (chunk lifecycle commands) where apply-index match matters.
-
-**Stability window:** one Raft heartbeat timeout (default 2s). Prevents flapping if the learner momentarily catches up then falls behind.
+**Why applied index (not log index):** "has applied what the leader has
+applied" is the strongest statement available before counting toward
+quorum. Log-index thresholds admit learners that have replicated entries
+but not yet applied them, and vault-ctl groups carry FSM-sensitive chunk
+lifecycle commands.
 
 ### Failure modes
 
-- **Learner falls behind faster than catches up:** stays a learner, alert fires ("node-X is a learner in 3/12 vault-ctl groups; investigate"). Operator decides whether to wait or remove.
-- **Snapshot install in progress:** sweep does not propose promotion until snapshot installation completes and applies.
-- **Operator force-promotion:** `gastrolog cluster promote <node>` promotes a node to voter in cluster-ctl Raft, as an escape hatch when the operator knows the learner is functionally caught up. There is no operator verb for promoting in vault-ctl groups.
+- **Learner falls behind faster than it catches up:** it stays a learner;
+  the promoter logs the lag at debug level, and the node's suffrage
+  (`NONVOTER` / `STAGING`) shows in `cluster status`. The operator decides
+  whether to wait or remove the node.
+- **Snapshot install in progress:** the learner's broadcast applied index
+  does not reach the leader's until the snapshot has been installed and
+  applied, so it is not promoted before then.
+- **Operator force-promotion:** `gastrolog cluster promote <node>` promotes a
+  node to voter in cluster-ctl Raft, for when the operator knows the learner
+  is caught up. There is no operator verb for promotion in vault-ctl groups.
 
 ### Composition with the soft-offline states
 
-Learners can become `Unreachable` (contact lapsed) or be placed in `Maintenance` (operator) the same way voters can. A learner in either soft-offline state is not promoted while in that state. State transition back to `Live` unlocks promotion on the next sweep tick.
+Promotion reads only applied-index evidence, not the node's lifecycle
+state. A learner out of contact sends no broadcasts, so its last reported
+index falls behind and it is not promoted until it reports again. A learner
+in `Maintenance` that is reachable and caught up is promoted like any other.
 
 ## Relationship to the segment pipeline
 
-Records become segments on the receiving node, are distributed to every home of the vault, and every home builds its own chunks. Two pieces of this design meet that write path:
+Records become segments on the receiving node, are distributed to every
+home of the vault, and every home builds its own chunks. Two pieces of this
+design meet that write path:
 
-- **The placement-rotation gate on soft-offline states.** The placement manager keeps a vault's leader and follower placements on a node that is `Unreachable` or `Maintenance` — or whose heartbeat is lost while it is still `Live` — and raises a soft-offline alarm for a leader instead of rotating ([placement.go](backend/internal/app/placement.go)). A follower restarting in a rolling restart therefore keeps its placement, and its node keeps its vault instance. There is no separate Receiving/Holding split of the placement; this gate is what keeps a transiently absent node's placement, and so its chunks, in place at RF=1.
-- **The Kubernetes preStop hook** only yields Raft leadership (`cluster yield-leadership`). There is no leader-only unsealed state to flush before SIGTERM: every home holds the vault's segments and builds its own chunks.
-
-The lifecycle states, learner-based join, soft-offline category (`Unreachable` + `Maintenance`), API surface principles, and operator CLI verbs are independent of the write path.
-
-## Out of scope (deferred to implementation issues)
-
-- Specific threshold values (5 min default for `Unreachable` auto-trigger is provisional; tune operationally)
-- Exact FSM command proto schemas
-- Migration semantics for existing clusters (existing voters likely stay voters; only new joiners become learners — but the transition path needs an explicit issue)
-- UI mockups
-- Alert text and severity
-- Interaction with the decommission orphan-refusal gate (separate implementation issue from this design)
-
-## Acceptance for this design
-
-This document is sufficient to open the following implementation issues:
-
-1. Node state machine — `NodeConfig` schema addition + `CmdSetNodeState` + transition validators (Live / Unreachable / Maintenance, with Removed as the absence of the NodeConfig)
-2. State-driven placement guard in [placement.go](backend/internal/app/placement.go) — gates on both soft-offline states identically
-3. `Unreachable` auto-trigger sweep (leader-side) + contact-resume auto-clear
-4. Operator CLI verbs for state transitions (`maintenance`, `online`, `remove-node`)
-5. UI surface for per-node state visibility with the warning/informational tone distinction
-6. Learner-based join: `AddNonvoter` path in [cluster/join.go](backend/internal/cluster/join.go)
-7. Per-group learner promoter
-8. System-Raft learner promoter
-
-Each implementation issue inherits its acceptance criteria from the corresponding section of this document.
-
-## Relationship to other work
-
-- Parent epic: [gastrolog-2i1g9](dcat://gastrolog-2i1g9) (FSM-authority migration: lifecycle, learners, audit cleanup)
-- Companion epic: [gastrolog-2ujjh](dcat://gastrolog-2ujjh) (Fan-out data-plane architecture) — lands after this epic; reframes the transitional pieces above.
-- Companion design: [gastrolog-5dfv7](dcat://gastrolog-5dfv7) (audit of disk-as-authority subsystems — independent, runs in parallel)
-- Superseded context (preserved as deferred reminders): [gastrolog-3xmtk](dcat://gastrolog-3xmtk), [gastrolog-3qr8z](dcat://gastrolog-3qr8z) — capture the symptom set the migration eliminates by construction.
+- **The placement-rotation gate on soft-offline states.** The placement
+  manager keeps a vault's leader and follower placements on a node that is
+  `Unreachable` or `Maintenance` — or whose contact has lapsed while it is
+  still `Live` — and raises `vault-soft-offline-leader` for a leader instead
+  of rotating ([placement.go](../backend/internal/app/placement.go)). A
+  follower restarting in a rolling restart keeps its placement, and its node
+  keeps its vault instance. This gate is what keeps a transiently absent
+  node's placement, and so its chunks, in place at RF=1.
+- **The Kubernetes preStop hook** (`deploy/k8s.yml`) only yields Raft
+  leadership (`cluster yield-leadership`); the node stays in the voter set
+  across the restart. There is no leader-only unsealed state to flush before
+  SIGTERM: every home holds the vault's segments and builds its own chunks.
+  Permanent removal is the operator running `cluster remove-node`.

@@ -7,7 +7,8 @@ import (
 )
 
 // glcbMappedCap bounds how many sealed chunks may keep a whole-file GLCB mmap
-// resident at once. Cold chunks are munmapped when over cap and unpinned.
+// resident at once. Least recently used chunks are munmapped when over cap and
+// unpinned.
 var glcbMappedCap = 64
 
 // touchGLCBMappedLocked moves id to the most-recently-used position. Caller

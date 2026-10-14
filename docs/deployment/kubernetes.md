@@ -15,6 +15,14 @@ OrbStack, kind, minikube, EKS, GKE, AKS — anywhere).
 
 ## Quick start
 
+`just deploy kubernetes-up` builds `gastrolog:test`, applies
+[`deploy/k8s.yml`](../../deploy/k8s.yml) and the bundled dependencies
+in [`deploy/k8s-deps.yml`](../../deploy/k8s-deps.yml), waits for every
+pod to be ready, and auto-wires the dependencies (see
+[configuring-deps.md](./configuring-deps.md)); `just deploy
+kubernetes-down` deletes both manifests, the PVCs and the namespace.
+The cluster alone, without the dependencies:
+
 ```sh
 kubectl apply -f deploy/k8s.yml
 kubectl -n gastrolog get pods -w
@@ -46,13 +54,17 @@ The manifest ([`deploy/k8s.yml`](../../deploy/k8s.yml)) defines:
 - **NodePort Service** `gastrolog` — external ingress on port
   30564 → 4564.
 - **ConfigMap** `gastrolog-config` — non-secret env (listen
-  address, cluster-addr=`auto`).
+  address, cluster-addr=`auto`, environment banner label and color).
 - **Secret** `gastrolog-secrets` — initial admin credentials and
   the bootstrap-token shared secret.
-- **StatefulSet** `gastrolog` — `replicas: 3` by default. Pod 0
-  (`gastrolog-0`) is the bootstrap; pods 1..N-1 are joiners. The
-  container's startup wrapper branches on the pod's ordinal to
-  set bootstrap-vs-joiner env vars at run time.
+- **StatefulSet** `gastrolog` — `replicas: 3` by default,
+  `podManagementPolicy: Parallel`. Pod 0 (`gastrolog-0`) is the
+  bootstrap; pods 1..N-1 are joiners. The container's startup wrapper
+  branches on the pod's ordinal to set bootstrap-vs-joiner env vars at
+  run time.
+- **PodDisruptionBudget** `gastrolog` — `maxUnavailable: 1`, so a
+  voluntary disruption (node drain, rolling restart) takes down at most
+  one pod at a time.
 
 ### Architecture
 
@@ -77,11 +89,14 @@ pods` matches what's in the gastrolog UI.
 ### Role detection
 
 Pod ordinal 0 is the bootstrap; pods 1..N-1 are joiners. The
-container's `command:` field carries a 6-line shell prelude that
-reads `${HOSTNAME##*-}` to get the ordinal and exports the right
+container's `command:` field carries a shell prelude that sets the node
+name and the advertised cluster address from the pod's hostname, reads
+`${HOSTNAME##*-}` to get the ordinal, and exports the right
 `GASTROLOG_*` env vars before exec'ing the entrypoint:
 
 ```sh
+export GASTROLOG_NAME=$HOSTNAME
+export GASTROLOG_CLUSTER_ADVERTISE=$HOSTNAME.gastrolog-headless.gastrolog.svc.cluster.local:4566
 ord=${HOSTNAME##*-}
 if [ "$ord" = "0" ]; then
   export GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET=$BOOTSTRAP_TOKEN_SHARED_SECRET
@@ -95,7 +110,9 @@ exec /docker-entrypoint.sh server
 
 This keeps pod-name = hostname = `GASTROLOG_NAME` consistent across
 `kubectl get pods`, the gastrolog UI, and CLI operations like
-`cluster remove-node gastrolog-3`.
+`cluster remove-node gastrolog-3`. Peers store the advertised
+headless-service DNS name rather than the pod IP, so a pod whose IP
+changes on restart stays reachable.
 
 ### Why the token is fetched over HTTP
 
@@ -110,8 +127,9 @@ from the K8s Secret; joiners poll it with backoff on their first boot.
 
 1. K8s schedules `gastrolog-0`. Its entrypoint sees
    `GASTROLOG_CLUSTER_ADDR=auto` and resolves the pod's own IP via
-   `hostname -i` (e.g. `10.244.1.17`). Binds + advertises on that
-   IP:4566.
+   `hostname -i` (e.g. `10.244.1.17`). It binds on that IP:4566 and
+   advertises its headless-service DNS name
+   (`gastrolog-0.gastrolog-headless.gastrolog.svc.cluster.local:4566`).
 2. `gastrolog-0` generates cluster TLS and the key it mints join
    tokens with (no token is stored anywhere), mounts
    the admin credentials from `/etc/gastrolog/admin_creds`,
@@ -120,7 +138,8 @@ from the K8s Secret; joiners poll it with backoff on their first boot.
    - `/cluster/bootstrap-token`, minting a token for each request
      that carries the `GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET`
    - The full Connect-RPC + UI on port 4564
-3. K8s schedules `gastrolog-1`, then `gastrolog-2`. Each polls
+3. K8s schedules `gastrolog-1` and `gastrolog-2` alongside it
+   (parallel pod management). Each polls
    `http://gastrolog-0.gastrolog-headless.gastrolog.svc.cluster.local:4564/cluster/bootstrap-token`
    with the shared secret in the `X-Bootstrap-Token-Secret`
    header.
@@ -200,8 +219,9 @@ directories are named by vault, not by node, so a new node handed the old
 `/config/raft` is refused at start: the home still holds the old node's
 certificate.
 
-`gastrolog-0` should never be removed — it's the bootstrap and
-holds Raft state required for new joiners to enroll. The recipes
+`gastrolog-0` should never be removed: it is the only pod that serves
+join tokens, and every joiner's `GASTROLOG_JOIN_ADDR` and
+`GASTROLOG_BOOTSTRAP_TOKEN_URL` point at it. The recipes
 enforce a floor of 3 replicas (bootstrap + 2 joiners minimum) to
 preserve quorum tolerance.
 
@@ -222,11 +242,13 @@ errors, so a refusal there shows up as a pod that scaled away while
 its node is still in `cluster status` — re-run the removal by hand
 to see the reason.
 
-The preStop hook (`cluster demote-self`) is deliberately exempt from
-the replication-factor gate: the pod is terminating either way, and
-K8s cannot tell a rolling restart from a scale-down, so refusing
-would only strand a voter. Placement reconcile re-places the vault
-on a surviving node.
+The preStop hook removes nothing. On a joiner it runs
+`gastrolog cluster yield-leadership`, handing off Raft leadership if
+the pod holds it, and the node stays a member: K8s cannot tell a
+rolling restart from a scale-down, so a restart is a transient absence
+and the pod comes back as the same node with its storage and
+placements intact. On `gastrolog-0` the hook does nothing. Permanent
+removal is always an explicit `cluster remove-node`.
 
 ## Production considerations
 
@@ -246,10 +268,9 @@ on a surviving node.
 - **TLS**: this manifest exposes plaintext HTTP via NodePort. In
   production, use an Ingress with TLS termination (cert-manager +
   Let's Encrypt is the common path on K8s).
-- **PodDisruptionBudget**: add one for the `gastrolog` StatefulSet
-  with `minAvailable: 2` (or whatever respects your Raft quorum)
-  so cluster maintenance doesn't take down enough nodes to lose
-  quorum.
+- **PodDisruptionBudget**: the manifest's `maxUnavailable: 1` is safe
+  for any cluster of 3 or more; a larger cluster can raise it to
+  `floor((N-1)/2)` to drain faster without losing quorum.
 - **Network policies**: restrict 4566 to intra-cluster traffic
   (`from: app=gastrolog`); 4564 stays open for the dashboard.
 - **Backup**: snapshot the PVCs via your cluster's volume

@@ -14,7 +14,7 @@ import (
 
 // Reader provides random-access record reads from a GLCB. Record frames are
 // sliced straight from the whole-file mapping of the owning MappedBlob —
-// every GLCB open path (warm cache, cloud-download promote, pipeline
+// every GLCB open path (cached copy, cloud-download promote, pipeline
 // cursors) goes through OpenMappedBlob + MappedBlob.Reader(); there is no
 // file-descriptor read path.
 type Reader struct {
@@ -155,27 +155,27 @@ func (rd *Reader) ReadRecord(pos uint32) (chunk.Record, error) {
 	return rd.readRecordAt(pos)
 }
 
-// prewarmMadvise is the page-cache warm applied by PrewarmSequential. It is a
-// package var so tests can observe that the retention SequentialPrewarmer path
-// actually reaches the warm call. Production always uses madviseSequential.
-var prewarmMadvise = madviseSequential
+// prefetchMadvise is the page-cache prefetch applied by PrefetchSequential. It is a
+// package var so tests can observe that the retention SequentialPrefetcher path
+// actually reaches the prefetch call. Production always uses madviseSequential.
+var prefetchMadvise = madviseSequential
 
-// PrewarmSequential warms the OS page cache for the whole GLCB mapping ahead of
-// a sequential full-chunk scan (retention fan-out drain). It advises the
+// PrefetchSequential prefetches the whole GLCB mapping into the OS page cache
+// ahead of a sequential full-chunk scan (retention fan-out drain). It advises the
 // kernel of front-to-back access and kicks off asynchronous readahead so the
-// scan's mmap accesses land as minor faults rather than cold major faults that
+// scan's mmap accesses land as minor faults rather than major faults that
 // pin scheduler Ps in non-preemptible kernel fault handlers under disk
 // saturation.
 //
-// The warm runs directly on the whole-file mmap (mmapData): MappedBlob closes
+// The prefetch runs directly on the whole-file mmap (mmapData): MappedBlob closes
 // its fd right after mmap, so no Reader carries one. madvise needs no fd; it
 // operates on the mapping the Reader already holds.
 //
 // Best-effort and idempotent. Safe on a closed/released cursor: Close() nils
-// mmapData, so the warm becomes a no-op instead of touching freed address
+// mmapData, so the prefetch becomes a no-op instead of touching freed address
 // space.
-func (rd *Reader) PrewarmSequential() {
-	prewarmMadvise(rd.mmapData)
+func (rd *Reader) PrefetchSequential() {
+	prefetchMadvise(rd.mmapData)
 }
 
 // ReadFanOutRecord reads a record for immediate hand-off to another

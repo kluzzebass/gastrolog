@@ -198,7 +198,7 @@ type ChunkMeta struct {
 	State ChunkState
 	// DiskBytes is the LOCAL on-disk footprint, always: the actual size of
 	// the chunk's data.glcb on THIS node. For a cloud-backed chunk this is
-	// the warm-cache state — the full cached GLCB size while cached, 0 once
+	// the cached-copy state — the full cached GLCB size while cached, 0 once
 	// evicted. Never falls back to a cloud/logical size; CloudBacked with
 	// DiskBytes==0 means "nothing local to reclaim here," not "unknown."
 	DiskBytes int64

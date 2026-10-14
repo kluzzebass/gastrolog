@@ -40,6 +40,6 @@ File vaults (local-only and cloud-backed) compress sealed chunks automatically u
 
 ## Queries
 
-Queries automatically search all vaults. Results from cloud-backed chunks, local sealed chunks, and active chunks are merged transparently. Cloud-backed chunks are fetched on demand via range requests — no full download required.
+Queries automatically search all vaults. Results from cloud-backed chunks, local sealed chunks, and active chunks are merged transparently. A cloud-backed chunk with no local copy is downloaded and verified on demand, then read from its cached copy.
 
 Select a topic from the sidebar for details on each storage shape.

@@ -184,9 +184,9 @@ func (x *NodeStorageConfig) GetFileStorages() []*FileStorage {
 type CloudStorageTransition struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	After string                 `protobuf:"bytes,1,opt,name=after,proto3" json:"after,omitempty"` // duration after chunk seal (e.g. "30s", "7d", "2w", "360d")
-	// Target CLOUD storage class — the archival tier ("GLACIER", "DEEP_ARCHIVE",
-	// "Archive"); empty = delete. Distinct from the uint32 storage_class above,
-	// which selects which local disk a vault may live on (gastrolog-108bcg).
+	// Target CLOUD storage class — the archival storage class ("GLACIER",
+	// "DEEP_ARCHIVE", "Archive"); empty = delete. Distinct from the uint32
+	// storage_class above, which selects which local disk a vault may live on.
 	CloudStorageClass string `protobuf:"bytes,2,opt,name=cloud_storage_class,json=cloudStorageClass,proto3" json:"cloud_storage_class,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache

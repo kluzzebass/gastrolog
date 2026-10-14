@@ -688,7 +688,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
 
   /**
    * disk_bytes is the LOCAL on-disk footprint on the responding node, always
-   * — for a cloud-backed chunk this is the warm-cache state (the cached
+   * — for a cloud-backed chunk this is the cached-copy state (the cached
    * GLCB's size while cached, 0 once evicted), never the cloud object size.
    *
    * @generated from field: int64 disk_bytes = 7;
@@ -741,7 +741,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
   retentionPending = false;
 
   /**
-   * current cloud archival tier (e.g. "GLACIER", "cold", "Archive")
+   * current cloud archival storage class (e.g. "GLACIER", "cold", "Archive")
    *
    * @generated from field: string cloud_storage_class = 15;
    */
@@ -789,7 +789,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
   /**
    * cloud_bytes is the compressed cloud object's transport size for a
    * cloud-backed chunk (0 = never uploaded). Cluster-wide fact, distinct
-   * from disk_bytes (per-node, live warm-cache state). gastrolog-33ul6h.
+   * from disk_bytes (per-node, live cached-copy state). gastrolog-33ul6h.
    *
    * @generated from field: int64 cloud_bytes = 20;
    */
@@ -2928,7 +2928,7 @@ export class ArchiveChunkRequest extends Message<ArchiveChunkRequest> {
   chunkId = new Uint8Array(0);
 
   /**
-   * Target cloud archival tier: "GLACIER", "DEEP_ARCHIVE", "Archive"
+   * Target cloud archival storage class: "GLACIER", "DEEP_ARCHIVE", "Archive"
    *
    * @generated from field: string cloud_storage_class = 3;
    */

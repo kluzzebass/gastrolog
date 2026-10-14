@@ -266,7 +266,7 @@ message ChunkMeta {
   int64 record_count = 5;
   int64 bytes = 6;
   // disk_bytes is the LOCAL on-disk footprint on the responding node, always
-  // — for a cloud-backed chunk this is the warm-cache state (the cached
+  // — for a cloud-backed chunk this is the cached-copy state (the cached
   // GLCB's size while cached, 0 once evicted), never the cloud object size.
   int64 disk_bytes = 7;
   google.protobuf.Timestamp ingest_start = 8;
@@ -276,7 +276,7 @@ message ChunkMeta {
   bytes vault_id = 12;    // which vault this chunk belongs to
   string vault_type = 13;  // vault type: "memory" or "file"
   bool retention_pending = 14; // true = chunk is marked for retention processing
-  string cloud_storage_class = 15;   // current cloud archival tier (e.g. "GLACIER", "cold", "Archive")
+  string cloud_storage_class = 15;   // current cloud archival storage class (e.g. "GLACIER", "cold", "Archive")
   int32 replica_count = 16;    // how many nodes currently have this chunk (leader + followers that have caught up)
   // Cluster-wide replica residency: the set of node IDs that reported having
   // this chunk locally during the most recent ListChunks fan-out. Lets the
@@ -297,7 +297,7 @@ message ChunkMeta {
   ChunkState state = 19;
   // cloud_bytes is the compressed cloud object's transport size for a
   // cloud-backed chunk (0 = never uploaded). Cluster-wide fact, distinct
-  // from disk_bytes (per-node, live warm-cache state). gastrolog-33ul6h.
+  // from disk_bytes (per-node, live cached-copy state). gastrolog-33ul6h.
   int64 cloud_bytes = 20;
 }
 
@@ -655,7 +655,7 @@ message RetryUnreadableChunksResponse {
 message ArchiveChunkRequest {
   string vault = 1;
   bytes chunk_id = 2;
-  string cloud_storage_class = 3; // Target cloud archival tier: "GLACIER", "DEEP_ARCHIVE", "Archive"
+  string cloud_storage_class = 3; // Target cloud archival storage class: "GLACIER", "DEEP_ARCHIVE", "Archive"
 }
 
 message ArchiveChunkResponse {}

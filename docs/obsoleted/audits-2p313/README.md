@@ -8,7 +8,7 @@
 
 ## What this is
 
-A **read-only, whole-backend review** of every production package under [`backend/`](../../backend/). The goal is not lint scores or test coverage percentages — it is to document where the codebase violates architectural invariants that GastroLog depends on for correctness, scale, and cluster behavior.
+A **read-only, whole-backend review** of every production package under [`backend/`](../../../backend/). The goal is not lint scores or test coverage percentages — it is to document where the codebase violates architectural invariants that GastroLog depends on for correctness, scale, and cluster behavior.
 
 This audit was triggered by a recurring pattern: features shipped quickly by bypassing existing machinery (`FindIngestRank`, mmap views, position scanners, FSM-grounded metadata) and compensating with heap buffers, periodic sweeps, or silent degradation. Those workarounds create regressions that are hard to see in single-node tests but show up under cluster load, snapshot restore, or large vaults.
 
@@ -22,21 +22,21 @@ This audit was triggered by a recurring pattern: features shipped quickly by byp
 
 | Path | Reviewed |
 |------|----------|
-| [`backend/internal/*`](../../backend/internal/) | All 39 top-level packages (+ `orchestrator/pipeline`) |
-| [`backend/cmd/*`](../../backend/cmd/) | `gastrolog`, `walinspect`, `multirun`, `compress-assets` |
-| [`backend/api/proto`](../../backend/api/proto/), [`api/gen`](../../backend/api/gen/) | Wire contracts and generated drift |
-| [`backend/justfile`](../../backend/justfile), [`go.mod`](../../backend/go.mod), [`ROADMAP.md`](../../backend/ROADMAP.md) | Tooling and stale docs (phase 12) |
+| [`backend/internal/*`](../../../backend/internal/) | All 39 top-level packages (+ `orchestrator/pipeline`) |
+| [`backend/cmd/*`](../../../backend/cmd/) | `gastrolog`, `walinspect`, `multirun`, `compress-assets` |
+| [`backend/api/proto`](../../../backend/api/proto/), [`api/gen`](../../../backend/api/gen/) | Wire contracts and generated drift |
+| [`backend/justfile`](../../../backend/justfile), [`go.mod`](../../../backend/go.mod), [`ROADMAP.md`](../../../backend/ROADMAP.md) | Tooling and stale docs (phase 12) |
 | Co-located `*_test.go` | Reviewed with each package (gaps noted as findings, not fixed here) |
 
 ### Out of scope
 
-Repo-root [`frontend/`](../../frontend/), [`deploy/`](../../deploy/), [`scripts/`](../../scripts/), [`.github/`](../../.github/), [`test/e2e/`](../../test/e2e/). CI implementation and test rewrites are separate efforts.
+Repo-root [`frontend/`](../../../frontend/), [`deploy/`](../../../deploy/), [`scripts/`](../../../scripts/), [`.github/`](../../../.github/), [`test/e2e/`](../../../test/e2e/). CI implementation and test rewrites are separate efforts.
 
 ### Organizing principle
 
-Phases follow the eight **bounded contexts** in [`docs/ubiquitous_language.md`](../ubiquitous_language.md), plus dedicated passes for CLI/API, shared libraries, cross-cutting import graph, and synthesis — so no package is “assumed covered” by a neighbor.
+Phases follow the eight **bounded contexts** in [`docs/ubiquitous_language.md`](../../ubiquitous_language.md), plus dedicated passes for CLI/API, shared libraries, cross-cutting import graph, and synthesis — so no package is “assumed covered” by a neighbor.
 
-Canonical references used during review: [`AGENTS.md`](../../AGENTS.md) (cluster-first, `raftwal` priority), [`docs/query_execution.md`](../query_execution.md), [`docs/vault-control-plane-architecture.md`](../vault-control-plane-architecture.md), [`backend/internal/raftwal/README.md`](../../backend/internal/raftwal/README.md).
+Canonical references used during review: [`AGENTS.md`](../../../AGENTS.md) (cluster-first, `raftwal` priority), [`docs/query_execution.md`](../../query_execution.md), [`docs/vault-control-plane-architecture.md`](../../vault-control-plane-architecture.md), [`backend/internal/raftwal/README.md`](../../../backend/internal/raftwal/README.md).
 
 ---
 

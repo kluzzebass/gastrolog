@@ -1214,12 +1214,10 @@ func (r *VaultLifecycleReconciler) reconcileLocalOrphans(v *reconcileView) error
 		//    in-flight. The retention sweep otherwise re-transitions these
 		//    ghosts every minute and pollutes downstream vaults.
 		//
-		// A third class — data-bearing chunks the FSM doesn't recognize —
-		// is handled separately below: those raise an operator alert and
-		// are preserved on disk per the no-auto-delete-of-unknown-orphans
-		// invariant (docs/disk-authority-audit.md).
-		// Auto-deleting them removes the recovery surface for FSM-glitch
-		// scenarios.
+		// A third class — data-bearing chunks the FSM doesn't recognize,
+		// unknown orphans — raises an operator alert and stays on disk:
+		// unknown orphans are never deleted automatically, because
+		// deleting them removes the recovery surface for FSM faults.
 		tombstoned := r.fsm.Load().IsTombstoned(meta.ID)
 		ghost := !tombstoned && meta.Sealed && !meta.WriteEnd.IsZero() &&
 			meta.RecordCount == 0 &&
@@ -1270,16 +1268,13 @@ func (r *VaultLifecycleReconciler) reconcileLocalOrphans(v *reconcileView) error
 
 // alertUnknownOrphan raises an operator-visible alert for a chunk
 // that is sealed, has records, but is not recognized by the FSM
-// (no manifest entry, no pendingDeletes, no tombstone). The
-// no-auto-delete-of-unknown-orphans invariant
-// (docs/disk-authority-audit.md) keeps these files on disk so they
-// remain available as a recovery surface for FSM-glitch scenarios
-// (bugs, operator error, restore-from-backup desync).
+// (no manifest entry, no pendingDeletes, no tombstone). Unknown
+// orphans are never deleted automatically: the files stay on disk as
+// the recovery surface for FSM faults (bugs, operator error,
+// restore-from-backup desync).
 //
 // The alert is keyed per (vault, chunk) so each unknown orphan
-// appears as its own row in the operator UI. The "unknown orphan"
-// language deliberately matches the audit doc terminology so future
-// readers find the same concept in one search.
+// appears as its own row in the operator UI.
 //
 // Why this is conservative: a chunk with RecordCount > 0 took
 // committed appends; either it was part of the cluster at some
@@ -1390,7 +1385,7 @@ func (r *VaultLifecycleReconciler) syncPipelineSealedGLCBs(v *reconcileView) {
 		// window otherwise schedules a doomed pull on EVERY home, since the
 		// bytes were just deleted everywhere. Cloud-backed chunks are never
 		// pulled: the cloud object is their durable copy, a local GLCB only
-		// their warm cache.
+		// their cached copy.
 		if e.CloudBacked || !e.IsSealed() || chunkOnItsWayOut(e, v.pendingByID[e.ID]) {
 			continue
 		}
@@ -1406,7 +1401,7 @@ func (r *VaultLifecycleReconciler) syncPipelineSealedGLCBs(v *reconcileView) {
 }
 
 // SyncHolderReceipts reconciles this home's chunk holder receipts against its
-// chunk root now. Called on the warm-cache eviction edge, which removes
+// chunk root now. Called on the cached-copy eviction edge, which removes
 // pipeline GLCBs of cloud-backed chunks; the periodic ReconcileTick is the
 // backstop. No-op for vaults that are not pipeline vaults.
 func (r *VaultLifecycleReconciler) SyncHolderReceipts() {
@@ -1423,7 +1418,7 @@ func (r *VaultLifecycleReconciler) SyncHolderReceipts() {
 // completed pull) of the copy agreed at seal, revoke on absence —
 // ChunkResidency then reports bytes truth instead of the placement
 // assumption: a home that lost its copy stops being counted the same sweep
-// that schedules its recovery pull, and a home whose warm-cache eviction
+// that schedules its recovery pull, and a home whose cached-copy eviction
 // removed a cloud-backed chunk's GLCB stops claiming it. A copy not yet
 // claimed is checked against the sealed digest first; the check quarantines a
 // divergent one, and for a chunk the cloud does not hold the pull replaces it.

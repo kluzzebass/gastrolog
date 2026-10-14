@@ -9,8 +9,8 @@ import (
 // Only the node that calls the cloud API knows a chunk's CURRENT cloud
 // storage class. The archival sweep compares that class against the
 // transition chain's target on the FSM iteration path, so unless the class
-// is replicated the comparison sees "" and a multi-step chain (cold ->
-// deep-freeze) never advances past its first step. CmdArchiveChunk makes
+// is replicated the comparison sees "" and a multi-step chain ("cold" then
+// "deep-freeze") never advances past its first step. CmdArchiveChunk makes
 // the class replicated state, so any voter can answer "what class is this
 // chunk in?".
 
@@ -43,9 +43,9 @@ func TestApplyArchiveChunk_RecordsClassAndDerivesArchived(t *testing.T) {
 	}
 }
 
-// The defect itself, at the FSM level: a second archive to a COLDER class must
+// The defect itself, at the FSM level: a second archive to a LATER class must
 // take effect. The old bookkeeping was a bool, which had nothing to advance.
-func TestApplyArchiveChunk_AdvancesToAColderClass(t *testing.T) {
+func TestApplyArchiveChunk_AdvancesToALaterClass(t *testing.T) {
 	t.Parallel()
 	f := New()
 	id := testChunkID(2)

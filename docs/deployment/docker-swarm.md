@@ -18,32 +18,45 @@ Kubernetes.
 ## Quick start (single-node Swarm)
 
 ```sh
-docker swarm init   # if not already in a Swarm
+just deploy swarm-up
+open http://localhost:4564             # admin / change-me
+```
 
-# Create the admin credentials secret (replace with your password):
+`swarm-up` builds the `gastrolog:test` image the stack file names,
+runs `docker swarm init` if needed, creates the
+`gastrolog_admin_creds` secret (`admin` / `change-me`), creates the
+three external Docker configs the push services mount
+(`gastrolog_rsyslog_conf`, `gastrolog_otel_conf`,
+`gastrolog_fluent_bit_conf`), runs `docker stack deploy -c stack.yml
+gastrolog`, and auto-wires the bundled dependencies (see
+[configuring-deps.md](./configuring-deps.md)). Deploying the stack by
+hand needs the image, the secret and the three configs first:
+
+```sh
 echo '{"username": "admin", "password": "change-me"}' \
   | docker secret create gastrolog_admin_creds -
-
+# plus gastrolog_rsyslog_conf, gastrolog_otel_conf, gastrolog_fluent_bit_conf
 cd deploy
 docker stack deploy -c stack.yml gastrolog
-open http://localhost:4564             # admin / change-me
 ```
 
 To tear down:
 
 ```sh
-docker stack rm gastrolog
-docker secret rm gastrolog_admin_creds   # optional — keep if you want to reuse
-docker volume ls -q | grep ^gastrolog_ | xargs docker volume rm
+just deploy swarm-down
 ```
+
+`swarm-down` removes the stack, its volumes, the secret and the three
+configs, and then runs `docker swarm leave --force`.
 
 ## What's in the recipe
 
 The stack file
 ([`deploy/stack.yml`](../../deploy/stack.yml)) defines two
-services — `bootstrap` and `joiner-1` — plus an overlay network
-and named volumes. Both services share a single Swarm `secret`
-for admin credentials, mounted at `/run/secrets/admin_creds`.
+gastrolog services — `bootstrap` and `joiner-1` — plus the bundled
+cloud-storage emulators and ingester-source services, an overlay
+network and named volumes. Both gastrolog services share a single Swarm
+`secret` for admin credentials, mounted at `/run/secrets/admin_creds`.
 
 > **Naming note.** Swarm service names (`bootstrap`, `joiner-1`)
 > stay role-clear in `docker service ls` and the
@@ -164,9 +177,9 @@ Then label nodes with `docker node update --label-add gastrolog=joiner <node>`.
 Each replica lands on a different node and gets a node-local
 volume by default — no volume sharing between Raft instances.
 
-For multi-node Swarm, also set
-`placement.constraints: [node.role == manager]` on the bootstrap
-service so it stays on a stable manager and doesn't migrate
+For multi-node Swarm, keep the bootstrap service's
+`placement.constraints: [node.role == manager]` (the stack file sets
+it) so it stays on a stable manager and doesn't migrate
 across hosts (which would lose its volume).
 
 ## Verify
@@ -194,8 +207,8 @@ curl -s -X POST -H "Content-Type: application/json" \
 ## Production caveats
 
 - **Admin secret**: rotate after first use. Pipe the new value
-  into `docker secret create`, redeploy the stack, the entrypoint
-  re-reads the secret. (Note: Gastrolog's idempotency means the
+  into `docker secret create`, redeploy the stack, and the server
+  re-reads the secret file at startup. (Note: Gastrolog's idempotency means the
   rotated secret is a no-op for the existing admin user — change
   the password through the UI/API instead. The secret only seeds
   the *initial* user.)
@@ -232,9 +245,8 @@ docker stack deploy -c stack.yml gastrolog
 ### Joiner fails with "name resolver error: produced zero addresses"
 
 The joiner is trying to enroll with bootstrap before the
-bootstrap's task DNS is registered on the overlay. The recipe's
-`depends_on: bootstrap` should usually prevent this; if it
-happens anyway, restart the joiner service:
+bootstrap's task DNS is registered on the overlay. The stack has no
+start ordering between services, so restart the joiner service:
 
 ```sh
 docker service update --force gastrolog_joiner-1

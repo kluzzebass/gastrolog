@@ -939,7 +939,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		return nil, fmt.Errorf("vault catchup sweep: %w", err)
 	}
 
-	// Warm-cache eviction sweep: every minute (second 23, phase-offset
+	// Cached-copy eviction sweep: every minute (second 23, phase-offset
 	// from the other sweeps) walk every leader instance and apply whatever
 	// LRU + TTL policies its chunk manager was configured with. No-op for
 	// managers without an eviction policy.

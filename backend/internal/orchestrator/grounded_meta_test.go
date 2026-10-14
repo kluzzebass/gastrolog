@@ -87,7 +87,7 @@ func TestGroundMetaFromEntryPreservesZeroSealedAt(t *testing.T) {
 
 // TestGroundMetaFromEntryDoesNotClobberLocalDiskBytes pins the merge
 // invariant: the merge only ever overrides the documented cluster-wide
-// fields. DiskBytes is per-node live warm-cache state that only the local chunk
+// fields. DiskBytes is per-node live cached-copy state that only the local chunk
 // Manager can know; the FSM's ManifestEntry has no equivalent fact (it carries
 // CloudBytes, the cloud object size, not a local disk claim). If a future change
 // wires ManifestEntry.CloudBytes — or anything else — into overwriting DiskBytes,
@@ -109,7 +109,7 @@ func TestGroundMetaFromEntryDoesNotClobberLocalDiskBytes(t *testing.T) {
 		t.Fatalf("fixture setup: entry = %+v", e)
 	}
 
-	// The local chunk Manager's live view: a warm cache of 777 bytes right
+	// The local chunk Manager's live view: a cached copy of 777 bytes right
 	// now, independent of the FSM's CloudBytes (the uploaded blob's transport
 	// size).
 	local := chunk.ChunkMeta{
@@ -125,7 +125,7 @@ func TestGroundMetaFromEntryDoesNotClobberLocalDiskBytes(t *testing.T) {
 		t.Error("grounding should set CloudBacked=true from the FSM (documented behavior)")
 	}
 	if got.DiskBytes != 777 {
-		t.Errorf("grounding clobbered DiskBytes: got %d, want 777 (unchanged local warm-cache state)", got.DiskBytes)
+		t.Errorf("grounding clobbered DiskBytes: got %d, want 777 (unchanged local cached-copy state)", got.DiskBytes)
 	}
 	if got.CloudBytes != 0 {
 		t.Errorf("grounding must not inject CloudBytes from the FSM either: got %d, want 0 (unchanged)", got.CloudBytes)
