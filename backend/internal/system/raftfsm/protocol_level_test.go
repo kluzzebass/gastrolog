@@ -250,3 +250,34 @@ func TestBinaryBelowActiveLevelStopsOnRestore(t *testing.T) {
 		t.Fatalf("restored node record = %+v (%v), want protocol level 2", node, err)
 	}
 }
+
+// TestStoreReadsAreSafeDuringRestore drives the readers the proposer gate
+// and the cluster-ctl store use — Store and ActiveProtocolLevel, called from
+// any goroutine — while Restore replaces the store on the apply goroutine.
+// Under -race a non-atomic swap is reported.
+func TestStoreReadsAreSafeDuringRestore(t *testing.T) {
+	f := New()
+	data := snapshotBytes(t, New())
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_ = f.ActiveProtocolLevel()
+				_ = f.Store()
+			}
+		}
+	}()
+	for range 50 {
+		if err := f.Restore(io.NopCloser(bytes.NewReader(data))); err != nil {
+			t.Fatalf("Restore: %v", err)
+		}
+	}
+	close(stop)
+	<-done
+}

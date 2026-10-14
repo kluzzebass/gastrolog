@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"io"
+	"sync/atomic"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/applywait"
@@ -102,7 +103,9 @@ func WithBinaryLevel(level uint32) Option {
 // FSM implements raft.FSM by dispatching deserialized ConfigCommands to an
 // in-memory config store.
 type FSM struct {
-	store   *memory.Store
+	// store is swapped whole by Restore on the Raft apply goroutine while
+	// Store and ActiveProtocolLevel read it from any goroutine.
+	store   atomic.Pointer[memory.Store]
 	onApply func(Notification)
 
 	onUnapplicable raftlevel.Unapplicable
@@ -120,11 +123,11 @@ var _ raft.FSM = (*FSM)(nil)
 // New creates a new FSM with a fresh in-memory store.
 func New(opts ...Option) *FSM {
 	f := &FSM{
-		store:          memory.NewStore(),
 		applyWait:      applywait.New(),
 		onUnapplicable: raftlevel.FailStop(nil),
 		binaryLevel:    raftlevel.Binary,
 	}
+	f.store.Store(memory.NewStore())
 	for _, o := range opts {
 		o(f)
 	}
@@ -133,7 +136,7 @@ func New(opts ...Option) *FSM {
 
 // Store returns the underlying in-memory store for serving reads.
 func (f *FSM) Store() *memory.Store {
-	return f.store
+	return f.store.Load()
 }
 
 // ApplyWait returns the tracker that follows this FSM's applied index.
@@ -145,7 +148,7 @@ func (f *FSM) ApplyWait() *applywait.Tracker {
 // ActiveProtocolLevel returns the cluster's committed active protocol level,
 // zero until one is committed.
 func (f *FSM) ActiveProtocolLevel() uint32 {
-	return f.store.ProtocolLevel()
+	return f.store.Load().ProtocolLevel()
 }
 
 // Apply deserializes a committed Raft log entry and dispatches to the store.
@@ -238,7 +241,7 @@ func (f *FSM) dispatch(ctx context.Context, cmd *gastrologv1.SystemCommand, inde
 		return nil, true
 
 	case *gastrologv1.SystemCommand_SetProtocolLevel:
-		return f.store.SetProtocolLevel(ctx, cmd.GetSetProtocolLevel().GetLevel()), true
+		return f.store.Load().SetProtocolLevel(ctx, cmd.GetSetProtocolLevel().GetLevel()), true
 
 	default:
 		return nil, false
@@ -293,7 +296,7 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 		if err != nil {
 			return nil, err
 		}
-		if err := f.store.PutCertificate(ctx, cert); err != nil {
+		if err := f.store.Load().PutCertificate(ctx, cert); err != nil {
 			return nil, err
 		}
 		// The cert manager on every node mirrors the store's certificates;
@@ -305,7 +308,7 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 		if err != nil {
 			return nil, err
 		}
-		if err := f.store.DeleteCertificate(ctx, id); err != nil {
+		if err := f.store.Load().DeleteCertificate(ctx, id); err != nil {
 			return nil, err
 		}
 		return &Notification{Kind: NotifyCertificateDeleted, ID: id}, nil
@@ -314,7 +317,7 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 		if err != nil {
 			return nil, err
 		}
-		if err := f.store.PutNode(ctx, node); err != nil {
+		if err := f.store.Load().PutNode(ctx, node); err != nil {
 			return nil, err
 		}
 		return &Notification{Kind: NotifyNodeConfigPut, ID: node.ID}, nil
@@ -323,19 +326,19 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 		if err != nil {
 			return nil, err
 		}
-		if err := f.store.DeleteNode(ctx, id); err != nil {
+		if err := f.store.Load().DeleteNode(ctx, id); err != nil {
 			return nil, err
 		}
 		return &Notification{Kind: NotifyNodeConfigDeleted, ID: id}, nil
 	case *gastrologv1.SystemCommand_MarkNodeRemoved:
 		// Read on demand by enrolment and admission; nothing reacts to it.
-		return nil, f.store.MarkNodeRemoved(ctx, c.MarkNodeRemoved.GetNodeId())
+		return nil, f.store.Load().MarkNodeRemoved(ctx, c.MarkNodeRemoved.GetNodeId())
 	case *gastrologv1.SystemCommand_SetNodeState:
 		id, newState, since, err := command.ExtractSetNodeState(c.SetNodeState)
 		if err != nil {
 			return nil, err
 		}
-		node, err := f.store.GetNode(ctx, id)
+		node, err := f.store.Load().GetNode(ctx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -353,13 +356,13 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 		}
 		node.State = newState
 		node.StateSince = since
-		if err := f.store.PutNode(ctx, *node); err != nil {
+		if err := f.store.Load().PutNode(ctx, *node); err != nil {
 			return nil, err
 		}
 		return &Notification{Kind: NotifyNodeStateChanged, ID: id}, nil
 	case *gastrologv1.SystemCommand_PutClusterTls:
 		tls := command.ExtractPutClusterTLS(c.PutClusterTls)
-		if err := f.store.PutClusterTLS(ctx, tls); err != nil {
+		if err := f.store.Load().PutClusterTLS(ctx, tls); err != nil {
 			return nil, err
 		}
 		return &Notification{Kind: NotifyClusterTLSPut}, nil
@@ -386,7 +389,7 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 	case *gastrologv1.SystemCommand_SetIngesterAssignment:
 		return f.applySetIngesterAssignment(ctx, c.SetIngesterAssignment)
 	case *gastrologv1.SystemCommand_SetSetupWizardDismissed:
-		if err := f.store.SetSetupWizardDismissed(ctx, c.SetSetupWizardDismissed.GetDismissed()); err != nil {
+		if err := f.store.Load().SetSetupWizardDismissed(ctx, c.SetSetupWizardDismissed.GetDismissed()); err != nil {
 			return nil, err
 		}
 		return &Notification{Kind: NotifySetupWizardDismissedSet}, nil
@@ -395,7 +398,7 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 		if err != nil {
 			return nil, err
 		}
-		if err := f.store.PutLogLevels(ctx, cfg); err != nil {
+		if err := f.store.Load().PutLogLevels(ctx, cfg); err != nil {
 			return nil, err
 		}
 		return &Notification{Kind: NotifyLogLevelsSet}, nil
@@ -409,7 +412,7 @@ func (f *FSM) applyPutRotationPolicy(ctx context.Context, pb *gastrologv1.PutRot
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.PutRotationPolicy(ctx, cfg); err != nil {
+	if err := f.store.Load().PutRotationPolicy(ctx, cfg); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifyRotationPolicyPut, ID: cfg.ID}, nil
@@ -420,7 +423,7 @@ func (f *FSM) applyDeleteRotationPolicy(ctx context.Context, pb *gastrologv1.Del
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.DeleteRotationPolicy(ctx, id); err != nil {
+	if err := f.store.Load().DeleteRotationPolicy(ctx, id); err != nil {
 		return nil, err
 	}
 	if err := f.cascadeDeleteRotationPolicy(ctx, id); err != nil {
@@ -434,7 +437,7 @@ func (f *FSM) applyPutRetentionPolicy(ctx context.Context, pb *gastrologv1.PutRe
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.PutRetentionPolicy(ctx, cfg); err != nil {
+	if err := f.store.Load().PutRetentionPolicy(ctx, cfg); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifyRetentionPolicyPut, ID: cfg.ID}, nil
@@ -445,7 +448,7 @@ func (f *FSM) applyDeleteRetentionPolicy(ctx context.Context, pb *gastrologv1.De
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.DeleteRetentionPolicy(ctx, id); err != nil {
+	if err := f.store.Load().DeleteRetentionPolicy(ctx, id); err != nil {
 		return nil, err
 	}
 	if err := f.cascadeDeleteRetentionPolicy(ctx, id); err != nil {
@@ -459,7 +462,7 @@ func (f *FSM) applyPutVault(ctx context.Context, pb *gastrologv1.PutVaultCommand
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.PutVault(ctx, cfg); err != nil {
+	if err := f.store.Load().PutVault(ctx, cfg); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifyVaultPut, ID: cfg.ID}, nil
@@ -473,10 +476,10 @@ func (f *FSM) applyDeleteVault(ctx context.Context, pb *gastrologv1.DeleteVaultC
 	// Read vault config before deleting — the dispatcher needs the name
 	// for cleanup logging.
 	note := &Notification{Kind: NotifyVaultDeleted, ID: id, DeleteData: pb.GetDeleteData()}
-	if existing, _ := f.store.GetVault(ctx, id); existing != nil {
+	if existing, _ := f.store.Load().GetVault(ctx, id); existing != nil {
 		note.Name = existing.Name
 	}
-	if err := f.store.DeleteVault(ctx, id, false); err != nil {
+	if err := f.store.Load().DeleteVault(ctx, id, false); err != nil {
 		return nil, err
 	}
 	return note, nil
@@ -487,7 +490,7 @@ func (f *FSM) applyPutIngester(ctx context.Context, pb *gastrologv1.PutIngesterC
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.PutIngester(ctx, cfg); err != nil {
+	if err := f.store.Load().PutIngester(ctx, cfg); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifyIngesterPut, ID: cfg.ID}, nil
@@ -500,11 +503,11 @@ func (f *FSM) applyDeleteIngester(ctx context.Context, pb *gastrologv1.DeleteIng
 	}
 	// Read ingester config before deleting so the dispatcher has name/node info.
 	note := &Notification{Kind: NotifyIngesterDeleted, ID: id}
-	if existing, _ := f.store.GetIngester(ctx, id); existing != nil {
+	if existing, _ := f.store.Load().GetIngester(ctx, id); existing != nil {
 		note.Name = existing.Name
 		note.NodeIDs = existing.NodeIDs
 	}
-	if err := f.store.DeleteIngester(ctx, id); err != nil {
+	if err := f.store.Load().DeleteIngester(ctx, id); err != nil {
 		return nil, err
 	}
 	return note, nil
@@ -520,7 +523,7 @@ func (f *FSM) applyPutSetting(ctx context.Context, pb *gastrologv1.PutSettingCom
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.SaveServerSettings(ctx, ss); err != nil {
+	if err := f.store.Load().SaveServerSettings(ctx, ss); err != nil {
 		return nil, err
 	}
 	notifyKey := key
@@ -535,7 +538,7 @@ func (f *FSM) applyPutRoute(ctx context.Context, pb *gastrologv1.PutRouteCommand
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.PutRoute(ctx, cfg); err != nil {
+	if err := f.store.Load().PutRoute(ctx, cfg); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifyRoutePut, ID: cfg.ID}, nil
@@ -546,7 +549,7 @@ func (f *FSM) applyDeleteRoute(ctx context.Context, pb *gastrologv1.DeleteRouteC
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.DeleteRoute(ctx, id); err != nil {
+	if err := f.store.Load().DeleteRoute(ctx, id); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifyRouteDeleted, ID: id}, nil
@@ -557,7 +560,7 @@ func (f *FSM) applyPutManagedFile(ctx context.Context, pb *gastrologv1.PutManage
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.PutManagedFile(ctx, cfg); err != nil {
+	if err := f.store.Load().PutManagedFile(ctx, cfg); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifyManagedFilePut, ID: cfg.ID}, nil
@@ -568,7 +571,7 @@ func (f *FSM) applyDeleteManagedFile(ctx context.Context, pb *gastrologv1.Delete
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.DeleteManagedFile(ctx, id); err != nil {
+	if err := f.store.Load().DeleteManagedFile(ctx, id); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifyManagedFileDeleted, ID: id}, nil
@@ -579,7 +582,7 @@ func (f *FSM) applyPutCloudService(ctx context.Context, pb *gastrologv1.PutCloud
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.PutCloudService(ctx, svc); err != nil {
+	if err := f.store.Load().PutCloudService(ctx, svc); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifyCloudServicePut, ID: svc.ID}, nil
@@ -590,7 +593,7 @@ func (f *FSM) applyDeleteCloudService(ctx context.Context, pb *gastrologv1.Delet
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.DeleteCloudService(ctx, id); err != nil {
+	if err := f.store.Load().DeleteCloudService(ctx, id); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifyCloudServiceDeleted, ID: id}, nil
@@ -601,7 +604,7 @@ func (f *FSM) applySetNodeStorageConfig(ctx context.Context, pb *gastrologv1.Set
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.SetNodeStorageConfig(ctx, cfg); err != nil {
+	if err := f.store.Load().SetNodeStorageConfig(ctx, cfg); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifyNodeStorageConfigSet}, nil
@@ -612,7 +615,7 @@ func (f *FSM) applySetVaultPlacements(ctx context.Context, pb *gastrologv1.SetVa
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.SetVaultPlacements(ctx, vaultID, placements); err != nil {
+	if err := f.store.Load().SetVaultPlacements(ctx, vaultID, placements); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifyVaultPlacementsSet, ID: vaultID}, nil
@@ -620,7 +623,7 @@ func (f *FSM) applySetVaultPlacements(ctx context.Context, pb *gastrologv1.SetVa
 
 func (f *FSM) applySetIngesterAlive(ctx context.Context, cmd *gastrologv1.SetIngesterAliveCommand) (*Notification, error) {
 	ingesterID := glid.FromBytes(cmd.GetIngesterId())
-	if err := f.store.SetIngesterAlive(ctx, ingesterID, cmd.GetNodeId(), cmd.GetAlive()); err != nil {
+	if err := f.store.Load().SetIngesterAlive(ctx, ingesterID, cmd.GetNodeId(), cmd.GetAlive()); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifyIngesterAliveSet, ID: ingesterID}, nil
@@ -628,7 +631,7 @@ func (f *FSM) applySetIngesterAlive(ctx context.Context, cmd *gastrologv1.SetIng
 
 func (f *FSM) applySetIngesterCheckpoint(ctx context.Context, cmd *gastrologv1.SetIngesterCheckpointCommand) (*Notification, error) {
 	ingesterID := glid.FromBytes(cmd.GetIngesterId())
-	if err := f.store.SetIngesterCheckpoint(ctx, ingesterID, cmd.GetData()); err != nil {
+	if err := f.store.Load().SetIngesterCheckpoint(ctx, ingesterID, cmd.GetData()); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifyIngesterCheckpointSet, ID: ingesterID}, nil
@@ -636,7 +639,7 @@ func (f *FSM) applySetIngesterCheckpoint(ctx context.Context, cmd *gastrologv1.S
 
 func (f *FSM) applySetIngesterAssignment(ctx context.Context, cmd *gastrologv1.SetIngesterAssignmentCommand) (*Notification, error) {
 	ingesterID := glid.FromBytes(cmd.GetIngesterId())
-	if err := f.store.SetIngesterAssignment(ctx, ingesterID, cmd.GetNodeId()); err != nil {
+	if err := f.store.Load().SetIngesterAssignment(ctx, ingesterID, cmd.GetNodeId()); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifyIngesterAssignmentSet, ID: ingesterID}, nil
@@ -650,49 +653,49 @@ func (f *FSM) applyUser(ctx context.Context, cmd *gastrologv1.SystemCommand) err
 		if err != nil {
 			return err
 		}
-		return f.store.CreateUser(ctx, user)
+		return f.store.Load().CreateUser(ctx, user)
 
 	case *gastrologv1.SystemCommand_UpdatePassword:
 		id, hash, err := command.ExtractUpdatePassword(c.UpdatePassword)
 		if err != nil {
 			return err
 		}
-		return f.store.UpdatePassword(ctx, id, hash)
+		return f.store.Load().UpdatePassword(ctx, id, hash)
 
 	case *gastrologv1.SystemCommand_UpdateUserRole:
 		id, role, err := command.ExtractUpdateUserRole(c.UpdateUserRole)
 		if err != nil {
 			return err
 		}
-		return f.store.UpdateUserRole(ctx, id, role)
+		return f.store.Load().UpdateUserRole(ctx, id, role)
 
 	case *gastrologv1.SystemCommand_UpdateUsername:
 		id, username, err := command.ExtractUpdateUsername(c.UpdateUsername)
 		if err != nil {
 			return err
 		}
-		return f.store.UpdateUsername(ctx, id, username)
+		return f.store.Load().UpdateUsername(ctx, id, username)
 
 	case *gastrologv1.SystemCommand_DeleteUser:
 		id, err := command.ExtractDeleteUser(c.DeleteUser)
 		if err != nil {
 			return err
 		}
-		return f.store.DeleteUser(ctx, id)
+		return f.store.Load().DeleteUser(ctx, id)
 
 	case *gastrologv1.SystemCommand_InvalidateTokens:
 		id, at, err := command.ExtractInvalidateTokens(c.InvalidateTokens)
 		if err != nil {
 			return err
 		}
-		return f.store.InvalidateTokens(ctx, id, at)
+		return f.store.Load().InvalidateTokens(ctx, id, at)
 
 	case *gastrologv1.SystemCommand_PutUserPreferences:
 		id, prefs, err := command.ExtractPutUserPreferences(c.PutUserPreferences)
 		if err != nil {
 			return err
 		}
-		return f.store.PutUserPreferences(ctx, id, prefs)
+		return f.store.Load().PutUserPreferences(ctx, id, prefs)
 
 	default:
 		return fmt.Errorf("unexpected user command: %T", c)
@@ -707,14 +710,14 @@ func (f *FSM) applyRefreshToken(ctx context.Context, cmd *gastrologv1.SystemComm
 		if err != nil {
 			return err
 		}
-		return f.store.CreateRefreshToken(ctx, token)
+		return f.store.Load().CreateRefreshToken(ctx, token)
 
 	case *gastrologv1.SystemCommand_DeleteRefreshToken:
 		id, err := command.ExtractDeleteRefreshToken(c.DeleteRefreshToken)
 		if err != nil {
 			return err
 		}
-		return f.store.DeleteRefreshToken(ctx, id)
+		return f.store.Load().DeleteRefreshToken(ctx, id)
 
 	case *gastrologv1.SystemCommand_RotateRefreshToken:
 		oldHash, next, err := command.ExtractRotateRefreshToken(c.RotateRefreshToken)
@@ -724,7 +727,7 @@ func (f *FSM) applyRefreshToken(ctx context.Context, cmd *gastrologv1.SystemComm
 		// Whether the old token was still there is not an apply outcome —
 		// every replica reaches the same state either way. The proposer reads
 		// the replacement back to learn whether it won.
-		_, err = f.store.RotateRefreshToken(ctx, oldHash, next)
+		_, err = f.store.Load().RotateRefreshToken(ctx, oldHash, next)
 		return err
 
 	case *gastrologv1.SystemCommand_DeleteUserRefreshTokens:
@@ -732,7 +735,7 @@ func (f *FSM) applyRefreshToken(ctx context.Context, cmd *gastrologv1.SystemComm
 		if err != nil {
 			return err
 		}
-		return f.store.DeleteUserRefreshTokens(ctx, userID)
+		return f.store.Load().DeleteUserRefreshTokens(ctx, userID)
 
 	default:
 		return fmt.Errorf("unexpected refresh token command: %T", c)
@@ -742,14 +745,14 @@ func (f *FSM) applyRefreshToken(ctx context.Context, cmd *gastrologv1.SystemComm
 // cascadeDeleteRotationPolicy clears rotation policy references from vaults
 // after the policy is deleted.
 func (f *FSM) cascadeDeleteRotationPolicy(ctx context.Context, policyID glid.GLID) error {
-	vaults, err := f.store.ListVaults(ctx)
+	vaults, err := f.store.Load().ListVaults(ctx)
 	if err != nil {
 		return fmt.Errorf("list vaults for cascade: %w", err)
 	}
 	for _, v := range vaults {
 		if v.RotationPolicyID != nil && *v.RotationPolicyID == policyID {
 			v.RotationPolicyID = nil
-			if err := f.store.PutVault(ctx, v); err != nil {
+			if err := f.store.Load().PutVault(ctx, v); err != nil {
 				return fmt.Errorf("cascade update vault %s: %w", v.ID, err)
 			}
 		}
@@ -760,7 +763,7 @@ func (f *FSM) cascadeDeleteRotationPolicy(ctx context.Context, policyID glid.GLI
 // cascadeDeleteRetentionPolicy removes retention rules referencing the policy
 // from vaults.
 func (f *FSM) cascadeDeleteRetentionPolicy(ctx context.Context, policyID glid.GLID) error {
-	vaults, err := f.store.ListVaults(ctx)
+	vaults, err := f.store.Load().ListVaults(ctx)
 	if err != nil {
 		return fmt.Errorf("list vaults for cascade: %w", err)
 	}
@@ -776,7 +779,7 @@ func (f *FSM) cascadeDeleteRetentionPolicy(ctx context.Context, policyID glid.GL
 		}
 		if modified {
 			v.RetentionRules = filtered
-			if err := f.store.PutVault(ctx, v); err != nil {
+			if err := f.store.Load().PutVault(ctx, v); err != nil {
 				return fmt.Errorf("cascade update vault %s: %w", v.ID, err)
 			}
 		}
@@ -788,7 +791,7 @@ func (f *FSM) cascadeDeleteRetentionPolicy(ctx context.Context, policyID glid.GL
 func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
 	ctx := context.Background()
 
-	sys, err := f.store.Load(ctx)
+	sys, err := f.store.Load().Load(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load system for snapshot: %w", err)
 	}
@@ -796,12 +799,12 @@ func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
 		sys = &system.System{}
 	}
 
-	users, err := f.store.ListUsers(ctx)
+	users, err := f.store.Load().ListUsers(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list users for snapshot: %w", err)
 	}
 
-	tokens, err := f.store.ListRefreshTokens(ctx)
+	tokens, err := f.store.Load().ListRefreshTokens(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list refresh tokens for snapshot: %w", err)
 	}
@@ -1000,7 +1003,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 		return fmt.Errorf("restore protocol level: %w", err)
 	}
 
-	f.store = newStore
+	f.store.Store(newStore)
 	// Wake apply-wait barriers covered by this snapshot — the restored
 	// state includes every command up to the embedded index. Advance only
 	// after the store swap so released waiters read post-restore state.
