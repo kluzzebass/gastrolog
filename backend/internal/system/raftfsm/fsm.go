@@ -13,6 +13,8 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/applywait"
+	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/raftlevel"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/command"
 	"gastrolog/internal/system/memory"
@@ -81,11 +83,30 @@ func WithOnApply(fn func(Notification)) Option {
 	}
 }
 
+// WithOnUnapplicable sets what the FSM calls on an entry it cannot apply, in
+// place of raftlevel.FailStop logging to standard error.
+func WithOnUnapplicable(fn raftlevel.Unapplicable) Option {
+	return func(f *FSM) {
+		f.onUnapplicable = fn
+	}
+}
+
+// WithBinaryLevel sets the protocol level the FSM's binary supports, in
+// place of raftlevel.Binary.
+func WithBinaryLevel(level uint32) Option {
+	return func(f *FSM) {
+		f.binaryLevel = level
+	}
+}
+
 // FSM implements raft.FSM by dispatching deserialized ConfigCommands to an
 // in-memory config store.
 type FSM struct {
 	store   *memory.Store
 	onApply func(Notification)
+
+	onUnapplicable raftlevel.Unapplicable
+	binaryLevel    uint32
 
 	// applyWait is advanced after each log entry is applied (and after a
 	// snapshot restore, up to the index the snapshot embeds). Followers
@@ -98,7 +119,12 @@ var _ raft.FSM = (*FSM)(nil)
 
 // New creates a new FSM with a fresh in-memory store.
 func New(opts ...Option) *FSM {
-	f := &FSM{store: memory.NewStore(), applyWait: applywait.New()}
+	f := &FSM{
+		store:          memory.NewStore(),
+		applyWait:      applywait.New(),
+		onUnapplicable: raftlevel.FailStop(nil),
+		binaryLevel:    raftlevel.Binary,
+	}
 	for _, o := range opts {
 		o(f)
 	}
@@ -116,22 +142,46 @@ func (f *FSM) ApplyWait() *applywait.Tracker {
 	return f.applyWait
 }
 
+// ActiveProtocolLevel returns the cluster's committed active protocol level,
+// zero until one is committed.
+func (f *FSM) ActiveProtocolLevel() uint32 {
+	return f.store.ProtocolLevel()
+}
+
 // Apply deserializes a committed Raft log entry and dispatches to the store.
 // Returns nil on success or an error on failure.
+//
+// An entry this binary cannot apply — undecodable, of an unknown command
+// type, or raising the active level above the binary's — goes to the
+// unapplicable hook, and the FSM does not advance past it.
 func (f *FSM) Apply(l *raft.Log) any {
-	// The entry is consumed regardless of dispatch outcome — advance the
-	// apply tracker on every return path, after the store mutation (if any)
-	// is visible. Mirrors raft's own AppliedIndex semantics, which count
-	// entries whose FSM application returned an error.
-	defer f.applyWait.Advance(l.Index)
-
 	cmd, err := command.Unmarshal(l.Data)
 	if err != nil {
-		return fmt.Errorf("unmarshal config command: %w", err)
+		return f.unapplicable(l.Index, fmt.Errorf("%w: %w", raftlevel.ErrUndecodableCommand, err))
 	}
+	if level := cmd.GetSetProtocolLevel().GetLevel(); level > f.binaryLevel {
+		return f.unapplicable(l.Index, fmt.Errorf("%w: this binary's level is %d, the active level is being raised to %d",
+			raftlevel.ErrBinaryBelowActiveLevel, f.binaryLevel, level))
+	}
+	result, known := f.dispatch(context.Background(), cmd, l.Index)
+	if !known {
+		return f.unapplicable(l.Index, raftlevel.UnknownCommand(cmd))
+	}
+	// Advance after the store mutation (if any) is visible, whether or not
+	// the command succeeded: raft counts an entry whose apply returned an
+	// error as applied.
+	f.applyWait.Advance(l.Index)
+	return result
+}
 
-	ctx := context.Background()
+func (f *FSM) unapplicable(index uint64, reason error) error {
+	f.onUnapplicable(raftgroup.ClusterControlPlaneGroupID, index, reason)
+	return reason
+}
 
+// dispatch applies a decoded command. It reports false for a command type
+// it does not handle.
+func (f *FSM) dispatch(ctx context.Context, cmd *gastrologv1.SystemCommand, index uint64) (any, bool) {
 	switch cmd.Command.(type) {
 	case *gastrologv1.SystemCommand_PutRotationPolicy,
 		*gastrologv1.SystemCommand_DeleteRotationPolicy,
@@ -163,7 +213,7 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.SystemCommand_SetIngesterAssignment,
 		*gastrologv1.SystemCommand_SetSetupWizardDismissed,
 		*gastrologv1.SystemCommand_PutLogLevels:
-		return f.applyConfig(ctx, cmd, l.Index)
+		return f.applyConfig(ctx, cmd, index), true
 
 	case *gastrologv1.SystemCommand_CreateUser,
 		*gastrologv1.SystemCommand_UpdatePassword,
@@ -172,23 +222,26 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.SystemCommand_DeleteUser,
 		*gastrologv1.SystemCommand_InvalidateTokens,
 		*gastrologv1.SystemCommand_PutUserPreferences:
-		return f.applyUser(ctx, cmd)
+		return f.applyUser(ctx, cmd), true
 
 	case *gastrologv1.SystemCommand_CreateRefreshToken,
 		*gastrologv1.SystemCommand_DeleteRefreshToken,
 		*gastrologv1.SystemCommand_RotateRefreshToken,
 		*gastrologv1.SystemCommand_DeleteUserRefreshTokens:
-		return f.applyRefreshToken(ctx, cmd)
+		return f.applyRefreshToken(ctx, cmd), true
 
 	case *gastrologv1.SystemCommand_CatchupBarrier:
 		// State-free startup catch-up barrier. No store mutation and no
-		// notification — its sole effect is the deferred
-		// applyWait.Advance(l.Index) above, which releases a node blocked
-		// on the FSM apply-wait tracker once it applies this entry.
-		return nil
+		// notification — its sole effect is Apply's applyWait.Advance, which
+		// releases a node blocked on the FSM apply-wait tracker once it
+		// applies this entry.
+		return nil, true
+
+	case *gastrologv1.SystemCommand_SetProtocolLevel:
+		return f.store.SetProtocolLevel(ctx, cmd.GetSetProtocolLevel().GetLevel()), true
 
 	default:
-		return fmt.Errorf("unknown config command type: %T", cmd.Command)
+		return nil, false
 	}
 }
 
@@ -797,6 +850,11 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 		return fmt.Errorf("unmarshal snapshot: %w", err)
 	}
 
+	if level := snap.GetProtocolLevel(); level > f.binaryLevel {
+		return f.unapplicable(snap.GetLastAppliedIndex(), fmt.Errorf("%w: this binary's level is %d, the snapshot's active level is %d",
+			raftlevel.ErrBinaryBelowActiveLevel, f.binaryLevel, level))
+	}
+
 	sys, users, tokens, err := command.RestoreSnapshot(snap)
 	if err != nil {
 		return fmt.Errorf("restore snapshot: %w", err)
@@ -937,6 +995,9 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 	}
 	if err := newStore.SetSetupWizardDismissed(ctx, rt.SetupWizardDismissed); err != nil {
 		return fmt.Errorf("restore setup wizard dismissed: %w", err)
+	}
+	if err := newStore.SetProtocolLevel(ctx, rt.ProtocolLevel); err != nil {
+		return fmt.Errorf("restore protocol level: %w", err)
 	}
 
 	f.store = newStore

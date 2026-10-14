@@ -5,6 +5,7 @@ package storetest
 
 import (
 	"context"
+	"errors"
 	"gastrolog/internal/glid"
 	"testing"
 	"time"
@@ -39,6 +40,50 @@ func TestStore(t *testing.T, newStore func(t *testing.T) system.Store) {
 	testCloudServices(t, newStore)
 	testNodeStorageConfigs(t, newStore)
 	testRemovedNodes(t, newStore)
+	testProtocolLevels(t, newStore)
+}
+
+func testProtocolLevels(t *testing.T, newStore func(t *testing.T) system.Store) {
+	t.Run("ActiveProtocolLevelIsNeverLowered", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		if level, err := s.GetProtocolLevel(ctx); err != nil || level != 0 {
+			t.Fatalf("fresh store level = %d, %v; want 0", level, err)
+		}
+		if err := s.SetProtocolLevel(ctx, 1); err != nil {
+			t.Fatalf("SetProtocolLevel(1): %v", err)
+		}
+		if err := s.SetProtocolLevel(ctx, 1); err != nil {
+			t.Fatalf("SetProtocolLevel(1) again: %v", err)
+		}
+		if err := s.SetProtocolLevel(ctx, 0); !errors.Is(err, system.ErrProtocolLevelLowered) {
+			t.Fatalf("SetProtocolLevel(0) = %v, want ErrProtocolLevelLowered", err)
+		}
+		if level, err := s.GetProtocolLevel(ctx); err != nil || level != 1 {
+			t.Fatalf("level = %d, %v after a refused lowering; want 1", level, err)
+		}
+		sys, err := s.Load(ctx)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if sys == nil || sys.Runtime.ProtocolLevel != 1 {
+			t.Fatalf("Load carries protocol level %+v, want 1", sys)
+		}
+	})
+
+	t.Run("NodeRecordKeepsItsProtocolLevel", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+		id := newID()
+		if err := s.PutNode(ctx, system.NodeConfig{ID: id, Name: "n", ProtocolLevel: 7}); err != nil {
+			t.Fatalf("PutNode: %v", err)
+		}
+		got, err := s.GetNode(ctx, id)
+		if err != nil || got == nil || got.ProtocolLevel != 7 {
+			t.Fatalf("GetNode = %+v, %v; want protocol level 7", got, err)
+		}
+	})
 }
 
 func testRemovedNodes(t *testing.T, newStore func(t *testing.T) system.Store) {

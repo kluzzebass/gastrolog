@@ -29,6 +29,7 @@ import (
 	"gastrolog/internal/cluster/tlsutil"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/multiraft"
+	"gastrolog/internal/raftlevel"
 
 	"github.com/Jille/raft-grpc-leader-rpc/leaderhealth"
 	hraft "github.com/hashicorp/raft"
@@ -114,6 +115,11 @@ type Server struct {
 	// function. Followers use the index to wait for their own group FSM to
 	// catch up before reading post-mutation state.
 	groupApplyFn func(ctx context.Context, groupID string, data []byte) (uint64, error)
+
+	// vaultCtlGate is the protocol-level gate ForwardVaultApply applies before
+	// proposing a forwarded vault-ctl entry. Unset, it gates at the base
+	// level.
+	vaultCtlGate atomic.Pointer[raftlevel.Gate]
 
 	// enrollHandler handles the Enroll RPC for joining nodes.
 	enrollHandler EnrollHandler
@@ -500,6 +506,12 @@ func (s *Server) SetApplyFn(fn func(ctx context.Context, data []byte) (uint64, e
 // wireClusterRaftApplies in app.go for the canonical wiring.
 func (s *Server) SetGroupApplyFn(fn func(ctx context.Context, groupID string, data []byte) (uint64, error)) {
 	s.groupApplyFn = fn
+}
+
+// SetVaultCtlGate sets the protocol-level gate ForwardVaultApply applies to
+// a forwarded vault-ctl entry before proposing it.
+func (s *Server) SetVaultCtlGate(g *raftlevel.Gate) {
+	s.vaultCtlGate.Store(g)
 }
 
 // SetRemovedNodeCheck registers the removal-record lookup used to explain

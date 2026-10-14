@@ -58,7 +58,16 @@ message SystemCommand {
     CatchupBarrierCommand catchup_barrier = 40;
     RotateRefreshTokenCommand rotate_refresh_token = 41;
     MarkNodeRemovedCommand mark_node_removed = 42;
+    SetProtocolLevelCommand set_protocol_level = 43;
   }
+}
+
+// SetProtocolLevelCommand commits the cluster's active protocol level: the
+// highest protocol level a command may require before it is proposed. The
+// apply refuses a level below the current one, so the active level never
+// goes down.
+message SetProtocolLevelCommand {
+  uint32 level = 1;
 }
 
 // CatchupBarrierCommand is a state-free entry the FSM applies as a no-op. Its
@@ -257,6 +266,9 @@ message PutNodeConfigCommand {
   // these fields so post-restore nodes preserve their state.
   NodeState state = 3;
   google.protobuf.Timestamp state_since = 4;
+  // Protocol level of the binary the node last started with; zero when the
+  // node has not reported one.
+  uint32 protocol_level = 5;
 }
 
 message DeleteNodeConfigCommand {
@@ -421,4 +433,7 @@ message SystemSnapshot {
   uint64 last_applied_index = 21;
   // Raft server IDs of every node the cluster removed.
   repeated string removed_node_ids = 22;
+  // The cluster's committed active protocol level; zero when none has been
+  // committed.
+  uint32 protocol_level = 23;
 }

@@ -6734,7 +6734,11 @@ type NodeConfig struct {
 	// Wall-clock instant the current state was entered. Zero if unknown
 	// (e.g., legacy record that has never had a state transition since
 	// the field was introduced).
-	StateSince    *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=state_since,json=stateSince,proto3" json:"state_since,omitempty"`
+	StateSince *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=state_since,json=stateSince,proto3" json:"state_since,omitempty"`
+	// Protocol level of the binary the node last started with: the highest
+	// Raft command level that binary can apply. Zero when the node has not
+	// reported one.
+	ProtocolLevel uint32 `protobuf:"varint,5,opt,name=protocol_level,json=protocolLevel,proto3" json:"protocol_level,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6795,6 +6799,13 @@ func (x *NodeConfig) GetStateSince() *timestamppb.Timestamp {
 		return x.StateSince
 	}
 	return nil
+}
+
+func (x *NodeConfig) GetProtocolLevel() uint32 {
+	if x != nil {
+		return x.ProtocolLevel
+	}
+	return 0
 }
 
 type PutNodeConfigRequest struct {
@@ -9622,14 +9633,15 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\n" +
 	"TypesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x128\n" +
-	"\x05value\x18\x02 \x01(\v2\".gastrolog.v1.IngesterTypeDefaultsR\x05value:\x028\x01\"\x9c\x01\n" +
+	"\x05value\x18\x02 \x01(\v2\".gastrolog.v1.IngesterTypeDefaultsR\x05value:\x028\x01\"\xc3\x01\n" +
 	"\n" +
 	"NodeConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12-\n" +
 	"\x05state\x18\x03 \x01(\x0e2\x17.gastrolog.v1.NodeStateR\x05state\x12;\n" +
 	"\vstate_since\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"stateSince\"H\n" +
+	"stateSince\x12%\n" +
+	"\x0eprotocol_level\x18\x05 \x01(\rR\rprotocolLevel\"H\n" +
 	"\x14PutNodeConfigRequest\x120\n" +
 	"\x06config\x18\x01 \x01(\v2\x18.gastrolog.v1.NodeConfigR\x06config\"P\n" +
 	"\x15PutNodeConfigResponse\x127\n" +

@@ -84,6 +84,7 @@ type configDispatcher struct {
 	configSignal       *notify.Signal                  // broadcasts config changes to WatchConfig streams
 	managedFileHandler ManagedFileHandler              // nil for single-node or before wiring
 	placementTrigger   func()                          // triggers immediate placement reconcile; nil for single-node
+	protocolLevelWake  func()                          // asks the protocol-level raiser to evaluate; nil without cluster-ctl Raft
 	alerts             alert.Sink                      // raises/clears config-side-effect-failed; nil disables alerting
 
 	// obligations tracks per-entity config side effects that failed to
@@ -266,6 +267,9 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		// bootstrap membership and a scaled-in node loops forever in
 		// pre-vote campaigns.
 		d.settle(entNodeConfig, "", "refresh-vault-ctl-members", d.handleNodeConfigChange(ctx))
+		// A node record carries the protocol level its binary reports, and
+		// a departed node no longer holds the active level down.
+		d.wakeProtocolLevel()
 		// Membership also changes the placement candidate set: a joined node
 		// opens a memory-vault follower slot (any alive node is eligible) and
 		// can relieve load; a removed node's vaults need re-placing. The
@@ -362,6 +366,23 @@ func (d *configDispatcher) setPlacementTrigger(fn func()) {
 	d.wiring.Lock()
 	defer d.wiring.Unlock()
 	d.placementTrigger = fn
+}
+
+// setProtocolLevelWake binds the protocol-level raiser's wake-up.
+func (d *configDispatcher) setProtocolLevelWake(fn func()) {
+	d.wiring.Lock()
+	defer d.wiring.Unlock()
+	d.protocolLevelWake = fn
+}
+
+// wakeProtocolLevel asks the protocol-level raiser to evaluate. Non-blocking.
+func (d *configDispatcher) wakeProtocolLevel() {
+	d.wiring.RLock()
+	wake := d.protocolLevelWake
+	d.wiring.RUnlock()
+	if wake != nil {
+		wake()
+	}
 }
 
 // setManagedFileHandler binds managed-file transfer.

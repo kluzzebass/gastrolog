@@ -742,9 +742,10 @@ func NodeStateFromProto(s gastrologv1.NodeState) system.NodeState {
 
 func putNodeConfigCmd(node system.NodeConfig) *gastrologv1.PutNodeConfigCommand {
 	cmd := &gastrologv1.PutNodeConfigCommand{
-		Id:    node.ID.ToProto(),
-		Name:  node.Name,
-		State: NodeStateToProto(node.State),
+		Id:            node.ID.ToProto(),
+		Name:          node.Name,
+		State:         NodeStateToProto(node.State),
+		ProtocolLevel: node.ProtocolLevel,
 	}
 	if !node.StateSince.IsZero() {
 		cmd.StateSince = timestamppb.New(node.StateSince)
@@ -778,6 +779,16 @@ func NewMarkNodeRemoved(nodeID string) *gastrologv1.SystemCommand {
 	}
 }
 
+// NewSetProtocolLevel creates a ConfigCommand committing the cluster's
+// active protocol level.
+func NewSetProtocolLevel(level uint32) *gastrologv1.SystemCommand {
+	return &gastrologv1.SystemCommand{
+		Command: &gastrologv1.SystemCommand_SetProtocolLevel{
+			SetProtocolLevel: &gastrologv1.SetProtocolLevelCommand{Level: level},
+		},
+	}
+}
+
 // NewSetNodeState creates a ConfigCommand for SetNodeState. The
 // `since` argument is captured by the proposer at propose-time and
 // applied deterministically by all replicas.
@@ -796,9 +807,10 @@ func NewSetNodeState(id glid.GLID, state system.NodeState, since time.Time) *gas
 // ExtractPutNodeConfig converts a PutNodeConfigCommand back to a NodeConfig.
 func ExtractPutNodeConfig(cmd *gastrologv1.PutNodeConfigCommand) (system.NodeConfig, error) {
 	out := system.NodeConfig{
-		ID:    glid.FromBytes(cmd.GetId()),
-		Name:  cmd.GetName(),
-		State: NodeStateFromProto(cmd.GetState()),
+		ID:            glid.FromBytes(cmd.GetId()),
+		Name:          cmd.GetName(),
+		State:         NodeStateFromProto(cmd.GetState()),
+		ProtocolLevel: cmd.GetProtocolLevel(),
 	}
 	if ts := cmd.GetStateSince(); ts != nil {
 		out.StateSince = ts.AsTime()
@@ -962,6 +974,7 @@ func BuildSnapshot(sys *system.System, users []system.User, tokens []system.Refr
 
 	snap.SetupWizardDismissed = rt.SetupWizardDismissed
 	snap.RemovedNodeIds = slices.Clone(rt.RemovedNodes)
+	snap.ProtocolLevel = rt.ProtocolLevel
 
 	// Config: log levels.
 	if cfg.LogLevels.Default != 0 || len(cfg.LogLevels.Rules) > 0 {
@@ -1143,6 +1156,7 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 
 	rt.SetupWizardDismissed = snap.GetSetupWizardDismissed()
 	rt.RemovedNodes = slices.Clone(snap.GetRemovedNodeIds())
+	rt.ProtocolLevel = snap.GetProtocolLevel()
 
 	return sys, users, tokens, nil
 }

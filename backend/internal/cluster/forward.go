@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/raftlevel"
 	"gastrolog/internal/system"
 	"io"
 	"io/fs"
@@ -792,7 +793,9 @@ func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApply
 	}
 	appliedIndex, err := s.applyFn(ctx, req.GetCommand())
 	if err != nil {
-		if errors.Is(err, system.ErrIllegalNodeStateTransition) || errors.Is(err, system.ErrNodeNotFound) || errors.Is(err, system.ErrCommandRejected) {
+		if errors.Is(err, system.ErrIllegalNodeStateTransition) || errors.Is(err, system.ErrNodeNotFound) ||
+			errors.Is(err, system.ErrCommandRejected) || errors.Is(err, system.ErrProtocolLevelLowered) ||
+			raftlevel.IsRefusal(err) {
 			// The command was well formed; the leader's state did not
 			// permit it. The forwarder turns this code back into a typed
 			// rejection on the follower.
@@ -812,6 +815,13 @@ func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApply
 func (s *Server) forwardVaultApply(ctx context.Context, req *gastrologv1.ForwardVaultApplyRequest) (*gastrologv1.ForwardVaultApplyResponse, error) {
 	if s.groupApplyFn == nil {
 		return nil, status.Error(codes.Unavailable, "group apply function not configured")
+	}
+	// This node is the one that hands the entry to raft.Apply, so it refuses
+	// an entry it cannot decode itself as well as one above the active level.
+	// InvalidArgument, not FailedPrecondition: the forwarder retries the
+	// latter against the next leader, and this refusal holds on any leader.
+	if err := s.vaultCtlGate.Load().CheckVaultRaftCommand(req.GetCommand()); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "vault apply: refused proposal: %v", err)
 	}
 	appliedIndex, err := s.groupApplyFn(ctx, string(req.GetGroupId()), req.GetCommand())
 	if err != nil {

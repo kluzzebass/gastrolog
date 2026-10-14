@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,8 +26,12 @@ var testMaxAge = "1m"
 // machinery for persistence testing.
 func newTestRaft(t *testing.T) (*hraft.Raft, *raftfsm.FSM) {
 	t.Helper()
-
 	fsm := raftfsm.New()
+	return newTestRaftWithFSM(t, fsm), fsm
+}
+
+func newTestRaftWithFSM(t *testing.T, fsm *raftfsm.FSM) *hraft.Raft {
+	t.Helper()
 
 	conf := hraft.DefaultConfig()
 	conf.LocalID = "test-node"
@@ -69,7 +74,7 @@ func newTestRaft(t *testing.T) (*hraft.Raft, *raftfsm.FSM) {
 		t.Fatal("timed out waiting for leadership")
 	}
 
-	return r, fsm
+	return r
 }
 
 func TestConformance(t *testing.T) {
@@ -80,23 +85,38 @@ func TestConformance(t *testing.T) {
 	})
 }
 
+// validCommand is a well-formed command every binary knows, for tests of the
+// apply and forward mechanics.
+func validCommand(t *testing.T) []byte {
+	t.Helper()
+	data, err := command.Marshal(command.NewCatchupBarrier())
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return data
+}
+
+// TestApplyBadData pins that an entry the FSM cannot decode, should one
+// reach the log, goes to the FSM's unapplicable hook instead of being
+// counted as applied.
 func TestApplyBadData(t *testing.T) {
 	t.Parallel()
-	r, fsm := newTestRaft(t)
-	s := New(r, fsm, 5*time.Second)
+	var stopped atomic.Int32
+	fsm := raftfsm.New(raftfsm.WithOnUnapplicable(func(string, uint64, error) { stopped.Add(1) }))
+	r := newTestRaftWithFSM(t, fsm)
 
-	// Apply garbage through raft — FSM returns an unmarshal error
-	// which surfaces via future.Response().
-	future := s.raft.Apply([]byte("not a valid protobuf"), s.applyTimeout)
+	future := r.Apply([]byte("not a valid protobuf"), 5*time.Second)
 	if err := future.Error(); err != nil {
 		t.Fatalf("unexpected raft-level error: %v", err)
 	}
-	resp := future.Response()
-	if resp == nil {
-		t.Fatal("expected error response from FSM, got nil")
+	if _, ok := future.Response().(error); !ok {
+		t.Fatalf("expected error response from FSM, got %T: %v", future.Response(), future.Response())
 	}
-	if _, ok := resp.(error); !ok {
-		t.Fatalf("expected error, got %T: %v", resp, resp)
+	if stopped.Load() != 1 {
+		t.Fatalf("unapplicable hook called %d times, want 1", stopped.Load())
+	}
+	if got := fsm.ApplyWait().Applied(); got >= future.Index() {
+		t.Fatalf("FSM advanced to %d past the undecodable entry at %d", got, future.Index())
 	}
 }
 
@@ -146,7 +166,7 @@ func TestApplyForwardsOnNotLeader(t *testing.T) {
 	s.SetForwarder(fwd)
 
 	// ApplyRaw should detect ErrNotLeader and forward.
-	testData := []byte("test-command-data")
+	testData := validCommand(t)
 	_, err = s.ApplyRaw(testData)
 	if err != nil {
 		t.Fatalf("ApplyRaw returned error: %v", err)
@@ -185,7 +205,7 @@ func TestApplyNoForwarderReturnsError(t *testing.T) {
 	s := New(r, fsm, 5*time.Second)
 	// No forwarder set.
 
-	_, err = s.ApplyRaw([]byte("test-command-data"))
+	_, err = s.ApplyRaw(validCommand(t))
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -221,7 +241,7 @@ func TestApplyForwarderError(t *testing.T) {
 	fwdErr := errors.New("leader unreachable")
 	s.SetForwarder(&mockForwarder{err: fwdErr})
 
-	_, err = s.ApplyRaw([]byte("test-data"))
+	_, err = s.ApplyRaw(validCommand(t))
 	if !errors.Is(err, fwdErr) {
 		t.Fatalf("expected forwarder error, got: %v", err)
 	}
@@ -240,7 +260,7 @@ func TestApplyReturnsAppliedIndexOnLeader(t *testing.T) {
 	// future.Index() is set on the resp side regardless. The goal of this
 	// test is to pin that the leader path returns a non-zero index, which
 	// is what the cluster ForwardApply handler ships back to followers.
-	idx, _ := s.ApplyRaw([]byte("noop-command"))
+	idx, _ := s.ApplyRaw(validCommand(t))
 	if idx == 0 {
 		t.Errorf("expected non-zero applied index on leader path, got 0")
 	}
@@ -282,7 +302,7 @@ func TestApplyWaitsForLocalApplyAfterForward(t *testing.T) {
 	s.SetForwarder(&mockForwarder{appliedIndex: 99})
 
 	start := time.Now()
-	_, err = s.ApplyRaw([]byte("forwarded-command"))
+	_, err = s.ApplyRaw(validCommand(t))
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -330,7 +350,7 @@ func TestApplyReturnsImmediatelyOnZeroAppliedIndex(t *testing.T) {
 	s.SetForwarder(&mockForwarder{appliedIndex: 0})
 
 	start := time.Now()
-	_, err = s.ApplyRaw([]byte("forwarded-command"))
+	_, err = s.ApplyRaw(validCommand(t))
 	if err != nil {
 		t.Fatalf("ApplyRaw unexpectedly errored: %v", err)
 	}
@@ -444,7 +464,7 @@ func TestApplyWaitCancelledContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := s.applyRaw(ctx, []byte("forwarded-command"))
+	_, err := s.applyRaw(ctx, validCommand(t))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("applyRaw with cancelled ctx = %v, want context.Canceled", err)
 	}

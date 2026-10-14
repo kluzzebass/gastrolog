@@ -56,6 +56,7 @@ import (
 	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/raftlevel"
 	"gastrolog/internal/raftwal"
 	"gastrolog/internal/schedwatch"
 	"gastrolog/internal/server"
@@ -438,8 +439,13 @@ func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg
 	td.groupMgr, td.vaultWAL = groupMgr, vaultWAL
 
 	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, groupMgr, nodeAddrResolver, nodeID)
+	factories.VaultCtlGate = raftlevel.NewGate(func() uint32 {
+		level, _ := cfgStore.GetProtocolLevel(ctx)
+		return level
+	})
 	if clusterSrv != nil {
 		factories.PeerConns = clusterSrv.PeerConns()
+		clusterSrv.SetVaultCtlGate(factories.VaultCtlGate)
 	}
 
 	// Wire cross-node record forwarding and search forwarding in cluster mode.
@@ -455,6 +461,9 @@ func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg
 
 	// Wire the dispatcher now that orchestrator and factories are available.
 	disp.wire(orch, cfgStore, factories)
+	if clusterSrv != nil {
+		startProtocolLevelRaiser(ctx, cfgStore, clusterSrv, disp, compCluster.Apply(logger))
+	}
 
 	// Sync the ComponentFilterHandler's rule set with the system config
 	// store. Watcher runs until ctx is cancelled; on every configSignal
@@ -1284,13 +1293,18 @@ func ensureNodeConfig(ctx context.Context, cfgStore system.Store, nodeID, prefer
 		return "", fmt.Errorf("get node: %w", err)
 	}
 	if existing != nil {
-		// If a preferred name was given and differs from the stored name, update it.
-		if preferredName != "" && existing.Name != preferredName {
+		// The record follows the preferred name, when one is given, and
+		// always reports the protocol level of the binary now running.
+		renamed := preferredName != "" && existing.Name != preferredName
+		if !renamed && existing.ProtocolLevel == raftlevel.Binary {
+			return existing.Name, nil
+		}
+		if renamed {
 			existing.Name = preferredName
-			if err := cfgStore.PutNode(ctx, *existing); err != nil {
-				return "", err
-			}
-			return preferredName, nil
+		}
+		existing.ProtocolLevel = raftlevel.Binary
+		if err := cfgStore.PutNode(ctx, *existing); err != nil {
+			return "", err
 		}
 		return existing.Name, nil
 	}
@@ -1299,10 +1313,11 @@ func ensureNodeConfig(ctx context.Context, cfgStore system.Store, nodeID, prefer
 		name = petname.Generate(2, "-")
 	}
 	if err := cfgStore.PutNode(ctx, system.NodeConfig{
-		ID:         nodeUUID,
-		Name:       name,
-		State:      system.NodeStateLive,
-		StateSince: time.Now(),
+		ID:            nodeUUID,
+		Name:          name,
+		State:         system.NodeStateLive,
+		StateSince:    time.Now(),
+		ProtocolLevel: raftlevel.Binary,
 	}); err != nil {
 		return "", err
 	}

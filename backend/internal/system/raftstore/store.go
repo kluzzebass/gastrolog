@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/raftlevel"
 	"gastrolog/internal/raftutil"
 	"time"
 
@@ -48,14 +49,17 @@ type Store struct {
 	applyTimeout time.Duration
 	forwarder    Forwarder // nil for single-node
 	barriers     barrierGate
+	gate         *raftlevel.Gate
 }
 
-// New creates a new Store.
+// New creates a new Store. Its proposals are gated against the active
+// protocol level its own FSM has applied.
 func New(r Applier, fsm *raftfsm.FSM, applyTimeout time.Duration) *Store {
 	return &Store{
 		fsm:          fsm,
 		raft:         r,
 		applyTimeout: applyTimeout,
+		gate:         raftlevel.NewGate(fsm.ActiveProtocolLevel),
 	}
 }
 
@@ -95,7 +99,15 @@ func (s *Store) apply(ctx context.Context, cmd *gastrologv1.SystemCommand) error
 // can read post-mutation state from the local FSM immediately, closing the
 // read-after-write race that otherwise leaves a follower serving stale
 // config right after a write it just made.
+//
+// Every command passes the protocol-level gate first, on the proposing node
+// and again on the leader that receives it forwarded: the leader refuses an
+// entry it cannot decode itself, and either node refuses a command type
+// above the cluster's active level.
 func (s *Store) applyRaw(ctx context.Context, data []byte) (uint64, error) {
+	if err := s.gate.CheckSystemCommand(data); err != nil {
+		return 0, fmt.Errorf("refused proposal: %w", err)
+	}
 	// Retry while a leadership transfer is in progress before deciding what to
 	// do with the error. ErrLeadershipTransferInProgress is NOT
 	// ErrNotLeader — this node still leads, it is just refusing new entries
@@ -552,4 +564,12 @@ func (s *Store) GetSetupWizardDismissed(ctx context.Context) (bool, error) {
 
 func (s *Store) SetSetupWizardDismissed(ctx context.Context, dismissed bool) error {
 	return s.apply(ctx, command.NewSetSetupWizardDismissed(dismissed))
+}
+
+func (s *Store) GetProtocolLevel(ctx context.Context) (uint32, error) {
+	return s.fsm.Store().GetProtocolLevel(ctx)
+}
+
+func (s *Store) SetProtocolLevel(ctx context.Context, level uint32) error {
+	return s.apply(ctx, command.NewSetProtocolLevel(level))
 }
