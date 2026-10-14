@@ -45,7 +45,7 @@ GastroLog does not need a separate tracing backend. A distributed trace is a set
 
 ## Programmable Ingestion
 
-Routes today are priority-ordered match-to-vault mappings (`RouteConfig.Stages` ships only a `MatchStage` in Phase 5 — gastrolog-4kkoo). At its ceiling, the routing layer is a lightweight data pipeline — the same pipeline language used for queries, applied at ingestion time. Future stage variants (enrich, lookup, redact, sample, fork, route-by-field per gastrolog-5e85x) plug into the same `RouteStage` oneof without re-shaping the proto.
+Routes today are priority-ordered match-to-vault mappings (`RouteConfig.Stages` carries only a `MatchStage`). At its ceiling, the routing layer is a lightweight data pipeline — the same pipeline language used for queries, applied at ingestion time. Further stage variants (enrich, lookup, redact, sample, fork, route-by-field) plug into the same `RouteStage` oneof without re-shaping the proto.
 
 **Route pipeline transforms.** Enrich with external data, redact sensitive fields, sample by severity — all after digestion but before the record hits storage. Parsing and field extraction are handled upstream by the ingester and digester; the route pipeline operates on fully digested records regardless of ingester type. The transform pipeline uses the same operator syntax as query pipelines, but is configured visually through the route editor in Settings — not through config files.
 
@@ -126,7 +126,7 @@ Storage should be a budget, not a cliff. The cluster expresses layered storage a
 
 A vault is the **only abstraction over the chunk layer**. It carries its full storage shape directly: a **type** (memory or file), a **storage class**, an optional **cloud service** binding, a **rotation policy**, **retention rules**, a **replication factor**, and cache tuning for cloud-backed reads. The simpler the unit, the simpler the failure modes.
 
-A cloud-backed vault is a file vault with a `CloudServiceID` set: sealed chunks upload to the cloud service, while not-yet-sealed records (segments) and a warm cache stay on local disk. This is the only "fancy" storage shape — every other vault is straightforwardly a memory or file container.
+A cloud-backed vault is a file vault with a `CloudServiceID` set: sealed chunks upload to the cloud service, while not-yet-sealed records (segments) and cached copies stay on local disk. This is the only "fancy" storage shape — every other vault is straightforwardly a memory or file container.
 
 ### Storage building blocks
 
@@ -141,15 +141,15 @@ Node-1 file storages:
   class 3: name=NAS,    path=/mnt/nas, disk-free-floor=5%
 ```
 
-**CloudService** — cluster-wide definition of a cloud storage service. S3 bucket, credentials, region, storage class. Multiple can exist (production S3, archival Glacier, etc.). Not tied to any node — any node can access it.
+**CloudService** — cluster-wide definition of a cloud storage service: provider (S3, GCS, Azure), bucket or container, credentials, region, a storage class for vault placement, and optional archival transitions between cloud storage classes. Multiple can exist (production S3, an archive bucket that transitions to Glacier, etc.). Not tied to any node — any node can access it.
 
 ```
 Cloud services:
   s3-prod: provider=s3, bucket=logs-prod, region=eu-west-1
-  glacier-archive: provider=s3, bucket=logs-archive, region=eu-west-1, storage-class=GLACIER
+  s3-archive: provider=s3, bucket=logs-archive, region=eu-west-1, archival-mode=active, transition=90d:GLACIER
 ```
 
-**Vault** — the storage container. Its `type`, `storage_class`, optional `cloud_service_id`, rotation policy, retention rules, and replication factor fully describe how records are persisted.
+**Vault** — the storage container. Its `type`, `storage_class`, optional `cloud_service_id`, rotation policy, retention rules, retention disposition, and replication factor fully describe how records are persisted.
 
 A typical three-vault retention chain looks like this:
 
@@ -214,7 +214,7 @@ flowchart TB
     style NEXT fill:#6a5040,color:#f0e8e0
 ```
 
-No duplicate writes. No coordination questions about who does what: the origin owns the segment, the vault-ctl leader owns chunk boundaries, and every home builds its own copy. If the vault-ctl leader dies, the next elected leader continues planning from the open manifest and chunk build cursors in the vault-ctl FSM.
+No duplicate writes. No coordination questions about who does what: the origin owns the segment, the vault-ctl leader owns chunk boundaries, and every home builds its own copy. If the vault-ctl leader dies, the next elected leader continues planning from the open manifest and the segment registry in the vault-ctl FSM.
 
 ### Durability and retention
 
@@ -226,7 +226,7 @@ Each vault retires chunks per its retention policy. The **retention disposition*
 
 Under `route`, the destination vault takes the records through its normal write path — segments on the node running the retention sweep, distributed to that vault's homes — and durability comes from that vault's own replication factor. The hand-off is **explicit and per-record**: the sweep waits for each record's durable ack (`SubmitRetentionRecord`), and a destination that refuses admission aborts the fan-out and keeps the source chunk.
 
-### Resolved: chunk metadata in Raft
+### Chunk metadata in Raft
 
 Each vault has its own Raft group (**vault-ctl Raft**). The cluster-ctl Raft stores cluster-wide configuration; each vault-ctl Raft group stores the chunk manifest for that vault — which chunks exist, their sealed/deleted state, replication metadata, and the receipt-protocol state for cluster-wide deletes. Leader and followers for the vault are determined by that group's election.
 
@@ -302,7 +302,7 @@ The only exception to "every chunk produced is a full local seal" is the archiva
 
 ### On-demand caching for cloud-backed vaults
 
-Cloud-backed vaults store sealed chunks remotely. Querying them incurs latency and egress costs. The vault keeps a **warm cache** on local disk, sized by `CacheBudget` and aged out by `CacheEviction` (LRU by default; TTL with `CacheTTL` for time-bounded eviction).
+Cloud-backed vaults store sealed chunks remotely. Querying them incurs latency and egress costs. The vault keeps **cached copies** on local disk, sized by `CacheBudget` and aged out by `CacheEviction` (LRU by default; TTL with `CacheTTL` for time-bounded eviction).
 
 - **Promote**: query hits a cloud-stored chunk → download to local cache → serve from local → keep in cache.
 - **Evict**: LRU or TTL-based, per the cache config. The cloud copy is the source of truth; the cache is purely a performance optimization.
@@ -360,11 +360,11 @@ Investigating incidents is a team activity, but most tools treat it as a solo on
 
 The cluster should not need an operator for steady-state operations. It should heal itself, rebalance itself, and operate within its resource budget without human intervention.
 
-**Automatic vault rebalancing.** When a node joins or leaves the cluster, vaults are redistributed across the remaining nodes to maintain even load. The rebalancing is lightweight because archive data lives in cloud-backed vaults — only the active chunk and warm cache need to migrate. Queries continue to work during rebalancing; the routing layer forwards requests to whichever node currently owns each vault.
+**Automatic vault rebalancing.** When a node joins or leaves the cluster, vaults are redistributed across the remaining nodes to maintain even load. The rebalancing is lightweight because archive data lives in cloud-backed vaults — only the active chunk and cached copies need to migrate. Queries continue to work during rebalancing; the routing layer forwards requests to whichever node currently owns each vault.
 
 **Storage pressure management.** When local storage approaches capacity, the cluster responds along the route chain automatically — accelerating retention on the upstream vault so records flow into the downstream vault sooner, evicting cache entries on cloud-backed vaults, and tightening rotation thresholds. The operator sets the budget; the routes-and-retention layer manages within it.
 
-**Graceful degradation.** When a node goes down, its vaults' sealed data is already durable in cloud-backed vaults further down the chain. Another node picks up ingestion for the affected vaults, and queries against cloud-backed chunks continue to work (they're in S3, not on the dead node's disk). The only records at risk are those whose segments no surviving node holds yet. The cluster never refuses to answer a query because a node is down — it answers with what's durable and tells you what's missing.
+**Graceful degradation.** When a node goes down, its vaults' sealed chunks are still held by the vaults' other homes (up to each vault's replication factor), and a cloud-backed vault's sealed chunks are in the cloud store, not on the dead node's disk. Other nodes keep receiving records for the affected vaults, and queries against the surviving copies continue to work. The only records at risk are those whose segments no surviving node holds yet. The cluster never refuses to answer a query because a node is down — it answers with what's durable and tells you what's missing.
 
 **Capacity planning signals.** The cluster exposes forward-looking metrics: "At current ingestion rate, local storage will be full in 14 days." "Adding one node would reduce average query latency by 30%." These are not alerts — they are planning signals visible in the inspector, available when you need them, invisible when you don't.
 
@@ -481,8 +481,8 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 
 | Capability | Status | Notes |
 |---|---|---|
-| Match-expression routing | Done | Inline `RouteConfig.Stages[].Match.Expression` → destinations; first-match-wins by priority (gastrolog-4kkoo) |
-| Synthetic-attribute routing | Done | `_source`, `_ingester`, `_vault`, `_reason` overlaid at eval time; routes can target retention vs. ingest distinctly (gastrolog-4kkoo) |
+| Match-expression routing | Done | Inline `RouteConfig.Stages[].Match.Expression` → destinations; first-match-wins by priority |
+| Synthetic-attribute routing | Done | `_source`, `_ingester`, `_vault`, `_reason` overlaid at eval time; routes can target retention vs. ingest distinctly |
 | Multi-destination fanout | Done | Fanout, round-robin, failover distribution |
 | Transform pipelines on ingest | Not started | No parse, enrich, redact, sample stages in routes |
 | Visual route editor | Not started | Routes configured via form fields, no flow builder |
@@ -502,8 +502,9 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | Per-vault leader election | Done | Vault-ctl Raft group per vault with leader/follower election |
 | Replication | Done | Segment distribution to every home with holder receipts; every home builds its own GLCB; homes missing a GLCB pull it from a peer home |
 | Inter-vault record routing on retention | Done | Vault `disposition=route` re-emits expiring chunks' records through the routing engine for delivery to the next vault |
+| Inter-vault chunk transfer on retention | Done | Vault `disposition=transfer` re-homes expiring sealed chunks to a target vault unchanged |
 | Budget-driven retention | Not started | Retention is time/count/size-based only |
-| Cloud-backed chunk cache eviction | Done | LRU and TTL eviction on warm cache, gated by `CacheBudget` and `CacheTTL` |
+| Cloud-backed chunk cache eviction | Done | LRU and TTL eviction of cached copies, gated by `CacheBudget` and `CacheTTL` |
 | Memory budget enforcement | Done | Total budget per memory vault; retention triggers when over |
 
 ### Anomaly Detection
@@ -552,8 +553,8 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | Config push (WatchSystem) | Done | Real-time config propagation via server stream |
 | Chunk push (WatchChunks) | Done | Real-time chunk metadata notifications via server stream |
 | Ingest pipeline backpressure | Done | PressureGate with hysteresis, per-ingester throttling |
-| Pipeline backpressure | Done | Per-vault admission refuses while the vault's pipeline backlog is at its budget (until chunking drains it) or its storage is below its free-space floor |
-| Operational alerting | Done | Rotation/retention rate alerts, self-ingester drop visibility, ingest pressure |
+| Pipeline backpressure | Done | Per-vault admission refuses while the vault's pipeline backlog is at its budget (until chunking drains it), its storage is below its free-space floor, or a refuse-enabled retention bound is exceeded |
+| Operational alarms | Done | Static alarm catalog with cause and response per type, chattering suppression, per-node alarms aggregated cluster-wide; ingest pressure and self-ingester drops are NodeStats metrics |
 | Automatic vault rebalancing | Not started | Vaults stay on their assigned node |
 | Storage pressure management | Not started | No automatic retention acceleration along the route chain under pressure |
 | Graceful degradation | Partial | Explain and the inspector's chunk listing report peers that did not contribute (`ContributionReport`, rendered by `DegradedPeersBadge`); the search result stream does not |
@@ -563,7 +564,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 
 | Capability | Status | Notes |
 |---|---|---|
-| Retention policies | Done | Time / count / size-based; fired events stream records through the routing engine and destroy the source chunk. Re-routing to other vaults is configured via routes with `Source = Retention trigger`. |
+| Retention policies | Done | Time / count / size-based; a fired event deletes the chunk, routes its records through the routing engine first, or transfers it to another vault, per the vault's retention disposition (default delete). Re-routing to other vaults is configured via routes matching `_source = "retention"`. |
 | Right to erasure | Not started | No purge command |
 | Sensitive field masking | Not started | Role-based display masking, not encryption. Redact stage for irreversible removal |
 | Access auditing | Not started | No audit vault |
@@ -573,10 +574,10 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 
 | Capability | Status | Notes |
 |---|---|---|
-| Query command | Done | Full query language, multiple output formats |
-| Follow command | Done | Live streaming with severity coloring |
+| Query command | Done | Full query language; text, JSON lines, CSV, raw and table output |
+| Follow command | Not started | Follow mode is UI-only; the CLI has no follow command |
 | Config management | Done | Full CRUD for all config entities |
-| Cluster management | Done | Join, bootstrap, status, node removal |
+| Cluster management | Done | Join, status, maintenance/online, promote/demote, node removal |
 | Stdin piping | Not started | No `--stdin` mode for chaining queries |
 | Terminal charts | Not started | No Unicode chart rendering |
 

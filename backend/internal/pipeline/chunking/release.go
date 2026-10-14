@@ -59,9 +59,8 @@ func releasableSegmentIDs(fsm *vaultctlfsm.FSM, m *vaultctlfsm.OpenChunkManifest
 }
 
 // scanSegmentReady reports whether a segment may be dropped from the
-// completed-segment registry. Two independent release signals (design-notes
-// 28/39, R3): the segment is superseded — its records live in RF-replicated
-// chunks, which un-pins the dead-holder case because the chunk reaches RF
+// completed-segment registry. Two independent release signals: the segment is
+// superseded — its records live in RF-replicated chunks, which un-pins the dead-holder case because the chunk reaches RF
 // among the live homes — OR the fast path, every required home already holds
 // the raw segment. A segment still referenced by an unbuilt manifest, or not
 // fully consumed, is never released. Pure over the pass's ReleaseScan: a
@@ -110,7 +109,7 @@ func mayPurgeHeadAfterBuild(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredH
 		return false
 	}
 	// Superseded — records are durable in RF-replicated chunks; drop the local
-	// head copy without waiting on a possibly-dead home (design-notes 39/R3).
+	// head copy without waiting on a possibly-dead home.
 	if fsm.SegmentSuperseded(segmentID, requiredHolders) {
 		return true
 	}
@@ -123,7 +122,7 @@ func mayPurgeHeadAfterBuild(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredH
 // explicit NoRequiredHolders opt-out, fatal for a multi-home vault whose
 // placement lookup failed.
 func scanMayRelease(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.CompletedSegmentEntry, requiredHolders []string, resolved bool, giveUpTTL time.Duration, now time.Time) bool {
-	// Give-up bound (design-notes 28): records that out-age the vault's
+	// Give-up bound: records that out-age the vault's
 	// delete-disposition retention TTL are released even though they were
 	// never chunked — retention would already have deleted them had chunking
 	// succeeded. Bounds registry growth for island-origin segments no holder
@@ -139,8 +138,8 @@ func scanMayRelease(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.CompletedS
 }
 
 // scanGiveUpExpired reports whether a segment has sat un-chunked in THIS
-// vault's registry longer than the give-up TTL — the counted give-up expiry
-// (design-notes 28), the bound on how long an uncollectable/island-origin
+// vault's registry longer than the give-up TTL — the counted give-up expiry,
+// the bound on how long an uncollectable/island-origin
 // segment may leak registry space. A segment referenced by an unbuilt manifest
 // never gives up: the build still needs its bytes, and its records ARE reaching
 // a chunk.
@@ -241,7 +240,7 @@ func (v *vaultChunking) enqueueRegistryReleaseCandidates() {
 			gaveUp++
 		}
 	}
-	// The counted expiry (design-notes 28) must be deliberate and visible —
+	// The counted expiry must be deliberate and visible —
 	// never a silent pipeline loss.
 	v.noteRetentionGiveUp(gaveUp, giveUpTTL)
 	if len(candidates) == 0 {

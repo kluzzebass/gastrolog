@@ -18,10 +18,16 @@ podman run --rm -d --name gastrolog \
   -e GASTROLOG_INITIAL_ADMIN_PASSWORD=change-me \
   ghcr.io/kluzzebass/gastrolog:latest
 
-# Multi-node compose:
-cd deploy
-podman compose up -d
+# Multi-node compose (needs a running `podman machine`):
+just deploy podman-up
 ```
+
+`podman-up` builds `gastrolog:test` with Docker and loads it into
+Podman (`docker save | podman load`), writes the push-service configs
+the compose file bind-mounts, runs `podman compose -p gastrolog-deploy
+up -d` against [`deploy/compose.yml`](../../deploy/compose.yml), and
+auto-wires the bundled dependencies. `just deploy podman-down` tears it
+down and wipes its volumes.
 
 See [quickstart.md](./quickstart.md) and
 [docker-compose.md](./docker-compose.md) for the full recipes —
@@ -67,7 +73,7 @@ file shipped at [`deploy/compose.yml`](../../deploy/compose.yml)
 works under both runtimes thanks to one specific accommodation:
 
 **The compose file declares an explicit `healthcheck:` block on
-the bootstrap service**, even though the image already has a
+every gastrolog service** (in the shared `x-gastrolog-base` block), even though the image already has a
 `HEALTHCHECK` directive in its Dockerfile. This is required
 because podman-compose / `podman compose` does NOT inherit the
 image's `HEALTHCHECK` for the purpose of `depends_on:
@@ -87,7 +93,7 @@ If `secrets:` doesn't work for you, upgrade Podman or use
 
 ## Verifying it works
 
-After `podman compose up -d`:
+After `just deploy podman-up`:
 
 ```sh
 for p in 4564 4574 4584; do
@@ -96,7 +102,7 @@ done
 ```
 
 Expected: all three return 200, same as Docker. If a node returns
-000 (no connection), check `podman logs gastrolog-<service>` for
+000 (no connection), check `podman logs gastrolog-<N>` for
 networking or DNS issues — usually rootless port collisions or
 the `podman compose` version not understanding the compose file.
 

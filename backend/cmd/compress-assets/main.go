@@ -21,7 +21,7 @@ func main() {
 
 	// Collect files first (avoid walking while mutating).
 	var files []string
-	err := filepath.WalkDir(filepath.Clean(dir), func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(filepath.Clean(dir), func(path string, d fs.DirEntry, err error) error { //nolint:gosec // G703: the walked directory is this build tool's own argument
 		if err != nil {
 			return err
 		}

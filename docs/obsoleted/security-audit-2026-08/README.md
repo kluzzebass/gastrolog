@@ -8,7 +8,7 @@
 
 ## What this is
 
-A **read-only, whole-system security review** of GastroLog: the Go backend under [`backend/`](../../backend/), the React frontend under [`frontend/`](../../frontend/), and the build/CI configuration. Eight lenses ran independently, each producing evidence-cited findings; a dependency vulnerability scan ([govulncheck.txt](./govulncheck.txt)) ran alongside them.
+A **read-only, whole-system security review** of GastroLog: the Go backend under [`backend/`](../../../backend/), the React frontend under [`frontend/`](../../../frontend/), and the build/CI configuration. Eight lenses ran independently, each producing evidence-cited findings; a dependency vulnerability scan ([govulncheck.txt](./govulncheck.txt)) ran alongside them.
 
 **This pass documents problems. It changes no production code.** Fixes are tracked as children of the epic.
 

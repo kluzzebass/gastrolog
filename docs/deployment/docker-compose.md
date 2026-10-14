@@ -8,15 +8,24 @@ provides.
 ## Quick start
 
 ```sh
-cd deploy
-docker compose up -d
+just deploy compose-up
 open http://localhost:4564           # admin / change-me
 ```
+
+`compose-up` builds the `gastrolog:test` image the compose file names,
+writes the push-service configs (rsyslog, OTel collector, fluent-bit)
+that the compose file bind-mounts from `/tmp/gastrolog-deploy/`, starts
+the project as `gastrolog-deploy`, waits for every node's `/readyz`, and
+runs [`deploy/setup-deps.sh`](../../deploy/setup-deps.sh) against
+`gastrolog-0` (see [configuring-deps.md](./configuring-deps.md)). A bare
+`docker compose up` in `deploy/` has neither the image nor those configs.
+To use a release image, change the `image:` line in the compose file's
+`x-gastrolog-base` block to `ghcr.io/kluzzebass/gastrolog:latest`.
 
 To tear down (and wipe data):
 
 ```sh
-docker compose down -v
+just deploy compose-down
 ```
 
 ## What's in the recipe
@@ -113,9 +122,13 @@ Adding a fourth or fifth joiner is a copy-paste job. Duplicate
 the `gastrolog-2` service block, increment the ordinal in name /
 hostname / `GASTROLOG_NAME` / `GASTROLOG_CLUSTER_ADDR`, add a new
 host port, declare new volumes for `gastrolog-N-config` and
-`gastrolog-N-vaults`, and `docker compose up -d` again. The new
-service will pick up the existing cluster token and enroll
-automatically.
+`gastrolog-N-vaults`, and run `docker compose -p gastrolog-deploy -f
+compose.yml up -d` from `deploy/` again. The copied block keeps
+`GASTROLOG_JOIN_ADDR`, `GASTROLOG_BOOTSTRAP_TOKEN_URL` and
+`GASTROLOG_BOOTSTRAP_TOKEN_SECRET`, so the new service fetches a
+freshly minted token from `gastrolog-0` and enrolls automatically.
+Give it file storage afterwards (`docker exec -i gastrolog-0 sh <
+deploy/add-storage.sh`) so vaults can place on it.
 
 For more than ~5 nodes or any cross-host deployment, switch to
 [Docker Swarm](./docker-swarm.md) or [Kubernetes](./kubernetes.md).
@@ -128,8 +141,10 @@ For more than ~5 nodes or any cross-host deployment, switch to
   `localhost:4564` only. For external access, put a TLS-terminating
   reverse proxy (Caddy, nginx, Traefik) in front of port 4564.
 - **Persistence**: each service has its own named volumes for
-  `/config` and `/vaults`. `docker compose down -v` deletes them.
-  Use `docker compose down` (without `-v`) to stop without wiping.
+  `/config` and `/vaults`. `just deploy compose-down` (and
+  `docker compose down -v`) deletes them. Use
+  `docker compose -p gastrolog-deploy -f compose.yml down` (without
+  `-v`) from `deploy/` to stop without wiping.
 - **Backups**: snapshot the named volumes (`docker run --rm -v
   gastrolog-0-config:/data alpine tar -cz -f - /data > backup.tgz`).
 - **Image updates**: `docker compose pull && docker compose up -d`

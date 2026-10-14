@@ -741,7 +741,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
   retentionPending = false;
 
   /**
-   * current cloud archival tier (e.g. "GLACIER", "cold", "Archive")
+   * current cloud archival storage class (e.g. "GLACIER", "cold", "Archive")
    *
    * @generated from field: string cloud_storage_class = 15;
    */
@@ -2928,7 +2928,7 @@ export class ArchiveChunkRequest extends Message<ArchiveChunkRequest> {
   chunkId = new Uint8Array(0);
 
   /**
-   * Target cloud archival tier: "GLACIER", "DEEP_ARCHIVE", "Archive"
+   * Target cloud archival storage class: "GLACIER", "DEEP_ARCHIVE", "Archive"
    *
    * @generated from field: string cloud_storage_class = 3;
    */

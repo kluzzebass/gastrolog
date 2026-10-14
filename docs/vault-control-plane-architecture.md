@@ -1,12 +1,8 @@
 # Vault-level control-plane architecture
 
-**Planning artifact:** dcat `gastrolog-k1ej7`  
-**Parent:** Architectural redesign — orchestration and metadata consistency (`gastrolog-3eghu`)  
-**Unblocks:** `gastrolog-5xxbd` (vault-level Raft + FSM namespacing), `gastrolog-554s3` (explicit vault → instance ownership)
+**Uniform Raft group model:** cluster-ctl Raft and every vault-ctl Raft group share **lifecycle and on-disk conventions**. The one structural difference — cluster-ctl Raft is opened directly rather than through `GroupManager`, on its own WAL — is named under [Lifecycle](#lifecycle) and [Persistence](#persistence); there is no undocumented privileged directory layout.
 
-**Acceptance criterion (k1ej7):** A **uniform Raft group model** — system/config and vault groups share **lifecycle and on-disk conventions**. Any exception is a **named compatibility shim** with an explicit **sunset** (no undocumented privileged directory layout).
-
-**Terminal state (5xxbd complete):** There are **no** per-vault-instance metadata Raft groups. **One vault-scoped control-plane Raft** (plus cluster-ctl Raft for cluster-global config) owns every cross-node chunk metadata mutation. **Vault instances** (chunk/index managers) remain the data plane and **do not** host their own Raft groups.
+There are **no** per-vault-instance metadata Raft groups. **One vault-ctl Raft group per vault** (plus cluster-ctl Raft for cluster-global config) owns every cross-node chunk metadata mutation. **Vault instances** (chunk/index managers) are the data plane and **do not** host their own Raft groups.
 
 **Vocabulary:** canonical terms follow [`ubiquitous_language.md`](./ubiquitous_language.md). In particular, this architecture uses **vault-ctl Raft** (one group per vault, authoritative for that vault's chunk metadata) and **instance FSM** (the per-vault-instance sub-state-machine inside the vault-ctl FSM, implemented in `vaultctlfsm`).
 
@@ -14,19 +10,18 @@
 
 ## Table of contents
 
-1. [Inventory: today (as implemented)](#inventory-today-as-implemented)
+1. [Inventory](#inventory)
 2. [A) Vocabulary (normative)](#a-vocabulary-normative)
 3. [B) Authority model (normative)](#b-authority-model-normative)
-4. [C) Uniform Raft group model (target)](#c-uniform-raft-group-model-target)
-5. [D) Vault readiness semantics](#d-vault-readiness-semantics-normative--testable)
+4. [C) Uniform Raft group model](#c-uniform-raft-group-model)
+5. [D) Vault readiness semantics](#d-vault-readiness-semantics)
 6. [E) Legal state machine (chunk / vault)](#e-legal-state-machine-chunk--vault)
-7. [F) Non-goals and open questions](#f-non-goals-and-open-questions)
-8. [G) Handoff checklists](#g-handoff-checklists)
-9. [Code anchors (maintenance)](#code-anchors-maintenance)
+7. [F) Open questions](#f-open-questions)
+8. [Code anchors (maintenance)](#code-anchors-maintenance)
 
 ---
 
-## Inventory: today (as implemented)
+## Inventory
 
 ### Cluster-ctl Raft
 
@@ -100,9 +95,9 @@ Vault / chunk operations and routing: [`backend/internal/orchestrator/vault_ops.
 
 **MUST**
 
-- Every mutation that changes **cross-node** interpretation of vault/chunk metadata **MUST** go through a **defined Raft group** (system or vault-scoped per target topology), or through an explicitly documented non-Raft path that remains safe under partition (rare; default is “no”).
-- **Cluster-ctl Raft** remains the home for **cluster-global** configuration and membership that is not vault-owned (exact list to be enumerated during implementation; default: anything not naturally keyed by vault ID stays system-scoped until moved).
-- **Vault-scoped** control-plane state **MUST** be keyed and replicated under a **vault-scoped Raft identity** in the target architecture (section C), not ad hoc sub-Raft groups for vault-wide invariants.
+- Every mutation that changes **cross-node** interpretation of vault/chunk metadata **MUST** go through a **defined Raft group** (cluster-ctl or vault-ctl), or through an explicitly documented non-Raft path that remains safe under partition (rare; default is “no”).
+- **Cluster-ctl Raft** is the home for **cluster-global** configuration and membership that is not vault-owned: anything not naturally keyed by vault ID stays cluster-scoped.
+- **Vault-scoped** control-plane state **MUST** be keyed and replicated under the vault's **vault-ctl Raft** group (section C), not ad hoc sub-Raft groups for vault-wide invariants.
 
 **MUST NOT**
 
@@ -112,68 +107,55 @@ Vault / chunk operations and routing: [`backend/internal/orchestrator/vault_ops.
 **Partial membership / unresolved peers**
 
 - **MUST** inherit the safety principle: **do not bootstrap** a new Raft group with an incomplete voter set when that would bake a bad configuration.
-- **MUST** define whether **deferred creation** means “vault not ready” vs “instance not ready” vs both — and what user-visible behavior is (backpressure, skip, retry).
+- **Deferred creation** makes the **vault** not ready on that node (see [Deferred group creation and instance binding](#deferred-group-creation-and-instance-binding)): ingest, query and control paths return `ErrVaultNotReady`, and reads leave the vault out (Status item 6).
 
 ---
 
-## C) Uniform Raft group model (target)
+## C) Uniform Raft group model
 
-**Goal:** System and vault groups follow the **same lifecycle and storage conventions**. Any exception is a **named compatibility shim** with a **sunset** (version gate or explicit removal deadline).
+### Topology
 
-### Target topology (conceptual)
-
-- **SystemRaft:** Global cluster config / membership (existing role, possibly narrowed as vault scope grows).
-- **VaultRaft (per vault):** Authoritative for **all** vault/chunk control-plane metadata. The single per-vault Raft hosts the chunk-FSM as a sub-FSM (`vaultctlfsm`).
-- **Chunk path (data plane):** Consumes committed state from VaultRaft + system; **does not** host Raft; **does not** own consensus for cross-node metadata.
+- **Cluster-ctl Raft:** global cluster config and membership.
+- **Vault-ctl Raft (one group per vault):** authoritative for **all** vault/chunk control-plane metadata. The group's FSM (`vaultraft.FSM`) hosts the chunk FSM as a sub-FSM (`vaultctlfsm`).
+- **Chunk path (data plane):** consumes committed state from vault-ctl and cluster-ctl Raft; **does not** host Raft; **does not** own consensus for cross-node metadata.
 
 ### Identifiers and routing
 
-- String `GroupID` remains the routing key for `multiraft.GroupTransport` ([`backend/internal/multiraft/transport.go`](../backend/internal/multiraft/transport.go)).
-- Target naming convention **MUST** be explicit. **Vault control-plane Raft** uses `vault/<vaultGLID>/ctl` (`raftgroup.VaultControlPlaneGroupID`) and is the **only** vault-scoped multiraft group for replicated chunk metadata. Cluster-ctl Raft routes on the multiraft transport as group `config` (`cluster.ConfigGroupID`); its on-disk name is `cluster-ctl`.
+- String `GroupID` is the routing key for `multiraft.GroupTransport` ([`backend/internal/multiraft/transport.go`](../backend/internal/multiraft/transport.go)).
+- **Vault-ctl Raft** uses `vault/<vaultGLID>/ctl` (`raftgroup.VaultControlPlaneGroupID`) and is the **only** vault-scoped multiraft group for replicated chunk metadata. Cluster-ctl Raft routes on the multiraft transport as group `config` (`cluster.ConfigGroupID`); its on-disk name is `cluster-ctl`.
 
-### Persistence (target rules)
+### Persistence
 
 - **WAL:** Split WALs with an identical semantic contract: cluster-ctl on `raft/wal`, all vault-ctl groups sharing `raft/groups/wal`. The split exists for I/O isolation — cluster-ctl heartbeats must not wait on vault append/fsync batching.
-- **Snapshots:** One directory pattern for all group kinds: `raft/groups/<groupID>/`, with cluster-ctl at `raft/groups/cluster-ctl`. **Greenfield only:** no on-disk upgrade path from older layouts; wipe or replace the raft tree when the layout changes during development.
+- **Snapshots:** One directory pattern for all group kinds: `raft/groups/<groupID>/`, with cluster-ctl at `raft/groups/cluster-ctl`. There is no on-disk upgrade path from another layout: when the layout changes, the raft tree is wiped.
 
 ### Lifecycle
 
 - **Create / seed / restart:** Vault-ctl groups are created, seeded and restarted through `GroupManager` ([`backend/internal/raftgroup/groupmanager.go`](../backend/internal/raftgroup/groupmanager.go)). Cluster-ctl Raft is not a `GroupManager` group: `openRaftClusterCtlStore` opens it directly, and `setupMultiRaft` leaves `GroupManagerConfig.ShutdownLast` empty for that reason.
-- **Shutdown:** Preserve ordering already relied upon (Raft shutdown before transport removal; see `DestroyGroup`). Vault redesign **MUST NOT** weaken shutdown invariants.
+- **Shutdown:** Raft shuts down before its transport is removed (`DestroyGroup`). Changes to vault-ctl groups **MUST NOT** weaken this ordering.
 
-### Authority direction (target)
+### Authority direction
 
 ```mermaid
 flowchart TB
-  sysRaft[SystemRaft_clusterScope]
-  vaultRaft[VaultRaft_perVault]
+  clusterCtl[ClusterCtlRaft_clusterScope]
+  vaultCtl[VaultCtlRaft_perVault]
   orch[Orchestrator]
   chunkMgr[ChunkManagers_dataPlane]
-  sysRaft -->|"committed_global_config"| orch
-  vaultRaft -->|"committed_vault_metadata"| orch
+  clusterCtl -->|"committed_global_config"| orch
+  vaultCtl -->|"committed_vault_metadata"| orch
   orch --> chunkMgr
 ```
 
 ---
 
-## D) Vault readiness semantics (normative + testable)
+## D) Vault readiness semantics
 
-Predicate names are illustrative; exact symbols belong in implementation.
-
-| Predicate | Intent |
-|-----------|--------|
-| **VaultRaft_LocalReplicaReady** | Local process has joined/replayed the vault group far enough that **reads** required for safe local work are valid (define minimum: e.g. snapshot + committed config applied, or stricter). |
-| **Vault_ControlPlaneReady** (node-local) | AND of: node process ready, `VaultRaft_LocalReplicaReady`, and any **dependency** declared mandatory (cluster-ctl Raft catchup, peer resolvability, etc.). |
-| **Vault_ServeIngestReady** / **Vault_ServeQueryReady** | **MAY** be stricter than control-plane ready; **MUST** be explicit if ingest is allowed before full FSM catch-up. |
+The canonical definition is in [`vault_readiness.go`](../backend/internal/orchestrator/vault_readiness.go). A vault is ready on a node when it has a local instance and that instance's vault-ctl group FSM has applied at least one entry or restored a snapshot (`vaultraft.FSM.Ready`, wired as the instance's `IsFSMReady`). A vault whose group creation is deferred is not ready (see [Readiness while deferred](#deferred-group-creation-and-instance-binding)). One gate covers ingest, query and control paths on the node: `Vault.ReadinessErr` returns `ErrVaultNotReady` until the vault is ready, and callers retry with backoff. The node's `/readyz` probe answers ready only while the orchestrator runs, the server is not draining, and `LocalVaultsReplicationReady` holds — every vault with a local instance is ready.
 
 **Consistency**
 
-- Metadata read from VaultRaft-backed state **MUST** be **linearizable** via normal Raft reads / barriers where this spec says “strong”.
-- Caches **MAY** be eventually consistent only where this spec lists allowed staleness and the failure mode is bounded.
-
-**WAL / replay / partial peers**
-
-- **MUST** state whether the prior style of **defer create** becomes **vault-group defer create**, and how that surfaces in readiness bits and logs.
+- Caches of vault-ctl state **MAY** be eventually consistent only where the allowed staleness is stated and the failure mode is bounded.
 
 ---
 
@@ -181,7 +163,7 @@ Predicate names are illustrative; exact symbols belong in implementation.
 
 Documents the transitions that flow through `vaultctlfsm` / vault-ctl Raft applies (`reconfig_vaults.go` callbacks) and which transitions are **vault Raft commands** vs **local instance** bookkeeping.
 
-Chunk substates (delete pending, tombstone, etc.) are mapped to: **vault-committed**, **instance-local**, or **system-committed**.
+Chunk substates (delete pending, tombstone, etc.) are mapped to: **vault-committed**, **instance-local**, or **cluster-committed** (cluster-ctl Raft).
 
 ### Chunk lifecycle (pipeline vaults)
 
@@ -214,6 +196,13 @@ stateDiagram-v2
 
 Tombstones are pruned on the same rule as released-segment tombstones (a shared `tombstoneLedger`): every node runs the chunk tombstone sweep (`Orchestrator.sweepChunkTombstones`, [`chunk_tombstone_purge.go`](../backend/internal/orchestrator/chunk_tombstone_purge.go)) for every vault on the vault-catchup cadence. It reads the delete sequence, deletes the node's copies of tombstoned chunks — the vault instance's chunk store through the local-orphan pass, and the vault's chunk staging whether or not the node is a home — and, only when every listing and delete succeeded, proposes `ConfirmChunkPurge(node, deleteSeq)`. The vault-ctl leader proposes `PruneChunkTombstones(members)` with its Raft configuration's server IDs; the apply drops the tombstones every member has confirmed and the confirmations of nodes no longer in the configuration. A member that is down, or cannot delete its copy, holds the tombstones until it has purged and confirmed; the tombstone set is bounded by the deletes some member has not swept yet, not by the number of chunks ever deleted.
 
+**Unknown orphans are never deleted automatically.** The local-orphan pass (`VaultLifecycleReconciler`, [`vault_lifecycle_reconciler.go`](../backend/internal/orchestrator/vault_lifecycle_reconciler.go)) deletes a node's copy of a chunk the manifest does not list only on positive evidence:
+
+- **Tombstoned:** the FSM recorded the chunk's delete.
+- **Ghost:** sealed, zero records, and sealed more than five minutes ago. A chunk with no records holds nothing to lose.
+
+A sealed chunk that holds records, with no manifest entry, no pending delete and no tombstone, is an **unknown orphan**. It took committed appends, so either the FSM lost its record or an aborted path left it behind, and the cluster may have no other copy. It stays on disk and raises the `unknown-orphan` alarm per chunk, as the recovery surface for FSM faults, operator error and a restore that disagrees with its backup.
+
 ### Vault state diagram
 
 ```mermaid
@@ -231,37 +220,14 @@ stateDiagram-v2
 
 ---
 
-## F) Non-goals and open questions
+## F) Open questions
 
-These require explicit product/architecture decisions:
+**Cluster-ctl Raft shrink/grow:** which configuration, if any, moves from cluster-ctl Raft to vault-ctl Raft.
 
-1. **One VaultRaft vs multiple raft groups per vault** (e.g. separate hot/cold metadata): pick one default.
-2. **No per-instance Raft**: chunk-FSM commands and apply-forwarding run on the vault control-plane Raft group. `ensureVaultControlPlaneRaftGroup` and `bindVaultInstanceToCtlLocked` are the canonical entries, and a single `SetGroupApplyFn` dispatches every group's applies.
-3. **Cluster-ctl Raft shrink/grow:** Which config moves to vault Raft vs stays global; backward compatibility for existing clusters.
-4. **Snapshot layout:** Converged — every group snapshots under `raft/groups/<groupID>/` (no legacy on-disk compatibility).
-5. **Feature flags:** Whether vault Raft rolls out behind a flag per vault or cluster-wide.
+Settled, and kept here because a reader would otherwise reopen them:
 
----
-
-## G) Handoff checklists
-
-### For gastrolog-5xxbd — vault-level Raft groups and FSM namespacing
-
-- [x] Implement `GroupID` scheme and `GroupStore` / `CreateGroup` wiring chosen in C/F. — done (5xxbd).
-- [x] Align snapshot directories with the chosen uniform pattern (greenfield; remove old `raft/` tree if layout changes). — done (5xxbd).
-- [x] FSM boundary: chunk-metadata commands run as a sub-FSM (`vaultctlfsm`) inside `vaultraft.FSM`, dispatched via `OpVaultChunkFSM` envelopes (`vaultraft.MarshalVaultChunkCommand`). Done (5xxbd).
-- [x] **RPC / naming cleanup:** consolidated apply entrypoints — done (2ze8j): single `SetGroupApplyFn`; `ForwardVaultApply` is the single cross-node apply RPC.
-- [x] Bootstrap/defer rules from D for partial membership; tests for "no bad initial config". — done (5xxbd).
-- [x] WAL: vault-ctl groups share the per-node vault-ctl `raftwal` (`raft/groups/wal`); cluster-ctl has its own (`raft/wal`).
-- [x] Shutdown: preserve `DestroyGroup` ordering vs transport; add vault group to shutdown sequence in `app` if needed. — done (5xxbd).
-
-### For gastrolog-554s3 — explicit vault → instance ownership
-
-- [x] Replace implicit "find chunk manager" shortcuts with APIs that take **vault context** first (`vault_ops.go` and call sites). — done (554s3 + 2ze8j): orchestrator shortcuts retired in favor of vault-scoped lookups.
-- [x] Document and enforce: chunk managers are **owned** under a vault umbrella; no orphan instance lifetimes. — done (554s3).
-- [x] Forwarding (vault apply path and record/search forwarding) must use stable vault identity keys consistent with C. — done (2ze8j): `ForwardVaultApply` is the single apply RPC, `groupApplyFn` is the single apply path.
-- [x] Readiness plumbing: orchestrator checks **Vault_ControlPlaneReady** before operations that require it (per D). — `Vault.ReadinessErr` gates on the instance's `IsFSMReady` callback (the vault-ctl group FSM's `Ready`, wired in `buildVaultRaftCallbacks`).
-- [x] Remove or quarantine legacy paths called out during inventory once vault Raft is live. — done (2ze8j): legacy per-instance Raft group-id helpers and tests deleted.
+- **One vault-ctl group per vault.** No vault has a second metadata group, and no vault instance has its own Raft group: chunk-FSM commands and apply-forwarding run on the vault-ctl group. `ensureVaultControlPlaneRaftGroup` and `bindVaultInstanceToCtlLocked` are the canonical entries, and a single `SetGroupApplyFn` dispatches every group's applies; `ForwardVaultApply` is the single cross-node apply RPC.
+- **Vault instances are owned by their vault.** Chunk and index managers live under a vault and are reached through vault-scoped lookups (`vault_ops.go`); there is no instance lifetime outside a vault, and the apply and forwarding paths key on the vault's identity.
 
 ---
 
@@ -277,7 +243,6 @@ These require explicit product/architecture decisions:
 | WAL | `backend/internal/raftwal/` |
 | Transport | `backend/internal/multiraft/transport.go` |
 | Orchestrator | `backend/internal/orchestrator/vault_ops.go` |
+| Vault readiness | `backend/internal/orchestrator/vault_readiness.go` |
 
-**Normative text:** This file is the readable **source of truth** for k1ej7 scope. Implementation issues should link here; scope changes **MUST** update this document rather than reinterpret informally.
-
-**Tracker:** dcat issue `gastrolog-k1ej7` tracks the planning task and links child issues (`gastrolog-5xxbd`, `gastrolog-554s3`).
+**Normative text:** This file is the readable **source of truth** for the vault control plane. Changes to its scope **MUST** update this document rather than reinterpret it informally.

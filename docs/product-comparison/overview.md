@@ -27,7 +27,7 @@ Peers are grouped by **what you are benchmarking**, not by how vendors market th
 | Peer | One-line positioning | Distinguishing features (why we compare) |
 |------|----------------------|------------------------------------------|
 | **Splunk** | Enterprise log search and analytics (on‑prem **Enterprise** and **Splunk Cloud**). | **SPL** and rich app ecosystem; access control is **layered** (role capabilities, per-role index/search filters in `authorize.conf`, knowledge-object ACLs). Tenancy is often **by convention** (indexes, apps, roles) rather than a single “tenant” object. |
-| **Graylog** | Open-core log platform with optional enterprise features. | **Streams** and **index sets** as the main data model; permissions are **roles plus explicit sharing** on entities (streams, dashboards, alerts). Strong **LDAP/AD** in open tier; **OIDC/SAML** in Enterprise. |
+| **Graylog** | Open-core log platform with optional enterprise features. | **Streams** and **index sets** as the main data model; permissions are **roles plus explicit sharing** on entities (streams, dashboards, alerts). Strong **LDAP/AD** in the open edition; **OIDC/SAML** in Enterprise. |
 | **Elastic** | **Elasticsearch** (storage + search) plus **Kibana** (UI and operational tools). | **Index-level** privileges plus **document- and field-level security**; **Kibana Spaces** for workspace separation; many **auth providers** and subscription-gated SSO/token/PKI patterns. De facto standard for **Query DSL** and large-scale search. |
 | **OpenSearch** | Elasticsearch lineage with AWS and community backing; **OpenSearch Dashboards** + Security plugin. | First-class **Dashboards multi-tenancy** (tenants, `securitytenant` header); **Security plugin** RBAC with cluster, index, DLS/FLS-style options. Relevant when benchmarking **self-managed** or **OpenSearch Service**–style deployments. |
 | **Grafana + Loki** | **Loki** (log aggregation) is usually paired with **Grafana** for query and RBAC. | **Organizations** and **folder** permissions as the main isolation story for the UI; **Prometheus-style** metrics and **LogQL** for logs. Good reference for **“minimal log store + rich control plane UI”** expectations. **Grafana Cloud Machine Learning** (outlier/forecast on metrics) is a separate surface from Loki; see [anomaly detection research](./anomaly-detection-research.md). |
@@ -62,7 +62,7 @@ These vendors are called out in [anomaly detection research](./anomaly-detection
 
 ## Edge log forwarding (complementary)
 
-Gastrolog is built to **receive** and **serve** logs from a central tier, not to compete with **Vector**, **Fluent Bit**, **Fluentd**, the **OpenTelemetry Collector**, or vendor-specific agents on each host. Deploy those at the **edge** (nodes, k8s DaemonSets, sidecars) to forward into Gastrolog—this is the main reason there is **no first-party Gastrolog forwarder**.
+Gastrolog is built to **receive** and **serve** logs from a central cluster, not to compete with **Vector**, **Fluent Bit**, **Fluentd**, the **OpenTelemetry Collector**, or vendor-specific agents on each host. Deploy those at the **edge** (nodes, k8s DaemonSets, sidecars) to forward into Gastrolog—this is the main reason there is **no first-party Gastrolog forwarder**.
 
 When researching “parity,” the relevant questions for these tools are usually **interoperability**, not feature replacement: wire protocols and auth, batching and backpressure, field naming and metadata (e.g. resource attributes), and operational runbooks—not whether Gastrolog re-implements their pipelines.
 

@@ -404,7 +404,7 @@ func (o *Orchestrator) glcbPullSources(vaultID glid.GLID) []string {
 // TTL rule exists or ANY runner has a route disposition — routed records must
 // reach their destinations, so their segments never give up (same veto
 // retentionMootsPull applies to GLCB pulls). Consulted by the chunking leader
-// when proposing ReleaseSegments (design-notes 28: counted expiry).
+// when proposing ReleaseSegments, as the counted give-up expiry.
 func (o *Orchestrator) vaultRetentionGiveUpTTL(vaultID glid.GLID) (time.Duration, bool) {
 	o.mu.RLock()
 	var runners []*retentionRunner

@@ -313,7 +313,7 @@ Required k8s scenarios:
 - **Release N+M:** remove V1 write-path only after soak period with no rollback-triggering regressions.
 - Update docs/help:
   - [frontend/src/help](/Users/kluzz/Code/gastrolog/frontend/src/help)
-  - [docs/fan-out/v2](/Users/kluzz/Code/gastrolog/docs/fan-out/v2)
+  - [docs/obsoleted/fan-out-v2](./)
 
 ## Phase 12: Router delivery queue (`gastrolog-2qrec`)
 

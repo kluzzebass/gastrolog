@@ -1,18 +1,18 @@
 # Cloud-backed Vault
 
-A **file vault with a cloud service binding**. The active chunk lives on local disk — only sealed chunks are uploaded to S3, GCS, or Azure Blob Storage. After upload, queries fetch the chunk's records via HTTP range requests; a local **warm cache** keeps frequently-read chunks on disk.
+A **file vault with a cloud service binding**. The active chunk lives on local disk — only sealed chunks are uploaded to S3, GCS, or Azure Blob Storage. After upload, a query that reads a chunk with no local copy downloads the chunk's object and verifies it into a local **cached copy**, which keeps recently-read chunks on disk.
 
 ## Settings
 
 | Setting | Description |
 |---------|-------------|
 | Cloud Service | Which [cloud storage endpoint](help:storage-config) to use for sealed chunks. |
-| Storage Class | The [file storage](help:storage-config) class for the local active chunk and the warm cache. |
+| Storage Class | The [file storage](help:storage-config) class for the local active chunk and the cached copies. |
 | Replication Factor | Number of copies. Each replica has its own local active chunk; sealed chunks are shared in the cloud. |
 | Rotation Policy | When to seal the active chunk and upload it. |
 | Retention Rules | What to do with aged-out cloud-backed chunks — delete from the cloud store, or send records through the routing engine to another vault. |
-| Cache Eviction | `lru` (default) or `ttl` for the warm cache. |
-| Cache Budget | Soft cap on warm-cache disk usage on each node (e.g. `1GiB`). |
+| Cache Eviction | `lru` (default) or `ttl` for the cached copies. |
+| Cache Budget | Soft cap on the disk usage of cached copies on each node (e.g. `1GiB`). |
 | Cache TTL | Eviction age for `ttl` mode (e.g. `1h`, `7d`). |
 
 ## Cloud Providers
@@ -54,7 +54,7 @@ When Credentials JSON is empty, the GCS client uses ADC: the `GOOGLE_APPLICATION
 
 - The active chunk is always local — ingestion latency is unaffected by cloud storage.
 - Each sealed chunk is stored as a single blob in GLCB format (seekable zstd compression).
-- Queries read cloud-backed chunks via HTTP range requests — only the needed frames are downloaded, not the entire blob.
+- A query that reads a cloud-backed chunk with no local copy downloads the whole object once, verifies it, and reads its cached copy from then on.
 - Cloud services are configured in the [Storage settings](help:storage-config) tab and referenced by name on a file vault's **Cloud Storage** field to make it cloud-backed.
 - Use the **Test Connection** button in cloud service settings to verify credentials. On a saved service it runs against the saved configuration and its stored credentials, so there is nothing to retype — enter credentials to test an unsaved change instead.
-- Only the placement leader uploads, once per sealed chunk, after its own copy is built. When the placement leader moves to another node, the new leader uploads every sealed chunk that is not in the cloud yet. Every node in the placement keeps the copy of each sealed chunk it built; once the chunk is uploaded that copy is warm cache, held to the vault's cache eviction policy on every node, and an evicted chunk is fetched back from the cloud on its next read.
+- Only the placement leader uploads, once per sealed chunk, after its own copy is built. When the placement leader moves to another node, the new leader uploads every sealed chunk that is not in the cloud yet. Every node in the placement keeps the copy of each sealed chunk it built; once the chunk is uploaded that copy is a cached copy, held to the vault's cache eviction policy on every node, and an evicted chunk is fetched back from the cloud on its next read.

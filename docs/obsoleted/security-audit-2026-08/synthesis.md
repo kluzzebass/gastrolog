@@ -8,7 +8,7 @@ The eight lenses ran independently, but their findings collapse into six themes.
 
 This is the systemic finding and it explains four of the seven distinct Criticals.
 
-The entire authorization model is one allowlist map in one interceptor ([`auth/interceptor.go:88`](../../backend/internal/auth/interceptor.go)). Everything about it is fragile:
+The entire authorization model is one allowlist map in one interceptor ([`auth/interceptor.go:88`](../../../backend/internal/auth/interceptor.go)). Everything about it is fragile:
 
 - **~20 privileged RPCs are simply absent from it** — `SetNodeState`, `YieldLeadership`, `PutCloudService`, `SetNodeStorageConfig`, `ArchiveChunk`, `TestHTTPLookup` — so any `role: "user"` account calls them freely.
 - **There is no data-level authorization at all.** Any authenticated user reads every vault on the cluster via Search/Follow. `docs/vision.md:389` states "RBAC for authorization" and line 391 anticipates multi-tenant deployments, so this is a gap against stated intent, not merely an unbuilt feature.
@@ -18,7 +18,7 @@ The fix is not "add the missing entries." It is to invert the model — deny by 
 
 ## Theme 2 — The highest-privilege transport has no authentication
 
-The per-group Raft lanes are built with `fullInterceptors=false` ([`cluster/cluster.go:685`](../../backend/internal/cluster/cluster.go)), which is exactly the flag that installs the mTLS interceptor ([`cluster.go:716-721`](../../backend/internal/cluster/cluster.go)), and the listener's TLS config uses `tls.VerifyClientCertIfGiven` ([`cluster/clustertls.go:154`](../../backend/internal/cluster/clustertls.go)) — which accepts a connection presenting no client certificate at all.
+The per-group Raft lanes are built with `fullInterceptors=false` ([`cluster/cluster.go:685`](../../../backend/internal/cluster/cluster.go)), which is exactly the flag that installs the mTLS interceptor ([`cluster.go:716-721`](../../../backend/internal/cluster/cluster.go)), and the listener's TLS config uses `tls.VerifyClientCertIfGiven` ([`cluster/clustertls.go:154`](../../../backend/internal/cluster/clustertls.go)) — which accepts a connection presenting no client certificate at all.
 
 hashicorp/raft does not authenticate peers; it trusts its transport completely. For these lanes that trust is unfounded. Anyone with TCP reach commits arbitrary entries to the replicated FSM — users, roles, cloud credentials, the JWT signing secret — or destroys availability through forged elections.
 
@@ -30,7 +30,7 @@ Around it sits a weak identity story (Theme 2b): one certificate and one private
 
 Every ingester is an unauthenticated network listener (only RELP offers optional mTLS). Across them:
 
-- Wire-supplied lengths reach allocators unchecked — RELP's `DATALEN` ([`relp/protocol.go:130`](../../backend/internal/ingester/relp/protocol.go)) is the clearest case.
+- Wire-supplied lengths reach allocators unchecked — RELP's `DATALEN` ([`relp/protocol.go:130`](../../../backend/internal/ingester/relp/protocol.go)) is the clearest case.
 - `bodyutil.ReadBody`'s `maxBytes` bounds the *compressed* input only, so a zstd bomb expands without limit.
 - Syslog TCP framing has no line-length bound.
 - Only the HTTP (Loki) ingester caps attribute count and length; OTLP, Fluent Forward, and Kafka do not.
@@ -42,7 +42,7 @@ Two independent remediations: bound the inputs, and contain the blast radius so 
 
 ## Theme 4 — Secrets are handed out and stored in the clear
 
-The same file demonstrates both the right and wrong pattern. MaxMind credentials are returned as a boolean `LicenseConfigured` flag ([`server/system.go:242`](../../backend/internal/server/system.go)) — correct. Cloud storage credentials two structs away ([`system.go:452-456`](../../backend/internal/server/system.go)) return `AccessKey`, `SecretKey`, `ConnectionString`, and `CredentialsJson` in plaintext to any authenticated caller, on every config read *and* every config write.
+The same file demonstrates both the right and wrong pattern. MaxMind credentials are returned as a boolean `LicenseConfigured` flag ([`server/system.go:242`](../../../backend/internal/server/system.go)) — correct. Cloud storage credentials two structs away ([`system.go:452-456`](../../../backend/internal/server/system.go)) return `AccessKey`, `SecretKey`, `ConnectionString`, and `CredentialsJson` in plaintext to any authenticated caller, on every config read *and* every config write.
 
 Combined with Theme 1, a low-privilege account is a credential-exfiltration path to the object store. Supporting findings: the JWT signing secret and TLS private keys sit unencrypted in the replicated config store (and therefore in every node's WAL, snapshots, and backups), secrets pass as literal CLI flags visible in `ps`, and the file permissions the code's own comment cites as mitigation are not actually applied.
 
@@ -54,7 +54,7 @@ This is the classic log-viewer XSS, and it is worth stating plainly: for a log a
 
 ## Theme 6 — Integrity is corruption-detection, not tamper-evidence
 
-CRC32 on WAL records and unkeyed SHA-256 on GLCB chunks detect *accidental* corruption. Neither is evidence against an adversary with disk or blob-store write access, who recomputes them freely. Sharpest instance: peer-to-peer replica pulls accept a chunk on matching record count alone ([`glcb_catchup.go:281`](../../backend/internal/orchestrator/)), never checking the SHA-256 the manifest already carries — a compromised peer serves tampered content undetected, and the digest to catch it is *already there, unused*.
+CRC32 on WAL records and unkeyed SHA-256 on GLCB chunks detect *accidental* corruption. Neither is evidence against an adversary with disk or blob-store write access, who recomputes them freely. Sharpest instance: peer-to-peer replica pulls accept a chunk on matching record count alone ([`glcb_catchup.go:281`](../../../backend/internal/orchestrator/)), never checking the SHA-256 the manifest already carries — a compromised peer serves tampered content undetected, and the digest to catch it is *already there, unused*.
 
 Whether to go further (keyed MACs, signed manifests) is a product decision about threat model. Using the digest that already exists is not.
 

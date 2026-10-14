@@ -816,7 +816,7 @@ type ChunkMeta struct {
 	VaultId           []byte                 `protobuf:"bytes,12,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`                                 // which vault this chunk belongs to
 	VaultType         string                 `protobuf:"bytes,13,opt,name=vault_type,json=vaultType,proto3" json:"vault_type,omitempty"`                           // vault type: "memory" or "file"
 	RetentionPending  bool                   `protobuf:"varint,14,opt,name=retention_pending,json=retentionPending,proto3" json:"retention_pending,omitempty"`     // true = chunk is marked for retention processing
-	CloudStorageClass string                 `protobuf:"bytes,15,opt,name=cloud_storage_class,json=cloudStorageClass,proto3" json:"cloud_storage_class,omitempty"` // current cloud archival tier (e.g. "GLACIER", "cold", "Archive")
+	CloudStorageClass string                 `protobuf:"bytes,15,opt,name=cloud_storage_class,json=cloudStorageClass,proto3" json:"cloud_storage_class,omitempty"` // current cloud archival storage class (e.g. "GLACIER", "cold", "Archive")
 	ReplicaCount      int32                  `protobuf:"varint,16,opt,name=replica_count,json=replicaCount,proto3" json:"replica_count,omitempty"`                 // how many nodes currently have this chunk (leader + followers that have caught up)
 	// Cluster-wide replica residency: the set of node IDs that reported having
 	// this chunk locally during the most recent ListChunks fan-out. Lets the
@@ -3432,7 +3432,7 @@ type ArchiveChunkRequest struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Vault             string                 `protobuf:"bytes,1,opt,name=vault,proto3" json:"vault,omitempty"`
 	ChunkId           []byte                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
-	CloudStorageClass string                 `protobuf:"bytes,3,opt,name=cloud_storage_class,json=cloudStorageClass,proto3" json:"cloud_storage_class,omitempty"` // Target cloud archival tier: "GLACIER", "DEEP_ARCHIVE", "Archive"
+	CloudStorageClass string                 `protobuf:"bytes,3,opt,name=cloud_storage_class,json=cloudStorageClass,proto3" json:"cloud_storage_class,omitempty"` // Target cloud archival storage class: "GLACIER", "DEEP_ARCHIVE", "Archive"
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }

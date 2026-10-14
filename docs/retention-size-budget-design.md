@@ -1,147 +1,108 @@
-# Size Budget Folds Into Retention Policy
+# Vault Size Bound on the Retention Policy
 
-Issue: gastrolog-33ul6h. Status: approved design (operator decisions
-2026-07-19), pre-implementation.
+Status: implemented (`backend/internal/system/policies.go`,
+`backend/internal/orchestrator/disk_guard.go`, `retention.go`,
+`storage_bytes.go`, `backend/internal/chunk/claim.go`,
+`backend/internal/server/system_policies.go`).
 
-## Superseded (2026-07-19)
-
-The shape below — a separate refuse-bound field on `RetentionPolicyConfig`,
-distinct from the drain-trigger `MaxSize` field — was superseded by the
-operator (comment c2) before implementation. The corrected shape: the drain
-trigger and the refuse bound COMBINE into `MaxSize` alone. `MaxSize` on a
-retention policy now means BOTH things at once — oldest sealed chunks drain
-past it, and admission refuses cluster-wide while the vault's local claim is
-at/over it. There is no second field; "bound-only" (a refuse bound with no
-drain trigger) is not a concept — a policy that sets only `MaxSize` is
-simply a drain policy that also happens to bound the vault. The creation-
-default floor stays refuse-only (a default must never destroy data).
-
-This file is kept because the measurement decisions below — ONE meaning of
-size as the local disk claim, cached cloud-backed chunks counted like any
-other chunk, the min-wins/default-floor resolution shape — still stand
-unchanged by the correction. Read the shape sections below as history: where
-they say "the budget field" or describe two fields, read "`MaxSize`,
-combined."
-
-## Problem
-
-The vault's size story is split across two config surfaces that are only
-correct in combination, with nothing enforcing the combination — and they
-do not measure the same thing.
-
-- `VaultConfig.max_size` drives the disk guard's cap-and-refuse: at the
-  budget, admission for the vault is refused cluster-wide "until retention
-  drains it". It drains nothing itself; on a vault with no size-triggered
-  retention the promise is unfulfillable.
-- `RetentionPolicyConfig.max_size` is the drain trigger: destroy/route the
-  oldest sealed chunks past the bound. It has no backstop when retention
-  wedges (gastrolog-5ct2av, live).
-- The drain trigger sums LOGICAL record bytes of sealed chunks only; the
-  guard budget measures the actual local disk claim (GLCB bytes + indexes +
-  segment backlog, cached cloud chunks included). Under compression they
-  diverge 3-4×; a careful drain-below-refuse pairing does not compose.
-
-## Operator decisions (2026-07-19)
-
-1. Max size is not a separate vault-level thing — it is a component of the
-   retention policy. A policy is the vault's complete size/age lifecycle:
-   drain triggers plus an optional hard refuse bound.
-2. The refuse bound lives ON THE POLICY, min-wins across a vault's attached
-   policies, and there is NO bound when none carries one (gastrolog-vl2p98
-   removed the creation-default floor; the volume's free-space thresholds
-   are the backstop).
-3. ONE meaning of size: the local disk claim — and it includes the warm
-   cache of cloud-backed chunks ("a cached GLCB file takes up just as much
-   space as a GLCB file in a regular vault").
-4. Disposition and transfer target stay per-vault (gastrolog-2l918-c4);
-   policies say WHEN, the vault says WHAT HAPPENS.
+A vault's size bound is not a vault field. It is `MaxSize` on a retention
+policy the vault attaches, measured in one currency — the local disk claim
+— and it governs both draining and, when the policy opts in, refusing.
 
 ## Shape
 
-### Config
+A retention policy (`RetentionPolicyConfig`) is the vault's complete
+size/age/count lifecycle: `MaxAge`, `MaxSize`, `MaxChunks`, and the
+`Refuse` flag. Policies say **when** chunks leave; the vault's retention
+disposition and transfer target say **what happens** to them, and stay on
+`VaultConfig`.
 
-- `RetentionPolicyConfig` gains `optional string size_budget` — the
-  per-node disk-claim budget, in the same size vocabulary as every other
-  quantity ("50GB"). Named after the guard's established term ("size
-  budget" is what the alarms already call it); deliberately NOT `max_size`,
-  which remains the drain trigger.
-- `VaultConfig.max_size` (field 19) is REMOVED; remaining tags renumber.
-  Same for the `PutVaultCommand` copy via the shared VaultConfig embed.
-  No reserved tags (house rule; wire-format break accepted per
-  formats-stay-V1, operator reinitializes).
-- Effective budget resolution (config→runtime boundary,
-  `refreshVaultDiskGuards`): for each file vault, resolve every attached
-  retention rule's policy; effective budget = min over the policies'
-  parsed `size_budget` values; if no attached policy carries one, the vault
-  has no size bound. A file vault with zero retention rules is bounded by
-  its VOLUME (`FileStorage.DiskFreeWarn` / `DiskFreeFloor`, 10%/3%), not by
-  a per-vault byte default — gastrolog-vl2p98 removed that floor, because it
-  refused admission without draining and so could never recover, and because
-  it made an unconfigured vault stricter than any configured one
-  survives with no operator diligence required.
-- Validation moves with the field: `PutRetentionPolicy` parse-checks
-  `size_budget` (must parse, must be > 0 when set) the way `PutVault`
-  checked `max_size`; `PutVault` loses that validation.
+`MaxSize` is a size expression (`"50GB"`, `"1GiB"`), stored verbatim and
+resolved at use. It means two things at once:
 
-### Measurement
+- **Drain.** Every stated `MaxSize` drains, regardless of `Refuse`: once the
+  vault's sealed-chunk store exceeds the bound, the oldest sealed chunks
+  fire retention events per the vault's disposition
+  (`SizeRetentionPolicy`). Each attached policy drains on its own bound, so
+  the tightest stated bound drives draining.
+- **Refuse.** Only when the stating policy has `Refuse` set (default off):
+  while the vault's whole local footprint is at or over the bound,
+  admission for the vault refuses cluster-wide — the backstop while drain
+  catches up or is deferred. The effective refuse bound is the minimum
+  `MaxSize` over the refuse-enabled attached policies
+  (`attachedSizeBound` → `resolveVaultSizeBound`, resolved at the
+  config→runtime boundary in `refreshVaultDiskGuards`).
 
-- ONE unit: local disk claim. A chunk's claim is `DiskBytes` when recorded
-  (the on-disk GLCB, which is also what cached cloud-backed chunks report)
-  else `Bytes` plus index sizes — exactly `localVaultChunkBytes` semantics,
-  extracted into a shared per-chunk helper both consumers use.
-- The REFUSE bound (guard footprint) keeps measuring the whole local claim:
-  chunk store + pipeline segment backlog. Unchanged machinery
-  (`localVaultFootprintBytes`), new config source only.
-- The DRAIN trigger (`SizeRetentionPolicy`) switches from `meta.Bytes` to
-  the same per-chunk disk-claim helper. Scope difference is inherent and
-  documented, not hidden: the trigger measures the retained chunk store
-  (what draining can reclaim); the bound measures everything the vault
-  holds (what refusal protects). Same currency, different scope — the
-  drain-below-budget pairing now composes.
-- Cloud-backed chunks under the drain trigger: they count their LOCAL
-  claim (cache bytes; ~zero when evicted). Consequence, intended: the size
-  trigger only destroys chunks whose destruction frees local disk. A
-  fully-evicted cloud chunk is never destroyed by a size trigger — its
-  local cost is cache, and cache eviction (the existing LRU/TTL job) is
-  the mechanism that manages cache, not retention. Age/count triggers are
-  unaffected and still see cloud-backed chunks.
+There is no per-vault size default. A vault whose attached policies state
+no refuse-enabled `MaxSize` has no per-vault refuse bound; the storage
+free-space thresholds it is placed on (`FileStorage.DiskFreeWarn` /
+`DiskFreeFloor`, defaults `"10%"` / `"3%"`) are its backstop. Those are
+percentages of the volume, so they compose across every vault sharing it,
+where a per-vault default would not — and a refuse-only default would
+refuse admission without ever draining, which no recovery path could
+clear.
 
-### Enforcement (unchanged)
+"Bound-only" is not a concept: a policy that sets only `MaxSize` is a
+drain policy that also bounds the vault.
 
-Cap-and-refuse stays in the disk guard exactly as today: per-node
-evaluation, `vaultAdmissionGate` local + peer via NodeStats, the
-`vault-max-size-capped` / `vault-max-size-approaching` alarms. Only the
-config SOURCE of `maxSizeBytes` changes. The capped alarm's "until
-retention drains it" phrasing becomes structurally honest: a bound now
-implies a policy attachment point, and the UI presents budget and drain
-threshold side by side on the policy.
+`Refuse` generalizes to every bound the policy states: on a refuse-enabled
+policy, a `MaxAge` or `MaxChunks` violation that a retention sweep fails to
+clear also refuses admission (`checkBoundViolations`). `MaxSize`'s refuse
+check is instantaneous (every disk-guard tick); age and count are
+sweep verdicts.
 
-### Surfaces swept (rename-through-the-stack)
+## Measurement
 
-proto (`system.proto`, `fsm.proto`) + `just gen` both sides; convert layer;
-`system/vault.go` creation defaulting (moves to resolver) and
-`system/policy` validation; `refreshVaultDiskGuards`; CLI (`config vault`
-loses max-size flags, `config retention-policy` gains `--size-budget`);
-UI (`VaultsSettings.tsx` Max Size field removed; retention-policy settings
-gain the budget field with placeholder = none/unbounded-per-policy and help
-explaining min-wins + the creation default); help topics
-(`vaults-config.md`, retention policy help); `ubiquitous_language.md`
-(**size budget** entry; drain trigger vs refuse bound distinction);
-`docs/alarm-management-design.md` only if alarm text changes.
+One unit, the local disk claim of a chunk (`chunk.DiskClaim`):
 
-## Testing
+- `DiskBytes` when recorded — the on-disk GLCB, which is also what a cached
+  cloud-backed chunk reports, since a cached GLCB takes as much local disk
+  as a GLCB in any other vault;
+- 0 for a cloud-backed chunk with no local copy — destroying it frees
+  nothing locally;
+- otherwise logical `Bytes` plus index file sizes.
 
-- Unit: min-wins resolution across multiple attached policies; default
-  floor with no rules / trigger-less policies; validation (parse, >0);
-  drain trigger measuring disk claim (DiskBytes preferred, fallback
-  Bytes+indexes; cloud-backed cached counts, evicted ~zero).
-- Guard integration: capped state driven from a policy budget; budget
-  raised on the policy → admission resumes; policy detached → default
-  floor applies (not unbounded).
-- Multi-node (4+ nodes, file vaults): remote placement capped from a
-  policy budget refuses cluster-wide (peer broadcast path unchanged);
-  sweep-node independence.
-- Unhappy: retention wedged → bound holds (backstop); restart survival of
-  resolved budgets; UI round-trip (policy create/edit with budget).
-- `testing.Short()` skips for slow multi-node cases; `just test` +
-  `just backend test-full` gate.
+The two halves share the per-chunk arithmetic and differ in scope:
+
+- The **drain** trigger measures the retained sealed-chunk store — what
+  draining can reclaim.
+- The **refuse** bound measures everything the vault holds on the node
+  (`localVaultFootprintBytes`): the chunk store plus the pipeline segment
+  backlog — what refusal protects.
+
+Consequence for cloud-backed vaults: the size drain only selects chunks
+whose destruction frees local disk. A fully evicted cloud-backed chunk is
+never destroyed by a size trigger; its local cost is cache, and cache
+eviction (LRU or TTL against `CacheBudget` / `CacheTTL`) manages cache.
+Age and count triggers still see cloud-backed chunks.
+
+## Enforcement
+
+Cap-and-refuse lives in the disk guard: per-node evaluation, with
+`vaultAdmissionGate` merging the local verdict and every peer's via the
+NodeStats broadcast, so a vault capped on any node refuses cluster-wide.
+Alarms:
+
+- `vault-max-size-approaching:<vault>` (Low) at 90% of the refuse bound;
+- `vault-max-size-capped:<vault>` (High) at the bound — new records for
+  that vault are refused, others are unaffected;
+- `vault-bound-capped:<vault>/age` | `/count` (High) for a refuse-enabled
+  age or count bound still violated after a sweep;
+- `retention-unenforceable:<vault>` (High) when every attached policy
+  resolves with no trigger, so the vault has no drain.
+
+## Validation
+
+`PutRetentionPolicy` parse-checks `MaxSize`: it must parse and must be
+greater than zero when set (`validateRetentionMaxSize`); `"0"` is rejected
+as meaning no bound. An unset `MaxSize` is stored unset — nothing is
+stamped onto the policy.
+
+## Surfaces
+
+- CLI: `config retention-policy … --max-size <size> [--refuse]`.
+- UI: the retention policy form carries Max Size and Refuse; the vault form
+  has no size field.
+- Help: `policy-retention.md`.
+- Vocabulary: **Max size (retention policy)** and **Refuse** in
+  `docs/ubiquitous_language.md`.

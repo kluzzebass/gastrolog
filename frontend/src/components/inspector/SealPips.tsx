@@ -1,8 +1,7 @@
 import { rowIsCalm, type SealPip } from "./sealPipState";
 import { pipClass } from "./sealPipClass";
 
-// SealPips renders the per-node copy-seal lifecycle for one chunk row
-// (design reference docs/mockups/seal-pips.html).
+// SealPips renders the per-node copy-seal lifecycle for one chunk row.
 // One circle per placement node, identical order in every row. Fill
 // degree carries the lifecycle (hollow → half → solid) so the grammar
 // survives colorblindness and small sizes; color is secondary. Ghost
