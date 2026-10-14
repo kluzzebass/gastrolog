@@ -1298,7 +1298,7 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, reason chunk.Retentio
 	// default) skips routing entirely — records drop and storage frees
 	// immediately. "route" flows records through the routing engine with
 	// synthetic `_source = "retention"`, so operator-configured routes can
-	// forward them to archive vaults, cold storage, etc. The original chunk
+	// forward them to archive vaults or any other vault. The original chunk
 	// is always destroyed regardless of disposition.
 	//
 	// Ordering: routing runs BEFORE the retention-pending flag is applied,
@@ -1455,7 +1455,7 @@ func dispositionActionName(disposition string) string {
 // AND lists the source vault as a destination creates a cascade —
 // re-ingested records produce new chunks that themselves expire on
 // the next sweep. Routes for retention should target a different
-// vault (cold storage, archive, etc.).
+// vault (an archive vault or any other vault).
 // fireRetentionEvent returns true when the fan-out ran to completion, and
 // false when the caller must leave the chunk alone for a later sweep.
 //

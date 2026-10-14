@@ -212,13 +212,13 @@ func TestArchivalSweepMultiStepTransition(t *testing.T) {
 
 	ids := ingestSealUpload(t, cm, 50)
 
-	// 2 days old → should match first transition (cold).
+	// 2 days old → should match the first transition (class "cold").
 	clock.Advance(48 * time.Hour)
 	orch.archivalSweepAll()
 
 	meta, _ := cm.Meta(ids[0])
 	if !meta.Archived {
-		t.Error("chunk should be archived after 2 days (cold threshold is 1 day)")
+		t.Error("chunk should be archived after 2 days (the first transition's threshold is 1 day)")
 	}
 	if got := blobStorageClass(t, cloudStore, ids[0]); got != "cold" {
 		t.Fatalf("blob storage class = %q, want %q after the first step", got, "cold")
@@ -227,8 +227,8 @@ func TestArchivalSweepMultiStepTransition(t *testing.T) {
 	// 31 days old → must ADVANCE to the second transition. This is the half the
 	// test was missing: it asserted only that the chunk reached the FIRST class,
 	// which the bug never prevented. ArchiveChunk short-circuited on a bare
-	// "archived" bool, so a chunk already in ANY class never moved to a colder
-	// one and silently stopped migrating to cheaper storage.
+	// "archived" bool, so a chunk already in ANY class never moved to a later
+	// class in the chain and silently stopped migrating to cheaper storage.
 	clock.Advance(31 * 24 * time.Hour)
 	orch.archivalSweepAll()
 
@@ -237,7 +237,7 @@ func TestArchivalSweepMultiStepTransition(t *testing.T) {
 			got, "deep-freeze")
 	}
 	if meta, _ = cm.Meta(ids[0]); !meta.Archived {
-		t.Error("chunk must remain archived after advancing to the colder class")
+		t.Error("chunk must remain archived after advancing to the later class")
 	}
 }
 

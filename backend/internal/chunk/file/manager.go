@@ -4162,7 +4162,7 @@ func (m *Manager) ArchiveChunk(ctx context.Context, id chunk.ChunkID, storageCla
 	// Compare the CURRENT class against the requested one, not a bare
 	// "archived" bool. A bool short-circuits on any prior archive, so a
 	// chunk that has moved to the first class of a multi-step transition
-	// chain never advances to a colder one — it silently stops moving to
+	// chain never advances to a later class in it — it silently stops moving to
 	// cheaper storage.
 	if m.storageClasses[id] == storageClass {
 		m.mu.Unlock()
@@ -5301,7 +5301,6 @@ func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) 
 // loadCloudBackedChunks verifies the cloud index is readable and populates it from
 // the cloud store if empty. Cloud-backed chunk metadata is NOT loaded into m.metas —
 // it stays in the B+ tree and is served on demand via lookupMeta/ForEach.
-// After loading, pre-warms the TS index cache so the first query doesn't spike.
 func (m *Manager) loadCloudBackedChunks() error {
 	var prevCount uint64
 	if m.cloudIdx != nil {

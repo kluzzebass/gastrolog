@@ -58,7 +58,7 @@ type VaultConfig struct {
 	// and frees storage immediately, never touching the routing engine.
 	// "route" feeds the records back through the routing engine with
 	// _source = "retention" so operator-configured routes can forward
-	// them to archive vaults, cold storage, etc. "transfer" re-homes the
+	// them to archive vaults or any other vault. "transfer" re-homes the
 	// sealed chunk to RetentionTransferTargetVaultID UNCHANGED — no
 	// record decode, no re-route, no re-ingest.
 	//
