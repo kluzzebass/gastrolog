@@ -1323,15 +1323,13 @@ func scanAttrsViaGLCB(m *Manager, id chunk.ChunkID, startPos uint64, fn func(wri
 //   - RecordCount == 0 ghost (rotation artifact never received
 //     records) → SweepLocalOrphans deletes;
 //   - RecordCount > 0 unknown orphan → SweepLocalOrphans alerts
-//     and PRESERVES the on-disk files per the no-auto-delete-of-
-//     unknown-orphans invariant (docs/disk-authority-audit.md).
+//     and PRESERVES the on-disk files: unknown orphans are never
+//     deleted automatically.
 //   - chunks present in the FSM manifest but absent on disk:
 //     SweepMissingReplicas requests catchup from a peer.
 //
-// The whole "m.metas as in-memory cache of the reconciled-against-
-// FSM view" framing is F1/F2 in the audit doc. Callers of m.metas
-// (HasLocalContent, query paths, etc.) inherit this lineage — they
-// read what the reconciler approved, not raw disk.
+// Callers of m.metas (HasLocalContent, query paths, etc.) read what the
+// reconciler approved, not raw disk.
 func (m *Manager) loadExisting() error {
 	entries, err := os.ReadDir(m.cfg.Dir)
 	if err != nil {
@@ -4027,13 +4025,11 @@ func (m *Manager) uploadedChunkIDs() []chunk.ChunkID {
 	return out
 }
 
-// downloadCloudBlobToChunkDir streams the zstd-wrapped cloud blob for a
-// chunk into <chunkDir>/data.glcb atomically and opens a local cursor.
-// The cloud blob is `chunk.glcb.zst` — a zstd-wrapped GLCB; this function
-// fetches it, decompresses the wrapper into the local data.glcb, and
-// hands the resulting plain GLCB to the local-cursor fast path. The
-// chunk dir becomes the cached copy, structurally identical to a freshly-
-// sealed local chunk. See docs/obsoleted/vault_redesign.md decisions 6 and 9.
+// downloadCloudBlobToChunkDir streams a chunk's transport-framed cloud
+// object into <chunkDir>/data.glcb atomically and opens a local cursor:
+// the frames are decompressed in order back into the plain GLCB, which the
+// local-cursor fast path then serves. The chunk dir becomes the cached copy,
+// structurally identical to a freshly-sealed local chunk.
 func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	dir, err := chunk.MkdirChunkDir(m.cfg.Dir, id)
 	if err != nil {

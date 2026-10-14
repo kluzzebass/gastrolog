@@ -89,7 +89,7 @@ type VaultConfig struct {
 	// even though it was never chunked (island origin, no reachable holder):
 	// holding an uncollectable entry forever only leaks. Route-disposition
 	// retention vetoes the bound — those records must be routed, not dropped.
-	// Nil disables (design-notes 28).
+	// Nil disables.
 	RetentionGiveUpTTL func() (time.Duration, bool)
 	// IndexOpener opens a completed segment for planner indexing. Defaults
 	// to BuildOrderedIndex when nil (tests may inject a counting wrapper).

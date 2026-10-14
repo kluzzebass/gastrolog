@@ -243,7 +243,7 @@ type vaultDiskGuard struct {
 	// Pipeline backlog budget (cap-and-refuse): unreleased registry segment
 	// bytes measured against the cluster-global backlogBudget. The OPERATING
 	// bound — engages well before disk pressure so the backlog is bounded by
-	// policy, not by the volume filling up (design-notes R2). Distinct from
+	// policy, not by the volume filling up. Distinct from
 	// maxSizeBytes: the max-size bound covers everything the vault RETAINS,
 	// the backlog budget covers what chunking has not yet drained.
 	backlogCapped      atomic.Bool

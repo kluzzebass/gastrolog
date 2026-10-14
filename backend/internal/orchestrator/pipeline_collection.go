@@ -40,7 +40,7 @@ type segmentLogReader struct {
 	// placement returns the vault's placement node IDs, for the RF supersession
 	// threshold. A waking node must not pull a segment whose records already
 	// live in an RF-replicated chunk — it catches up at the chunk level, not by
-	// re-pulling superseded transport (design-notes R4). nil disables the skip
+	// re-pulling superseded transport. nil disables the skip
 	// (single-node / tests with no placement wiring).
 	placement func() []string
 }

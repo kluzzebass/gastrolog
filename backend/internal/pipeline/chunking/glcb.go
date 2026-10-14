@@ -39,7 +39,7 @@ type BuildGLCBResult struct {
 	Bytes             int64
 }
 
-// BuildGLCB encodes merged span records into GLCB (design-notes §37).
+// BuildGLCB encodes merged span records into GLCB.
 // dst must be an *os.File opened in the directory where the blob will live
 // (use BuildGLCBFile for the common atomic-rename path). EventID and raw bytes
 // are copied verbatim; attributes are normalized into the chunk string dictionary.

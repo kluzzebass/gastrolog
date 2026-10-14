@@ -15,8 +15,25 @@ on one.
 If you're running `gastrolog` outside a container (e.g. via
 `go install`, a release binary, or systemd), use the flags directly; the
 four secret variables work there too. See
-[`docs/cluster_enrollment.md`](./cluster_enrollment.md) for the
-operator-facing flag reference.
+[`docs/cluster_enrollment.md`](./cluster_enrollment.md) for how enrollment
+and join tokens work.
+
+A few server settings are read from the environment by the binary itself,
+with no entrypoint mapping, so they apply in and out of containers alike;
+where a flag exists, an explicitly set flag wins:
+
+| Env var | Flag | Notes |
+|---|---|---|
+| `GLOG_SEGMENT_HOT_PATH_FSYNC` | `--segment-hot-path-fsync` | Default `true`. `false`/`0`/`no`/`n`/`off` stops fsyncing segmentation group-commit flushes (load testing). |
+| `GLOG_RAFT_HEARTBEAT_TIMEOUT` | `--raft-heartbeat-timeout` | Go duration (`3s`). Base Raft heartbeat/election timeout for all groups; unset keeps the default (2s, vault-ctl +1s). A malformed value fails startup. |
+| `GLOG_RAFT_LEADER_LEASE` | `--raft-leader-lease` | Go duration. Raft leader lease for all groups; unset keeps the default (1.5s). Must not exceed the heartbeat timeout. |
+| `GLOG_PEER_TTL_MULTIPLIER` | — | Positive integer, default `3`: how many stats-broadcast intervals a peer's last stats stay queryable. |
+| `GLOG_UNREACHABLE_THRESHOLD` | — | Go duration, default `5m`: silence after which the cluster-ctl leader marks a node unreachable. |
+| `GLOG_UNREACHABLE_ALERT_THRESHOLD` | — | Go duration, default `5m`: time in unreachable after which the alarm raises. |
+| `GLOG_LOCK_TRACKING` | — | Orchestrator lock-leak diagnostics, on by default; `off`/`false`/`0` disables. |
+| `GLOG_RAFT_LEASE_TRACE` | — | Any value other than empty or `0` enables slow-path logging for lease-sensitive Raft RPCs (also on with `--pprof-debug`). |
+
+`GASTROLOG_TOKEN` supplies the CLI's `--token` for the client commands.
 
 ## Mapping
 
@@ -31,12 +48,13 @@ when used.
 | `GASTROLOG_VAULTS` | `--vaults` | string | Default: `/vaults`. Vault storage directory; mount as a volume. |
 | `GASTROLOG_LISTEN` | `--listen` | string | HTTP / Connect-RPC listen address (default `:4564`). |
 | `GASTROLOG_CLUSTER_ADDR` | `--cluster-addr` | string | Cluster gRPC listen address (default `:4566`). Set to the literal string `auto` to have the entrypoint resolve the container's own hostname to its overlay IP and use that — required for Docker Swarm and Kubernetes overlay networks where service-name DNS resolves to a routing-mesh VIP that can't be bound. |
+| `GASTROLOG_CLUSTER_ADVERTISE` | `--cluster-advertise` | string | Address peers store and dial to reach this node. Empty = the bind address. Set to a stable DNS name where pod IPs rotate (the Kubernetes manifest uses the pod's headless-service name). |
 | `GASTROLOG_NAME` | `--name` | string | Node name. Defaults to a random petname; set explicitly when stable identity matters (e.g. `gastrolog-0` from a StatefulSet ordinal). |
 | `GASTROLOG_JOIN_ADDR` | `--join-addr` | string | Cluster address of any node already in the cluster — set on joiners. The node reached serves the join wherever it sits in the configuration, so this need not be the bootstrap node or the leader. Omit on the bootstrap node. |
 | `GASTROLOG_JOIN_TOKEN` | `--join-token` | string | Cluster join token — set on joiners. Pair with `GASTROLOG_JOIN_ADDR`. |
 | `GASTROLOG_NO_AUTH` | `--no-auth` | bool | Disable authentication. Truthy values: `1`, `true`, `yes`, `y`, `on` (case-insensitive). Anything else (including `false`, `0`, empty) is off. **Use only for testing.** |
 | `GASTROLOG_PPROF` | `--pprof` | string | pprof HTTP server address (e.g. `localhost:6060`). Empty/unset = disabled. Serves `/debug/pprof/{profile,trace,heap,goroutine,mutex,block}`. |
-| `GASTROLOG_PPROF_DEBUG` | `--pprof-debug` | bool | Enable mutex (1/5) and block (10ms) sampling for pprof. Dev/incident use only. |
+| `GASTROLOG_PPROF_DEBUG` | `--pprof-debug` | bool | Enable mutex (1/5) and block (10ms) sampling for pprof. Same truthy values as `GASTROLOG_NO_AUTH`. Dev/incident use only. |
 | `GASTROLOG_PPROF_MUTEX_FRACTION` | `--pprof-mutex-fraction` | int | Mutex contention sample rate (`0`=off, `1`=all, `5`=one in five). Overrides `--pprof-debug` default when set. |
 | `GASTROLOG_PPROF_BLOCK_RATE` | `--pprof-block-rate` | int | Block profile sample period in nanoseconds (`0`=off, `1`=all events, `10000000`≈one per 10ms blocked). Overrides `--pprof-debug` default when set. |
 | `GASTROLOG_CONFIG_TYPE` | `--config-type` | string | Config store: `raft` (default) or `memory`. Use `memory` only for tests / ephemeral demos. |
@@ -45,7 +63,9 @@ when used.
 | `GASTROLOG_BOOTSTRAP_TOKEN_SECRET` | `--bootstrap-token-secret` | string | Joiner only: secret sent in the `X-Bootstrap-Token-Secret` header when fetching from `GASTROLOG_BOOTSTRAP_TOKEN_URL`. |
 | `GASTROLOG_INITIAL_ADMIN_FILE` | `--initial-admin-file` | string | Bootstrap node only: read initial admin credentials from this path. JSON `{"username": ..., "password": ...}` or single-line `username:password`. Wins over the env-var pair. No-op once any user exists. |
 | `GASTROLOG_INITIAL_ADMIN_USER` | `--initial-admin-user` | string | Bootstrap node only: initial admin username (paired with `GASTROLOG_INITIAL_ADMIN_PASSWORD`). No-op once any user exists. |
-| `GASTROLOG_INITIAL_ADMIN_PASSWORD` | `--initial-admin-password` | string | Bootstrap node only: initial admin password. **Prefer `GASTROLOG_INITIAL_ADMIN_FILE` for production** — env-var-based passwords show up in `docker inspect`, process listings, and Kubernetes Pod manifests. |
+| `GASTROLOG_INITIAL_ADMIN_PASSWORD` | `--initial-admin-password` | string | Bootstrap node only: initial admin password. **Prefer `GASTROLOG_INITIAL_ADMIN_FILE` for production** — env-var-based passwords show up in `docker inspect` and Kubernetes Pod manifests. |
+| `GASTROLOG_ENVIRONMENT_LABEL` | `--environment-label` | string | Label rendered in the UI header banner (e.g. `Kubernetes`). Empty hides the banner. Must be a single token: the entrypoint word-splits its arguments, so a value with spaces breaks the command line. |
+| `GASTROLOG_ENVIRONMENT_COLOR` | `--environment-color` | string | CSS color for the banner (e.g. `red`, `#c4302b`). Empty uses the palette default. |
 
 ## Default-vs-explicit semantics
 
@@ -59,15 +79,16 @@ This means:
   when no env var is set, so a bare `docker run` produces a working
   single-node node.
 - Setting `GASTROLOG_HOME=""` or `GASTROLOG_VAULTS=""` does NOT
-  unset the flag — it sets it to the empty string. To use the
+  unset the flag — an empty value falls back to the container
+  default (`/config`, `/vaults`) exactly like an unset one. To use the
   binary's platform defaults instead of the container defaults,
   override the entrypoint or use the binary directly.
 
 ## Bool flag semantics
 
-Bool env vars (`GASTROLOG_NO_AUTH` is the only one today) follow
+Bool env vars (`GASTROLOG_NO_AUTH` and `GASTROLOG_PPROF_DEBUG`) follow
 standard truthy semantics: only `1`, `true`, `yes`, `y`, `on`
-(case-insensitive) enable the corresponding flag. Anything else —
+(case-insensitive, surrounding whitespace ignored) enable the corresponding flag. Anything else —
 including `false`, `0`, `no`, `off`, or any unrecognized value —
 disables it.
 
@@ -80,8 +101,8 @@ The image declares `/config` and `/vaults` as VOLUMEs, signaling that
 those paths must be persistent across container restarts. In
 production you should mount these explicitly:
 
-- **Docker Compose**: named volumes (`config_data:/config`,
-  `vault_data:/vaults`).
+- **Docker Compose**: named volumes per node (`gastrolog-0-config:/config`,
+  `gastrolog-0-vaults:/vaults`).
 - **Kubernetes StatefulSet**: PersistentVolumeClaim templates for
   each path.
 - **`docker run` quickstart**: bind-mounts (`-v $(pwd)/config:/config

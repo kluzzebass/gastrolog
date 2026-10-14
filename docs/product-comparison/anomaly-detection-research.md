@@ -254,7 +254,7 @@ Training-batch models are a non-starter on the ingest hot path.
 
 **[river-ml](https://github.com/online-ml/river)** — Python streaming ML library. ADWIN, Half-Space Trees, streaming KMeans, online gaussian models.
 
-**Amortized cost guidance:** sub-microsecond per-event is the bar for the ingest hot path. EWMA fits. RRCF at 10 trees × 256 samples is ~10–50µs per point — OK for aggregated streams, not per-event. Above that, run off the hot path on a sampled/aggregated tier.
+**Amortized cost guidance:** sub-microsecond per-event is the bar for the ingest hot path. EWMA fits. RRCF at 10 trees × 256 samples is ~10–50µs per point — OK for aggregated streams, not per-event. Above that, run off the hot path on a sampled/aggregated stream.
 
 **[NAB](https://github.com/numenta/NAB)** (Numenta Anomaly Benchmark) — benchmark + scoring for streaming detectors. Directional, not gospel; biased univariate.
 

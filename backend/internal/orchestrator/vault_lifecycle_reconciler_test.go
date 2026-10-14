@@ -546,11 +546,10 @@ func TestSweepLocalOrphansDeletesOnlyTombstonedAbsentEntries(t *testing.T) {
 	}
 }
 
-// TestSweepLocalOrphansPreservesDataBearingUnknownOrphans pins the
-// no-auto-delete-of-unknown-orphans invariant from
-// docs/disk-authority-audit.md. A sealed chunk with real records but no
-// FSM record, no tombstone, and no pendingDelete is exactly the recovery
-// surface FSM-glitch scenarios need preserved. The sweep must alert (the
+// TestSweepLocalOrphansPreservesDataBearingUnknownOrphans pins that
+// unknown orphans are never deleted automatically. A sealed chunk with real
+// records but no FSM record, no tombstone, and no pendingDelete is exactly
+// the recovery surface FSM-glitch scenarios need preserved. The sweep must alert (the
 // alert side is exercised in TestAlertUnknownOrphanRaisesAlert below)
 // and MUST NOT delete.
 //

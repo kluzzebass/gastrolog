@@ -204,7 +204,7 @@ in IngestTS order (the default) or SourceTS order:
 
 | Chunk Type | Strategy |
 |------------|----------|
-| Sealed (local or warm-cached cloud) | Walk the embedded mmap'd ITSI/STSI rank-by-rank, seek to positions in TS order |
+| Sealed (local, or a cached copy of a cloud-backed chunk) | Walk the embedded mmap'd ITSI/STSI rank-by-rank, seek to positions in TS order |
 | Active or Sealing pipeline chunk with a local GLCB | Same rank-ordered path over the GLCB's embedded ITSI/STSI |
 | Active or Sealing pipeline chunk without a local GLCB, ingest order | Sequential scan (`b.build()`) of the manifest-listed segment spans, which already yield in ingest order |
 | Active or Sealing pipeline chunk without a local GLCB, any other ordering | Sorted in memory (`buildSortedScanner`, `query/order_sort_scanner.go`): one pass collects each surviving record's ordering key and position, charged against the memory budget, then the records are read back sorted |
@@ -217,9 +217,9 @@ flowchart TD
     Open["cm.OpenCursor(chunkID)"] --> LookupMeta["lookupMeta()"]
 
     LookupMeta --> IsCloud{"Cloud-backed?"}
-    IsCloud -->|Yes| CloudPath["Warm-cache fill: whole-blob download → mmap data.glcb"]
+    IsCloud -->|Yes| CloudPath["Local data.glcb if cached, else download a cached copy: whole object → mmap data.glcb"]
     IsCloud -->|No| IsSealed{"Sealed?"}
-    IsSealed -->|Yes| MmapPath["mmap data.glcb (GLCB)"]
+    IsSealed -->|Yes| MmapPath["glcbCursor over mmap'd data.glcb"]
     IsSealed -->|"No: ErrChunkNotFound"| Pipeline["OpenPipelineChunkCursor()"]
     Pipeline --> HasGLCB{"Local GLCB built?"}
     HasGLCB -->|Yes| GLCBCursor["GLCB cursor over local data.glcb"]
@@ -236,8 +236,9 @@ flowchart TD
 |-------------|------------|------------|
 | Active or Sealing (pipeline), local GLCB built | GLCB cursor (`chunking.OpenGLCBCursor`) | Memory-mapped local `data.glcb` |
 | Active or Sealing (pipeline), no local GLCB | `manifestRecordCursor` | Reads the manifest-listed segment spans; the first `Seek` switches to a positional reader |
-| Sealed (local) | `mmapCursor` | Memory-mapped GLCB, random access via record-index offsets |
-| Cloud-backed | `glcbCursor` (after warm-cache fill) | One whole-object download → reassemble GLCB → mmap; reads are local from then on. Histogram rank lookups on cold chunks skip the fill: the ITSI section arrives via KB-scale range GETs |
+| Sealed (local) | `glcbCursor` (`glcb.NewGLCBCursor`) | Memory-mapped `data.glcb`, random access via record-index offsets |
+| Unsealed chunk written by the file chunk manager (`raw.log`/`idx.log`, e.g. an import before its GLCB conversion) | `mmapCursor` | Memory-mapped `raw.log`, `idx.log`, `attr.log` |
+| Cloud-backed | `glcbCursor` (after the download into a cached copy) | One whole-object download → reassemble GLCB → mmap; reads are local from then on. Histogram rank lookups on uncached chunks skip the download: the ITSI section arrives via KB-scale range GETs |
 
 Active and Sealing pipeline chunks come from the FSM manifest, not from the
 chunk manager. `openSearchChunkCursor()` (`query/query.go`) tries
@@ -262,7 +263,7 @@ chunk, so a query whose limit fills from newer chunks does no cloud I/O. A
 cloud-backed chunk whose blob cannot be read is skipped with a warning
 (`handleCloudPrimeError`) instead of failing the query.
 
-Reads go through a whole-blob download and warm-cache fill. The first cursor
+Reads go through a whole-blob download into a cached copy. The first cursor
 pays one download; every subsequent read on the same chunk goes through the
 local mmap fast path:
 
@@ -274,10 +275,10 @@ sequenceDiagram
     participant Cache as Local data.glcb
 
     QE->>CM: OpenCursor(chunkID)
-    CM->>S3: Download(chunk.glcb.zst)
+    CM->>S3: Download(vault-{vault}/{chunk}.glcb)
     S3-->>CM: transport-framed GLCB object
     CM->>Cache: DownloadAndUnwrap → data.glcb
-    CM->>CM: VerifyDownloadedBlob (TOC digest vs FSM)
+    CM->>CM: verifyDownloadedBlob (TOC digest vs FSM)
     CM-->>QE: glcbCursor over mmap'd data.glcb
 
     loop Per record
@@ -292,15 +293,15 @@ chunk. Subsequent queries reuse the cache; the vault's cache policy
 (`CacheEviction` LRU on `CacheBudget`, or TTL on `CacheTTL`) reclaims it.
 
 Every home holds a second kind of local copy: the GLCB the pipeline built in
-its chunk root before the chunk was uploaded. Once the vault-ctl manifest
-records the upload, that GLCB is warm cache too — reads use it without any
+its chunk root before the chunk was uploaded. Once the vault chunk manifest
+records the upload, that GLCB is a cached copy too — reads use it without any
 cloud I/O (also after a restart, when nothing has registered it), and the
 eviction sweep, which runs on every home rather than only the placement
 leader, counts it against the budget and removes it like the chunk-dir copy.
-Eviction considers only chunks the manifest marks cloud-backed; a local GLCB
+Eviction considers only chunks the vault chunk manifest marks cloud-backed; a local GLCB
 whose upload has not committed is never removed. An evicted pipeline GLCB
 withdraws the home's holder receipt, and the next read re-fetches into the
-chunk dir through the cold path above.
+chunk dir through the download path above.
 
 ## Cloud Index Infrastructure
 
@@ -311,21 +312,23 @@ heap. This keeps memory stable regardless of cloud-backed chunk count.
 flowchart LR
     subgraph "Per-Vault Disk"
         BTree["cloud.idx (B+ tree)"]
-        WarmCache["data.glcb warm cache"]
+        CachedCopy["data.glcb cached copy"]
     end
 
     subgraph "Cloud Store"
-        Blobs["chunk.glcb.zst blobs"]
+        Blobs["transport-framed {chunk}.glcb objects"]
     end
 
     BTree -->|"ChunkID → metadata"| Meta["ChunkMeta"]
-    Blobs -->|"DownloadAndUnwrap"| WarmCache
-    WarmCache -->|"mmap GLCB sections"| Positions["Records / TS indexes / TOC"]
+    Blobs -->|"DownloadAndUnwrap"| CachedCopy
+    CachedCopy -->|"mmap GLCB sections"| Positions["Records / TS indexes / TOC"]
 ```
 
-**Warm cache.** First read of a cloud-backed chunk pulls the
-zstd-wrapped blob, decompresses it into a local `data.glcb`, and verifies
-the TOC's blob digest against the FSM-stamped value (gastrolog-grnc3).
+**Cached copy.** First read of an uncached cloud-backed chunk pulls the
+transport-framed object, decompresses its frames into a local `data.glcb`
+(`glcb.DownloadAndUnwrap`, which checks every frame's hash), and verifies
+the TOC's blob digest against the digest the vault-ctl FSM recorded at upload
+(`verifyDownloadedBlob`); a mismatch discards the download.
 The TS index, record index, and records all live in the same file from
 that point on — `pread`-based binary search runs against the local mmap
 with no further cloud I/O.
@@ -364,8 +367,9 @@ next to the parser that reads them back: the filter, then `start=`, `end=`,
 `order=`, `limit=` and `pos=`. A peer therefore scans under exactly the bounds,
 ordering and position the coordinator's own scan uses — a vault led on another
 node honours a source-time window or a `pos=` address the same way a local one
-does. A legacy token/key-value query is folded into its filter first, so it
-never reaches a peer as an unfiltered scan. What the text does not carry
+does. A query whose terms sit in its `Tokens`/`KV` fields rather than a
+filter is folded into a filter first (`Query.Normalize`), so it never
+reaches a peer as an unfiltered scan. What the text does not carry
 travels in the request beside it: the resume cursor in `ResumeToken`, the
 partial-aggregate request in `PartialAggregates`, the histogram request and
 its grid in `HistogramGrid`. A test fails when a
@@ -573,4 +577,6 @@ flowchart TD
 The merge loop pops the entry with the smallest timestamp (or largest, for
 reverse queries) from the heap, yields it to the client, and advances that
 chunk's scanner to get the next record. When the limit is reached or the heap
-is empty, it builds a resume token encoding each chunk's last-returned position.
+is empty, it builds a resume token: the canonical cursor (the last record's
+timestamp on the ordering axis and its EventID) plus the last-returned
+position of each chunk scanned in physical order (see Resume tokens above).

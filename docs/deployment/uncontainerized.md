@@ -13,13 +13,9 @@ cd gastrolog
 just build           # produces build/gastrolog
 ```
 
-Or directly with Go:
-
-```sh
-mkdir -p build
-cd backend
-go build -o ../build/gastrolog ./cmd/gastrolog
-```
+`just build` builds the frontend, embeds it into the backend, and builds
+the binary; `just backend build` builds only the binary, serving whatever
+frontend assets are already embedded.
 
 ### From a release
 
@@ -50,10 +46,14 @@ registration screen, and you're running.
 To run unattended (no interactive admin prompt):
 
 ```sh
-gastrolog server \
-  --initial-admin-user admin \
-  --initial-admin-password change-me
+GASTROLOG_INITIAL_ADMIN_PASSWORD=change-me gastrolog server \
+  --initial-admin-user admin
 ```
+
+The password goes in the environment: the binary reads
+`GASTROLOG_INITIAL_ADMIN_PASSWORD` itself, and a password passed as
+`--initial-admin-password` is visible to every process on the host (the
+flag still works, with a warning).
 
 ## Multi-node cluster (development)
 
@@ -67,7 +67,10 @@ just backend cluster-run     # start it (interactive imux TUI)
 ```
 
 The cluster runs node 1 at `localhost:4564`, node 2 at `localhost:4574`,
-etc. Each node has its own data directory under `data/node{N}`.
+etc. (cluster ports `4566`, `4576`, ...). Each node has its own home
+directory at `$GLOG_DATA_DIR/node{N}` (default `/tmp/gastrolog/node{N}`).
+The node count, ports and auth come from `GLOG_*` variables, which the
+justfiles load from `.env`.
 
 See [`scripts/cluster.sh`](../../scripts/cluster.sh) for the
 full bootstrap dance — admin registration, vault setup, route
@@ -94,24 +97,24 @@ about to use it rather than keeping one around:
 gastrolog cluster join-token
 ```
 
-Then on each joiner:
+Then on each joiner, with the token in the environment (a token passed
+as `--join-token` is visible to every process on the host):
 
 ```sh
 # host B — joiner
-gastrolog server \
+GASTROLOG_JOIN_TOKEN=<token> gastrolog server \
   --home /var/lib/gastrolog \
   --listen :4564 \
   --cluster-addr hostB:4566 \
-  --join-addr hostA:4566 \
-  --join-token <token>
+  --join-addr hostA:4566
 ```
 
 `--join-addr` is any node already in the cluster, not a specific one:
 the node reached serves the join wherever it sits in the configuration.
 
 For unattended joins, have an existing node serve tokens with
-`--bootstrap-token-serve-secret` and point joiners at it with
-`--bootstrap-token-url` and `--bootstrap-token-secret`; it mints a fresh
+`GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET` and point joiners at it with
+`--bootstrap-token-url` and `GASTROLOG_BOOTSTRAP_TOKEN_SECRET`; it mints a fresh
 token per request, so a joiner started much later still gets a live one.
 A joiner asks only on its first start; once it holds its certificate it
 restarts from it without contacting the URL.
@@ -160,15 +163,16 @@ non-container deployments:
 | Flag | Purpose |
 |---|---|
 | `--home <path>` | Persistent state directory. Default: platform config dir. |
-| `--vaults <path>` | Vault storage. Default: `<home>/vaults`. |
+| `--vaults <path>` | Base directory that relative file storage paths resolve against. Default: `<home>`. |
 | `--listen <addr>` | HTTP / Connect-RPC listen address. Default: `:4564`. |
 | `--cluster-addr <addr>` | Cluster gRPC listen address. Default: `:4566`. **Set to a routable address (`hostname:4566`) for multi-host clusters.** |
 | `--name <name>` | Stable node name. Default: random petname. |
-| `--join-addr <addr>` / `--join-token <token>` | Cluster enrollment for joiners. |
-| `--bootstrap-token-serve-secret <secret>` | Serve minted join tokens at `GET /cluster/bootstrap-token`, gated on this secret. |
-| `--bootstrap-token-url <url>` / `--bootstrap-token-secret <secret>` | Joiner only: fetch a minted token from that endpoint instead of passing `--join-token`. |
+| `--join-addr <addr>` / `GASTROLOG_JOIN_TOKEN` | Cluster enrollment for joiners. |
+| `GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET` | Serve minted join tokens at `GET /cluster/bootstrap-token`, gated on this secret. |
+| `--bootstrap-token-url <url>` / `GASTROLOG_BOOTSTRAP_TOKEN_SECRET` | Joiner only: fetch a minted token from that endpoint instead of supplying one. |
 | `--initial-admin-file <path>` | Bootstrap node only: provision admin credentials from a file. |
-| `--no-auth` | Disable authentication. Testing only. |
+| `--cluster-advertise <addr>` | Address peers store and dial for this node. Default: the bind address. |
+| `--no-auth` | Disable authentication; every request is treated as admin. |
 
 ## Why bother containerizing?
 
@@ -186,6 +190,10 @@ because you think it's the only way to run modern software.
   [docker-swarm.md](./docker-swarm.md),
   [kubernetes.md](./kubernetes.md).
 - **All env vars** that the entrypoint understands: see
-  [container_environment.md](../container_environment.md). They
-  don't apply when running the binary directly — the entrypoint
-  is what translates env vars to flags.
+  [container_environment.md](../container_environment.md). Most only
+  exist in the container, where the entrypoint translates them to
+  flags; the four secrets (`GASTROLOG_JOIN_TOKEN`,
+  `GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET`,
+  `GASTROLOG_BOOTSTRAP_TOKEN_SECRET`, `GASTROLOG_INITIAL_ADMIN_PASSWORD`)
+  and the `GLOG_SEGMENT_HOT_PATH_FSYNC` / `GLOG_RAFT_*` settings are read
+  by the binary itself and work the same without a container.

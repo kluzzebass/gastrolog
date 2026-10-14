@@ -6,7 +6,7 @@ handle it and forwards transparently.
 
 ## Routing Strategies
 
-Every RPC is classified in `routing/routes.go` with one of four strategies.
+Every RPC is classified in `server/routing/routes.go` (`DefaultRoutes`) with one of four strategies.
 The coverage test (`TestAllProceduresDeclared`) parses the generated
 `*.connect.go` files and verifies every procedure constant appears in the
 registry — adding a new RPC without classifying it fails the test.
@@ -54,9 +54,9 @@ This is the strategy for **imperative actions on a specific resource**:
 seal a vault, reindex it, trigger an ingester. They are not config
 mutations, so they must NOT be tunnelled through `RouteLeader` and a Raft
 round-trip just to reach the right node — the interceptor delivers them
-directly (gastrolog-51ge9).
+directly.
 
-Each such procedure declares, in `routing/routes.go`, **which resource it
+Each such procedure declares, in `server/routing/routes.go`, **which resource it
 targets** and **how to read that resource's ID out of its request**:
 
 ```go
@@ -140,9 +140,9 @@ ForwardRPCFrame {
 ```
 
 On the receiving node, the handler dispatches through the **internal
-Connect mux** — the same mux used by the unix socket, with
-`NoAuthInterceptor` (mTLS already verified the peer) and no routing
-interceptor (prevents forwarding loops).
+Connect mux** (`Server.BuildInternalHandler`), with `NoAuthInterceptor`
+(mTLS already verified the peer) and no routing interceptor (prevents
+forwarding loops).
 
 The dispatch is an in-process HTTP call:
 1. Build `http.Request` with procedure as URL path, raw proto as body
@@ -190,8 +190,9 @@ handler manages parallel streams, merge logic, and backpressure.
 ### RouteLeader — Raft handles it
 
 The interceptor passes RouteLeader RPCs through without action. The
-handler calls `cfgStore.Apply()` which internally forwards to the Raft
-leader via `ForwardApply` if the current node isn't the leader.
+handler writes through the config store (`raftstore.Store`), whose apply
+path forwards the command to the cluster-ctl Raft leader via `ForwardApply`
+(`cluster.Forwarder`) when the current node isn't the leader.
 
 ## Two Muxes
 
@@ -200,44 +201,50 @@ Client-facing mux:  auth interceptor → routing interceptor → handler
 Internal mux:       NoAuthInterceptor → handler  (no routing interceptor)
 ```
 
-The internal mux is used by:
-- **ForwardRPC** handler (cluster gRPC port) — dispatches forwarded requests
-- **Unix socket** listener — local CLI access without auth
+The client-facing mux serves the TCP listener and the **Unix socket**. The
+socket skips authentication (`NoAuthInterceptor`; the socket file's
+permissions are the access control) but is a first-hop client channel like
+TCP, so it keeps the routing interceptor and routes owner-scoped requests
+exactly as TCP does.
 
-The routing interceptor is only on the client-facing mux. This prevents
-forwarding loops: a ForwardRPC dispatch on the receiving node goes
-through the internal mux, which has no routing interceptor, so the
-handler always executes locally.
+The internal mux serves only the **ForwardRPC** handler on the cluster port,
+which dispatches requests that were already forwarded. It has no routing
+interceptor, so a forwarded request always executes on the node that
+received it and cannot loop.
 
 ## Cluster Communication Channels
 
-All inter-node communication runs over a single gRPC server per node
-(cluster port, mTLS):
+All inter-node communication runs on the cluster port (mTLS). The port
+demultiplexes connections by TLS SNI (`cluster/lane_listener.go`): a
+`gastrolog-raft.<group>` SNI (`multiraft.LaneSNI`) selects that Raft group's
+lane, a gRPC stack of its own serving `gastrolog.v1.MultiRaftTransportService`
+for that group alone; every other connection reaches the service lane, which
+serves `gastrolog.v1.ClusterService`.
 
-### Legacy per-RPC handlers (cluster/forward.go)
+### Per-RPC handlers (`cluster/forward.go`)
 
 | Category | RPCs |
 |----------|------|
 | Config | ForwardApply |
-| Enrollment | Enroll (mTLS-exempt) |
+| Vault-ctl apply | ForwardVaultApply |
+| Enrollment | Enroll (mTLS-exempt), RequestMembership |
 | Stats | Broadcast |
-| Ingestion | ForwardRecords |
-| Inspector | ForwardListChunks, ForwardGetIndexes, ForwardGetChunk, ForwardAnalyzeChunk, ForwardValidateVault |
-| Operations | ForwardReindexVault, ForwardExportToVault |
+| Inspector | ForwardListChunks, ForwardGetPipelineBacklog, ForwardGetIndexes, ForwardGetChunk, ForwardAnalyzeChunk, ForwardValidateVault, ForwardValidateIngester |
+| Operations | ForwardReindexVault, ForwardExportToVault, ForwardReconcileCloudIndex |
 | Context | ForwardGetContext, ForwardExplain |
 | Membership | NotifyEviction, ForwardRemoveNode, ForwardSetNodeSuffrage |
 | Files | ListPeerManagedFiles |
-| Streaming | ForwardSearch, ForwardFollow, ForwardImportRecords, StreamForwardRecords, PullManagedFile |
+| Streaming | ForwardSearch, ForwardFollow, ForwardWatchChunks, ForwardImportRecords, PullSegment, PullChunkGLCB, PullManagedFile |
 
-### Generic handler (cluster/forward_rpc.go)
+### Generic handler (`cluster/forward_rpc.go`)
 
 | RPC | Pattern | Purpose |
 |-----|---------|---------|
 | ForwardRPC | bidirectional | Forward any unary RPC to any node |
 
-ForwardRPC coexists with the legacy per-RPC handlers.
+ForwardRPC coexists with the per-RPC handlers.
 RouteToResourceOwner unary RPCs are routed via the interceptor →
-ForwardRPC. Streaming RPCs and RouteFanOut still use the dedicated
+ForwardRPC. Streaming RPCs and RouteFanOut use the dedicated
 per-RPC handlers.
 
 ## Context Helpers

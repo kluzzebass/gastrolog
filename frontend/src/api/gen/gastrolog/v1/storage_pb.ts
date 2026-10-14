@@ -153,9 +153,9 @@ export class CloudStorageTransition extends Message<CloudStorageTransition> {
   after = "";
 
   /**
-   * Target CLOUD storage class — the archival tier ("GLACIER", "DEEP_ARCHIVE",
-   * "Archive"); empty = delete. Distinct from the uint32 storage_class above,
-   * which selects which local disk a vault may live on (gastrolog-108bcg).
+   * Target CLOUD storage class — the archival storage class ("GLACIER",
+   * "DEEP_ARCHIVE", "Archive"); empty = delete. Distinct from the uint32
+   * storage_class above, which selects which local disk a vault may live on.
    *
    * @generated from field: string cloud_storage_class = 2;
    */

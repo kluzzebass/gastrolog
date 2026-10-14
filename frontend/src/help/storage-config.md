@@ -61,6 +61,6 @@ Stored credentials are never sent back to the browser or returned by the API. A 
 A cloud-backed vault is a file vault with a cloud service binding. It still needs file storage on each replica's node:
 
 - The active chunk is buffered locally before it seals and uploads.
-- A warm cache holds frequently-read sealed chunks downloaded from the cloud during queries.
+- Cached copies hold the sealed chunks downloaded from the cloud during queries.
 
 Both use the vault's selected **Storage Class** — the same class governs active-chunk placement and cache placement. File storages with that class must exist on every node that hosts a cloud-backed vault replica.

@@ -1214,12 +1214,10 @@ func (r *VaultLifecycleReconciler) reconcileLocalOrphans(v *reconcileView) error
 		//    in-flight. The retention sweep otherwise re-transitions these
 		//    ghosts every minute and pollutes downstream vaults.
 		//
-		// A third class — data-bearing chunks the FSM doesn't recognize —
-		// is handled separately below: those raise an operator alert and
-		// are preserved on disk per the no-auto-delete-of-unknown-orphans
-		// invariant (docs/disk-authority-audit.md).
-		// Auto-deleting them removes the recovery surface for FSM-glitch
-		// scenarios.
+		// A third class — data-bearing chunks the FSM doesn't recognize,
+		// unknown orphans — raises an operator alert and stays on disk:
+		// unknown orphans are never deleted automatically, because
+		// deleting them removes the recovery surface for FSM faults.
 		tombstoned := r.fsm.Load().IsTombstoned(meta.ID)
 		ghost := !tombstoned && meta.Sealed && !meta.WriteEnd.IsZero() &&
 			meta.RecordCount == 0 &&
@@ -1270,16 +1268,13 @@ func (r *VaultLifecycleReconciler) reconcileLocalOrphans(v *reconcileView) error
 
 // alertUnknownOrphan raises an operator-visible alert for a chunk
 // that is sealed, has records, but is not recognized by the FSM
-// (no manifest entry, no pendingDeletes, no tombstone). The
-// no-auto-delete-of-unknown-orphans invariant
-// (docs/disk-authority-audit.md) keeps these files on disk so they
-// remain available as a recovery surface for FSM-glitch scenarios
-// (bugs, operator error, restore-from-backup desync).
+// (no manifest entry, no pendingDeletes, no tombstone). Unknown
+// orphans are never deleted automatically: the files stay on disk as
+// the recovery surface for FSM faults (bugs, operator error,
+// restore-from-backup desync).
 //
 // The alert is keyed per (vault, chunk) so each unknown orphan
-// appears as its own row in the operator UI. The "unknown orphan"
-// language deliberately matches the audit doc terminology so future
-// readers find the same concept in one search.
+// appears as its own row in the operator UI.
 //
 // Why this is conservative: a chunk with RecordCount > 0 took
 // committed appends; either it was part of the cluster at some

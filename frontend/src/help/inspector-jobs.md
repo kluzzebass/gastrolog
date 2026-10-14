@@ -17,7 +17,7 @@ The **Max Concurrent Jobs** setting in [Cluster settings](settings:service) [![i
 | Job name | What it does |
 |----------|----------------|
 | `archival-sweep` | Archives cloud-backed chunks per lifecycle policy |
-| `cache-eviction` | Evicts warm-cache cloud-backed chunks (LRU + TTL) |
+| `cache-eviction` | Evicts cached copies of cloud-backed chunks (LRU + TTL) |
 | `cloud-reconcile` | Reconciles cloud index metadata against blob store |
 | `cluster-ctl-learner-promoter` | Promotes caught-up cluster-ctl learners to voters (leader-only) |
 | `cluster-stats-broadcast` | Broadcasts local NodeStats to all cluster peers |

@@ -61,7 +61,7 @@ Phase 7 deliverable: V2 paths stop consulting placement leader for ingest; V1 pa
 
 - `PlacementLeaderIsWriteAuthority` encodes the per-vault rule in code.
 - Guardrail tests assert V1=true, V2=false.
-- This document is linked from `docs/fan-out/v2/README.md`.
+- This document is linked from [`README.md`](README.md).
 
 ## Out of scope here
 

@@ -9,15 +9,15 @@ GastroLog is a log aggregation and search service. It collects logs from various
 ## Features
 
 - **Multiple ingesters** — Syslog (UDP/TCP), HTTP (Loki-compatible), RELP, OTLP (gRPC/HTTP), Fluent Forward, Kafka, MQTT (v3.1.1/v5), file tail, Docker container logs, self-monitoring, internal metrics, and built-in test generators (chatterbox, scatterbox)
-- **Layered storage via routing** — Vaults hold append-only chunks that seal automatically, trigger index builds, and come in three storage shapes: memory (fast ingest), local disk (persistent), and cloud-backed (S3/Azure/GCS with seekable zstd for random-access range reads). Rotation and retention policies control when chunks seal and expire; retention can re-route records to another vault to compose multi-vault retention chains
+- **Vaults** — Vaults hold append-only chunks that seal automatically, trigger index builds, and come in three storage shapes: memory, local disk, and cloud-backed (S3/Azure/GCS, uploaded as separately compressed frames so a reader range-fetches only the section it needs). Each vault keeps as many copies as its replication factor
 - **Full-text search** — Token, attribute, and key-value indexes with a purpose-built query language supporting boolean logic, comparisons, regex, and globs
 - **Pipeline analytics** — Pipe-based query transformations (`| stats`, `| timechart`, `| eval`, `| sort`, `| head`, `| tail`, `| slice`, `| where`, `| rename`, `| fields`, `| dedup`, `| lookup`, `| export`, `| raw`) with 10 aggregation functions, 28 scalar functions, time bucketing, and arithmetic expressions
-- **Field enrichment** — Built-in `rdns` (reverse DNS) and `useragent` (user-agent parser) lookup tables, plus configurable MMDB (GeoIP/ASN with auto-download), CSV, JSON (with jq transform), HTTP, and static lookup tables
+- **Field enrichment** — Built-in `rdns` (reverse DNS) and `useragent` (user-agent parser) lookup tables, plus configurable MMDB (GeoIP/ASN with auto-download), CSV, JSON and YAML (with jq transform), HTTP, and static lookup tables
 - **Visualizations** — Line charts, bar charts, donut charts, heatmaps, scatter plots, world maps (choropleth and point), single-value displays, and sortable tables with CSV/JSON export — auto-detected or explicitly selected via `| linechart`, `| barchart`, `| donut`, `| heatmap`, `| scatter`, `| map`
-- **Multi-store routing** — Route messages to different stores based on filter expressions
-- **Rotation and retention policies** — Per-store control over chunk size, data lifecycle, and migration between stores
+- **Routing** — Route records to vaults by match expression, in priority order, with fanout, round-robin, or failover distribution across a route's destinations
+- **Rotation and retention policies** — Per-vault control over when chunks seal and when they expire; on expiry a vault deletes the records, routes them through the routing table again, or transfers the sealed chunk to another vault
 - **Embedded web UI** — Single binary serves both the API and the frontend
-- **Clustering** — Multi-node Raft consensus for config replication, transparent write forwarding to the leader, automatic cross-node query fan-out with merged results, record forwarding between ingest and storage nodes, non-voter read replicas, and auto-generated mTLS for all inter-node communication
+- **Clustering** — Raft consensus for configuration and for each vault's chunk metadata, transparent forwarding of writes to the leader, cross-node search with merged results, record bytes pulled to every node that homes a vault, non-voter members, and auto-generated mTLS for all inter-node communication
 - **Authentication** — JWT-based with configurable password policies and user management
 
 ## Quick Start
@@ -59,19 +59,22 @@ gastrolog server
 ```
 gastrolog server [flags]          Start the service
 gastrolog query <expression>      Search logs (streams results to stdout)
-gastrolog config <entity>         Manage vaults, ingesters, routes, filters, policies, settings
-gastrolog cluster <action>        Cluster lifecycle (status, health, join, shutdown, promote/demote)
-gastrolog user <action>           Manage users (list, create, delete, reset-password)
+gastrolog config <entity>         Manage vaults, ingesters, routes, policies, cloud services, nodes, certificates, files, settings
+gastrolog cluster <action>        Cluster lifecycle (status, health, join-token, join, remove-node, promote/demote, shutdown, ...)
+gastrolog user <action>           Manage users (list, get, create, delete, reset-password)
 gastrolog login                   Get a JWT token (for scripting remote access)
 gastrolog register                Bootstrap the first admin user
-gastrolog inspect <vault|chunk>   Inspect vault details, chunks, and their status
-gastrolog seal <vault>            Seal the active chunk and start a new one
+gastrolog inspect <vault|chunk|storage>  Inspect vaults, chunks, and storages
+gastrolog alerts                  List standing alarms across the cluster
+gastrolog seal <vault>            Seal the vault's open chunks and start new ones
 gastrolog reindex <vault>         Rebuild all indexes for sealed chunks
 gastrolog pause <vault>           Pause ingestion for a vault
 gastrolog resume <vault>          Resume ingestion for a vault
-gastrolog migrate <vault>         Migrate a vault to a new destination
+gastrolog validate <vault>        Check a vault's chunks, indexes and cloud objects for damage
+gastrolog reconcile <vault>       Rebuild each node's cloud index from the object store
 gastrolog archive <chunk-id>      Archive a cloud-backed chunk to offline storage
 gastrolog restore <chunk-id>      Restore an archived chunk to readable storage
+gastrolog repatriate <chunk-id>   Re-introduce an orphan chunk into the vault's manifest
 gastrolog job <action>            Monitor async jobs
 gastrolog prime                   Print AI agent primer
 gastrolog version                 Print version
@@ -93,11 +96,12 @@ gastrolog version                 Print version
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--listen` | Listen address (host:port) | `:4564` |
-| `--vaults` | Vault storage directory | `<home>/vaults` |
+| `--vaults` | Base directory that file storage paths resolve against | `<home>` |
 | `--no-auth` | Disable authentication (all requests treated as admin) | `false` |
 | `--cluster-addr` | Cluster gRPC listen address | `:4566` |
-| `--join-addr` | Leader's cluster address to join an existing cluster | *(none)* |
-| `--join-token` | Join token from the leader node | *(none)* |
+| `--cluster-advertise` | Address peers store and dial for this node (e.g. a stable DNS name where pod IPs rotate) | the bind address |
+| `--join-addr` | Cluster address of any node in the cluster to join | *(none)* |
+| `--join-token` | Join token (prefer the `GASTROLOG_JOIN_TOKEN` environment variable: a flag is visible to every process on the host) | *(none)* |
 | `--name` | Node name | random petname |
 
 ## AI Agent Integration
@@ -140,78 +144,48 @@ The built-in help system documents the full query language, all operators, and s
 
 Every GastroLog node auto-bootstraps as a single-node Raft cluster on first start, with auto-generated mTLS for inter-node communication. To form a multi-node cluster, join additional nodes to an existing one.
 
-> **Note:** When a node joins a cluster, its local configuration is replaced by the cluster's replicated state. Any ingesters, vaults, filters, or users configured on the joining node before it joins will be lost.
+> **Note:** When a node joins a cluster, its local configuration is replaced by the cluster's replicated state. Any ingesters, vaults, routes, or users configured on the joining node before it joins will be lost.
 
 ### Joining via CLI
 
-The first node prints a join token on startup:
+Join tokens expire (one hour by default), so mint one on any node already in the cluster just before starting the joiner:
 
-```
-cluster join token (use --join-token to join)  token=<TOKEN>
+```sh
+gastrolog cluster join-token
 ```
 
-Start additional nodes with `--join-addr` and `--join-token`:
+Start additional nodes with `--join-addr` (any member's cluster address) and the token in `GASTROLOG_JOIN_TOKEN`:
 
 ```sh
 # Node 2
-gastrolog server --listen :4574 --cluster-addr :4575 \
-  --join-addr localhost:4566 --join-token <TOKEN>
+GASTROLOG_JOIN_TOKEN=<TOKEN> gastrolog server --home ./node2 \
+  --listen :4574 --cluster-addr :4575 --join-addr localhost:4566
 
 # Node 3
-gastrolog server --listen :4584 --cluster-addr :4585 \
-  --join-addr localhost:4566 --join-token <TOKEN>
+GASTROLOG_JOIN_TOKEN=<TOKEN> gastrolog server --home ./node3 \
+  --listen :4584 --cluster-addr :4585 --join-addr localhost:4566
 ```
 
-Voter/non-voter status is managed automatically based on group size, or manually via `gastrolog cluster promote/demote`.
+A joiner enters as a non-voter and is promoted to voter once it has caught up; `gastrolog cluster promote/demote` changes suffrage by hand.
 
 ### Joining via UI
 
-A single-node cluster can also add nodes from **Settings > Nodes > Join Cluster** in the web UI.
+A running single node can join an existing cluster from **Settings > Nodes > Join Cluster** in the web UI, given any member's cluster address and a join token minted on that cluster.
 
 ### Multi-node Docker Compose
 
-A 3-node cluster tolerates 1 node failure while maintaining quorum (2-node clusters provide **no** fault tolerance — see the [clustering docs](frontend/src/help/clustering.md#two-node-warning) for details).
-
-```yaml
-services:
-  node1:
-    image: ghcr.io/kluzzebass/gastrolog:latest
-    command: server --listen :4564 --cluster-addr :4566
-    ports: ["4564:4564", "4566:4566"]
-    volumes: [node1:/config]
-
-  node2:
-    image: ghcr.io/kluzzebass/gastrolog:latest
-    command: server --listen :4564 --cluster-addr :4566
-      --join-addr node1:4566 --join-token ${JOIN_TOKEN}
-    ports: ["4574:4564"]
-    volumes: [node2:/config]
-    depends_on: [node1]
-
-  node3:
-    image: ghcr.io/kluzzebass/gastrolog:latest
-    command: server --listen :4564 --cluster-addr :4566
-      --join-addr node1:4566 --join-token ${JOIN_TOKEN}
-    ports: ["4584:4564"]
-    volumes: [node3:/config]
-    depends_on: [node1]
-
-volumes:
-  node1:
-  node2:
-  node3:
-```
+A 3-node cluster tolerates 1 node failure while maintaining quorum (2-node clusters provide **no** fault tolerance — see the [clustering docs](frontend/src/help/clustering.md#two-node-warning) for details). [`deploy/compose.yml`](deploy/compose.yml) is a 3-node cluster whose joiners fetch a freshly minted join token from the first node over HTTP; [docs/deployment/docker-compose.md](./docs/deployment/docker-compose.md) walks through it.
 
 ### How it works
 
-- **Configuration** (ingesters, vaults, filters, users) is replicated across all nodes via Raft consensus
-- **Log data** is stored locally on the node that owns each vault and is **not replicated**
+- **Configuration** (ingesters, vaults, routes, policies, users) is replicated across all nodes via Raft consensus
+- **Log data** lives on each vault's homes — as many nodes as the vault's replication factor. The node that receives a record writes it to a segment, every home pulls the segment and builds the sealed chunk from it, and each vault's chunk metadata is replicated by its own Raft group
 - **Searches** automatically fan out to vaults on all nodes and merge results
-- Non-voters participate in search but don't vote in leader elections — useful for scaling read capacity (demote via `gastrolog cluster demote <node>`)
+- Non-voters serve searches but don't vote in leader elections (demote via `gastrolog cluster demote <node>`)
 
 ## Building from Source
 
-Requires [Go](https://go.dev/) 1.26+, [Bun](https://bun.sh/), and [just](https://github.com/casey/just).
+Requires [Go](https://go.dev/) 1.27+, [Bun](https://bun.sh/), and [just](https://github.com/casey/just).
 
 ```sh
 # Build single binary with embedded frontend
@@ -227,7 +201,7 @@ just docker
 ## Development
 
 ```sh
-# Start the backend (Raft config, persistent data in ./data)
+# Start the backend (Raft config, persistent data in $GLOG_DATA_DIR, default backend/data)
 just backend run
 
 # Start the frontend dev server (separate terminal)
@@ -243,7 +217,7 @@ frontend/     React 19 + Vite 7 + TypeScript + Tailwind v4
 backend/      Go, Connect RPC server
   cmd/        CLI entry point (Cobra)
   api/        Protobuf definitions and generated code
-  internal/   Core packages (chunk, index, query, querylang, ingester, server, config, cluster)
+  internal/   Core packages (chunk, index, query, querylang, ingester, pipeline, orchestrator, server, system, cluster, vaultraft)
 ```
 
 See `AGENTS.md` for detailed guidance.

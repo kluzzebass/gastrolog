@@ -222,8 +222,8 @@ func TestReleaseUnpinsDeadHolderViaSupersession(t *testing.T) {
 	}
 }
 
-// TestReleaseGiveUpOnRetentionExpiry pins the counted give-up expiry
-// (design-notes 28): an island-origin segment — never collected, never
+// TestReleaseGiveUpOnRetentionExpiry pins the counted give-up expiry: an
+// island-origin segment — never collected, never
 // chunked, holders never satisfied — releases once its records out-age the
 // vault's delete-disposition retention TTL. Had chunking succeeded, retention
 // would already have deleted the records; holding the registry entry forever

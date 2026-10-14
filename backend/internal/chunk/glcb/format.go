@@ -1,15 +1,12 @@
 // Package glcb defines the GLCB (GastroLog Chunk Blob) on-disk format —
 // a self-describing single-file representation of a sealed chunk.
 //
-// GLCB is used universally — local-only vaults store a `data.glcb` file
-// per sealed chunk; cloud-backed vaults upload the same file (zstd-wrapped
-// for transport) to object storage and keep a local cache copy with the
-// same `data.glcb` name. The format itself is silent on compression: it
-// defines only the on-disk layout, and every section is directly
-// readable without a decompression step. Compression, when applied, is
-// a generic file-level wrapper produced by the cloud-upload pipeline
-// (see ../../chunk/file/manager.go's uploadToCloud). See
-// docs/obsoleted/vault_redesign.md decisions 6 and 9.
+// GLCB is the current sealed-chunk format: every home stores a `data.glcb`
+// file per sealed chunk, and a cloud-backed vault uploads the same bytes,
+// re-framed per section for transport (transport.go), and keeps a local
+// cache copy with the same `data.glcb` name. The on-disk layout carries no
+// compression: every section is directly readable without a decompression
+// step. Compression exists only in the transport frames.
 //
 //	Layout (offsets are absolute from the start of the file):
 //
@@ -107,8 +104,8 @@ const (
 // Reuses format.Type so a section's type byte matches the type byte that
 // would appear in the same kind of standalone file.
 //
-// Only the two TS-index sections are emitted by the writer today (emitTail,
-// writer.go). The remaining type bytes are forward declarations for the
+// The writer emits the layout section and the two TS-index sections
+// (writer.go). The remaining type bytes are forward declarations for the
 // standalone index kinds under internal/index/file (token, JSON, KV, attr)
 // that are planned to embed as blob sections; they stay declared so the
 // type-byte ↔ index-kind mapping is pinned in one place.
