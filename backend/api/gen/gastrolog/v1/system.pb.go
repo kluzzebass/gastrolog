@@ -626,11 +626,11 @@ type VaultConfig struct {
 	// removed the mirror).
 	Placements    []*VaultPlacement `protobuf:"bytes,11,rep,name=placements,proto3" json:"placements,omitempty"`
 	CacheEviction string            `protobuf:"bytes,12,opt,name=cache_eviction,json=cacheEviction,proto3" json:"cache_eviction,omitempty"` // "lru" (default) or "ttl"
-	// Warm-cache soft cap for cloud-backed chunks, as a size expression
+	// Cached-copy soft cap for cloud-backed chunks, as a size expression
 	// ("1GiB"). Empty = unset (defaulted at creation for cloud vaults); "0"
 	// rejected.
 	CacheBudget string `protobuf:"bytes,13,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`
-	// Warm-cache eviction age (ttl mode only), as a duration expression ("1h",
+	// Cached-copy eviction age (ttl mode only), as a duration expression ("1h",
 	// "7d"). Empty = unset.
 	CacheTtl             string `protobuf:"bytes,14,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`
 	RetentionDisposition string `protobuf:"bytes,15,opt,name=retention_disposition,json=retentionDisposition,proto3" json:"retention_disposition,omitempty"` // "delete", "route", or "transfer" — what retention does with aged-out records

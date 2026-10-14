@@ -248,7 +248,8 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 	}
 	waitClass("cold")
 
-	// And it must ADVANCE to a colder class, which the old bool guard refused.
+	// And it must ADVANCE to the next cloud storage class in the transition
+	// chain, which the old bool guard refused.
 	if err := mgr.ArchiveChunk(t.Context(), chunkID, "deep-freeze"); err != nil {
 		t.Fatalf("ArchiveChunk (second step): %v", err)
 	}

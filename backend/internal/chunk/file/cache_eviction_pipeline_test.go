@@ -15,7 +15,7 @@ import (
 
 // Pipeline-built chunks keep their data.glcb under the vault's chunk root,
 // outside the manager's Dir. Once such a chunk is cloud-backed that file is
-// its warm cache on every home, and the cache policy must reach it.
+// its cached copy on every home, and the cache policy must reach it.
 
 // pipelineHome is one node's view of a cloud-backed pipeline vault: its chunk
 // manager and the chunk root the pipeline builds GLCBs into.
@@ -155,7 +155,7 @@ func countRecords(t *testing.T, cm *Manager, id chunk.ChunkID) int {
 
 // uploadPipelineChunks builds n pipeline chunks on h and uploads each — the
 // uploading home's shape, where the uploaded chunk keeps its pipeline GLCB as
-// the warm cache.
+// the cached copy.
 func uploadPipelineChunks(t *testing.T, h *pipelineHome, n, records int) ([]chunk.ChunkID, []string) {
 	t.Helper()
 	var ids []chunk.ChunkID
@@ -173,8 +173,9 @@ func uploadPipelineChunks(t *testing.T, h *pipelineHome, n, records int) ([]chun
 }
 
 // TestEvictCacheLRU_PipelineGLCB: on the uploading home, LRU eviction under
-// budget pressure removes the coldest cloud-backed chunk's pipeline GLCB (and
-// its now-empty pipeline chunk dir), keeping the hotter ones.
+// budget pressure removes the least recently read cloud-backed chunk's
+// pipeline GLCB (and its now-empty pipeline chunk dir), keeping the more
+// recently read ones.
 func TestEvictCacheLRU_PipelineGLCB(t *testing.T) {
 	t.Parallel()
 	clock := &mutableClock{t: time.Now()}
@@ -205,14 +206,14 @@ func TestEvictCacheLRU_PipelineGLCB(t *testing.T) {
 		t.Fatalf("EvictCacheLRU = (%d, %d), want (1, %d)", evicted, freed, info.Size())
 	}
 	if fileExists(paths[0]) {
-		t.Errorf("coldest pipeline GLCB %s survived eviction", paths[0])
+		t.Errorf("least recently read pipeline GLCB %s survived eviction", paths[0])
 	}
 	if fileExists(filepath.Dir(paths[0])) {
 		t.Errorf("evicted chunk's pipeline dir %s left behind", filepath.Dir(paths[0]))
 	}
 	for _, p := range paths[1:] {
 		if !fileExists(p) {
-			t.Errorf("hot pipeline GLCB %s evicted under a budget that fits it", p)
+			t.Errorf("recently read pipeline GLCB %s evicted under a budget that fits it", p)
 		}
 	}
 }
@@ -259,7 +260,7 @@ func TestEvictCache_PipelineGLCBRereadRefetches(t *testing.T) {
 		t.Errorf("cloud downloads = %d, want 1 (the re-fetch)", h.store.downloads.Load())
 	}
 	if !fileExists(filepath.Join(h.cm.chunkDir(ids[0]), dataGLCBFileName)) {
-		t.Error("re-fetch did not warm the chunk-dir cache")
+		t.Error("re-fetch did not populate the chunk-dir cached copy")
 	}
 	if fileExists(paths[0]) {
 		t.Error("re-fetch resurrected the evicted pipeline GLCB")
@@ -378,7 +379,7 @@ func TestPipelineGLCB_ServesAndEvictsAfterRestart(t *testing.T) {
 		t.Fatalf("read after restart served %d records, want 30", got)
 	}
 	if n := restarted.store.downloads.Load(); n != 0 {
-		t.Fatalf("read after restart downloaded %d times, want 0 (the pipeline GLCB is the warm cache)", n)
+		t.Fatalf("read after restart downloaded %d times, want 0 (the pipeline GLCB is the cached copy)", n)
 	}
 
 	if evicted, _ := restarted.cm.EvictCache(); evicted != 1 {

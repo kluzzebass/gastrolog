@@ -34,7 +34,7 @@ type MetadataAnnouncer interface {
 	// GLCB section-reader path.
 	AnnounceAttachOffsets(id ChunkID, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64)
 	// AnnounceUpload publishes a successful cloud upload. cloudBytes is the
-	// compressed cloud object's transport size; local warm-cache footprint
+	// compressed cloud object's transport size; local cached-copy footprint
 	// is per-node state and does not belong on this cluster-replicated
 	// announce. hash is the GLCB whole-blob digest (32 bytes) read from the
 	// TOC footer; cloudServiceID is the cloud service the chunk was
@@ -61,7 +61,7 @@ type AnnouncerSetter interface {
 
 // IntegrityVerifier reports the expected GLCB whole-blob digest for a chunk
 // (the value the FSM stamped onto CmdUploadChunk). The chunk manager calls
-// ExpectedDigest after every cold-cache cloud download and rejects any blob
+// ExpectedDigest after every uncached-chunk cloud download and rejects any blob
 // whose actual digest doesn't match. The (zero, false) return path means
 // "no expectation on file" — used for entries that carry no recorded hash;
 // a nil verifier on the Manager Config disables verification entirely

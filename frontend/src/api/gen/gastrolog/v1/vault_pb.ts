@@ -688,7 +688,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
 
   /**
    * disk_bytes is the LOCAL on-disk footprint on the responding node, always
-   * — for a cloud-backed chunk this is the warm-cache state (the cached
+   * — for a cloud-backed chunk this is the cached-copy state (the cached
    * GLCB's size while cached, 0 once evicted), never the cloud object size.
    *
    * @generated from field: int64 disk_bytes = 7;
@@ -789,7 +789,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
   /**
    * cloud_bytes is the compressed cloud object's transport size for a
    * cloud-backed chunk (0 = never uploaded). Cluster-wide fact, distinct
-   * from disk_bytes (per-node, live warm-cache state). gastrolog-33ul6h.
+   * from disk_bytes (per-node, live cached-copy state). gastrolog-33ul6h.
    *
    * @generated from field: int64 cloud_bytes = 20;
    */

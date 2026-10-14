@@ -9,10 +9,10 @@ import (
 	"gastrolog/internal/tsindex"
 )
 
-// Cold-chunk rank resolution: a cloud-backed chunk whose warm cache is gone
+// Uncached-chunk rank resolution: a cloud-backed chunk whose cached copy is gone
 // can still answer ingest-rank lookups exactly, by fetching just its ITSI
 // section from the object via range GETs (glcb.FetchRemoteSection). This is
-// what lets histogram counts for cold chunks be exact instead of estimated.
+// what lets histogram counts for uncached chunks be exact instead of estimated.
 //
 // The whole-blob no-fetch policy stands: this path never downloads the
 // object, only its TS-index section — KB-scale, bounded, and cached so a
@@ -20,7 +20,7 @@ import (
 
 // remoteTSViewBudget bounds the memory the fetched-ITSI cache may hold.
 // An ITSI is 12 bytes per record, so the budget admits on the order of a
-// thousand 10k-record chunks — far more cold chunks than one histogram
+// thousand 10k-record chunks — far more uncached chunks than one histogram
 // window spans — while staying irrelevant next to the process's mmap
 // footprint. Refetching an evicted entry costs two small GETs, so being
 // wrong here is cheap in both directions.
@@ -33,12 +33,12 @@ type remoteTSView struct {
 	bytes int64
 }
 
-// coldIngestRank resolves an ingest-rank lookup for a cold cloud-backed
+// uncachedIngestRank resolves an ingest-rank lookup for an uncached cloud-backed
 // chunk, or reports a miss. Misses are deliberate degradations — no cloud
-// store, chunk not cloud-backed, warm copy present (the mmap path serves
+// store, chunk not cloud-backed, cached copy present (the mmap path serves
 // it), archived object, transient fetch failure — and the caller's contract
 // (0, false, nil) sends the histogram back to its labeled estimate.
-func (m *Manager) coldIngestRank(id chunk.ChunkID, ts time.Time) (uint64, bool) {
+func (m *Manager) uncachedIngestRank(id chunk.ChunkID, ts time.Time) (uint64, bool) {
 	if m.cfg.CloudStore == nil || m.cloudIdx == nil || m.HasLocalContent(id) {
 		return 0, false
 	}
@@ -88,18 +88,18 @@ func (m *Manager) remoteTSViewFor(id chunk.ChunkID, objSize int64) (tsindex.View
 	entry, data, err := glcb.FetchRemoteSection(ctx, m.cfg.CloudStore, m.blobKey(id), objSize, glcb.SectionIngestTSIndex)
 	if err != nil {
 		// Archived objects and transient store trouble land here; both are
-		// ordinary for cold data, so this is a Debug, not an alarm.
-		m.logger.Debug("cold rank: remote ITSI unavailable", "chunk", id, "error", err)
+		// ordinary for uncached data, so this is a Debug, not an alarm.
+		m.logger.Debug("uncached rank: remote ITSI unavailable", "chunk", id, "error", err)
 		return nil, false
 	}
 	viewAny, err := glcb.DefaultRegistry().NewView(entry, data)
 	if err != nil {
-		m.logger.Warn("cold rank: remote ITSI section undecodable", "chunk", id, "error", err)
+		m.logger.Warn("uncached rank: remote ITSI section undecodable", "chunk", id, "error", err)
 		return nil, false
 	}
 	view, isTS := viewAny.(tsindex.View)
 	if !isTS {
-		m.logger.Warn("cold rank: remote ITSI decoded to unexpected view", "chunk", id)
+		m.logger.Warn("uncached rank: remote ITSI decoded to unexpected view", "chunk", id)
 		return nil, false
 	}
 

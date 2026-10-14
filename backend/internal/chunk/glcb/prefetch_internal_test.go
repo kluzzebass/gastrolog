@@ -7,11 +7,11 @@ import (
 )
 
 // buildBlobFile (toc_hardening_test.go) writes a small valid GLCB and returns
-// its path + size; reused here for the prewarm wiring tests.
+// its path + size; reused here for the prefetch wiring tests.
 
-// TestPrewarmSequentialReachesMadvise proves the chunk.SequentialPrewarmer
-// method actually reaches the warm call on a live mapping.
-func TestPrewarmSequentialReachesMadvise(t *testing.T) {
+// TestPrefetchSequentialReachesMadvise proves the chunk.SequentialPrefetcher
+// method actually reaches the prefetch call on a live mapping.
+func TestPrefetchSequentialReachesMadvise(t *testing.T) {
 	path, size := buildBlobFile(t)
 	blob, err := OpenMappedBlob(path)
 	if err != nil {
@@ -27,30 +27,30 @@ func TestPrewarmSequentialReachesMadvise(t *testing.T) {
 
 	var calls int
 	var gotLen int
-	orig := prewarmMadvise
-	prewarmMadvise = func(data []byte) {
+	orig := prefetchMadvise
+	prefetchMadvise = func(data []byte) {
 		calls++
 		gotLen = len(data)
 	}
-	defer func() { prewarmMadvise = orig }()
+	defer func() { prefetchMadvise = orig }()
 
 	// Call through the interface the retention drain uses, not the concrete
 	// method, so the wiring (cursor -> reader -> madvise) is what's exercised.
-	var warmer chunk.SequentialPrewarmer = NewGLCBCursor(rd, chunk.NewChunkID(), nil).(chunk.SequentialPrewarmer)
-	warmer.PrewarmSequential()
+	var prefetcher chunk.SequentialPrefetcher = NewGLCBCursor(rd, chunk.NewChunkID(), nil).(chunk.SequentialPrefetcher)
+	prefetcher.PrefetchSequential()
 
 	if calls != 1 {
-		t.Fatalf("prewarm reached madvise %d times, want 1", calls)
+		t.Fatalf("prefetch reached madvise %d times, want 1", calls)
 	}
-	// The warm must cover the whole file mapping, not a sub-slice.
+	// The prefetch must cover the whole file mapping, not a sub-slice.
 	if int64(gotLen) != size {
-		t.Fatalf("prewarm advised %d bytes, want whole mapping %d", gotLen, size)
+		t.Fatalf("prefetch advised %d bytes, want whole mapping %d", gotLen, size)
 	}
 }
 
-// TestPrewarmSequentialSafeAfterClose ensures the warm is a no-op (not a crash
+// TestPrefetchSequentialSafeAfterClose ensures the prefetch is a no-op (not a crash
 // or an madvise against freed address space) once the cursor mapping is gone.
-func TestPrewarmSequentialSafeAfterClose(t *testing.T) {
+func TestPrefetchSequentialSafeAfterClose(t *testing.T) {
 	path, _ := buildBlobFile(t)
 	blob, err := OpenMappedBlob(path)
 	if err != nil {
@@ -64,7 +64,7 @@ func TestPrewarmSequentialSafeAfterClose(t *testing.T) {
 	_ = blob.Close()
 
 	// Real madvise path (not the seam) — must tolerate the emptied mapping.
-	rd.PrewarmSequential()
+	rd.PrefetchSequential()
 }
 
 // TestMadviseSequentialEmptyInput guards the platform helper against nil/empty

@@ -88,7 +88,7 @@ func smallRecords(n int) []chunk.Record {
 // TestListAllChunkMetasOverlaysFromFSM is the regression test for the follower
 // cloud-badge gap, updated for the grounded-read seam. The local chunk manager
 // only sets CloudBacked=true on the node that actually uploaded the blob (the
-// cold instance raft leader); followers strip
+// cloud-backed vault instance's Raft leader); followers strip
 // sealed_backing from their chunk-manager params and never see the cloud state,
 // so their local CloudBacked is permanently false. The fix grounds the
 // cluster-wide FSM view onto each chunk meta the orchestrator returns. Without
@@ -119,7 +119,7 @@ func TestListAllChunkMetasOverlaysFromFSM(t *testing.T) {
 	apply(vaultctlfsm.MarshalUploadChunk(chunkID, 1234, 0, 0, 0, 0, [32]byte{}, glid.GLID{}, 0))
 
 	// The local follower instance has no CloudStore, so its chunk manager
-	// reports CloudBacked=false for the same chunk. DiskBytes is live warm-cache
+	// reports CloudBacked=false for the same chunk. DiskBytes is live cached-copy
 	// state only this node knows — grounding must not clobber it.
 	local := chunk.ChunkMeta{
 		ID: chunkID, Sealed: true, State: chunk.ChunkStateSealed,

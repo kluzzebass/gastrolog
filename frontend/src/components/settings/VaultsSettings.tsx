@@ -145,7 +145,7 @@ export function VaultStorageForm({
   onTypeChange?: (t: VaultTypeLabel) => void;
   onUpdate: (patch: Partial<StorageEntry>) => void;
 }>) {
-  const cacheReason = storage.cloudServiceId === "" ? "Only a cloud-backed vault has a warm cache." : undefined;
+  const cacheReason = storage.cloudServiceId === "" ? "Only a cloud-backed vault keeps cached copies." : undefined;
   let cacheTtlReason = cacheReason;
   if (cacheTtlReason === undefined && storage.cacheEviction !== "ttl") {
     cacheTtlReason = "Applies to TTL eviction only.";
@@ -182,7 +182,7 @@ export function VaultStorageForm({
         <>
           {/* Cloud Storage selector — when set, the file vault becomes
               cloud-backed (sealed chunks upload to S3/etc; the active
-              chunk and a warm cache stay on local disk). The storage
+              chunk and cached copies stay on local disk). The storage
               class governs the local placement either way. */}
           <FormField
             label="Cloud Storage"

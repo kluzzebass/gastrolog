@@ -23,8 +23,8 @@ const cloudIndexFile = "cloud.idx"
 //     — GLCB section offsets for embedded TS indexes (0 = none)
 //   - 1 × int64 (8 bytes): CloudBytes — the compressed cloud object's transport
 //     size. Distinct currency from DiskBytes: DiskBytes is this node's LIVE
-//     local warm-cache footprint (0 when evicted, refreshed on every
-//     warm/evict/re-warm transition); CloudBytes is the cluster-wide,
+//     local cached-copy footprint (0 when evicted, refreshed on every
+//     cache/evict/re-download transition); CloudBytes is the cluster-wide,
 //     upload-time-fixed blob size.
 //
 // Changing this layout needs no migration: openCloudIndex's

@@ -97,8 +97,8 @@ func TestCacheEvictionNotDuplicatedAcrossSweeps(t *testing.T) {
 }
 
 // TestCacheEvictionSweepAll_EvictsOnFollowerInstance: every home holds local
-// copies of a cloud-backed vault's chunks, so a follower instance's warm cache
-// is held to the same policy as the placement leader's.
+// copies of a cloud-backed vault's chunks, so a follower instance's cached copies
+// are held to the same policy as the placement leader's.
 func TestCacheEvictionSweepAll_EvictsOnFollowerInstance(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	vaultID := glid.New()

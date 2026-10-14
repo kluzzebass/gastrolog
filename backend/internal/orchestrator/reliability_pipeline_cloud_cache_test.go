@@ -13,7 +13,7 @@ import (
 )
 
 // addCloudCacheVault writes a cloud-backed pipeline vault bound to a "memory"
-// cloud service, with the given warm-cache policy, placed on nodeIdxs (first
+// cloud service, with the given cache policy, placed on nodeIdxs (first
 // is leader), routes every record to it, and drives the dispatcher-equivalent
 // fan-out on every node.
 func (h *orchRelHarness) addCloudCacheVault(label string, nodeIdxs []int, cacheBudget string) vaultSpec {
@@ -27,7 +27,7 @@ func (h *orchRelHarness) addCloudCacheVault(label string, nodeIdxs []int, cacheB
 }
 
 // putCloudVault writes a cloud-backed pipeline vault bound to a "memory" cloud
-// service, with the given warm-cache policy and no placement, and routes every
+// service, with the given cache policy and no placement, and routes every
 // record to it.
 func (h *orchRelHarness) putCloudVault(label, cacheBudget string) vaultSpec {
 	h.t.Helper()
@@ -82,13 +82,13 @@ func (h *orchRelHarness) addVaultOnEveryNode(v vaultSpec) {
 	}
 }
 
-// TestOrchPipeline_CloudWarmCacheEvictsOnEveryHome drives the warm-cache
+// TestOrchPipeline_CloudCachedCopyEvictsOnEveryHome drives the cache
 // policy on a real 4-node cluster: a cloud-backed vault with RF 3 and a cache
 // budget no chunk fits. Every home — not only the uploading placement leader —
 // must drop its pipeline GLCB of every uploaded chunk, withdraw its holder
 // receipt for it, and still serve every record by re-fetching from the shared
 // bucket. Segment release must not be pinned by the withdrawn receipts.
-func TestOrchPipeline_CloudWarmCacheEvictsOnEveryHome(t *testing.T) {
+func TestOrchPipeline_CloudCachedCopyEvictsOnEveryHome(t *testing.T) {
 	if testing.Short() {
 		t.Skip("multi-node pipeline acceptance test")
 	}
@@ -132,7 +132,7 @@ func TestOrchPipeline_CloudWarmCacheEvictsOnEveryHome(t *testing.T) {
 				uploaded, len(entries), held, onDisk), done
 		}, func() { h.dumpPipelineState(v) })
 
-	// Every home reads every record back through the cold path while
+	// Every home reads every record back through the uncached path while
 	// eviction keeps running. (The harness has no cross-node search
 	// forwarding, so the non-home node is not queried.)
 	for _, idx := range homes {

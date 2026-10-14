@@ -16,7 +16,7 @@ import (
 	"gastrolog/internal/query"
 )
 
-// A cold cloud-backed chunk's histogram counts must be EXACT, resolved via
+// An uncached cloud-backed chunk's histogram counts must be EXACT, resolved via
 // ranged reads of the object's ITSI section — not spread across buckets in
 // proportion to time overlap. The fixture makes the two answers maximally
 // different: record density is wildly non-uniform inside the chunk's span,
@@ -28,7 +28,7 @@ import (
 // objects and unreachable stores still estimate, visibly.
 
 // vetoingStore fails the test's contract if anything performs a full-object
-// download: cold histogram reads are ranged or they are a policy violation.
+// download: uncached histogram reads are ranged or they are a policy violation.
 type vetoingStore struct {
 	*blobstore.Memory
 	fullGets int
@@ -39,7 +39,7 @@ func (s *vetoingStore) Download(ctx context.Context, key string) (io.ReadCloser,
 	return s.Memory.Download(ctx, key)
 }
 
-func TestColdCloudChunkHistogramIsExact(t *testing.T) {
+func TestUncachedCloudChunkHistogramIsExact(t *testing.T) {
 	t.Parallel()
 
 	const totalRecords = 300
@@ -94,10 +94,10 @@ func TestColdCloudChunkHistogramIsExact(t *testing.T) {
 		}
 	}
 
-	// Cold: evict every warm copy (a 1-byte budget evicts everything; a
+	// Uncached: evict every cached copy (a 1-byte budget evicts everything; a
 	// zero budget means eviction disabled), then forbid full downloads.
 	if evicted, _ := cm.EvictCacheLRU(1); evicted == 0 {
-		t.Fatal("premise: nothing evicted; the chunk never became cold")
+		t.Fatal("premise: nothing evicted; the chunk never became uncached")
 	}
 	store.fullGets = 0
 

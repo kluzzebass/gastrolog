@@ -1385,7 +1385,7 @@ func (r *VaultLifecycleReconciler) syncPipelineSealedGLCBs(v *reconcileView) {
 		// window otherwise schedules a doomed pull on EVERY home, since the
 		// bytes were just deleted everywhere. Cloud-backed chunks are never
 		// pulled: the cloud object is their durable copy, a local GLCB only
-		// their warm cache.
+		// their cached copy.
 		if e.CloudBacked || !e.IsSealed() || chunkOnItsWayOut(e, v.pendingByID[e.ID]) {
 			continue
 		}
@@ -1401,7 +1401,7 @@ func (r *VaultLifecycleReconciler) syncPipelineSealedGLCBs(v *reconcileView) {
 }
 
 // SyncHolderReceipts reconciles this home's chunk holder receipts against its
-// chunk root now. Called on the warm-cache eviction edge, which removes
+// chunk root now. Called on the cached-copy eviction edge, which removes
 // pipeline GLCBs of cloud-backed chunks; the periodic ReconcileTick is the
 // backstop. No-op for vaults that are not pipeline vaults.
 func (r *VaultLifecycleReconciler) SyncHolderReceipts() {
@@ -1418,7 +1418,7 @@ func (r *VaultLifecycleReconciler) SyncHolderReceipts() {
 // completed pull) of the copy agreed at seal, revoke on absence —
 // ChunkResidency then reports bytes truth instead of the placement
 // assumption: a home that lost its copy stops being counted the same sweep
-// that schedules its recovery pull, and a home whose warm-cache eviction
+// that schedules its recovery pull, and a home whose cached-copy eviction
 // removed a cloud-backed chunk's GLCB stops claiming it. A copy not yet
 // claimed is checked against the sealed digest first; the check quarantines a
 // divergent one, and for a chunk the cloud does not hold the pull replaces it.

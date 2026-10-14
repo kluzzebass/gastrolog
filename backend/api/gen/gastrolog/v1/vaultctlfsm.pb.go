@@ -3089,7 +3089,7 @@ type ManifestEntry struct {
 	// cloud_bytes is the compressed cloud object's transport size, set only
 	// by CmdUploadChunk (0 until the chunk is uploaded). This entry never
 	// carried a real per-node local-disk-bytes fact — ManifestEntry is
-	// Raft-replicated cluster state, and local warm-cache footprint is
+	// Raft-replicated cluster state, and local cached-copy footprint is
 	// node-local; was misleadingly named disk_bytes. Renamed honestly,
 	// gastrolog-33ul6h.
 	CloudBytes        int64  `protobuf:"varint,7,opt,name=cloud_bytes,json=cloudBytes,proto3" json:"cloud_bytes,omitempty"`

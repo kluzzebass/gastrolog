@@ -867,7 +867,7 @@ func TestPlannerOpensManifestAfterPickingSegment(t *testing.T) {
 }
 
 // TestLoadSegmentViewsCachesIndexesAcrossPlanSteps guards the planner's
-// segment index cache: once a segment index is warm, later partial-manifest
+// segment index cache: once a segment index is cached, later partial-manifest
 // steps must not reopen it.
 func TestLoadSegmentViewsCachesIndexesAcrossPlanSteps(t *testing.T) {
 	t.Parallel()
@@ -928,7 +928,7 @@ func TestLoadSegmentViewsCachesIndexesAcrossPlanSteps(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := indexOpens.Load(); got != 0 {
-		t.Fatalf("warm-cache partial PlanOnce index opens = %d, want 0", got)
+		t.Fatalf("already-cached partial PlanOnce index opens = %d, want 0", got)
 	}
 }
 

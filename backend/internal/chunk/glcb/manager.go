@@ -45,11 +45,12 @@ func NewGLCBCursor(rd *Reader, id chunk.ChunkID, onClose func()) chunk.RecordCur
 
 func (c *glcbCursor) RecordCount() uint64 { return c.recordCount }
 
-// PrewarmSequential implements chunk.SequentialPrewarmer for full-scan
-// consumers (retention fan-out): it warms the OS page cache for the whole GLCB
-// mapping via madvise before the drain scan — see Reader.PrewarmSequential.
-func (c *glcbCursor) PrewarmSequential() {
-	c.reader.PrewarmSequential()
+// PrefetchSequential implements chunk.SequentialPrefetcher for full-scan
+// consumers (retention fan-out): it prefetches the whole GLCB mapping into the
+// OS page cache
+// via madvise before the drain scan — see Reader.PrefetchSequential.
+func (c *glcbCursor) PrefetchSequential() {
+	c.reader.PrefetchSequential()
 }
 
 func (c *glcbCursor) ReadFanOutRecord(pos uint32) (chunk.Record, error) {

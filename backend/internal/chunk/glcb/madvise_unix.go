@@ -7,13 +7,13 @@ import "golang.org/x/sys/unix"
 // madviseSequential hints the kernel that data will be read once, front to
 // back, and kicks off asynchronous readahead for the whole mapping. It moves
 // the read I/O onto a P-releasing syscall so the subsequent sequential mmap
-// accesses fault in as minor faults instead of cold major faults that pin
+// accesses fault in as minor faults instead of major faults that pin
 // scheduler Ps inside non-preemptible kernel fault handlers under disk
 // saturation.
 //
 // Best-effort and idempotent: advice is a hint, and failures (e.g. a range
 // that has already been unmapped) are ignored — the scan still reads
-// correctly, just without the warm. Both darwin and linux expose Madvise and
+// correctly, just without the prefetch. Both darwin and linux expose Madvise and
 // the two advice constants with identical semantics for our use.
 func madviseSequential(data []byte) {
 	if len(data) == 0 {

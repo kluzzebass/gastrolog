@@ -201,7 +201,7 @@ shape (memory, file, file+cloud) defined by --type, --storage-class
 	cmd.Flags().String("rotation-policy", "", "rotation policy name or ID")
 	cmd.Flags().StringSlice("retention-policy", nil, "retention policy name or ID; repeat or comma-separate to attach several — every attached policy is evaluated each sweep. An empty value detaches all")
 	cmd.Flags().String("cache-eviction", "lru", "cache eviction strategy: lru or ttl")
-	cmd.Flags().String("cache-budget", "", "warm-cache soft cap for cloud-backed chunks (e.g. 1GB, 500MB, 1GiB). Unset defaults to a bounded budget for cloud vaults; 0 is rejected")
+	cmd.Flags().String("cache-budget", "", "cached-copy soft cap for cloud-backed chunks (e.g. 1GB, 500MB, 1GiB). Unset defaults to a bounded budget for cloud vaults; 0 is rejected")
 	cmd.Flags().String("cache-ttl", "", "cache TTL duration for ttl eviction mode (e.g. 1h, 7d)")
 	cmd.Flags().String("retention-disposition", "delete", "what retention does with aged-out records: delete (drop), route (send through routing engine), or transfer (re-home the sealed chunk unchanged to --retention-transfer-target)")
 	cmd.Flags().String("retention-transfer-target", "", "vault name or ID records transfer to when --retention-disposition=transfer; must be a different file or memory vault that is not cloud-backed")
@@ -270,7 +270,7 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 	return nil
 }
 
-// applyVaultCacheFlags overlays the warm-cache budget/ttl flags. Both are
+// applyVaultCacheFlags overlays the cache budget/ttl flags. Both are
 // expression strings on the wire, carried through verbatim; an empty
 // cache-budget is "unset" (the server defaults it for cloud vaults).
 func applyVaultCacheFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
