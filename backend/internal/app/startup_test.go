@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"gastrolog/internal/raftlevel"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/memory"
 )
@@ -58,7 +59,7 @@ func discardLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 func TestEnsureNodeConfig_ExistingNode(t *testing.T) {
 	t.Parallel()
 	nodeID := glid.New().String()
-	store := &startupStub{node: &system.NodeConfig{ID: glid.MustParse(nodeID), Name: "old-panda"}}
+	store := &startupStub{node: &system.NodeConfig{ID: glid.MustParse(nodeID), Name: "old-panda", ProtocolLevel: raftlevel.Binary}}
 
 	name, err := ensureNodeConfig(context.Background(), store, nodeID, "")
 	if err != nil {
@@ -69,6 +70,33 @@ func TestEnsureNodeConfig_ExistingNode(t *testing.T) {
 	}
 	if len(store.putNodes) != 0 {
 		t.Fatal("PutNode should not be called for existing node")
+	}
+}
+
+// A node restarting on a binary at another protocol level reports it: its
+// record is what the cluster-ctl leader raises the active level from.
+func TestEnsureNodeConfig_ExistingNodeReportsBinaryLevel(t *testing.T) {
+	t.Parallel()
+	for _, stale := range []uint32{0, raftlevel.Binary + 1} {
+		nodeID := glid.New().String()
+		store := &startupStub{node: &system.NodeConfig{
+			ID: glid.MustParse(nodeID), Name: "old-panda", State: system.NodeStateMaintenance, ProtocolLevel: stale,
+		}}
+
+		name, err := ensureNodeConfig(context.Background(), store, nodeID, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if name != "old-panda" {
+			t.Fatalf("expected existing name, got %q", name)
+		}
+		if len(store.putNodes) != 1 {
+			t.Fatalf("recorded level %d: want 1 PutNode call, got %d", stale, len(store.putNodes))
+		}
+		got := store.putNodes[0]
+		if got.ProtocolLevel != raftlevel.Binary || got.Name != "old-panda" || got.State != system.NodeStateMaintenance {
+			t.Fatalf("recorded level %d: PutNode wrote %+v, want the record at level %d", stale, got, raftlevel.Binary)
+		}
 	}
 }
 
@@ -89,6 +117,9 @@ func TestEnsureNodeConfig_NewNode(t *testing.T) {
 	}
 	if store.putNodes[0].Name != name {
 		t.Fatalf("PutNode name %q != returned name %q", store.putNodes[0].Name, name)
+	}
+	if store.putNodes[0].ProtocolLevel != raftlevel.Binary {
+		t.Fatalf("PutNode protocol level %d, want %d", store.putNodes[0].ProtocolLevel, raftlevel.Binary)
 	}
 }
 
@@ -159,7 +190,7 @@ func TestEnsureNodeConfig_PreferredNameOverridesExisting(t *testing.T) {
 func TestEnsureNodeConfig_PreferredNameMatchesExisting(t *testing.T) {
 	t.Parallel()
 	nodeID := glid.New().String()
-	store := &startupStub{node: &system.NodeConfig{ID: glid.MustParse(nodeID), Name: "coord"}}
+	store := &startupStub{node: &system.NodeConfig{ID: glid.MustParse(nodeID), Name: "coord", ProtocolLevel: raftlevel.Binary}}
 
 	name, err := ensureNodeConfig(context.Background(), store, nodeID, "coord")
 	if err != nil {

@@ -275,6 +275,12 @@ export class SystemCommand extends Message<SystemCommand> {
      */
     value: MarkNodeRemovedCommand;
     case: "markNodeRemoved";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.SetProtocolLevelCommand set_protocol_level = 43;
+     */
+    value: SetProtocolLevelCommand;
+    case: "setProtocolLevel";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<SystemCommand>) {
@@ -327,6 +333,7 @@ export class SystemCommand extends Message<SystemCommand> {
     { no: 40, name: "catchup_barrier", kind: "message", T: CatchupBarrierCommand, oneof: "command" },
     { no: 41, name: "rotate_refresh_token", kind: "message", T: RotateRefreshTokenCommand, oneof: "command" },
     { no: 42, name: "mark_node_removed", kind: "message", T: MarkNodeRemovedCommand, oneof: "command" },
+    { no: 43, name: "set_protocol_level", kind: "message", T: SetProtocolLevelCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemCommand {
@@ -343,6 +350,48 @@ export class SystemCommand extends Message<SystemCommand> {
 
   static equals(a: SystemCommand | PlainMessage<SystemCommand> | undefined, b: SystemCommand | PlainMessage<SystemCommand> | undefined): boolean {
     return proto3.util.equals(SystemCommand, a, b);
+  }
+}
+
+/**
+ * SetProtocolLevelCommand commits the cluster's active protocol level: the
+ * highest protocol level a command may require before it is proposed. The
+ * apply refuses a level below the current one, so the active level never
+ * goes down.
+ *
+ * @generated from message gastrolog.v1.SetProtocolLevelCommand
+ */
+export class SetProtocolLevelCommand extends Message<SetProtocolLevelCommand> {
+  /**
+   * @generated from field: uint32 level = 1;
+   */
+  level = 0;
+
+  constructor(data?: PartialMessage<SetProtocolLevelCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SetProtocolLevelCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "level", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetProtocolLevelCommand {
+    return new SetProtocolLevelCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SetProtocolLevelCommand {
+    return new SetProtocolLevelCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SetProtocolLevelCommand {
+    return new SetProtocolLevelCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SetProtocolLevelCommand | PlainMessage<SetProtocolLevelCommand> | undefined, b: SetProtocolLevelCommand | PlainMessage<SetProtocolLevelCommand> | undefined): boolean {
+    return proto3.util.equals(SetProtocolLevelCommand, a, b);
   }
 }
 
@@ -1564,6 +1613,14 @@ export class PutNodeConfigCommand extends Message<PutNodeConfigCommand> {
    */
   stateSince?: Timestamp;
 
+  /**
+   * Protocol level of the binary the node last started with; zero when the
+   * node has not reported one.
+   *
+   * @generated from field: uint32 protocol_level = 5;
+   */
+  protocolLevel = 0;
+
   constructor(data?: PartialMessage<PutNodeConfigCommand>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1576,6 +1633,7 @@ export class PutNodeConfigCommand extends Message<PutNodeConfigCommand> {
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "state", kind: "enum", T: proto3.getEnumType(NodeState) },
     { no: 4, name: "state_since", kind: "message", T: Timestamp },
+    { no: 5, name: "protocol_level", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutNodeConfigCommand {
@@ -2507,6 +2565,14 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
    */
   removedNodeIds: string[] = [];
 
+  /**
+   * The cluster's committed active protocol level; zero when none has been
+   * committed.
+   *
+   * @generated from field: uint32 protocol_level = 23;
+   */
+  protocolLevel = 0;
+
   constructor(data?: PartialMessage<SystemSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2537,6 +2603,7 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
     { no: 20, name: "log_levels", kind: "message", T: LogLevelConfig },
     { no: 21, name: "last_applied_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 22, name: "removed_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 23, name: "protocol_level", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemSnapshot {

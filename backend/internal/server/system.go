@@ -431,9 +431,10 @@ func (s *SystemServer) loadConfigNodeConfigs(ctx context.Context, resp *apiv1.Ge
 	}
 	for _, n := range nodes {
 		nc := &apiv1.NodeConfig{
-			Id:    n.ID.ToProto(),
-			Name:  n.Name,
-			State: command.NodeStateToProto(n.EffectiveState()),
+			Id:            n.ID.ToProto(),
+			Name:          n.Name,
+			State:         command.NodeStateToProto(n.EffectiveState()),
+			ProtocolLevel: n.ProtocolLevel,
 		}
 		if !n.StateSince.IsZero() {
 			nc.StateSince = timestamppb.New(n.StateSince)
@@ -832,11 +833,21 @@ func (s *SystemServer) PutNodeConfig(
 		return nil, connErr
 	}
 
+	// The protocol level is the node's own report; renaming keeps it.
+	existing, err := s.sysStore.GetNode(ctx, nodeUUID)
+	if err != nil {
+		return nil, errInternal(err)
+	}
+	var protocolLevel uint32
+	if existing != nil {
+		protocolLevel = existing.ProtocolLevel
+	}
 	if err := s.sysStore.PutNode(ctx, system.NodeConfig{
-		ID:         nodeUUID,
-		Name:       name,
-		State:      system.NodeStateLive,
-		StateSince: time.Now(),
+		ID:            nodeUUID,
+		Name:          name,
+		State:         system.NodeStateLive,
+		StateSince:    time.Now(),
+		ProtocolLevel: protocolLevel,
 	}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("put node config: %w", err))
 	}

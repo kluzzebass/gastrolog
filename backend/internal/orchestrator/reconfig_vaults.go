@@ -17,6 +17,7 @@ import (
 	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/query"
 	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/raftlevel"
 	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -1016,7 +1017,7 @@ func (o *Orchestrator) ensureVaultControlPlaneRaftGroup(vaultID glid.GLID, clust
 		return
 	}
 	gid := raftgroup.VaultControlPlaneGroupID(vaultID)
-	vfsm := vaultraft.NewFSM()
+	vfsm := vaultraft.NewFSM(vaultraft.WithGroup(gid), vaultraft.WithOnUnapplicable(raftlevel.FailStop(o.logger)))
 	vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
 	g, members := o.tryStartClusterWideRaftGroup(gid, vfsm, clusterNodes, factories)
 	if g != nil {
@@ -1149,14 +1150,15 @@ func vaultCtlSubFSM(g *raftgroup.Group, vaultID glid.GLID) *vaultctlfsm.FSM {
 }
 
 // vaultCtlChunkApplier returns the applier for a vault's sub-FSM commands:
-// forwarded to the group leader when peers are wired, applied through the
-// local group otherwise.
+// gated on the protocol level, then forwarded to the group leader when peers
+// are wired, applied through the local group otherwise.
 func (o *Orchestrator) vaultCtlChunkApplier(g *raftgroup.Group, vaultID glid.GLID) vaultctlfsm.Applier {
+	var next vaultctlfsm.Applier = &vaultCtlApplier{o: o, vaultID: vaultID}
 	if o.peerConns != nil {
 		gid := raftgroup.VaultControlPlaneGroupID(vaultID)
-		return cluster.NewVaultCtlChunkApplyForwarder(g.Raft, gid, vaultID, groupApplyWait(g), o.peerConns, cluster.RaftApplyTimeout)
+		next = cluster.NewVaultCtlChunkApplyForwarder(g.Raft, gid, vaultID, groupApplyWait(g), o.peerConns, cluster.RaftApplyTimeout)
 	}
-	return &vaultCtlApplier{o: o, vaultID: vaultID}
+	return gatedChunkApplier{gate: o.vaultCtlGate, next: next}
 }
 
 // tryStartClusterWideRaftGroup creates or returns an existing cluster-wide Raft group

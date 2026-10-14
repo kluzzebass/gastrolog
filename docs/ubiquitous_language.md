@@ -480,9 +480,11 @@ Nodes agreeing on what the cluster believes, via Raft.
   A node hosts vault instances, runs ingesters, serves queries, and
   participates in Raft groups.
 
-- **NodeConfig** — the declarative (`ID`, `Name`, `State`, `StateSince`)
-  record for a node. Lives
+- **NodeConfig** — the declarative (`ID`, `Name`, `State`, `StateSince`,
+  `ProtocolLevel`) record for a node. Lives
   in the cluster-ctl Raft's config. The `Name` is for humans; `ID` is canonical.
+  `ProtocolLevel` is the node's own report of its binary's **protocol level**,
+  written at startup; zero until the node reports one.
 
 - **Peer** — another node, from this node's perspective. "Peer" is always
   relative; the same node is "local" to itself and "peer" to everyone else.
@@ -571,6 +573,34 @@ gRPC transport:
   `PruneChunkTombstonesCommand` drops the tombstones every member of its Raft
   configuration has confirmed, and the confirmations of nodes no longer in
   it. Same rule as the released-segment **purge confirmation**.
+
+### Protocol levels
+
+What keeps a Raft log entry from reaching a node that cannot apply it. See
+[`raft_rolling_upgrades.md`](./raft_rolling_upgrades.md).
+
+- **Protocol level** — an integer naming what may appear in the Raft logs.
+  A binary's protocol level (`raftlevel.Binary`) is the highest command level
+  it can apply; a release that adds a command type raises it.
+- **Level table** — maps every command oneof case of `SystemCommand`,
+  `VaultRaftCommand` and `VaultCtlCommand` to the protocol level that
+  introduced it (`raftlevel.DefaultTable`). A test fails when a case is
+  missing.
+- **Active protocol level** (a.k.a. "active level") — the cluster's committed
+  protocol level, in cluster-ctl (`system.Runtime.ProtocolLevel`, committed by
+  `SetProtocolLevelCommand`). The cluster-ctl leader raises it once every
+  member of the cluster-ctl Raft configuration reports a binary at that level
+  or above; it is never lowered. Never below `raftlevel.Base`.
+- **Protocol-level gate** (`raftlevel.Gate`) — the proposer-side check every
+  cluster-ctl and vault-ctl command passes: refuse a command type above the
+  active level (`ErrCommandAboveClusterLevel`), and, on the node that hands
+  the entry to `raft.Apply`, refuse an entry it cannot decode itself
+  (`ErrUndecodableCommand`, `ErrUnknownCommand`).
+- **Unapplicable entry** — a committed entry an FSM cannot apply: one it
+  cannot decode, of a command type it does not know, or raising the active
+  level above its binary's. The FSM hands it to its unapplicable hook,
+  whose production form (`raftlevel.FailStop`) stops the process; it never
+  applies the entry or advances past it.
 
 ### Raft primitives (hashicorp/raft vocabulary)
 
@@ -1850,6 +1880,7 @@ Canonical milestone verbs (reuse these names; do not coin synonyms):
 | — (banned)       | tier, tiered, tiering | **GastroLog has no tiers.** Hot/cold storage layering is a rejected design, and the word is what brings it back: it reads as a standing concept, so the next writer reaches for it and then designs to it. Do not use it in our voice for ANYTHING — not storage, not a step in a fallback chain, not a severity band. Canonical replacements: a step in an ordered lookup is a **fallback**; a severity band is a **threshold**; a cloud archival class is a **cloud storage class**; the mechanism for moving data by age is **late-bound retention routing**. The ONLY permitted use is quoting a provider's own API surface where the identifier is theirs and cannot be renamed: Azure `AccessTier` / `SetTier` / `SetBlobTier`, AWS `types.Tier`, the S3 class literal `"INTELLIGENT_TIERING"`. Describing their behaviour in our prose still uses our words. Enforced by `scripts/hooks/pre-commit`. |
 | storage class    |                   | The **uint32** local class on `FileStorage`, `CloudService` and `VaultConfig` that selects WHICH DISK a vault may live on. Numeric, and it owns the unqualified name. |
 | cloud storage class | storage class (for cloud archival), archival tier | The **string** cloud archival storage class — `"GLACIER"`, `"DEEP_ARCHIVE"`, `"cold"`; empty means standard storage. Always carries the `cloud` qualifier in identifiers (`CloudStorageClass`, `cloud_storage_class`), because `CloudService` holds both meanings one field apart and an unqualified `StorageClass` there reads as the numeric one. The exception is the `blobstore` adapters, where `BlobInfo.StorageClass` deliberately mirrors the provider's own field name (S3 StorageClass, GCS StorageClass, Azure AccessTier). |
+| protocol level, active protocol level | feature level, cluster feature level, binary version | What the gate compares is the level a command type needs against the level the cluster committed; a binary's version string plays no part. |
 | vault-ctl Raft   |                   | One Raft group per vault, authoritative for that vault's chunk metadata. Follows the `{scope}-ctl` naming pattern for control-plane Raft groups. |
 | cluster-ctl Raft | system Raft, config Raft, cluster Raft | One Raft group per cluster, authoritative for cluster-wide configuration. Pairs with `vault-ctl Raft` to form the `{scope}-ctl` pattern. Its Raft group ID is `cluster-ctl` (`raftgroup.ClusterControlPlaneGroupID`). |
 | Raft contact     | peer heartbeat, liveness ping | Peer liveness comes from Raft's own per-group traffic. There is no peer heartbeat broadcast; "heartbeat" means only hashicorp/raft's replication heartbeat. |

@@ -1,13 +1,16 @@
 package vaultctlfsm
 
 import (
+	"errors"
 	"testing"
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/raftlevel"
 
 	hraft "github.com/hashicorp/raft"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -235,40 +238,90 @@ func TestCommandRoundTrip(t *testing.T) {
 	})
 }
 
-// TestApplyRejectsMalformedBytes verifies Apply returns an error (not a panic)
-// for empty and undecodable command bytes (unhappy path).
-func TestApplyRejectsMalformedBytes(t *testing.T) {
+// TestApplyStopsOnMalformedBytes verifies Apply hands empty and undecodable
+// command bytes to the unapplicable hook (not a panic, not an applied entry).
+func TestApplyStopsOnMalformedBytes(t *testing.T) {
 	t.Parallel()
 	f := New()
+	stops := 0
+	f.SetOnUnapplicable(func(string, uint64, error) { stops++ })
 
-	if err, ok := f.Apply(&hraft.Log{Data: nil}).(error); !ok || err == nil {
-		t.Errorf("empty data: expected error, got %v", f.Apply(&hraft.Log{Data: nil}))
+	if err, ok := f.Apply(&hraft.Log{Data: nil}).(error); !ok || !errors.Is(err, raftlevel.ErrUnknownCommand) {
+		t.Errorf("empty data: expected ErrUnknownCommand, got %v", err)
 	}
 
 	// A wire-type/field combination that cannot decode as VaultCtlCommand:
 	// field 1 declared as varint but truncated.
 	garbage := []byte{0x08}
-	if err, ok := f.Apply(&hraft.Log{Data: garbage}).(error); !ok || err == nil {
-		t.Errorf("garbage data: expected error, got %v", f.Apply(&hraft.Log{Data: garbage}))
+	if err, ok := f.Apply(&hraft.Log{Data: garbage}).(error); !ok || !errors.Is(err, raftlevel.ErrUndecodableCommand) {
+		t.Errorf("garbage data: expected ErrUndecodableCommand, got %v", err)
+	}
+	if stops != 2 {
+		t.Errorf("unapplicable hook called %d times, want 2", stops)
 	}
 }
 
-// TestApplyRejectsEmptyOneof verifies a VaultCtlCommand with no command set is
-// rejected by the dispatch (unhappy path).
-func TestApplyRejectsEmptyOneof(t *testing.T) {
+// TestApplyStopsOnEmptyOneof verifies a VaultCtlCommand with no command set
+// goes to the unapplicable hook and changes nothing.
+func TestApplyStopsOnEmptyOneof(t *testing.T) {
 	t.Parallel()
 	f := New()
+	var reasons []error
+	f.SetOnUnapplicable(func(_ string, _ uint64, reason error) { reasons = append(reasons, reason) })
 	data, err := proto.Marshal(&gastrologv1.VaultCtlCommand{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := f.Apply(&hraft.Log{Data: data})
-	if err, ok := result.(error); !ok || err == nil {
-		t.Errorf("empty oneof: expected error, got %v", result)
+	result := f.Apply(&hraft.Log{Index: 1, Data: data})
+	if err, ok := result.(error); !ok || !errors.Is(err, raftlevel.ErrUnknownCommand) {
+		t.Errorf("empty oneof: result %v, want ErrUnknownCommand", result)
+	}
+	if len(reasons) != 1 || !errors.Is(reasons[0], raftlevel.ErrUnknownCommand) {
+		t.Errorf("unapplicable hook calls = %v, want one ErrUnknownCommand", reasons)
+	}
+	if f.Ready() {
+		t.Error("an unapplicable entry made the FSM ready")
 	}
 }
 
 func glidFromByte(b byte) (g glid.GLID) {
 	g[0] = b
 	return g
+}
+
+func TestApplyStopsOnUndecodableEntry(t *testing.T) {
+	t.Parallel()
+	f := New()
+	var reasons []error
+	f.SetOnUnapplicable(func(_ string, _ uint64, reason error) { reasons = append(reasons, reason) })
+	result := f.Apply(&hraft.Log{Index: 1, Data: []byte{0xFF}})
+	if err, ok := result.(error); !ok || !errors.Is(err, raftlevel.ErrUndecodableCommand) {
+		t.Errorf("result %v, want ErrUndecodableCommand", result)
+	}
+	if len(reasons) != 1 || !errors.Is(reasons[0], raftlevel.ErrUndecodableCommand) {
+		t.Errorf("unapplicable hook calls = %v, want one ErrUndecodableCommand", reasons)
+	}
+	if f.Ready() {
+		t.Error("an unapplicable entry made the FSM ready")
+	}
+}
+
+// TestApplyCommandOfUnknownTypeChangesNothing pins what the outer vault-ctl
+// FSM relies on to stop: a command type the chunk FSM does not handle comes
+// back as ErrUnknownCommand and leaves the FSM as it was.
+func TestApplyCommandOfUnknownTypeChangesNothing(t *testing.T) {
+	t.Parallel()
+	f := New()
+	var cmd gastrologv1.VaultCtlCommand
+	unknown := protowire.AppendBytes(protowire.AppendTag(nil, 999, protowire.BytesType), []byte{0x08, 0x01})
+	if err := proto.Unmarshal(unknown, &cmd); err != nil {
+		t.Fatal(err)
+	}
+	result := f.ApplyCommand(&cmd)
+	if err, ok := result.(error); !ok || !errors.Is(err, raftlevel.ErrUnknownCommand) {
+		t.Fatalf("result %v, want ErrUnknownCommand", result)
+	}
+	if f.Ready() || f.Count() != 0 {
+		t.Fatalf("an unknown command changed the FSM: ready=%v chunks=%d", f.Ready(), f.Count())
+	}
 }

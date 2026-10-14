@@ -166,6 +166,12 @@ type Store interface {
 	// Setup wizard (runtime — UI state)
 	GetSetupWizardDismissed(ctx context.Context) (bool, error)
 	SetSetupWizardDismissed(ctx context.Context, dismissed bool) error
+
+	// Active protocol level (runtime — raised by the cluster-ctl leader).
+	// Zero until the cluster commits one. SetProtocolLevel refuses a level
+	// below the current one with ErrProtocolLevelLowered.
+	GetProtocolLevel(ctx context.Context) (uint32, error)
+	SetProtocolLevel(ctx context.Context, level uint32) error
 }
 
 // LoadServerSettings reads the server-level settings from the store.

@@ -1030,9 +1030,13 @@ func TestApplyAdvancesApplyWait(t *testing.T) {
 		t.Fatalf("Applied() after Apply(index 4) = %d, want 4", got)
 	}
 
-	// A failing entry (garbage payload) still advances the tracker.
-	if res := fsm.Apply(&raft.Log{Index: 5, Data: []byte("not a protobuf")}); res == nil {
-		t.Fatal("expected error result for garbage payload")
+	// A refused command still advances the tracker: raft counts it applied.
+	refused, err := command.Marshal(command.NewSetNodeState(newID(), system.NodeStateMaintenance, time.Now()))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if res := fsm.Apply(&raft.Log{Index: 5, Data: refused}); res == nil {
+		t.Fatal("expected error result for a state change of an unknown node")
 	}
 	if got := fsm.ApplyWait().Applied(); got != 5 {
 		t.Fatalf("Applied() after failing Apply(index 5) = %d, want 5", got)
