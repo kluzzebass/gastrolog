@@ -1104,7 +1104,7 @@ describe("vault form eligibility and gating", () => {
     for (const label of ["Cache Eviction", "Cache Budget", "Cache TTL"]) {
       const input = getByLabelText(label) as HTMLInputElement;
       expect(input.disabled).toBe(true);
-      expect(fieldNote(input)?.textContent).toBe("Only a cloud-backed vault has a warm cache.");
+      expect(fieldNote(input)?.textContent).toBe("Only a cloud-backed vault keeps cached copies.");
     }
   });
 

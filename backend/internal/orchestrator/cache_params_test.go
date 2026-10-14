@@ -1,6 +1,6 @@
 package orchestrator
 
-// The warm-cache config must actually reach the file-manager factory. Without
+// The cache config must actually reach the file-manager factory. Without
 // the cache_* param keys the factory reads, an operator's cache budget is
 // silently ignored and the cache runs unbounded. This asserts the config →
 // param bridge, which buildVaultParams supplies for the memory budget too.

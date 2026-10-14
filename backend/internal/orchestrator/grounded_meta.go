@@ -33,7 +33,7 @@ import (
 //     local SealedAt zero and only populate WriteEnd, so the FSM's
 //     wall-clock seal completion is applied when present.
 //
-// Every node-local fact is preserved untouched: DiskBytes (per-node warm-cache
+// Every node-local fact is preserved untouched: DiskBytes (per-node cached-copy
 // footprint), CloudBytes, and every other field the local manager owns. The
 // FSM's ManifestEntry has no per-node disk claim to overlay, so DiskBytes must
 // never be clobbered (pinned by

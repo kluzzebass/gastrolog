@@ -123,7 +123,7 @@ func TestOpenCursorCloudBackedResolvesLazilyFromFSM(t *testing.T) {
 	}
 	id := ids[0]
 
-	// Evict the warm cache (removes the local data.glcb) ...
+	// Evict the cached copy (removes the local data.glcb) ...
 	if evicted, _ := cm.EvictCacheLRU(1); evicted != 1 {
 		t.Fatalf("EvictCacheLRU: evicted = %d, want 1", evicted)
 	}
@@ -270,7 +270,7 @@ func TestLazyCloudBackedResolverConcurrentFirstAccess(t *testing.T) {
 }
 
 // TestLazyCloudBackedResolverEvictThenReread pins the eviction interplay: a
-// lazily-resolved chunk's warm cache participates in eviction like any other
+// lazily-resolved chunk's cached copy participates in eviction like any other
 // cloud-backed chunk, and a post-eviction read re-downloads without
 // re-resolving (the cloud-index entry survives eviction).
 func TestLazyCloudBackedResolverEvictThenReread(t *testing.T) {
@@ -285,18 +285,18 @@ func TestLazyCloudBackedResolverEvictThenReread(t *testing.T) {
 	info := wipeCloudEntry(t, cm, id)
 	calls := installCountingResolver(cm, id, info)
 
-	// First read resolves lazily and re-warms the cache.
+	// First read resolves lazily and re-downloads the cached copy.
 	if got := readAllCloudRecords(t, cm, id); got != records {
 		t.Fatalf("first read served %d records, want %d", got, records)
 	}
 	if !cm.hasLocalGLCB(id) {
-		t.Fatal("warm cache not populated by the first cloud read")
+		t.Fatal("cached copy not populated by the first cloud read")
 	}
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("resolver calls after first read = %d, want 1", got)
 	}
 
-	// Evict the warm copy again — the resolved entry must survive. The
+	// Evict the cached copy again — the resolved entry must survive. The
 	// eviction sweep itself consults the resolver to confirm the upload;
 	// only the read after it must not re-resolve.
 	if evicted, _ := cm.EvictCacheLRU(1); evicted != 1 {

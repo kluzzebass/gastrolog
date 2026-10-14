@@ -71,7 +71,7 @@ func uploadN(t *testing.T, cm *Manager, count, recordsPerChunk int) []chunk.Chun
 }
 
 // TestEvictCacheLRU verifies size-based eviction: with a budget below the
-// total cached bytes, the coldest entries (oldest lastAccess) must be
+// total cached bytes, the least recently read entries (oldest lastAccess) must be
 // evicted first until the cache fits.
 func TestEvictCacheLRU(t *testing.T) {
 	t.Parallel()
@@ -84,7 +84,7 @@ func TestEvictCacheLRU(t *testing.T) {
 		t.Fatalf("expected 3 cloud-backed chunks, got %d", len(ids))
 	}
 
-	// Touch ids[1] and ids[2] in order so they're hotter than ids[0].
+	// Touch ids[1] and ids[2] in order so they're more recently read than ids[0].
 	clock.t = clock.t.Add(time.Second)
 	openAndDrain(t, cm, ids[1])
 	clock.t = clock.t.Add(time.Second)
@@ -101,14 +101,14 @@ func TestEvictCacheLRU(t *testing.T) {
 	for _, id := range ids {
 		path := filepath.Join(cm.chunkDir(id), dataGLCBFileName)
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Errorf("warm cache for %s should be evicted: stat err=%v", id, err)
+			t.Errorf("cached copy of %s should be evicted: stat err=%v", id, err)
 		}
 	}
 }
 
 // TestEvictCacheLRU_Order verifies that LRU eviction respects access
 // recency: with a budget that fits exactly two of three chunks, the
-// coldest one should be the one that gets dropped.
+// least recently read one should be the one that gets dropped.
 func TestEvictCacheLRU_Order(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
@@ -120,7 +120,7 @@ func TestEvictCacheLRU_Order(t *testing.T) {
 		t.Fatalf("expected 3 cloud-backed chunks, got %d", len(ids))
 	}
 
-	// Touch ids[1] and ids[2] but NOT ids[0] — leaving ids[0] coldest.
+	// Touch ids[1] and ids[2] but NOT ids[0] — leaving ids[0] least recently read.
 	clock.t = clock.t.Add(10 * time.Second)
 	openAndDrain(t, cm, ids[1])
 	clock.t = clock.t.Add(10 * time.Second)
@@ -135,8 +135,8 @@ func TestEvictCacheLRU_Order(t *testing.T) {
 		}
 		sizes = append(sizes, info.Size())
 	}
-	// Budget = sum of the two HOTTEST sizes (ids[1] + ids[2]); the coldest
-	// (ids[0]) must be evicted to fit.
+	// Budget = sum of the two MOST RECENTLY READ sizes (ids[1] + ids[2]); the
+	// least recently read (ids[0]) must be evicted to fit.
 	budget := uint64(sizes[1] + sizes[2]) //nolint:gosec // G115: test-only
 
 	evicted, _ := cm.EvictCacheLRU(budget)
@@ -146,11 +146,11 @@ func TestEvictCacheLRU_Order(t *testing.T) {
 
 	// ids[0] gone, ids[1] and ids[2] still present.
 	if _, err := os.Stat(filepath.Join(cm.chunkDir(ids[0]), dataGLCBFileName)); !os.IsNotExist(err) {
-		t.Errorf("coldest chunk %s should be evicted", ids[0])
+		t.Errorf("least recently read chunk %s should be evicted", ids[0])
 	}
 	for _, id := range ids[1:] {
 		if _, err := os.Stat(filepath.Join(cm.chunkDir(id), dataGLCBFileName)); err != nil {
-			t.Errorf("hot chunk %s should still be cached: %v", id, err)
+			t.Errorf("recently read chunk %s should still be cached: %v", id, err)
 		}
 	}
 }

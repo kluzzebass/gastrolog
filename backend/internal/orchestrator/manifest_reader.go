@@ -28,7 +28,7 @@ func (o *Orchestrator) ManifestReader() manifest.Reader {
 
 // IntegrityVerifier returns a chunk.IntegrityVerifier backed by the same
 // FSM-projected manifest as ManifestReader. The chunk manager wires this
-// in to verify cold-cache cloud downloads against the FSM-recorded digest.
+// in to verify uncached-chunk cloud downloads against the FSM-recorded digest.
 func (o *Orchestrator) IntegrityVerifier() chunk.IntegrityVerifier {
 	return &orchestratorManifestReader{o: o}
 }
@@ -49,7 +49,7 @@ var _ chunk.IntegrityVerifier = (*orchestratorManifestReader)(nil)
 // ExpectedDigest implements chunk.IntegrityVerifier. Returns the FSM-recorded
 // GLCB whole-blob digest for a chunk; (zero, false) when the chunk isn't
 // in the manifest yet (pre-upload race) or carries no recorded hash (zero
-// Hash on the entry, treated as "no expectation"). Cold-cache downloads
+// Hash on the entry, treated as "no expectation"). Uncached-chunk downloads
 // consult this to reject blobs
 // whose actual digest doesn't match what the leader stamped at upload time.
 func (r *orchestratorManifestReader) ExpectedDigest(id chunk.ChunkID) ([32]byte, bool) {

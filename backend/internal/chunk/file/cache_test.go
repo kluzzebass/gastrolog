@@ -81,9 +81,9 @@ func ingestAndUpload(t *testing.T, cm *Manager, n int) chunk.ChunkID {
 	return chunk.ChunkID{}
 }
 
-// TestUploadKeepsLocalGLCB asserts the warm-cache contract: after a chunk
+// TestUploadKeepsLocalGLCB asserts the cached-copy contract: after a chunk
 // is sealed and uploaded to the cloud, its local data.glcb file remains in
-// place inside <chunkDir> as the warm cache — there is no parallel
+// place inside <chunkDir> as the cached copy — there is no parallel
 // CacheDir copy.
 func TestUploadKeepsLocalGLCB(t *testing.T) {
 	t.Parallel()
@@ -94,15 +94,15 @@ func TestUploadKeepsLocalGLCB(t *testing.T) {
 	path := filepath.Join(cm.chunkDir(chunkID), dataGLCBFileName)
 	info, err := os.Stat(path)
 	if err != nil {
-		t.Fatalf("expected in-tree warm cache at %s: %v", path, err)
+		t.Fatalf("expected in-tree cached copy at %s: %v", path, err)
 	}
 	if info.Size() == 0 {
-		t.Error("warm cache file is empty")
+		t.Error("cached copy file is empty")
 	}
 }
 
 // TestCacheHitAvoidsCloudDownload covers the steady-state read: the chunk
-// has just been uploaded, the local data.glcb is the warm cache, and reads
+// has just been uploaded, the local data.glcb is the cached copy, and reads
 // must not touch the cloud at all.
 func TestCacheHitAvoidsCloudDownload(t *testing.T) {
 	t.Parallel()
@@ -135,15 +135,15 @@ func TestCacheHitAvoidsCloudDownload(t *testing.T) {
 		t.Errorf("read %d records, expected 200", count)
 	}
 	if total := store.downloads.Load() + store.downloadRanges.Load(); total != 0 {
-		t.Errorf("warm-cache hit should not trigger cloud calls, got %d", total)
+		t.Errorf("cached-copy hit should not trigger cloud calls, got %d", total)
 	}
 }
 
-// TestColdCacheDownloadsToChunkDir simulates an evicted / never-cached
+// TestUncachedChunkDownloadsToChunkDir simulates an evicted / never-cached
 // cloud-backed chunk: deleting the in-tree data.glcb forces openCloudCursor to
 // download the blob fresh, which lands at <chunkDir>/data.glcb so the next
-// read goes through the warm-cache fast path.
-func TestColdCacheDownloadsToChunkDir(t *testing.T) {
+// read goes through the cached-copy fast path.
+func TestUncachedChunkDownloadsToChunkDir(t *testing.T) {
 	t.Parallel()
 	cm, store := newCacheTestManager(t)
 
@@ -164,25 +164,25 @@ func TestColdCacheDownloadsToChunkDir(t *testing.T) {
 		t.Errorf("read %d records, expected 200", count)
 	}
 	if downloads := store.downloads.Load(); downloads != 1 {
-		t.Errorf("expected 1 cloud download after cold cache, got %d", downloads)
+		t.Errorf("expected 1 cloud download of an uncached chunk, got %d", downloads)
 	}
 	if _, err := os.Stat(glcbPath); err != nil {
 		t.Errorf("downloaded blob should land at %s: %v", glcbPath, err)
 	}
 }
 
-// TestDeleteRemovesWarmCache covers the chunk-delete path: deleting a
-// cloud-backed chunk should remove the in-tree warm cache copy too so
+// TestDeleteRemovesCachedCopy covers the chunk-delete path: deleting a
+// cloud-backed chunk should remove the in-tree cached copy too so
 // retention/disk-pressure semantics keep working without the legacy
 // CacheDir.
-func TestDeleteRemovesWarmCache(t *testing.T) {
+func TestDeleteRemovesCachedCopy(t *testing.T) {
 	t.Parallel()
 	cm, _ := newCacheTestManager(t)
 
 	chunkID := ingestAndUpload(t, cm, 200)
 	chunkDir := cm.chunkDir(chunkID)
 	if _, err := os.Stat(filepath.Join(chunkDir, dataGLCBFileName)); err != nil {
-		t.Fatal("warm cache should exist before delete")
+		t.Fatal("cached copy should exist before delete")
 	}
 
 	if err := cm.Delete(chunkID); err != nil {
@@ -223,12 +223,12 @@ func (v *staticVerifier) ExpectedDigest(chunk.ChunkID) ([32]byte, bool) {
 	return v.digest, v.have
 }
 
-// TestColdCacheVerifiesBlobDigest covers the blob-digest integrity
-// check: a cold-cache cloud download is rejected when the GLCB
+// TestUncachedDownloadVerifiesBlobDigest covers the blob-digest integrity
+// check: an uncached chunk's cloud download is rejected when the GLCB
 // whole-blob digest read from the TOC footer doesn't match what the FSM
-// stamped at upload time. Without verification the warm cache would
+// stamped at upload time. Without verification the cached copy would
 // happily seed itself with corrupted bytes and re-serve them forever.
-func TestColdCacheVerifiesBlobDigest(t *testing.T) {
+func TestUncachedDownloadVerifiesBlobDigest(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
 	inner := blobstore.NewMemory()
@@ -255,7 +255,7 @@ func TestColdCacheVerifiesBlobDigest(t *testing.T) {
 	// verifier's "match" / "mismatch" cases against real data.
 	actualDigest := readBlobDigest(t, glcbPath)
 
-	// Cold-cache + matching digest: download should succeed and the chunk
+	// Uncached + matching digest: download should succeed and the chunk
 	// should read normally.
 	if err := os.Remove(glcbPath); err != nil {
 		t.Fatal(err)
@@ -270,7 +270,7 @@ func TestColdCacheVerifiesBlobDigest(t *testing.T) {
 		t.Errorf("matching digest: read %d records, expected 50", got)
 	}
 
-	// Cold-cache + wrong expected digest: the download must be rejected and
+	// Uncached + wrong expected digest: the download must be rejected and
 	// the tmp file cleaned up. There is no range-request fallback — a
 	// digest mismatch surfaces an error rather than silently switching to
 	// per-frame range reads.

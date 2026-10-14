@@ -300,7 +300,7 @@ func TestUploadToCloud_DivergentCopyNeverReachesTheStore(t *testing.T) {
 
 // An object another home already uploaded is not adopted by a home whose own
 // copy is divergent: adopting would announce that copy and keep it as the
-// cloud-backed chunk's warm cache.
+// cloud-backed chunk's cached copy.
 func TestUploadToCloud_DivergentCopyNeverAdoptsTheStoredObject(t *testing.T) {
 	t.Parallel()
 	shared := blobstore.NewMemory()

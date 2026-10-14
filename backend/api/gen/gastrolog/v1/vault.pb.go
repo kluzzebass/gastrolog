@@ -806,7 +806,7 @@ type ChunkMeta struct {
 	RecordCount int64 `protobuf:"varint,5,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
 	Bytes       int64 `protobuf:"varint,6,opt,name=bytes,proto3" json:"bytes,omitempty"`
 	// disk_bytes is the LOCAL on-disk footprint on the responding node, always
-	// — for a cloud-backed chunk this is the warm-cache state (the cached
+	// — for a cloud-backed chunk this is the cached-copy state (the cached
 	// GLCB's size while cached, 0 once evicted), never the cloud object size.
 	DiskBytes         int64                  `protobuf:"varint,7,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"`
 	IngestStart       *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=ingest_start,json=ingestStart,proto3" json:"ingest_start,omitempty"`
@@ -837,7 +837,7 @@ type ChunkMeta struct {
 	State ChunkState `protobuf:"varint,19,opt,name=state,proto3,enum=gastrolog.v1.ChunkState" json:"state,omitempty"`
 	// cloud_bytes is the compressed cloud object's transport size for a
 	// cloud-backed chunk (0 = never uploaded). Cluster-wide fact, distinct
-	// from disk_bytes (per-node, live warm-cache state). gastrolog-33ul6h.
+	// from disk_bytes (per-node, live cached-copy state). gastrolog-33ul6h.
 	CloudBytes    int64 `protobuf:"varint,20,opt,name=cloud_bytes,json=cloudBytes,proto3" json:"cloud_bytes,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

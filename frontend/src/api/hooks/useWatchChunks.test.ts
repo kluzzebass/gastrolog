@@ -329,7 +329,7 @@ describe("mergeChunksSnapshot — snapshots cannot shrink residency", () => {
 });
 
 // diskBytes is per-node LIVE local cache state (eviction drops it to 0,
-// re-warm brings it back), not a monotone-growing field like
+// re-download brings it back), not a monotone-growing field like
 // bytes/recordCount. cloudBytes IS fixed once the chunk is uploaded, so
 // it keeps the monotone-max shape.
 describe("mergeMeta — diskBytes/cloudBytes", () => {
@@ -369,7 +369,7 @@ describe("mergeMeta — diskBytes/cloudBytes", () => {
     expect(merged.cloudBytes).toBe(BigInt(300));
   });
 
-  test("diskBytes also follows an increase (re-warm)", () => {
+  test("diskBytes also follows an increase (re-download)", () => {
     const existing = new ChunkMeta({ id: bytes(43), cloudBacked: true, diskBytes: BigInt(0) });
     const incoming = new ChunkMeta({ id: bytes(43), cloudBacked: true, diskBytes: BigInt(900) });
     const merged = mergeMeta(existing, incoming);

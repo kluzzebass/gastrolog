@@ -365,7 +365,7 @@ func (f *FSM) segmentSupersededLocked(segID glid.GLID, placement []string) bool 
 // a segment: sealed and held by HolderQuorum(placement) members of placement,
 // sealed and cloud-backed, or already gone (its records aged out under
 // retention, which only deletes sealed chunks). A cloud-backed chunk's durable
-// copy is the uploaded object; its holders are warm caches that eviction
+// copy is the uploaded object; its holders keep cached copies that eviction
 // withdraws, and counting them would re-pin a segment every time a home evicts.
 func (f *FSM) chunkReplicatedLocked(id chunk.ChunkID, placement []string) bool {
 	entry := f.chunks[id]

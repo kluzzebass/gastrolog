@@ -44,12 +44,12 @@ type VaultConfig struct {
 	// CacheEviction is "lru" (default) or "ttl" — only meaningful for cloud-backed.
 	CacheEviction string `json:"cacheEviction,omitempty"`
 
-	// CacheBudget is the warm-cache soft cap for cloud-backed chunks, as a size
+	// CacheBudget is the cached-copy soft cap for cloud-backed chunks, as a size
 	// expression ("1GiB"). Empty = unset (defaulted at creation for cloud
-	// vaults); non-cloud vaults have no warm cache and leave it empty.
+	// vaults); non-cloud vaults have no cached copies and leave it empty.
 	CacheBudget string `json:"cacheBudget,omitempty"`
 
-	// CacheTTL is the warm-cache eviction age (ttl mode only) as a duration
+	// CacheTTL is the cached-copy eviction age (ttl mode only) as a duration
 	// expression ("1h", "7d"). Empty = unset.
 	CacheTTL string `json:"cacheTtl,omitempty"`
 
@@ -97,7 +97,7 @@ type VaultConfig struct {
 // have typed. Stored verbatim at creation, so a defaulted vault reads exactly
 // like a configured one.
 
-// DefaultVaultCacheBudget is the warm-cache soft cap applied when a
+// DefaultVaultCacheBudget is the cached-copy soft cap applied when a
 // cloud-backed vault is created without one. The cache is a soft LRU cap over
 // cloud-backed chunk copies, so a too-small budget costs re-reads from the
 // blob store, not refused records; but unbounded is still a defect.

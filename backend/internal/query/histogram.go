@@ -525,7 +525,7 @@ func attrScanGroupCandidateOK(cm chunk.ChunkManager, meta chunk.ChunkMeta, start
 		return false
 	}
 	// Skip chunks whose content isn't locally readable — for cloud
-	// chunks that means "blob is not in the warm cache." We never
+	// chunks that means "the chunk is uncached on this node." We never
 	// trigger an S3 download just to compute the level breakdown;
 	// histogram refreshes that span 30d would otherwise pull
 	// hundreds of cloud blobs. Cloud-backed chunks still contribute
@@ -673,8 +673,8 @@ func timechartChunkGroupsPerBucket(
 				// weird formats), not unsampled-cloud leftover. Attribute
 				// them to "other" here so buildHistogramBuckets'
 				// global-ratio distribution only kicks in for buckets
-				// that genuinely have no local samples (cloud blobs not
-				// in the warm cache).
+				// that genuinely have no local samples (uncached
+				// cloud-backed chunks).
 				localCounts["other"]++
 			}
 			sampled++

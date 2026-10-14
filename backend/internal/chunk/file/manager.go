@@ -131,20 +131,20 @@ type Config struct {
 	// store. Nil means this manager is the uploader.
 	IsCloudUploader func() bool
 
-	// CacheEviction selects the warm-cache eviction policy: "lru" (default)
+	// CacheEviction selects the cached-copy eviction policy: "lru" (default)
 	// or "ttl". The two are mutually exclusive — operators pick one mode,
 	// not both. Empty string is treated as "lru" so a vault with a budget
 	// but no explicit policy still gets eviction.
 	CacheEviction string
 
-	// CacheBudgetBytes is the soft cap on total bytes occupied by warm-cache
+	// CacheBudgetBytes is the soft cap on total bytes occupied by cached
 	// copies of cloud-backed chunks — every local data.glcb, the chunk
 	// dir's and the pipeline-built one alike. Zero disables budget
 	// enforcement. Only consulted in LRU mode; TTL mode ignores it.
 	CacheBudgetBytes uint64
 
-	// CacheTTL is the maximum age (since last OpenCursor) of a warm-cache
-	// entry before it gets evicted. Only consulted in TTL mode; LRU mode
+	// CacheTTL is the maximum age (since last OpenCursor) of a cached copy
+	// before it gets evicted. Only consulted in TTL mode; LRU mode
 	// ignores this field. Local-only sealed chunks are never affected —
 	// their data.glcb is authoritative.
 	CacheTTL time.Duration
@@ -158,7 +158,7 @@ type Config struct {
 	// (create, seal, compress, upload, delete) for cluster-wide visibility.
 	Announcer chunk.MetadataAnnouncer
 
-	// IntegrityVerifier, when non-nil, is consulted on every cold-cache
+	// IntegrityVerifier, when non-nil, is consulted on every uncached-chunk
 	// cloud download to verify the GLCB whole-blob digest matches the
 	// FSM-recorded value. A mismatch causes the downloaded file to be
 	// deleted and the read to error — the next retry re-fetches.
@@ -269,7 +269,7 @@ type Manager struct {
 	indexBuilders  []chunk.ChunkIndexBuilder // injected post-construction via SetIndexBuilders
 	cloudListCache []chunk.ChunkMeta         // cached List() result for cloud-backed chunks; nil = stale
 
-	remoteTS       map[chunk.ChunkID]remoteTSView // fetched-ITSI views for cold rank lookups (cold_rank.go)
+	remoteTS       map[chunk.ChunkID]remoteTSView // fetched-ITSI views for uncached rank lookups (uncached_rank.go)
 	remoteTSBytes  int64                          // raw bytes held by remoteTS, bounded by remoteTSViewBudget
 	remoteTSMu     sync.Mutex
 	storageClasses map[chunk.ChunkID]string // in-memory cache of cloud storage class per chunk
@@ -306,9 +306,9 @@ type Manager struct {
 	chunkLocks   map[chunk.ChunkID]*sync.RWMutex
 
 	// lastAccess records the most recent OpenCursor time for each chunk
-	// read through its local data.glcb. Used by EvictCacheLRU to
-	// pick the coldest entries when the cache exceeds its budget. In-memory
-	// only — never persisted; eviction signals don't outlive the process,
+	// read through its local data.glcb. Used by EvictCacheLRU to pick the
+	// least recently read entries when the cache exceeds its budget.
+	// In-memory only — never persisted; eviction signals don't outlive the process,
 	// per the chunk-redesign doc's "cache eviction signals are node-local,
 	// not FSM state" rule.
 	lastAccessMu sync.Mutex
@@ -1063,7 +1063,7 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	m.mu.Unlock()
 
 	if cloudBacked {
-		// Local data.glcb is the warm cache for cloud-backed chunks: when
+		// Local data.glcb is the cached copy of a cloud-backed chunk: when
 		// the leader uploads or any node downloads, the same file lives at
 		// <chunkDir>/data.glcb and the read goes through the sealed-local
 		// path with no S3 round-trip. Falls back to a full-blob download
@@ -1084,9 +1084,10 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 		// Cloud-backed cursors don't touch local mmap regions; the
 		// per-chunk lifetime lock is unnecessary for them. Their lifecycle
 		// is handled by the cloud index's own concurrency primitives.
-		// downloadCloudBlobToChunkDir populates the warm cache as a
+		// downloadCloudBlobToChunkDir populates the cached copy as a
 		// side-effect; touch lastAccess once the cursor returns so the
-		// freshly-cached chunk doesn't immediately register as cold.
+		// freshly-cached chunk doesn't immediately register as least
+		// recently read.
 		cursor, err := m.openCloudCursor(id)
 		if err == nil && m.hasLocalGLCB(id) {
 			m.touchLastAccess(id)
@@ -1221,7 +1222,7 @@ func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS t
 	// is missing — so a network fetch here would burn S3 bandwidth and
 	// seconds of wall time to compute a result the user never sees.
 	//
-	// If the warm cache holds the blob (data.glcb on disk), route through
+	// If the cached copy holds the blob (data.glcb on disk), route through
 	// the local GLCB cursor. If not, return nil with zero records scanned;
 	// the caller treats sampled==0 as "no breakdown available" and the
 	// bucket stays hatched. Callers that genuinely need bytes regardless
@@ -2957,7 +2958,7 @@ func (m *Manager) ScanActiveByIngestTS(id chunk.ChunkID, cb func(ingestTS time.T
 // for the active chunk. Returns (0, false, nil) for sealed chunks (cloud or
 // local) — the index manager owns those via OpenIngestMmap, which reads the
 // embedded ITSI section out of data.glcb regardless of cloud-backed status
-// (the warm cache makes both look identical).
+// (the cached copy makes both look identical).
 func (m *Manager) FindIngestStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	m.mu.Lock()
 	active := m.active
@@ -2981,18 +2982,18 @@ func (m *Manager) FindIngestStartPosition(id chunk.ChunkID, ts time.Time) (uint6
 // only equal to rank for monotonic chunks (callers gate on
 // meta.IngestTSMonotonic). Returns (0, false, nil) for sealed chunks —
 // caller falls through to IndexManager.FindIngestEntryIndex which mmaps
-// the ITSI section directly from data.glcb (cloud or local — the warm
-// cache makes both the same path).
+// the ITSI section directly from data.glcb (cloud or local — the cached
+// copy makes both the same path).
 func (m *Manager) FindIngestEntryIndex(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	m.mu.Lock()
 	active := m.active
 	m.mu.Unlock()
 
 	if active == nil || active.meta.id != id {
-		// Cold cloud-backed chunks resolve via ranged reads of the object's
-		// ITSI (cold_rank.go). Warm and local sealed chunks stay a miss here:
+		// Uncached cloud-backed chunks resolve via ranged reads of the object's
+		// ITSI (uncached_rank.go). Cached and local sealed chunks stay a miss here:
 		// the index manager serves them from the local GLCB's mmap.
-		if rank, ok := m.coldIngestRank(id, ts); ok {
+		if rank, ok := m.uncachedIngestRank(id, ts); ok {
 			return rank, true, nil
 		}
 		return 0, false, nil
@@ -3092,7 +3093,7 @@ func (m *Manager) HasLocalContent(id chunk.ChunkID) bool {
 	if !meta.cloudBacked {
 		return true
 	}
-	// In-tree warm cache: the local data.glcb is the chunk's
+	// In-tree cached copy: the local data.glcb is the chunk's
 	// authoritative cache for cloud-backed reads.
 	return m.hasLocalGLCB(id)
 }
@@ -3100,7 +3101,7 @@ func (m *Manager) HasLocalContent(id chunk.ChunkID) bool {
 // HeadCloudBlob probes the chunk's cloud blob via a HEAD request, ignoring
 // any local cache. Used by the reconcile sweep to detect blobs deleted
 // out-of-band by a lifecycle rule — OpenCursor would silently serve from
-// the warm cache and miss the gap. Returns chunk.ErrChunkSuspect for
+// the cached copy and miss the gap. Returns chunk.ErrChunkSuspect for
 // missing blobs (the tracker uses that to start the grace window) and
 // nil when the blob is present. Implements chunk.CloudBlobChecker.
 func (m *Manager) HeadCloudBlob(id chunk.ChunkID) error {
@@ -3123,7 +3124,7 @@ func (m *Manager) HeadCloudBlob(id chunk.ChunkID) error {
 }
 
 // FindSourceStartPosition returns the earliest record position with SourceTS >= ts.
-// Active chunks: B+ tree lookup. Sealed (local or cloud-warm-cached): caller
+// Active chunks: B+ tree lookup. Sealed (local or cached cloud-backed): caller
 // falls through to IndexManager.FindSourceStartPosition (which mmaps the
 // embedded STSI section out of data.glcb).
 func (m *Manager) FindSourceStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
@@ -3148,7 +3149,7 @@ func (m *Manager) FindSourceStartPosition(id chunk.ChunkID, ts time.Time) (uint6
 // search-side scanners read the embedded ITSI/STSI sections directly
 // from data.glcb via filetsidx.OpenIngestMmap / OpenSourceMmap (handled
 // by the IndexManager). Cloud-backed chunks reach the same path through
-// their warm-cache data.glcb; when the warm cache is cold the histogram
+// their cached copy's data.glcb; when the chunk is uncached the histogram
 // falls back to FSM-proportional distribution rather than fetching the
 // index section from S3.
 
@@ -3238,7 +3239,7 @@ func (m *Manager) DeleteSilent(id chunk.ChunkID) error {
 }
 
 func (m *Manager) deleteInternal(id chunk.ChunkID) error {
-	// A removed chunk must not keep answering cold rank lookups from the
+	// A removed chunk must not keep answering uncached rank lookups from the
 	// fetched-ITSI cache.
 	m.dropRemoteTSView(id)
 	// Wait for any in-flight PostSealProcess on this chunk to finish
@@ -3320,7 +3321,7 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 			return fmt.Errorf("delete cloud-backed chunk %s: %w", id, err)
 		}
 		m.removeFromCloudIndex(id)
-		// Remove the in-tree warm cache copy of the cloud blob — the
+		// Remove the in-tree cached copy of the cloud blob — the
 		// chunk dir IS that cache, so blowing it away on delete keeps
 		// disk usage bounded by retention.
 		_ = os.RemoveAll(m.chunkDir(id))
@@ -3494,7 +3495,7 @@ func (m *Manager) RefreshDiskSizes(id chunk.ChunkID) {
 	meta.diskBytes = m.computeDiskBytes(id)
 }
 
-// --- Warm cache helpers ---
+// --- Cached copy helpers ---
 
 // openLocalGLCBCursor opens a sealed chunk's data.glcb file via the chunkcloud
 // reader pipeline. Returns the underlying os error (typically ENOENT) when
@@ -3586,7 +3587,7 @@ func (m *Manager) GLCBBlobPath(id chunk.ChunkID) (string, bool) {
 // vault ChunkRoot rather than this manager's Dir) it returns that path;
 // otherwise the canonical <chunkDir>/data.glcb — unless that file is absent
 // and this node's pipeline-built copy exists, which is how an unregistered
-// cloud-backed chunk's pipeline GLCB serves as its warm cache. A registered
+// cloud-backed chunk's pipeline GLCB serves as its cached copy. A registered
 // path whose file is gone defers to the locator: a placement change moves the
 // vault's pipeline root, and the locator names where the copy lives now. Safe
 // to call without mu held — it briefly takes mu to read the externalGLCB map
@@ -3652,9 +3653,9 @@ func (m *Manager) localGLCBCopies(id chunk.ChunkID) ([]string, int64) {
 	return paths, size
 }
 
-// touchLastAccess records that the warm cache for this chunk was just hit
+// touchLastAccess records that the cached copy of this chunk was just hit
 // (or just populated). The lastAccess map is consulted by EvictCacheLRU to
-// pick the coldest entries when the cache exceeds its budget. Map is
+// pick the least recently read entries when the cache exceeds its budget. Map is
 // in-memory only — never persisted; eviction signals don't outlive the
 // process.
 func (m *Manager) touchLastAccess(id chunk.ChunkID) {
@@ -3663,13 +3664,13 @@ func (m *Manager) touchLastAccess(id chunk.ChunkID) {
 	m.lastAccessMu.Unlock()
 }
 
-// evictionRule decides per-candidate whether a warm-cache entry should be
+// evictionRule decides per-candidate whether a cached copy should be
 // evicted. Implementations are stateless given the candidate + the
 // running totalRemaining (the bytes still cached after prior evictions in
 // this sweep).
 //
-// EvictCache builds a list of rules and walks coldest-first; a candidate
-// is evicted when ANY rule returns true. This is the composition surface
+// EvictCache builds a list of rules and walks least recently read first; a
+// candidate is evicted when ANY rule returns true. This is the composition surface
 // for future restrictions: the base policy (LRU or TTL) contributes one
 // rule, and additional restrictions (storage-pressure, corrupt-blob,
 // pin-list, …) drop in alongside without touching the policy branches.
@@ -3680,8 +3681,8 @@ type evictionRule struct {
 	shouldEvict func(c cacheEntry, totalRemaining int64) bool
 }
 
-// EvictCacheLRU is the coldest-first-by-budget rule on its own. Kept as a
-// public surface so tests + future callers can pin down LRU semantics
+// EvictCacheLRU is the least-recently-read-first-by-budget rule on its own.
+// Kept as a public surface so tests + future callers can pin down LRU semantics
 // without going through the policy dispatch in EvictCache.
 func (m *Manager) EvictCacheLRU(budgetBytes uint64) (int, int64) {
 	rule := lruRule(budgetBytes)
@@ -3782,8 +3783,8 @@ func ttlRule(ttl time.Duration, now time.Time) *evictionRule {
 	}
 }
 
-// runEvictionSweep walks candidates coldest-first and applies the rule
-// set to each. A candidate is evicted when ANY rule matches; the loop
+// runEvictionSweep walks candidates least recently read first and applies the
+// rule set to each. A candidate is evicted when ANY rule matches; the loop
 // continues until every candidate has been examined (rules that need
 // to stop early — e.g. LRU's budget cap — handle that themselves via
 // the totalRemaining argument).
@@ -3793,7 +3794,7 @@ func (m *Manager) runEvictionSweep(label string, rules []evictionRule) (int, int
 		return 0, 0
 	}
 
-	// Coldest-first: oldest lastAccess first. Zero/missing lastAccess
+	// Least recently read first: oldest lastAccess first. Zero/missing lastAccess
 	// (chunk seen on disk but never opened in this process) ranks as
 	// oldest possible.
 	slices.SortFunc(candidates, func(a, b cacheEntry) int {
@@ -3835,8 +3836,8 @@ func (m *Manager) runEvictionSweep(label string, rules []evictionRule) (int, int
 
 // updateCloudDiskBytes persists a new LOCAL diskBytes value onto a
 // cloud-backed chunk's cloud-index entry — called whenever this node's
-// warm-cache footprint for the chunk changes (eviction removes the local
-// data.glcb, download/re-warm restores it). DiskBytes is per-node cache
+// cached-copy footprint for the chunk changes (eviction removes the local
+// data.glcb, download/re-download restores it). DiskBytes is per-node cache
 // state, not cluster-replicated (CloudBytes is); every node's cloud index
 // must be kept honest independently as its own local cache turns over.
 // No-op if the chunk isn't in this node's cloud index. Same
@@ -3877,7 +3878,7 @@ func (m *Manager) updateCloudDiskBytes(id chunk.ChunkID, diskBytes int64) {
 // freed. Afterwards nothing in this manager points at a removed file: the
 // external registration and any pipeline-registered local meta are dropped,
 // so the next lookup resolves the chunk as cloud-backed and reads re-fetch
-// through the cold path.
+// through the uncached path.
 func (m *Manager) evictLocalCopies(c cacheEntry) int64 {
 	chunkLock := m.chunkLockFor(c.id)
 	chunkLock.Lock()
@@ -3910,7 +3911,7 @@ func (m *Manager) evictLocalCopies(c cacheEntry) int64 {
 	m.forgetEvictedGLCB(c.id)
 	if remaining == 0 {
 		// Persisted BEFORE releasing the chunk lock, so no concurrent
-		// reader or re-warmer observes the file gone while the index still
+		// reader or re-downloader observes the file gone while the index still
 		// claims a positive local footprint.
 		m.updateCloudDiskBytes(c.id, 0)
 		m.lastAccessMu.Lock()
@@ -4031,7 +4032,7 @@ func (m *Manager) uploadedChunkIDs() []chunk.ChunkID {
 // The cloud blob is `chunk.glcb.zst` — a zstd-wrapped GLCB; this function
 // fetches it, decompresses the wrapper into the local data.glcb, and
 // hands the resulting plain GLCB to the local-cursor fast path. The
-// chunk dir becomes the warm cache, structurally identical to a freshly-
+// chunk dir becomes the cached copy, structurally identical to a freshly-
 // sealed local chunk. See docs/obsoleted/vault_redesign.md decisions 6 and 9.
 func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	dir, err := chunk.MkdirChunkDir(m.cfg.Dir, id)
@@ -4068,7 +4069,7 @@ func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCur
 	// the FSM stamped at upload time. A mismatch means the bytes we just
 	// pulled are not the bytes the leader uploaded — corruption in flight,
 	// a clobbered S3 object, or a retention race. Reject so we don't seed
-	// the warm cache with bad bytes that would be re-served forever.
+	// the cached copy with bad bytes that would be re-served forever.
 	if err := m.verifyDownloadedBlob(id, tmpPath); err != nil {
 		_ = os.Remove(tmpPath)
 		return nil, err
@@ -4079,7 +4080,7 @@ func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCur
 	// Serialize the rename + persisted-diskBytes update against a
 	// concurrent eviction sweep, which takes this same per-chunk lock
 	// around its os.Remove + updateCloudDiskBytes(0) pair. Without this,
-	// an in-flight re-warm and an eviction sweep could interleave and
+	// an in-flight re-download and an eviction sweep could interleave and
 	// leave the file and the persisted claim disagreeing. Released before
 	// openLocalGLCBCursor below, which takes its OWN (read) lock on the
 	// same non-reentrant mutex.
@@ -4090,7 +4091,7 @@ func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCur
 		_ = os.Remove(tmpPath)
 		return nil, err
 	}
-	// The chunk is re-warmed — the cloud index's persisted diskBytes must
+	// The chunk is re-downloaded — the cloud index's persisted diskBytes must
 	// reflect the newly-cached local file, not stay at 0 (evicted) or a
 	// stale prior value.
 	m.updateCloudDiskBytes(id, m.computeDiskBytes(id))
@@ -4296,7 +4297,7 @@ func (m *Manager) GetAnnouncer() chunk.MetadataAnnouncer {
 	return m.cfg.Announcer
 }
 
-// SetIntegrityVerifier injects the verifier consulted on every cold-cache
+// SetIntegrityVerifier injects the verifier consulted on every uncached-chunk
 // cloud download. Safe to pass nil to disable verification entirely.
 func (m *Manager) SetIntegrityVerifier(v chunk.IntegrityVerifier) {
 	m.mu.Lock()
@@ -4854,7 +4855,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	}
 
 	// No separate CacheDir mirror — the local data.glcb that we just
-	// uploaded stays in <chunkDir> and IS the warm cache.
+	// uploaded stays in <chunkDir> and IS the cached copy.
 
 	// Take the per-chunk write lock around the FSM announce, the file
 	// removal, AND the metadata transition. Cursors in flight on this
@@ -4882,7 +4883,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 
 	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — they
 	// are redundant with data.glcb. Keep the local data.glcb itself: it is
-	// the warm cache for the now-cloud-backed chunk, read transparently via
+	// the cached copy of the now-cloud-backed chunk, read transparently via
 	// OpenCursor's local-GLCB fast path. Eviction under disk pressure can
 	// delete it later; the cloud blob is authoritative.
 	if err := m.removeLocalDataFiles(id); err != nil {
@@ -4890,7 +4891,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	}
 
 	// Treat the upload itself as an access for eviction purposes — without
-	// this the just-uploaded warm cache has zero lastAccess and the next
+	// this the just-uploaded cached copy has zero lastAccess and the next
 	// TTL sweep would immediately evict a chunk no reader has had a chance
 	// to touch.
 	m.touchLastAccess(id)
@@ -4898,7 +4899,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	// Move metadata from in-memory map to cloud B+ tree index.
 	// The chunk is now cloud-only — remove from Go heap.
 	//
-	// diskBytes stays the LOCAL warm-cache footprint: removeLocalDataFiles
+	// diskBytes stays the LOCAL cached-copy footprint: removeLocalDataFiles
 	// above only deleted the redundant multi-file artifacts, not data.glcb
 	// itself, so the chunk dir's on-disk size right now (computeDiskBytes)
 	// is the honest local claim — NOT blobSize, which is the compressed
@@ -5033,19 +5034,19 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64, digest [32]by
 	}
 
 	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — same
-	// rationale as uploadToCloud: data.glcb itself stays as the warm cache
+	// rationale as uploadToCloud: data.glcb itself stays as the cached copy
 	// for the now-cloud-backed chunk.
 	if err := m.removeLocalDataFiles(id); err != nil {
 		return fmt.Errorf("remove local data files after cloud adopt: %w", err)
 	}
 
 	// Treat the adoption as an access — same rationale as uploadToCloud:
-	// without this the warm cache has zero lastAccess and the next TTL
+	// without this the cached copy has zero lastAccess and the next TTL
 	// sweep would immediately evict it.
 	m.touchLastAccess(id)
 
 	// Same diskBytes/cloudBytes split as uploadToCloud: data.glcb stays as
-	// the local warm cache, so the honest local claim is what's actually on
+	// the local cached copy, so the honest local claim is what's actually on
 	// disk right now, not the compressed blob size.
 	m.mu.Lock()
 	meta := m.metas[id]
@@ -5276,7 +5277,7 @@ func (m *Manager) scanAttrsCloud(id chunk.ChunkID, startPos uint64, fn func(writ
 }
 
 // openCloudCursor opens a cloud-backed chunk for record reads when the
-// in-tree warm cache (<chunkDir>/data.glcb) is absent. The fast path lives
+// in-tree cached copy (<chunkDir>/data.glcb) is absent. The fast path lives
 // in OpenCursor — by the time we get here either the cache was evicted or
 // the chunk was never sealed locally (follower that adopted via FSM).
 //
@@ -5325,7 +5326,7 @@ func (m *Manager) loadCloudBackedChunks() error {
 
 // reconcileCloudIndexLocally reconciles in-memory state against the
 // PERSISTED cloud index: drops local m.metas entries the index also holds —
-// the local data.glcb sticks around as warm cache after upload, but the
+// the local data.glcb sticks around as the cached copy after upload, but the
 // authoritative meta (archived flag, TOC offsets) is the index entry, and
 // without the drop a restart resurrects a stale local-sealed meta that
 // masks the cloud-recorded archived flag — and corrects stale persisted
@@ -5341,7 +5342,7 @@ func (m *Manager) reconcileCloudIndexLocally() {
 // loadCloudBackedChunksFromStore only initializes diskBytes for entries it
 // newly discovers from the cloud store's listing — an entry already in the
 // index is trusted as-is, on the assumption that the in-process
-// eviction/re-warm paths (updateCloudDiskBytes) kept it current. That
+// eviction/re-download paths (updateCloudDiskBytes) kept it current. That
 // assumption breaks on a crash between the local mutation and the paired
 // index update: a crash between eviction's os.Remove and its
 // updateCloudDiskBytes(id, 0) call leaves a stale-positive claim; nothing
@@ -5381,8 +5382,8 @@ func (m *Manager) reconcileCloudDiskBytesAtStartup() {
 }
 
 // dropLocalMetaForCloudBackedChunks removes m.metas entries for any chunk also
-// present in the cloud index. The on-disk data.glcb is preserved as warm
-// cache; only the duplicated in-memory meta goes.
+// present in the cloud index. The on-disk data.glcb is preserved as the
+// cached copy; only the duplicated in-memory meta goes.
 func (m *Manager) dropLocalMetaForCloudBackedChunks() {
 	if m.cloudIdx == nil {
 		return
@@ -5424,7 +5425,7 @@ func (m *Manager) loadCloudBackedChunksFromStore() error {
 			return nil
 		}
 		// If we also have a local entry, the local data.glcb is now the
-		// warm cache for an already-uploaded chunk. Drop the local meta
+		// cached copy of an already-uploaded chunk. Drop the local meta
 		// in favor of the authoritative cloud entry that's about to be
 		// inserted into cloudIdx — the local data.glcb file stays in
 		// place as cache and will be picked up by OpenCursor's local-GLCB
@@ -5464,7 +5465,7 @@ func (m *Manager) loadCloudBackedChunksFromStore() error {
 			// below). Most newly-discovered blobs have no local copy
 			// (0, via computeDiskBytes' ReadDir-miss branch), but a
 			// codec-mismatch cloud-index rebuild can rediscover a blob
-			// whose data.glcb survived on disk as a still-warm cache —
+			// whose data.glcb survived on disk as a still-cached copy —
 			// this stat is what keeps that cache from reporting as
 			// evicted.
 			diskBytes:   m.computeDiskBytes(id),
@@ -5516,7 +5517,7 @@ func (m *Manager) loadCloudBackedChunksFromStore() error {
 // a cloud blob's sealed GLCB footer, bypassing its (unreadable) object
 // metadata. It downloads and unwraps the blob into a transient temp file,
 // mmaps it just long enough to read the layout/TOC meta, and discards it — no
-// warm-cache promotion, no locking side effects. This is the fallback for
+// cached-copy promotion, no locking side effects. This is the fallback for
 // loadCloudBackedChunksFromStore when DecodeObjectMetadata fails; the footer is
 // the source of truth, the object metadata is only a cache.
 func (m *Manager) chunkMetaFromCloudBlobFooter(id chunk.ChunkID, blob blobstore.BlobInfo) (chunk.ChunkMeta, error) {

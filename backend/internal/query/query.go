@@ -906,7 +906,7 @@ func ingestBoundMinPosition(q Query, meta chunk.ChunkMeta, cm chunk.ChunkManager
 	if rank, found, err := im.FindIngestEntryIndex(meta.ID, lower); err == nil && found {
 		return rank, true
 	}
-	// Cold cloud-backed chunks resolve their rank through the chunk manager.
+	// Uncached cloud-backed chunks resolve their rank through the chunk manager.
 	if rank, found, err := cm.FindIngestEntryIndex(meta.ID, lower); err == nil && found {
 		return rank, true
 	}

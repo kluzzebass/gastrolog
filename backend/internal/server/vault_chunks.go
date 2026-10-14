@@ -398,7 +398,7 @@ func (s *VaultServer) GetChunk(
 //
 // Routing: RouteLocal — the handler tries the local node first, then
 // fans out to remote vault-hosting nodes if the chunk has migrated to a
-// vault this node doesn't host. Cross-vault migration (warm → cloud,
+// vault this node doesn't host. Cross-vault migration (local → cloud-backed,
 // etc.) shifts a chunk's owning node, so a single RouteToResourceOwner hop
 // would frequently miss and produce ErrChunkNotFound log spam.
 func (s *VaultServer) GetIndexes(

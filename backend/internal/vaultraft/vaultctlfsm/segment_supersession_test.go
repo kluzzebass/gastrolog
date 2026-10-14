@@ -70,7 +70,7 @@ func TestSegmentSupersededByReplicatedChunk(t *testing.T) {
 
 // TestSegmentSupersededByCloudBackedChunk: a cloud-backed chunk's durable copy
 // is the uploaded object, so it supersedes its segments with no holder at all —
-// the state every home reaches once warm-cache eviction has withdrawn its
+// the state every home reaches once cached-copy eviction has withdrawn its
 // receipt. Before the upload commits, the same zero-holder chunk supersedes
 // nothing.
 func TestSegmentSupersededByCloudBackedChunk(t *testing.T) {

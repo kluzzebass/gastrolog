@@ -1,6 +1,6 @@
 package server_test
 
-// Coverage: the warm-cache budget is a stored expression, resolved at use,
+// Coverage: the cache budget is a stored expression, resolved at use,
 // scoped to cloud-backed vaults. Unset → default; explicit "0" → rejected;
 // non-cloud → left empty.
 
@@ -59,7 +59,7 @@ func TestPutVaultRejectsExplicitZeroCacheBudget(t *testing.T) {
 	}
 }
 
-// A non-cloud vault has no warm cache: cache-budget is neither defaulted nor
+// A non-cloud vault has no cached copies: cache-budget is neither defaulted nor
 // rejected, so an empty value stays empty.
 func TestPutVaultLeavesCacheBudgetUnsetForNonCloudVault(t *testing.T) {
 	client, store, _ := newConfigTestSetup(t)
@@ -78,6 +78,6 @@ func TestPutVaultLeavesCacheBudgetUnsetForNonCloudVault(t *testing.T) {
 		t.Fatalf("PutVault: %v", err)
 	}
 	if got := getStoredVault(t, store, id).CacheBudget; got != "" {
-		t.Fatalf("non-cloud cache-budget = %q, want empty (no warm cache to bound)", got)
+		t.Fatalf("non-cloud cache-budget = %q, want empty (no cached copies to bound)", got)
 	}
 }

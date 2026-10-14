@@ -26,7 +26,7 @@ import (
 //
 // The locator answers where this node's pipeline GLCB for a chunk lives, with
 // no disk or FSM read: a cloud-backed chunk resolves from the cloud index
-// before the resolver is consulted, so the read and warm-cache eviction paths
+// before the resolver is consulted, so the read and cached-copy eviction paths
 // find its pipeline copy through the locator instead.
 type externalGLCBResolverSetter interface {
 	SetExternalGLCBResolver(func(chunk.ChunkID) (string, chunk.ExternalGLCBInfo, bool))

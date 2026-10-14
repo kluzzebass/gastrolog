@@ -13,10 +13,10 @@ import (
 	"gastrolog/internal/glid"
 )
 
-// A cold cloud-backed chunk — sealed, uploaded, local GLCB evicted — must
+// An uncached cloud-backed chunk — sealed, uploaded, local GLCB evicted — must
 // still answer ingest-rank lookups exactly, via ranged reads of the object's
-// ITSI section. This is what turns the histogram's estimated counts for cold
-// chunks into exact ones. The full-blob no-fetch policy stands: these tests
+// ITSI section. This is what turns the histogram's estimated counts for
+// uncached chunks into exact ones. The full-blob no-fetch policy stands: these tests
 // fail if a rank lookup triggers a whole-object download.
 
 // gaugedStore wraps the memory store, counting ranged reads and refusing
@@ -39,9 +39,9 @@ func (s *gaugedStore) DownloadRange(ctx context.Context, key string, off, length
 	return s.Memory.DownloadRange(ctx, key, off, length)
 }
 
-// coldCloudChunk uploads a chunk and evicts its local GLCB, returning the
+// uncachedCloudChunk uploads a chunk and evicts its local GLCB, returning the
 // chunk ID and the ingest timestamps it was built with.
-func coldCloudChunk(t *testing.T, cm *Manager, records int) (chunk.ChunkID, []time.Time) {
+func uncachedCloudChunk(t *testing.T, cm *Manager, records int) (chunk.ChunkID, []time.Time) {
 	t.Helper()
 	base := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
 	stamps := make([]time.Time, records)
@@ -81,7 +81,7 @@ func coldCloudChunk(t *testing.T, cm *Manager, records int) (chunk.ChunkID, []ti
 		t.Fatal("no sealed chunk to upload")
 	}
 
-	// Make it cold: drop the warm-cache copy the upload left behind.
+	// Make it uncached: drop the cached copy the upload left behind.
 	cm.evictMappedGLCB(id)
 	if err := os.Remove(cm.glcbPath(id)); err != nil {
 		t.Fatalf("evict local GLCB: %v", err)
@@ -92,7 +92,7 @@ func coldCloudChunk(t *testing.T, cm *Manager, records int) (chunk.ChunkID, []ti
 	return id, stamps
 }
 
-func TestColdChunkRankResolvesViaRangedReads(t *testing.T) {
+func TestUncachedChunkRankResolvesViaRangedReads(t *testing.T) {
 	t.Parallel()
 	store := &gaugedStore{Memory: blobstore.NewMemory()}
 	cm, err := NewManager(Config{
@@ -105,7 +105,7 @@ func TestColdChunkRankResolvesViaRangedReads(t *testing.T) {
 	}
 	defer cm.Close()
 
-	id, stamps := coldCloudChunk(t, cm, 300)
+	id, stamps := uncachedCloudChunk(t, cm, 300)
 	objSize := objectSizeInStore(t, store.Memory)
 	store.fullGets = 0 // ignore upload-era traffic; the policy governs reads
 
@@ -115,7 +115,7 @@ func TestColdChunkRankResolvesViaRangedReads(t *testing.T) {
 			t.Fatalf("FindIngestEntryIndex(probe %d): %v", i, err)
 		}
 		if !ok {
-			t.Fatalf("probe %d unresolved; cold chunk contributes estimates again", i)
+			t.Fatalf("probe %d unresolved; uncached chunk contributes estimates again", i)
 		}
 		want := map[int]uint64{0: 0, 1: 150, 2: 299}[i]
 		if rank != want {
@@ -151,7 +151,7 @@ func TestColdChunkRankResolvesViaRangedReads(t *testing.T) {
 // An archived object cannot be range-read. The lookup must degrade to
 // not-found — the histogram keeps its labeled estimate — never error out of
 // the bucket loop.
-func TestColdChunkRankOnArchivedObject(t *testing.T) {
+func TestUncachedChunkRankOnArchivedObject(t *testing.T) {
 	t.Parallel()
 	store := &gaugedStore{Memory: blobstore.NewMemory()}
 	cm, err := NewManager(Config{
@@ -164,7 +164,7 @@ func TestColdChunkRankOnArchivedObject(t *testing.T) {
 	}
 	defer cm.Close()
 
-	id, stamps := coldCloudChunk(t, cm, 20)
+	id, stamps := uncachedCloudChunk(t, cm, 20)
 	if err := store.Archive(context.Background(), cm.blobKey(id), "GLACIER"); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
@@ -178,8 +178,8 @@ func TestColdChunkRankOnArchivedObject(t *testing.T) {
 	}
 }
 
-// A local-only vault must be untouched by the cold branch.
-func TestColdRankBranchIgnoresLocalOnlyVault(t *testing.T) {
+// A local-only vault must be untouched by the uncached branch.
+func TestUncachedRankBranchIgnoresLocalOnlyVault(t *testing.T) {
 	t.Parallel()
 	cm, err := NewManager(Config{
 		Dir: t.TempDir(), Now: time.Now,

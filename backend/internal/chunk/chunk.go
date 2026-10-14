@@ -85,7 +85,7 @@ type ChunkManager interface {
 
 	// HasLocalContent reports whether the chunk's record content is fully
 	// available on local disk — true for sealed local file chunks and for
-	// cloud-backed chunks whose GLCB blob is already in the warm cache. False for
+	// cloud-backed chunks whose GLCB blob is already a local cached copy. False for
 	// cloud-backed chunks that would require an S3 download. Callers that perform
 	// content-bearing reads purely as a side-effect (notably histogram
 	// level breakdowns) gate on this so that a histogram refresh never
@@ -224,7 +224,7 @@ type ChunkIndexBuilder interface {
 // CloudBlobChecker probes a chunk's authoritative cloud blob (independent of
 // any local cache copy). Implemented by managers backed by a cloud store; the
 // reconcile sweep uses it to detect blobs deleted out-of-band by lifecycle
-// rules without being misled by a still-present warm cache. Returns nil if
+// rules without being misled by a still-present cached copy. Returns nil if
 // the blob is reachable, ErrChunkSuspect if it's missing, or another error
 // for transient problems.
 type CloudBlobChecker interface {
@@ -355,7 +355,7 @@ type CloudBackedChunkInfo struct {
 	// CloudBytes is the compressed cloud object size — the only size fact
 	// the FSM actually carries for an uploaded chunk (AnnounceUpload's
 	// param). There is deliberately no DiskBytes here: a node registering
-	// from metadata alone has no local copy yet, so its local warm-cache
+	// from metadata alone has no local copy yet, so its local cached-copy
 	// footprint starts at 0 regardless of what the leader's blob is sized
 	// at.
 	CloudBytes      int64
@@ -428,14 +428,14 @@ type AttrsProjectionSource interface {
 	ProjectAttrs(pos uint32) (writeTS time.Time, attrs Attributes, err error)
 }
 
-// SequentialPrewarmer is implemented by cursors whose backing store benefits
-// from a sequential page-cache warm before a full scan. mmap major faults pin
+// SequentialPrefetcher is implemented by cursors whose backing store benefits
+// from a sequential page-cache prefetch before a full scan. mmap major faults pin
 // scheduler Ps inside non-preemptible kernel fault handlers; a full-chunk
-// scan (retention fan-out) cold-faulting through a mapping stalls the whole
-// runtime under disk saturation. PrewarmSequential moves that I/O onto
+// scan (retention fan-out) major-faulting through a mapping stalls the whole
+// runtime under disk saturation. PrefetchSequential moves that I/O onto
 // P-releasing syscalls; best-effort and idempotent.
-type SequentialPrewarmer interface {
-	PrewarmSequential()
+type SequentialPrefetcher interface {
+	PrefetchSequential()
 }
 
 // RecordBatchReader extends RecordCursor with batched forward reads for

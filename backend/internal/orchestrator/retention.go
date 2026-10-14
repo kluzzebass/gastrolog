@@ -46,8 +46,8 @@ const (
 	// with expiry). One stream at a time keeps the burst flat; total drain
 	// time is unchanged because the disk was the constraint anyway.
 	//
-	// The count does not rest on the fan-out's sequential prewarm: the
-	// reason above holds with or without warming. Single-stream does keep
+	// The count does not rest on the fan-out's sequential prefetch: the
+	// reason above holds with or without prefetching. Single-stream does keep
 	// one drain's madvise readahead from being evicted by a competing
 	// drain — a bonus, not the basis for the count.
 	retentionChunkWorkers = 1
@@ -309,7 +309,7 @@ func (o *Orchestrator) retentionSweepAll() {
 
 	// Cache eviction does NOT run here: it is its own scheduled job (see
 	// cache_eviction.go, cron "23 * * * * *"), operator-visible in the Jobs
-	// inspector as its own unit. It is a node-local warm-cache concern, not
+	// inspector as its own unit. It is a node-local cached-copy concern, not
 	// a retention decision.
 }
 
@@ -1641,14 +1641,14 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID, reason chunk.Rete
 }
 
 func (r *retentionRunner) fanOutChunkRecords(ctx context.Context, cur chunk.RecordCursor, id chunk.ChunkID, jobs chan<- chunk.Record) int {
-	// Full-chunk scan ahead: warm the page cache via madvise readahead first
-	// so the scan's mmap accesses are minor faults. Cold-faulting a whole GLCB
+	// Full-chunk scan ahead: prefetch into the page cache via madvise readahead
+	// first so the scan's mmap accesses are minor faults. Major-faulting a whole GLCB
 	// through the mapping pins scheduler Ps and stalls the runtime under
 	// disk saturation — measured as Raft election storms during retention
 	// expiry. Skipped when the fan-out already aborted.
 	if ctx.Err() == nil {
-		if warm, ok := cur.(chunk.SequentialPrewarmer); ok {
-			warm.PrewarmSequential()
+		if pf, ok := cur.(chunk.SequentialPrefetcher); ok {
+			pf.PrefetchSequential()
 		}
 	}
 	if fanout, ok := cur.(chunk.RecordFanOutSource); ok && fanout.RecordCount() > 0 {

@@ -1411,10 +1411,10 @@ func TestCloudClusterReconcileSkipsTombstoned(t *testing.T) {
 	}
 }
 
-// --- Warm cache and eviction tests ---
+// --- Cached copy and eviction tests ---
 //
-// The chunk dir itself is the warm cache; the cache-population invariant lives
+// The chunk dir itself is the cached copy; the cache-population invariant lives
 // next to OpenCursor in the chunk/file package (TestUploadKeepsLocalGLCB,
-// TestCacheHitAvoidsCloudDownload, TestColdCacheDownloadsToChunkDir,
-// TestDeleteRemovesWarmCache). Eviction against that layout is not covered
+// TestCacheHitAvoidsCloudDownload, TestUncachedChunkDownloadsToChunkDir,
+// TestDeleteRemovesCachedCopy). Eviction against that layout is not covered
 // here yet.
