@@ -56,6 +56,19 @@ func TestPlacementEventDelegation(t *testing.T) {
 		}
 	})
 
+	for _, kind := range []raftfsm.NotifyKind{raftfsm.NotifyNodeConfigPut, raftfsm.NotifyNodeConfigDeleted} {
+		t.Run("node_config_change_wakes_protocol_level_raiser", func(t *testing.T) {
+			t.Parallel()
+			d := newTestDispatcher(&mockOrch{}, &stubCfgStore{}, &captureHandler{})
+			wakes := 0
+			d.setProtocolLevelWake(func() { wakes++ })
+			d.Handle(raftfsm.Notification{Kind: kind, ID: glid.New()})
+			if wakes != 1 {
+				t.Fatalf("notification %d: want 1 protocol-level wake, got %d", kind, wakes)
+			}
+		})
+	}
+
 	t.Run("node_config_delete_wakes_placement", func(t *testing.T) {
 		t.Parallel()
 		mo := &mockOrch{}

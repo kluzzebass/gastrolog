@@ -14,6 +14,7 @@ import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/raftlevel"
 
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/protobuf/proto"
@@ -388,6 +389,11 @@ type FSM struct {
 	// onAckSegmentHolder fan-out: fires after a new holder is recorded for a segment.
 	onAckSegmentHolder map[int]func(glid.GLID)
 	onAckHolderSeq     int
+
+	// onUnapplicable is what Apply calls on an entry it cannot apply when the
+	// FSM serves a Raft group by itself. Nested in a vaultraft.FSM, the
+	// outer FSM decides instead, from ApplyCommand's ErrUnknownCommand.
+	onUnapplicable raftlevel.Unapplicable
 }
 
 // New creates an empty chunk metadata FSM.
@@ -400,7 +406,16 @@ func New() *FSM {
 		segmentResume:     make(map[glid.GLID]uint32),
 		segmentChunks:     make(map[glid.GLID][]chunk.ChunkID),
 		releasedSegments:  make(map[glid.GLID]uint64),
+		onUnapplicable:    raftlevel.FailStop(nil),
 	}
+}
+
+// SetOnUnapplicable sets what Apply calls on an entry it cannot apply, in
+// place of raftlevel.FailStop logging to standard error.
+func (f *FSM) SetOnUnapplicable(fn raftlevel.Unapplicable) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onUnapplicable = fn
 }
 
 var _ hraft.FSM = (*FSM)(nil)
@@ -823,20 +838,34 @@ func (f *FSM) Count() int {
 // Post-apply subscriber callbacks (onCreate, onUpload, onSeal, the receipt-
 // protocol delete hooks, …) are invoked OUTSIDE the FSM mutex so that
 // potentially-slow filesystem operations don't block other Apply calls.
+//
+// An entry this binary cannot apply — undecodable, or of a command type it
+// does not know — goes to the unapplicable hook and changes no state.
 func (f *FSM) Apply(log *hraft.Log) any {
-	if len(log.Data) == 0 {
-		return errors.New("empty chunk FSM command")
-	}
 	var cmd gastrologv1.VaultCtlCommand
 	if err := proto.Unmarshal(log.Data, &cmd); err != nil {
-		return fmt.Errorf("vaultctlfsm: decode command: %w", err)
+		return f.unapplicable(log.Index, fmt.Errorf("vaultctlfsm: %w: %w", raftlevel.ErrUndecodableCommand, err))
 	}
-	return f.ApplyCommand(&cmd)
+	result := f.ApplyCommand(&cmd)
+	if err, ok := result.(error); ok && errors.Is(err, raftlevel.ErrUnknownCommand) {
+		return f.unapplicable(log.Index, err)
+	}
+	return result
+}
+
+func (f *FSM) unapplicable(index uint64, reason error) error {
+	f.mu.RLock()
+	hook := f.onUnapplicable
+	f.mu.RUnlock()
+	hook("vault-ctl", index, reason)
+	return reason
 }
 
 // ApplyCommand applies an already-decoded VaultCtlCommand. The outer
 // vaultraft FSM calls this directly with the nested command from a
 // VaultScopedCommand, avoiding a redundant re-marshal/unmarshal round-trip.
+// A command type the FSM does not handle changes no state and returns an
+// error wrapping raftlevel.ErrUnknownCommand.
 func (f *FSM) ApplyCommand(cmd *gastrologv1.VaultCtlCommand) any {
 	result, fx := f.applyLocked(cmd)
 	fx.fire()
@@ -1000,7 +1029,6 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 	)
 
 	f.mu.Lock()
-	f.ready = true
 	switch c := cmd.GetCommand().(type) {
 	case *gastrologv1.VaultCtlCommand_CreateChunk:
 		result = f.applyCreate(c.CreateChunk)
@@ -1071,9 +1099,11 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 		var ok bool
 		result, fx, ok = f.tryApplySegmentPipelineLocked(cmd)
 		if !ok {
-			result = fmt.Errorf("unknown chunk FSM command: %T", cmd.GetCommand())
+			f.mu.Unlock()
+			return fmt.Errorf("vaultctlfsm: %w", raftlevel.UnknownCommand(cmd)), applyEffects{}
 		}
 	}
+	f.ready = true
 	f.attachApplyCallbacks(&fx)
 	f.mu.Unlock()
 

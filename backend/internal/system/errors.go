@@ -19,4 +19,8 @@ var (
 	// whose specific cause did not survive the wire: the command was well
 	// formed but the leader's state did not permit it.
 	ErrCommandRejected = errors.New("command rejected by the leader")
+
+	// ErrProtocolLevelLowered is returned when a command would lower the
+	// cluster's active protocol level.
+	ErrProtocolLevelLowered = errors.New("active protocol level cannot be lowered")
 )

@@ -39,6 +39,11 @@ type Runtime struct {
 
 	// UI state.
 	SetupWizardDismissed bool `json:"setup_wizard_dismissed,omitempty"`
+
+	// ProtocolLevel is the cluster's committed active protocol level: the
+	// highest level a Raft command may need before it is proposed. Zero
+	// until the cluster commits one.
+	ProtocolLevel uint32 `json:"protocolLevel,omitempty"`
 }
 
 // PlacementsFor returns a vault's placements from the runtime map, which the

@@ -92,6 +92,9 @@ type NodeConfig struct {
 	// entered. Zero if the State has never been explicitly set (e.g.,
 	// legacy record).
 	StateSince time.Time `json:"stateSince,omitzero"`
+	// ProtocolLevel is the protocol level of the binary the node last
+	// started with. Zero when the node has not reported one.
+	ProtocolLevel uint32 `json:"protocolLevel,omitempty"`
 }
 
 // EffectiveState returns the node's State with the legacy/zero-value

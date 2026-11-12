@@ -5689,6 +5689,15 @@ export class NodeConfig extends Message<NodeConfig> {
    */
   stateSince?: Timestamp;
 
+  /**
+   * Protocol level of the binary the node last started with: the highest
+   * Raft command level that binary can apply. Zero when the node has not
+   * reported one.
+   *
+   * @generated from field: uint32 protocol_level = 5;
+   */
+  protocolLevel = 0;
+
   constructor(data?: PartialMessage<NodeConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -5701,6 +5710,7 @@ export class NodeConfig extends Message<NodeConfig> {
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "state", kind: "enum", T: proto3.getEnumType(NodeState) },
     { no: 4, name: "state_since", kind: "message", T: Timestamp },
+    { no: 5, name: "protocol_level", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeConfig {

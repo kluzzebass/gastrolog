@@ -61,6 +61,7 @@ type Store struct {
 	clusterTLS           *system.ClusterTLS                    // runtime: cluster identity
 	setupWizardDismissed bool                                  // runtime: UI state
 	logLevels            *system.LogLevelConfig                // operator-controlled: nil until first PutLogLevels
+	protocolLevel        uint32                                // runtime: active protocol level, never lowered
 }
 
 var _ system.Store = (*Store)(nil)
@@ -97,7 +98,7 @@ func (s *Store) isEmpty() bool {
 		len(s.nodeStorageConfigs) == 0 &&
 		len(s.nodes) == 0 && len(s.removedNodes) == 0 &&
 		!s.ss.hasServerSettings && s.clusterTLS == nil &&
-		s.logLevels == nil
+		s.logLevels == nil && s.protocolLevel == 0
 }
 
 // Barrier is a no-op: this store is the state, so there is nothing it could
@@ -154,6 +155,7 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 		rt.ClusterTLS = &c
 	}
 	rt.SetupWizardDismissed = s.setupWizardDismissed
+	rt.ProtocolLevel = s.protocolLevel
 
 	// Runtime: vault placements — the owner. VaultConfig carries no
 	// mirrored copy.
@@ -1279,5 +1281,26 @@ func (s *Store) SetSetupWizardDismissed(_ context.Context, dismissed bool) error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.setupWizardDismissed = dismissed
+	return nil
+}
+
+func (s *Store) GetProtocolLevel(_ context.Context) (uint32, error) {
+	return s.ProtocolLevel(), nil
+}
+
+// ProtocolLevel returns the active protocol level.
+func (s *Store) ProtocolLevel() uint32 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.protocolLevel
+}
+
+func (s *Store) SetProtocolLevel(_ context.Context, level uint32) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if level < s.protocolLevel {
+		return fmt.Errorf("%w: active level is %d, refused %d", system.ErrProtocolLevelLowered, s.protocolLevel, level)
+	}
+	s.protocolLevel = level
 	return nil
 }
