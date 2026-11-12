@@ -5,12 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime/pprof"
 	"slices"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -80,6 +82,34 @@ type orchRelNode struct {
 	// store, with a test-held pause after a read (holdNextLoad).
 	loader *holdingLoader
 	cancel context.CancelFunc
+	// servingOrch answers the segment and GLCB pulls the cluster server
+	// receives in pipeline mode: the orchestrator startNode last built, kept
+	// across stopNode because the cluster server outlives it. pullRefusal,
+	// when set, answers every pull with its error instead (refusePulls).
+	servingOrch atomic.Pointer[orchestrator.Orchestrator]
+	pullRefusal atomic.Pointer[error]
+}
+
+func (n *orchRelNode) serveSegmentPull(vaultID, segmentID glid.GLID, w io.Writer) error {
+	if refusal := n.pullRefusal.Load(); refusal != nil {
+		return *refusal
+	}
+	o := n.servingOrch.Load()
+	if o == nil {
+		return fmt.Errorf("%s has not started", n.label)
+	}
+	return o.ServeSegmentPull(vaultID, segmentID, w)
+}
+
+func (n *orchRelNode) serveChunkGLCBPull(vaultID glid.GLID, chunkID chunk.ChunkID, w io.Writer) error {
+	if refusal := n.pullRefusal.Load(); refusal != nil {
+		return *refusal
+	}
+	o := n.servingOrch.Load()
+	if o == nil {
+		return fmt.Errorf("%s has not started", n.label)
+	}
+	return o.ServeChunkGLCBPull(vaultID, chunkID, w)
 }
 
 // orchRelHarness boots N in-process nodes, each running a real orchestrator
@@ -145,6 +175,9 @@ type orchRelHarness struct {
 	// levels, when non-nil, replaces the protocol-level table every node's
 	// vault-ctl gate checks against (withProtocolLevels).
 	levels raftlevel.Table
+	// alarmNow, when non-nil, is the clock every node's alarm collector
+	// measures suppression windows against (withAlarmClock).
+	alarmNow func() time.Time
 }
 
 // pipelineClusterOpts carries the pipeline tuning for withPipelineCluster.
@@ -301,6 +334,12 @@ func withPipelineCluster(completePolicy segmentation.CompletePolicy, chunkMaxRec
 // place of this binary's level table.
 func withProtocolLevels(table raftlevel.Table) orchRelOption {
 	return func(h *orchRelHarness) { h.levels = table }
+}
+
+// withAlarmClock runs every node's alarm collector on now, so a test can carry
+// a raised condition past its type's DelayOn without waiting it out.
+func withAlarmClock(now func() time.Time) orchRelOption {
+	return func(h *orchRelHarness) { h.alarmNow = now }
 }
 
 // withSharedCloudStore makes every node's "memory" cloud service one shared
@@ -641,6 +680,10 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 		}
 		// Initialize multiraft transport.
 		_ = srv.Transport()
+		if h.pipeline != nil {
+			srv.SetSegmentPullServer(node.serveSegmentPull)
+			srv.SetChunkGLCBPullServer(node.serveChunkGLCBPull)
+		}
 		node.clusterSrv = srv
 		h.nodes[id] = node
 	}
@@ -838,6 +881,9 @@ func (h *orchRelHarness) startNode(id string) {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})).With("node", n.label)
 	}
 	n.alerts = alert.New()
+	if h.alarmNow != nil {
+		n.alerts = alert.NewWithClock(h.alarmNow)
+	}
 	orchCfg := orchestrator.Config{
 		LocalNodeID: id,
 		Logger:      logger,
@@ -932,10 +978,8 @@ func (h *orchRelHarness) startNode(id string) {
 		}
 		return future.Index(), nil
 	})
-	if h.pipeline != nil {
-		n.clusterSrv.SetSegmentPullServer(orch.ServeSegmentPull)
-		n.clusterSrv.SetChunkGLCBPullServer(orch.ServeChunkGLCBPull)
-	}
+	n.servingOrch.Store(orch)
+	n.pullRefusal.Store(nil)
 	n.factories = factories
 
 	ctx := context.Background()
