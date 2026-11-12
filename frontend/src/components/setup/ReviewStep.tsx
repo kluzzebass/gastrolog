@@ -9,6 +9,7 @@ interface ReviewStepProps {
   rotation: RotationData;
   retention: RetentionData;
   ingester: IngesterData;
+  storagePath: string;
   namePlaceholders?: {
     vault: string;
     rotation: string;
@@ -95,6 +96,7 @@ export function ReviewStep({
   rotation,
   retention,
   ingester,
+  storagePath,
   namePlaceholders,
 }: Readonly<ReviewStepProps>) {
   const c = useThemeClass(dark);
@@ -117,7 +119,7 @@ export function ReviewStep({
         <Row label="Name" value={vault.name || namePlaceholders?.vault || "default"} dark={dark} />
         <Row label="Type" value={vault.type} dark={dark} />
         {vault.type === "file" && (
-          <Row label="Directory" value={vault.dir} dark={dark} />
+          <Row label="Storage Directory" value={storagePath} dark={dark} />
         )}
       </Section>
 

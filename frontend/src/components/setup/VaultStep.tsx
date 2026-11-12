@@ -12,6 +12,7 @@ interface VaultStepProps {
   data: VaultData;
   onChange: (data: VaultData) => void;
   namePlaceholder?: string;
+  storagePathPlaceholder: string;
 }
 
 const VAULT_TYPES = [
@@ -19,7 +20,7 @@ const VAULT_TYPES = [
   { value: "memory", label: "Memory (non-persistent)" },
 ];
 
-export function VaultStep({ dark, data, onChange, namePlaceholder }: Readonly<VaultStepProps>) {
+export function VaultStep({ dark, data, onChange, namePlaceholder, storagePathPlaceholder }: Readonly<VaultStepProps>) {
   const c = useThemeClass(dark);
   return (
     <div className="flex flex-col gap-5">
@@ -60,16 +61,17 @@ export function VaultStep({ dark, data, onChange, namePlaceholder }: Readonly<Va
 
       {data.type === "file" && (
         <FormField
-          label="Directory"
-          description="Directory where log chunks will be stored."
+          label="Storage Directory"
+          description="Every node gets a file storage at this path. A relative path resolves against each node's home directory."
           dark={dark}
         >
           <TextInput
             value={data.dir}
             onChange={(v) => onChange({ ...data, dir: v })}
+            placeholder={storagePathPlaceholder}
             dark={dark}
             mono
-            examples={["/var/log/gastrolog/data", "/vaults"]}
+            examples={["/var/lib/gastrolog", "storage/logs"]}
           />
         </FormField>
       )}

@@ -6,7 +6,9 @@ import { useToast } from "../Toast";
 import { systemClient } from "../../api/client";
 import { VaultType } from "../../api/gen/gastrolog/v1/system_pb";
 import { usePutSetupSettings } from "../../api/hooks/useSettings";
-import { useGenerateName } from "../../api/hooks/useSystem";
+import { useConfig, useGenerateName } from "../../api/hooks/useSystem";
+import { useSetNodeStorageConfig } from "../../api/hooks/useStorage";
+import { defaultStoragePath, planWizardStorage } from "./wizardStorage";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "../settings/Buttons";
 import { WelcomeStep } from "./WelcomeStep";
@@ -68,6 +70,8 @@ export function SetupWizard() {
   const { addToast } = useToast();
   const queryClient = useQueryClient();
   const putSetupSettings = usePutSetupSettings();
+  const setNodeStorage = useSetNodeStorageConfig();
+  const { data: config } = useConfig();
 
   const [step, setStep] = useState(0);
   const [creating, setCreating] = useState(false);
@@ -84,6 +88,7 @@ export function SetupWizard() {
   // Generate petname placeholders for each entity on mount.
   const [namePlaceholders, setNamePlaceholders] = useState({
     vault: "",
+    storage: "",
     rotation: "",
     retention: "",
     ingester: "",
@@ -91,23 +96,26 @@ export function SetupWizard() {
 
   useEffect(() => {
     async function generateNames() {
-      const [vn, rn, ren, inn] = await Promise.all([
+      const [vn, sn, rn, ren, inn] = await Promise.all([
+        generateName.mutateAsync(),
         generateName.mutateAsync(),
         generateName.mutateAsync(),
         generateName.mutateAsync(),
         generateName.mutateAsync(),
       ]);
-      setNamePlaceholders({ vault: vn, rotation: rn, retention: ren, ingester: inn });
+      setNamePlaceholders({ vault: vn, storage: sn, rotation: rn, retention: ren, ingester: inn });
     }
     generateNames();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const storageName = namePlaceholders.storage || "default";
+  const storagePathDefault = defaultStoragePath(storageName);
+  const storagePath = vault.dir.trim() || storagePathDefault;
+
   const canProceed = () => {
     switch (step) {
       case 0: return true; // Welcome
-      case 1: // Vault
-        if (vault.type === "file" && !vault.dir.trim()) return false;
-        return true;
+      case 1: return true; // Vault (empty storage directory takes the default)
       case 2: return true; // Rotation (defaults are fine)
       case 3: return true; // Retention (defaults are fine)
       case 4: return !!ingester.type; // Need a type selected
@@ -131,6 +139,20 @@ export function SetupWizard() {
 
     const vaultName = vault.name || namePlaceholders.vault || "default";
     const ingesterName = ingester.name || namePlaceholders.ingester || ingester.type;
+
+    const isFileVault = vault.type === "file";
+    const vaultType = isFileVault ? VaultType.FILE : VaultType.MEMORY;
+    const nodeConfigs = config?.nodeConfigs ?? [];
+    const nodeStorageConfigs = config?.nodeStorageConfigs ?? [];
+
+    // Gives every node a file storage the file vault's class matches, and
+    // resolves to that class; a memory vault needs none.
+    const provisionStorage = async (): Promise<number> => {
+      if (!isFileVault) return 0;
+      const plan = planWizardStorage(nodeConfigs, nodeStorageConfigs, { name: storageName, path: storagePath });
+      await Promise.all(plan.updates.map((u) => setNodeStorage.mutateAsync(u)));
+      return plan.storageClass;
+    };
 
     // Pre-compute IDs and derived values outside try/catch so the React
     // Compiler can analyze conditional/logical expressions (it can't
@@ -177,14 +199,15 @@ export function SetupWizard() {
       // 1. Create independent policies in parallel.
       await Promise.all(policyPromises);
 
-      // 2. Create vault with the storage shape inline.
+      // 2. Create the vault on storage every node offers.
+      const storageClass = await provisionStorage();
       await systemClient.putVault({
         config: {
           id: vaultIdBytes,
           name: vaultName,
           enabled: true,
-          type: VaultType.FILE,
-          storageClass: 1,
+          type: vaultType,
+          storageClass,
           replicationFactor: 1,
           rotationPolicyId: hasRotation ? rotationIdBytes : new Uint8Array(0),
           retentionRules: hasRetention
@@ -298,7 +321,13 @@ export function SetupWizard() {
             <WelcomeStep dark={dark} onNext={() => setStep(1)} />
           )}
           {step === 1 && (
-            <VaultStep dark={dark} data={vault} onChange={setVault} namePlaceholder={namePlaceholders.vault} />
+            <VaultStep
+              dark={dark}
+              data={vault}
+              onChange={setVault}
+              namePlaceholder={namePlaceholders.vault}
+              storagePathPlaceholder={storagePathDefault}
+            />
           )}
           {step === 2 && (
             <RotationPolicyStep
@@ -326,6 +355,7 @@ export function SetupWizard() {
               rotation={rotation}
               retention={retention}
               ingester={ingester}
+              storagePath={storagePath}
               namePlaceholders={namePlaceholders}
             />
           )}

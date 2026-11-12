@@ -29,7 +29,8 @@ describe("setup wizard policy steps", () => {
     const { getAllByText, queryByText, getByText } = render(
       <ReviewStep
         dark
-        vault={{ name: "", type: "file", storageClass: "", path: "", memoryBudget: "", nodeId: "" } as never}
+        vault={{ name: "", type: "file", dir: "" }}
+        storagePath="storage/default"
         rotation={rotation}
         retention={retention}
         ingester={{ type: "", name: "", params: {} } as never}
