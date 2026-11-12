@@ -93,10 +93,11 @@ func (o *Orchestrator) pipelineRootCandidates(sys *system.System, vaultID glid.G
 // into root, so a placement change — the vault moving to another storage on
 // this node, the node becoming or ceasing to be a home — orphans nothing. A
 // home takes every area. A node that only originates segments for the vault
-// takes working/ and completed/, the areas it serves and publishes from; a
-// former home's head/ and chunks/ stay where they are, as they are no longer
-// this node's to hold, and the released-segment sweep purges their staging
-// copies on every candidate root.
+// takes working/ and completed/, the areas it publishes from; a former home's
+// head/ and chunks/ stay where they are, served from there until the new homes
+// hold them. The released-segment sweep purges head/ copies once their
+// segments are released, and the chunk tombstone sweep deletes chunks/ copies
+// once the placement holds those chunks (purgeFormerHomeChunkCopies).
 //
 // The pipeline must not be registered for the vault while this runs: the
 // moved files are recovered (working/), republished (completed/) and served

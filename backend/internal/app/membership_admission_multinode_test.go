@@ -96,7 +96,7 @@ func newAdmissionNode(t *testing.T, ca tlsutil.CAKeyPair, bootstrap bool) *admis
 
 	var gate membershipGate
 	n := &admissionNode{id: id, srv: srv, raft: r, store: store, tls: ctls, gate: &gate}
-	n.remove = makeRemoveNodeFunc(srv, store, &gate, id, discardLogger())
+	n.remove = makeRemoveNodeFunc(srv, store, nil, &gate, id, discardLogger())
 	n.setSuffrage = makeSetNodeSuffrageFunc(srv, store, &gate, id, nil, discardLogger())
 
 	if err := srv.Start(); err != nil {

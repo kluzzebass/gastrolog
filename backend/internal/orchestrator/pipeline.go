@@ -18,6 +18,7 @@ import (
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/collection"
 	"gastrolog/internal/pipeline/distribution"
+	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
@@ -29,7 +30,11 @@ import (
 
 // ServeSegmentPull streams a locally-held completed segment to w for a remote
 // collector. Wired to the cluster PullSegment RPC handler so home nodes can
-// fetch segments this node originated or already holds (Rubicon C).
+// fetch segments this node originated or already holds (Rubicon C). A segment
+// the pipeline cannot serve — the vault is not registered here, or registered
+// under another root since a placement change — is served from any root the
+// node could hold the vault's files under: a former home's head/ copy can be
+// the only reachable copy of a segment no chunk covers yet.
 func (o *Orchestrator) ServeSegmentPull(vaultID, segmentID glid.GLID, w io.Writer) error {
 	o.mu.RLock()
 	pl := o.pipeline
@@ -37,7 +42,31 @@ func (o *Orchestrator) ServeSegmentPull(vaultID, segmentID glid.GLID, w io.Write
 	if pl == nil {
 		return errors.New("pipeline not initialized")
 	}
-	return translateServePullError(pl.ServePull(distribution.PullRequest{VaultID: vaultID, SegmentID: segmentID, Dest: w}))
+	err := translateServePullError(pl.ServePull(distribution.PullRequest{VaultID: vaultID, SegmentID: segmentID, Dest: w}))
+	if !errors.Is(err, collection.ErrSegmentUnavailable) {
+		return err
+	}
+	path, ok := o.keptSegmentPath(vaultID, segmentID)
+	if !ok {
+		return err
+	}
+	return translateServePullError(distribution.StreamSegment(path, w))
+}
+
+// keptSegmentPath finds a copy of the segment in head/, completed/ or
+// pre-head/ under any pipeline root this node could hold the vault's files
+// under.
+func (o *Orchestrator) keptSegmentPath(vaultID, segmentID glid.GLID) (string, bool) {
+	sys, err := o.loadSystem(context.Background())
+	if err != nil {
+		return "", false
+	}
+	for _, root := range o.pipelineRootCandidates(sys, vaultID) {
+		if path, ok := paths.FindSegment(root, segmentID, paths.AreaHead, paths.AreaCompleted, paths.AreaPreHead); ok {
+			return path, true
+		}
+	}
+	return "", false
 }
 
 // translateServePullError maps the distribution store's "cannot serve this
@@ -59,21 +88,47 @@ func translateServePullError(err error) error {
 }
 
 // ServeChunkGLCBPull streams a locally-held sealed chunk GLCB to a peer home
-// recovering a missing replica. Serves straight from the pipeline chunk root;
-// the puller verifies seal metadata before promoting, so no integrity work
-// happens here.
+// recovering a missing replica. A home serves from its pipeline chunk root; a
+// node that is no longer a home — a placement change replaced it — serves the
+// copy it kept under any root it could hold the vault's files under, since it
+// can be the chunk's only holder until the new homes have pulled it. The
+// puller verifies seal metadata before promoting, so no integrity work happens
+// here.
 func (o *Orchestrator) ServeChunkGLCBPull(vaultID glid.GLID, chunkID chunk.ChunkID, w io.Writer) error {
-	root, ok := o.pipelineVaultChunkRoot(vaultID)
-	if !ok {
-		return fmt.Errorf("vault %s is not a pipeline home on this node", vaultID)
+	if refusal := o.glcbServeRefusal.Load(); refusal != nil {
+		return *refusal
 	}
-	f, err := os.Open(filepath.Clean(chunking.ChunkGLCBPath(root, chunkID)))
+	path, err := o.localGLCBPath(vaultID, chunkID)
+	if err != nil {
+		return err
+	}
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return err
 	}
 	defer func() { _ = f.Close() }()
 	_, err = io.Copy(w, f)
 	return err
+}
+
+// localGLCBPath finds this node's copy of a sealed chunk's GLCB: in the home
+// chunk root when the node is a home, otherwise in the chunks/ of any pipeline
+// root it could hold the vault's files under.
+func (o *Orchestrator) localGLCBPath(vaultID glid.GLID, chunkID chunk.ChunkID) (string, error) {
+	if root, ok := o.pipelineVaultChunkRoot(vaultID); ok {
+		return chunking.ChunkGLCBPath(root, chunkID), nil
+	}
+	sys, err := o.loadSystem(context.Background())
+	if err != nil {
+		return "", fmt.Errorf("vault %s is not a pipeline home on this node and its config is unavailable: %w", vaultID, err)
+	}
+	for _, root := range o.pipelineRootCandidates(sys, vaultID) {
+		path := chunking.ChunkGLCBPath(pipelineChunkRoot(root), chunkID)
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("chunk %s of vault %s: %w", chunkID, vaultID, os.ErrNotExist)
 }
 
 // SubmitRetentionRecord routes a single record ejected from a vault during a
@@ -573,6 +628,42 @@ func (o *Orchestrator) isVaultHome(sys *system.System, vaultID glid.GLID) bool {
 	return false
 }
 
+// holdsOriginStaging reports whether this node holds records for the vault
+// that the vault's homes have not collected and released yet: a segment in
+// completed/ under any root the node could hold the vault's files under, or
+// unfinished records in working/. The running writer's working/ always has an
+// open segment, so there its own record count decides; any other working
+// segment is left from an earlier registration or process and counts until
+// registration recovers it.
+func (o *Orchestrator) holdsOriginStaging(sys *system.System, vaultID glid.GLID) bool {
+	liveRoot := ""
+	if holds, running := o.pipeline.OriginHoldsRecords(vaultID); running {
+		if holds {
+			return true
+		}
+		liveRoot, _ = o.originRoot(vaultID)
+	}
+	for _, root := range o.pipelineRootCandidates(sys, vaultID) {
+		dirs := []string{paths.CompletedDir(root)}
+		if root != liveRoot {
+			dirs = append(dirs, paths.WorkingDir(root))
+		}
+		for _, dir := range dirs {
+			ids, err := paths.ListSegmentIDs(dir)
+			if err != nil {
+				// Unreadable staging may still hold acked records.
+				o.logger.Warn("origin staging unreadable; keeping the vault registered",
+					"vault", vaultID, "dir", dir, "error", err)
+				return true
+			}
+			if len(ids) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // originRoot returns the vault's pipeline root on this node: the root its
 // current registration was made with (pipelineRootFor), or the node home's
 // root for a vault the pipeline does not run here. Lock-free, like every
@@ -798,11 +889,13 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 	desired := destinationVaults(sys)
 	// Origin-register every vault homed on this node, even if no route targets
 	// it, so direct-to-vault submit always finds a local segmentation queue on
-	// the home node it is routed to.
+	// the home node it is routed to. Keep every vault this node still holds
+	// origin staging for: those records were acked, and only a registration
+	// publishes them and serves their pulls until the homes release them.
 	if sys != nil {
 		for i := range sys.Config.Vaults {
 			vid := sys.Config.Vaults[i].ID
-			if o.isVaultHome(sys, vid) {
+			if o.isVaultHome(sys, vid) || o.holdsOriginStaging(sys, vid) {
 				desired[vid] = struct{}{}
 			}
 		}

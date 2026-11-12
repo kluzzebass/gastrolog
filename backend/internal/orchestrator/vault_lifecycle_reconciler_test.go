@@ -1220,8 +1220,9 @@ func TestSweepNodesOutsidePlacementSkipsCurrentPlacementMembers(t *testing.T) {
 // TestSweepNodesOutsidePlacementPrunesHolderClaims: a node that left the
 // vault's placement keeps its chunk and segment holder claims forever — no
 // reconciler of its own runs to revoke them. With no pending delete naming
-// it, the sweep still prunes it; the claims of current placement members
-// stay, and once pruned the sweep has nothing left to propose.
+// it, and the placement holding what it holds, the sweep still prunes it; the
+// claims of current placement members stay, and once pruned the sweep has
+// nothing left to propose.
 func TestSweepNodesOutsidePlacementPrunesHolderClaims(t *testing.T) {
 	t.Parallel()
 
@@ -1245,8 +1246,9 @@ func TestSweepNodesOutsidePlacementPrunesHolderClaims(t *testing.T) {
 	apply(vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
 		SegmentID: segID, RecordCount: 1,
 	}))
-	apply(vaultctlfsm.MarshalAckSegmentHolders([]glid.GLID{segID}, "follower-node"))
-	apply(vaultctlfsm.MarshalAckSegmentHolders([]glid.GLID{segID}, "segment-departed"))
+	for _, node := range []string{"follower-node", "leader-node", "segment-departed"} {
+		apply(vaultctlfsm.MarshalAckSegmentHolders([]glid.GLID{segID}, node))
+	}
 
 	var prunedNodes []string
 	vaultInst := &VaultInstance{
@@ -1271,14 +1273,67 @@ func TestSweepNodesOutsidePlacementPrunesHolderClaims(t *testing.T) {
 	if got := fsm.Get(chunkID).Holders; !slices.Equal(got, []string{"leader-node"}) {
 		t.Errorf("chunk holders = %v, want [leader-node]", got)
 	}
-	if got := fsm.GetCompletedSegment(segID).Holders; !slices.Equal(got, []string{"follower-node"}) {
-		t.Errorf("segment holders = %v, want [follower-node]", got)
+	if got := fsm.GetCompletedSegment(segID).Holders; !slices.Equal(got, []string{"follower-node", "leader-node"}) {
+		t.Errorf("segment holders = %v, want [follower-node leader-node]", got)
 	}
 
 	prunedNodes = nil
 	rec.SweepNodesOutsidePlacement()
 	if len(prunedNodes) != 0 {
 		t.Fatalf("converged sweep proposed %v, want nothing", prunedNodes)
+	}
+}
+
+// A node that left the placement stays the holder of an unreleased segment the
+// placement holds fewer than HolderQuorum copies of: the new homes still
+// collect it, and the departed node's copy may be the only reachable one. Once
+// the placement holds the quorum, the sweep prunes it.
+func TestSweepNodesOutsidePlacementKeepsSegmentHoldersThePlacementLacks(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	apply := func(data []byte) {
+		t.Helper()
+		if err, ok := fsm.Apply(&hraft.Log{Data: data}).(error); ok && err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+	}
+	segID := glid.New()
+	apply(vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID: segID, RecordCount: 1,
+	}))
+	apply(vaultctlfsm.MarshalAckSegmentHolders([]glid.GLID{segID}, "departed"))
+	apply(vaultctlfsm.MarshalAckSegmentHolders([]glid.GLID{segID}, "follower-node"))
+
+	var prunedNodes []string
+	vaultInst := &VaultInstance{
+		VaultID:         glid.New(),
+		FollowerTargets: []system.ReplicationTarget{{NodeID: "follower-node"}},
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftPruneNode: func(nodeID string) error {
+				prunedNodes = append(prunedNodes, nodeID)
+				apply(vaultctlfsm.MarshalPruneNode(nodeID))
+				return nil
+			},
+		},
+	}
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "leader-node", slog.Default())
+	rec.fsm.Store(fsm)
+
+	for range 3 {
+		rec.SweepNodesOutsidePlacement()
+	}
+	if len(prunedNodes) != 0 {
+		t.Fatalf("pruned %v while the placement holds one of the two copies it needs", prunedNodes)
+	}
+	if got := fsm.GetCompletedSegment(segID).Holders; !slices.Equal(got, []string{"departed", "follower-node"}) {
+		t.Fatalf("segment holders = %v, want [departed follower-node]", got)
+	}
+
+	apply(vaultctlfsm.MarshalAckSegmentHolders([]glid.GLID{segID}, "leader-node"))
+	rec.SweepNodesOutsidePlacement()
+	if !slices.Equal(prunedNodes, []string{"departed"}) {
+		t.Fatalf("pruned %v once the placement holds the quorum, want [departed]", prunedNodes)
 	}
 }
 

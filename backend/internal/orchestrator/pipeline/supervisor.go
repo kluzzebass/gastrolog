@@ -992,6 +992,13 @@ func (s *Supervisor) UnregisterVault(vaultID glid.GLID) (wait func()) {
 	}
 }
 
+// OriginHoldsRecords reports whether the vault's origin writer on this node
+// holds records not yet completed into completed/. running is false when the
+// vault has no origin writer here.
+func (s *Supervisor) OriginHoldsRecords(vaultID glid.GLID) (holds, running bool) {
+	return s.seg.HoldsRecords(vaultID)
+}
+
 func (s *Supervisor) unregisterOrigin(vaultID glid.GLID) (wait func()) {
 	s.route.UnregisterVault(vaultID)
 	s.seg.UnregisterVault(vaultID)
