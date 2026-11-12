@@ -73,11 +73,11 @@ func (o *Orchestrator) LocalPipelineBacklogSnapshot(vaultID glid.GLID) (Pipeline
 }
 
 func (o *Orchestrator) vaultCtlLeaderNodeID(vaultID glid.GLID) string {
-	if o.groupMgr == nil {
+	if o.groupManager() == nil {
 		return ""
 	}
 	gid := raftgroup.VaultControlPlaneGroupID(vaultID)
-	g := o.groupMgr.GetGroup(gid)
+	g := o.groupManager().GetGroup(gid)
 	if g == nil || g.Raft == nil {
 		return ""
 	}

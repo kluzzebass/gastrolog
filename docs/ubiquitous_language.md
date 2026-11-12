@@ -863,10 +863,13 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   - `o.vaults map[glid.GLID]*Vault` — local vault registry (protected by
     `o.mu`, a `locktrack.RWMutex`).
   - `o.scheduler` — the job queue + cron runner.
-  - `o.groupMgr` — handle to the `raftgroup.GroupManager`.
+  - `o.wired` — the **cluster wiring**: the `raftgroup.GroupManager`, the
+    peer pool, the vault-ctl gate, the segment and GLCB pullers and the
+    replication flag, built whole by `ApplyConfig` and published with one
+    atomic store, because the scheduler already runs jobs that read it.
+    Read through `o.wiring()` / `o.groupManager()`.
   - `o.pipeline` — the ingest pipeline supervisor; holds the routing table.
-  - `o.segmentPuller`, `o.chunkGLCBPuller`, `o.transferrer`,
-    `o.peerConns` — cross-node I/O.
+  - `o.transferrer` — cross-node chunk migration.
 
 - **Factories** — the bundle passed to `Orchestrator.ApplyConfig` that
   contains component constructors (chunk manager factory, index manager

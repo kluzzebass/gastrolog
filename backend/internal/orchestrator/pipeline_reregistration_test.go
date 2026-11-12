@@ -166,7 +166,7 @@ func TestPipelineReregistrationNeverUnpublishesTheVault(t *testing.T) {
 	}
 
 	// The handle arrives: the next reload re-registers the vault with it.
-	orch.groupMgr = singleNodeVaultCtlGroup(t, reregLocalNode, vaultID)
+	orch.setGroupManagerForTest(singleNodeVaultCtlGroup(t, reregLocalNode, vaultID))
 	if err := orch.ReloadFilters(ctx); err != nil {
 		t.Fatalf("handle-arrival ReloadFilters: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestPipelineFailedReregistrationKeepsTheVaultAPipelineVault(t *testing.T) {
 	}
 
 	repair := breakSegmentationRoot(t, orch, vaultID)
-	orch.groupMgr = singleNodeVaultCtlGroup(t, reregLocalNode, vaultID)
+	orch.setGroupManagerForTest(singleNodeVaultCtlGroup(t, reregLocalNode, vaultID))
 	if err := orch.ReloadFilters(ctx); err == nil {
 		t.Fatal("premise: re-registration onto a damaged segmentation root must fail")
 	}

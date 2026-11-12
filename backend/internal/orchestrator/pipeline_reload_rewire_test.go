@@ -87,7 +87,7 @@ func TestConfigReloadDoesNotWarnAboutRewiringVaultsThisNodeDoesNotChunk(t *testi
 	})
 	// With a vault-ctl handle present the rewire is attempted; without one it
 	// returns early and the reload could not have warned in the first place.
-	orch.groupMgr = singleNodeVaultCtlGroup(t, "node-local", vaultID)
+	orch.setGroupManagerForTest(singleNodeVaultCtlGroup(t, "node-local", vaultID))
 
 	if err := orch.ReloadFilters(context.Background()); err != nil {
 		t.Fatalf("ReloadFilters: %v", err)

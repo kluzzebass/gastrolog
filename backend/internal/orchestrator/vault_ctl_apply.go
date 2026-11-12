@@ -22,21 +22,21 @@ var ErrVaultCtlRaftUnavailable = errors.New("vault control-plane raft: group man
 // for the given vault. Uses VaultApplyForwarder when PeerConns is configured
 // so followers forward to the vault Raft leader; otherwise applies locally.
 func (o *Orchestrator) ApplyVaultControlPlane(vaultID glid.GLID, data []byte) error {
-	if o.groupMgr == nil {
+	if o.groupManager() == nil {
 		return ErrVaultCtlRaftUnavailable
 	}
-	if err := o.vaultCtlGate.CheckVaultRaftCommand(data); err != nil {
+	if err := o.wiring().vaultCtlGate.CheckVaultRaftCommand(data); err != nil {
 		return fmt.Errorf("refused vault-ctl proposal: %w", err)
 	}
 	gid := raftgroup.VaultControlPlaneGroupID(vaultID)
-	g := o.groupMgr.GetGroup(gid)
+	g := o.groupManager().GetGroup(gid)
 	if g == nil {
 		return fmt.Errorf("vault control-plane raft group %q not running on this node", gid)
 	}
-	if o.peerConns == nil {
+	if o.wiring().peerConns == nil {
 		return g.Raft.Apply(data, cluster.RaftApplyTimeout).Error()
 	}
-	fwd := cluster.NewVaultApplyForwarder(g.Raft, gid, groupApplyWait(g), o.peerConns, cluster.RaftApplyTimeout)
+	fwd := cluster.NewVaultApplyForwarder(g.Raft, gid, groupApplyWait(g), o.wiring().peerConns, cluster.RaftApplyTimeout)
 	return fwd.Apply(data)
 }
 

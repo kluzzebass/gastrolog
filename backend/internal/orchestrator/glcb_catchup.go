@@ -75,7 +75,7 @@ func glcbCatchupVaultJobPrefix(vaultID glid.GLID) string {
 // releases the right to retry it instead of stranding a claim that would stop
 // the chunk from ever being pulled again.
 func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.ManifestEntry) {
-	if o.chunkGLCBPuller == nil || o.scheduler == nil {
+	if o.wiring().chunkGLCBPuller == nil || o.scheduler == nil {
 		return // single-node: every chunk this node should hold, it built
 	}
 	if o.diskProtectActive() {
@@ -267,7 +267,7 @@ func (o *Orchestrator) pullGLCBFromNode(ctx context.Context, node string, vaultI
 		return err
 	}
 	tmp := f.Name()
-	pullErr := o.chunkGLCBPuller.Pull(ctx, node, vaultID, e.ID, f)
+	pullErr := o.wiring().chunkGLCBPuller.Pull(ctx, node, vaultID, e.ID, f)
 	if pullErr == nil {
 		pullErr = f.Sync()
 	}

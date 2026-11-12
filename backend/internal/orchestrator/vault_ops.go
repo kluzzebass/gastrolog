@@ -216,10 +216,10 @@ func (o *Orchestrator) ListLocalChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMeta
 // must fan out via the server's directRemoteSearcher / forwarder
 // surfaces.
 func (o *Orchestrator) ListClusterChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMeta, error) {
-	if o.groupMgr == nil {
+	if o.groupManager() == nil {
 		return nil, nil
 	}
-	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	g := o.groupManager().GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
 	if g == nil {
 		return nil, nil
 	}
@@ -648,7 +648,7 @@ func (o *Orchestrator) rewirePipelineAfterCtlRestore(vaultID glid.GLID) error {
 		FSM:     fsm,
 		Applier: applier,
 	}
-	if o.segmentPuller != nil {
+	if o.wiring().segmentPuller != nil {
 		lookup := func() *vaultctlfsm.FSM {
 			f, _, _, ok := o.vaultCtlHandle(vaultID)
 			if ok && f != nil {
@@ -659,7 +659,7 @@ func (o *Orchestrator) rewirePipelineAfterCtlRestore(vaultID glid.GLID) error {
 		cfg.Log = &segmentLogReader{lookup: lookup, localNodeID: o.localNodeID, vaultRoot: root, placement: func() []string { return o.vaultPlacementNodeIDs(vaultID) }}
 		cfg.Pull = &segmentPullClient{
 			lookup:      lookup,
-			puller:      o.segmentPuller,
+			puller:      o.wiring().segmentPuller,
 			localNodeID: o.localNodeID,
 			vaultRoot:   root,
 		}
