@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"io"
+	"sync"
 	"testing"
 	"testing/synctest"
 
@@ -76,5 +77,55 @@ func TestSupervisorUnregisterVaultWaitCoversInFlightWork(t *testing.T) {
 		}
 		close(pull.release)
 		<-waited
+	})
+}
+
+// countingPull counts pull attempts and fails each one.
+type countingPull struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (p *countingPull) Pull(context.Context, glid.GLID, glid.GLID, []string, io.Writer) (string, error) {
+	p.mu.Lock()
+	p.n++
+	p.mu.Unlock()
+	return "", io.ErrUnexpectedEOF
+}
+
+func (p *countingPull) attempts() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.n
+}
+
+// A home registered after Start collects the segments already assigned to it
+// with no publish to wake it: the vault's collection worker runs its own
+// catch-up pass when it starts.
+func TestSupervisorLateHomeRegistrationCollectsAssignedSegments(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		vaultID := glid.New()
+		sup := New(Config{NodeID: glid.New()})
+		if err := sup.Start(context.Background()); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		defer func() { _ = sup.Stop() }()
+
+		pull := &countingPull{}
+		if err := sup.RegisterVault(VaultSpec{
+			VaultID:  vaultID,
+			Home:     true,
+			HomeRoot: t.TempDir(),
+			Log:      assignedLog{seg: collection.AssignedSegment{VaultID: vaultID, SegmentID: glid.New()}},
+			Pull:     pull,
+			Receipts: &countingReceipts{},
+		}); err != nil {
+			t.Fatalf("RegisterVault: %v", err)
+		}
+		synctest.Wait()
+		if pull.attempts() == 0 {
+			t.Fatal("a home registered after Start never tried to collect its assigned segment")
+		}
 	})
 }
