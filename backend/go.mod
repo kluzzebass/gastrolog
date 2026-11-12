@@ -2,13 +2,15 @@ module gastrolog
 
 go 1.27.0
 
+toolchain go1.27.4
+
 require (
 	cloud.google.com/go/storage v1.61.0
 	connectrpc.com/connect v1.19.1
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.4
 	github.com/Jille/raft-grpc-leader-rpc v1.1.0
 	github.com/SaveTheRbtz/zstd-seekable-format-go/pkg v0.8.0
-	github.com/andybalholm/brotli v1.2.0
+	github.com/andybalholm/brotli v1.2.7
 	github.com/aws/aws-sdk-go-v2 v1.44.0
 	github.com/aws/aws-sdk-go-v2/config v1.32.40
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.39
@@ -27,7 +29,7 @@ require (
 	github.com/hashicorp/go-hclog v1.6.2
 	github.com/hashicorp/raft v1.7.3
 	github.com/itchyny/gojq v0.12.19
-	github.com/klauspost/compress v1.18.4
+	github.com/klauspost/compress v1.20.2
 	github.com/maxmind/mmdbwriter v1.2.0
 	github.com/mileusna/useragent v1.3.5
 	github.com/oschwald/maxminddb-golang v1.13.1
@@ -35,11 +37,11 @@ require (
 	github.com/twmb/franz-go v1.20.7
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	go.opentelemetry.io/proto/otlp v1.11.0
-	golang.org/x/crypto v0.55.0
-	golang.org/x/net v0.58.0
-	golang.org/x/sync v0.22.0
-	golang.org/x/sys v0.47.0
-	golang.org/x/term v0.45.0
+	golang.org/x/crypto v0.57.0
+	golang.org/x/net v0.60.0
+	golang.org/x/sync v0.23.0
+	golang.org/x/sys v0.48.0
+	golang.org/x/term v0.46.0
 	golang.org/x/time v0.15.0
 	google.golang.org/api v0.271.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260825221802-da73d73af1c5
@@ -137,7 +139,7 @@ require (
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/genproto v0.0.0-20260128011058-8636f8732409 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
