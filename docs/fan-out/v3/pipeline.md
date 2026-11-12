@@ -244,8 +244,13 @@ refuses hard links gets a byte copy instead, written under a temporary name,
 fsynced, and renamed in.
 
 Distribution answers pull requests for segment bytes from `head/`,
-`completed/` or `pre-head/` (`segmentPathForPull`). The origin never pushes:
-the vault-ctl log carries intent, and bytes move only when a home pulls them.
+`completed/` or `pre-head/` (`segmentPathForPull`). A segment the pipeline
+cannot serve — the vault is not registered on the node, or registered under
+another root since a placement change — is served from those areas under any
+root the node could hold the vault's files under (`ServeSegmentPull`): a
+former home's `head/` copy can be the only reachable copy of a segment no
+chunk covers yet. The origin never pushes: the vault-ctl log carries intent,
+and bytes move only when a home pulls them.
 
 ## Collection
 
@@ -346,7 +351,10 @@ vault's placement keeps serving the chunks it holds from whichever of its
 roots still has them (`ServeChunkGLCBPull`), and the placement leader does
 not prune it from a chunk's holders while the placement holds fewer than the
 holder quorum of that chunk — after a placement change that replaced every
-home, the former homes are the only source. A home missing a sealed chunk
+home, the former homes are the only source. The same holds for an unreleased
+segment no durable chunk supersedes yet: the former home stays its holder
+while the placement holds fewer than the holder quorum of it, and the new
+homes collect it from the former home's copy when its origin is down or gone. A home missing a sealed chunk
 that no source can supply raises `glcb-unrecoverable`.
 
 ### Seal and the sealed digest

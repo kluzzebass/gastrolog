@@ -1626,11 +1626,11 @@ describes what the code does today.
   placement leader's outside-placement prune when the node leaves the
   placement, and by the vault-ctl leader when it leaves the cluster. The
   outside-placement prune waits while the node still holds a sealed chunk
-  (not cloud-backed, not being deleted) that the current placement holds
-  fewer than the holder quorum of: after a placement change that replaced
-  every home holding a chunk, the former homes are its only holders, and
-  they serve it to the new homes from wherever their copy still lies — the
-  **placement handoff**. Replica catch-up pulls from the placement first and
+  (not cloud-backed, not being deleted), or an unreleased segment no durable
+  chunk supersedes, that the current placement holds fewer than the holder
+  quorum of: after a placement change that replaced every home holding a
+  chunk, the former homes are its only holders, and they serve it to the new
+  homes from wherever their copy still lies — the **placement handoff**. Replica catch-up pulls from the placement first and
   falls back to a chunk's confirmed holders.
   For a cloud-backed chunk a holder's GLCB is a **cached copy**: every
   home's cache eviction may remove it, and the home's holder receipt is

@@ -1611,29 +1611,12 @@ func (r *VaultLifecycleReconciler) reconcileNodesOutsidePlacement(v *reconcileVi
 		}
 	}
 
-	outside := make(map[string]bool)
-	note := func(nodeID string) {
-		if nodeID != "" && !placement[nodeID] {
-			outside[nodeID] = true
-		}
+	fsm := r.fsm.Load()
+	var segments []vaultctlfsm.CompletedSegmentEntry
+	if fsm != nil {
+		segments = fsm.ListCompletedSegments()
 	}
-	for _, p := range v.pending {
-		for nodeID := range p.ExpectedFrom {
-			note(nodeID)
-		}
-	}
-	for _, e := range v.entries {
-		for _, nodeID := range e.Holders {
-			note(nodeID)
-		}
-	}
-	if fsm := r.fsm.Load(); fsm != nil {
-		for _, seg := range fsm.ListCompletedSegments() {
-			for _, nodeID := range seg.Holders {
-				note(nodeID)
-			}
-		}
-	}
+	outside := nodesOutsidePlacement(v, segments, placement)
 	if len(outside) == 0 {
 		return
 	}
@@ -1644,6 +1627,11 @@ func (r *VaultLifecycleReconciler) reconcileNodesOutsidePlacement(v *reconcileVi
 		if chunk, ok := chunkHandoffPending(v, nodeID, placed); ok {
 			r.logger.Debug("outside-placement prune: deferred until the new homes hold the node's chunks",
 				"vault", r.vaultID, "node", nodeID, "chunk", chunk)
+			continue
+		}
+		if seg, ok := segmentHandoffPending(fsm, segments, nodeID, placed); ok {
+			r.logger.Debug("outside-placement prune: deferred until the new homes hold the node's segments",
+				"vault", r.vaultID, "node", nodeID, "segment", seg)
 			continue
 		}
 		nodes = append(nodes, nodeID)
@@ -1665,6 +1653,34 @@ func (r *VaultLifecycleReconciler) reconcileNodesOutsidePlacement(v *reconcileVi
 		"vault", r.vaultID, "pruned", pruned, "outside", len(nodes))
 }
 
+// nodesOutsidePlacement lists every node outside placement that the FSM still
+// names: in a pending delete's ExpectedFrom, or a chunk's or completed
+// segment's holder set.
+func nodesOutsidePlacement(v *reconcileView, segments []vaultctlfsm.CompletedSegmentEntry, placement map[string]bool) map[string]bool {
+	outside := make(map[string]bool)
+	note := func(nodeID string) {
+		if nodeID != "" && !placement[nodeID] {
+			outside[nodeID] = true
+		}
+	}
+	for _, p := range v.pending {
+		for nodeID := range p.ExpectedFrom {
+			note(nodeID)
+		}
+	}
+	for _, e := range v.entries {
+		for _, nodeID := range e.Holders {
+			note(nodeID)
+		}
+	}
+	for _, seg := range segments {
+		for _, nodeID := range seg.Holders {
+			note(nodeID)
+		}
+	}
+	return outside
+}
+
 // chunkHandoffPending reports a sealed chunk that still needs nodeID as a
 // holder: its local GLCB is the chunk's durable copy (not cloud-backed, not on
 // its way out) and the current placement holds fewer than HolderQuorum copies
@@ -1684,6 +1700,25 @@ func chunkHandoffPending(v *reconcileView, nodeID string, placement []string) (c
 		}
 	}
 	return chunk.ChunkID{}, false
+}
+
+// segmentHandoffPending reports an unreleased segment that still needs nodeID
+// as a holder: the homes still collect it (it is not superseded, the same test
+// collection skips by) and the current placement holds fewer than
+// HolderQuorum copies of it. The new homes collect it from the node's copy,
+// which is the only reachable one when its origin is down or gone.
+func segmentHandoffPending(fsm *vaultctlfsm.FSM, segments []vaultctlfsm.CompletedSegmentEntry, nodeID string, placement []string) (glid.GLID, bool) {
+	quorum := vaultctlfsm.HolderQuorum(placement)
+	for _, seg := range segments {
+		if !slices.Contains(seg.Holders, nodeID) || vaultctlfsm.PlacedHolderCount(seg.Holders, placement) >= quorum {
+			continue
+		}
+		if fsm.SegmentSuperseded(seg.SegmentID, placement) {
+			continue
+		}
+		return seg.SegmentID, true
+	}
+	return glid.GLID{}, false
 }
 
 // idleActiveThreshold is how long an FSM-Active chunk can sit without

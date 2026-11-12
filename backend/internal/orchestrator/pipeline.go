@@ -30,7 +30,11 @@ import (
 
 // ServeSegmentPull streams a locally-held completed segment to w for a remote
 // collector. Wired to the cluster PullSegment RPC handler so home nodes can
-// fetch segments this node originated or already holds (Rubicon C).
+// fetch segments this node originated or already holds (Rubicon C). A segment
+// the pipeline cannot serve — the vault is not registered here, or registered
+// under another root since a placement change — is served from any root the
+// node could hold the vault's files under: a former home's head/ copy can be
+// the only reachable copy of a segment no chunk covers yet.
 func (o *Orchestrator) ServeSegmentPull(vaultID, segmentID glid.GLID, w io.Writer) error {
 	o.mu.RLock()
 	pl := o.pipeline
@@ -38,7 +42,31 @@ func (o *Orchestrator) ServeSegmentPull(vaultID, segmentID glid.GLID, w io.Write
 	if pl == nil {
 		return errors.New("pipeline not initialized")
 	}
-	return translateServePullError(pl.ServePull(distribution.PullRequest{VaultID: vaultID, SegmentID: segmentID, Dest: w}))
+	err := translateServePullError(pl.ServePull(distribution.PullRequest{VaultID: vaultID, SegmentID: segmentID, Dest: w}))
+	if !errors.Is(err, collection.ErrSegmentUnavailable) {
+		return err
+	}
+	path, ok := o.keptSegmentPath(vaultID, segmentID)
+	if !ok {
+		return err
+	}
+	return translateServePullError(distribution.StreamSegment(path, w))
+}
+
+// keptSegmentPath finds a copy of the segment in head/, completed/ or
+// pre-head/ under any pipeline root this node could hold the vault's files
+// under.
+func (o *Orchestrator) keptSegmentPath(vaultID, segmentID glid.GLID) (string, bool) {
+	sys, err := o.loadSystem(context.Background())
+	if err != nil {
+		return "", false
+	}
+	for _, root := range o.pipelineRootCandidates(sys, vaultID) {
+		if path, ok := paths.FindSegment(root, segmentID, paths.AreaHead, paths.AreaCompleted, paths.AreaPreHead); ok {
+			return path, true
+		}
+	}
+	return "", false
 }
 
 // translateServePullError maps the distribution store's "cannot serve this
