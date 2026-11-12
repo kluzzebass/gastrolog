@@ -224,9 +224,9 @@ func (s *SystemServer) refuseStorageRemoval(ctx context.Context, next system.Nod
 		}
 		placements[v.ID] = ps
 	}
-	var losses []orchestrator.ChunkHolderLoss
+	var losses []orchestrator.HolderLoss
 	if s.orch != nil {
-		losses = s.orch.ChunkHolderLossWithout(ctx, next.NodeID)
+		losses = s.orch.HolderLossWithout(ctx, next.NodeID)
 	}
 	if err := storageRemovalRefusal(prev, next, vaults, placements, losses); err != nil {
 		return connect.NewError(connect.CodeFailedPrecondition, err)
@@ -252,12 +252,12 @@ func removedStorages(prev *system.NodeStorageConfig, next system.NodeStorageConf
 
 // storageRemovalRefusal decides whether replacing a node's storage config
 // prev with next drops a file storage the vaults still need: one a vault is
-// placed on, or — while sealed chunks of a vault no longer placed on the node
-// depend on the node's copies (losses) — any of its storages. A dropped
-// storage stops being a root the node serves chunks from, so either would
-// strand chunks whose only copy lies under it. Reclassifying a storage keeps
-// its path and is not refused.
-func storageRemovalRefusal(prev *system.NodeStorageConfig, next system.NodeStorageConfig, vaults []system.VaultConfig, placements map[glid.GLID][]system.VaultPlacement, losses []orchestrator.ChunkHolderLoss) error {
+// placed on, or — while sealed chunks or unreleased segments of a vault no
+// longer placed on the node depend on the node's copies (losses) — any of its
+// storages. A dropped storage stops being a root the node serves chunks and
+// segments from, so either would strand records whose only copy lies under
+// it. Reclassifying a storage keeps its path and is not refused.
+func storageRemovalRefusal(prev *system.NodeStorageConfig, next system.NodeStorageConfig, vaults []system.VaultConfig, placements map[glid.GLID][]system.VaultPlacement, losses []orchestrator.HolderLoss) error {
 	removed := removedStorages(prev, next)
 	if len(removed) == 0 {
 		return nil
@@ -280,8 +280,8 @@ func storageRemovalRefusal(prev *system.NodeStorageConfig, next system.NodeStora
 			continue
 		}
 		return fmt.Errorf(
-			"vault %q has %d sealed chunk(s) whose copies on this node its new homes have not pulled yet; removing a storage now can strand them — retry once the vault's homes hold them",
-			loss.VaultName, loss.Chunks)
+			"vault %q has %s whose copies on this node its homes have not pulled yet; removing a storage now can strand them — keep the storage until the vault's homes hold them, then retry",
+			loss.VaultName, loss.Holdings())
 	}
 	return nil
 }

@@ -781,67 +781,86 @@ func TestNodeRemover_ConcurrentRemovalsCannotOrphan(t *testing.T) {
 	}
 }
 
-// A node holding copies that sealed chunks still depend on — a former home
-// whose chunks the new homes have not pulled yet — is not removed: its copy
-// can be the chunk's only one. Refused for every policy, like an orphaned
-// vault; --force bypasses it on the record.
-func TestRemovalGates_RefusesWhileChunksDependOnTheNode(t *testing.T) {
+// A node holding copies that sealed chunks or unreleased segments still
+// depend on — a former home whose chunks or segments the new homes have not
+// pulled yet, or an origin whose segments the homes have not collected — is
+// not removed: its copy can be the only one. Refused for every policy, like an
+// orphaned vault, naming each vault with what depends on the node; --force
+// bypasses it on the record.
+func TestRemovalGates_RefusesWhileDataDependsOnTheNode(t *testing.T) {
 	t.Parallel()
-	vaultID := glid.New()
-	var asked string
-	losses := func(_ context.Context, nodeID string) []orchestrator.ChunkHolderLoss {
-		asked = nodeID
-		return []orchestrator.ChunkHolderLoss{{VaultID: vaultID, VaultName: "handed-off", Chunks: 2}}
+	cases := []struct {
+		name string
+		loss orchestrator.HolderLoss
+		want string
+	}{
+		{name: "chunks", loss: orchestrator.HolderLoss{VaultName: "handed-off", Chunks: 2}, want: `"handed-off"`},
+		{name: "segments", loss: orchestrator.HolderLoss{VaultName: "unchunked", Segments: 3}, want: "3 unreleased segment(s)"},
+		{name: "both", loss: orchestrator.HolderLoss{VaultName: "mixed", Chunks: 1, Segments: 4}, want: "1 sealed chunk(s) and 4 unreleased segment(s)"},
 	}
-	for _, policy := range []cluster.RemovalPolicy{cluster.RemovalPolicyOperator, cluster.RemovalPolicySelf} {
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tc.loss.VaultID = glid.New()
+			var asked string
+			losses := func(_ context.Context, nodeID string) []orchestrator.HolderLoss {
+				asked = nodeID
+				return []orchestrator.HolderLoss{tc.loss}
+			}
+			for _, policy := range []cluster.RemovalPolicy{cluster.RemovalPolicyOperator, cluster.RemovalPolicySelf} {
+				c := newRFTestCluster(t)
+				c.node("a", system.NodeStateLive)
+				c.node("b", system.NodeStateLive)
+				c.memVault("elsewhere", 1, "b")
+				logger, _ := testLogger()
+				err := evaluateRemovalGates(context.Background(), c.store, losses, c.ids["a"].String(),
+					cluster.RemoveNodeOptions{Policy: policy}, logger)
+				if !errors.Is(err, cluster.ErrRemovalRefused) {
+					t.Fatalf("policy %v: removal of a node data depends on must be refused, got %v", policy, err)
+				}
+				if asked != c.ids["a"].String() {
+					t.Fatalf("policy %v: gate asked about %q, want the removed node", policy, asked)
+				}
+				if !strings.Contains(err.Error(), tc.loss.VaultName) || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("policy %v: refusal must name the vault and what depends on the node (%q): %v", policy, tc.want, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRemovalGates_ForceBypassesHolderLossGate(t *testing.T) {
+	t.Parallel()
+	for _, loss := range []orchestrator.HolderLoss{
+		{VaultID: glid.New(), VaultName: "handed-off", Chunks: 1},
+		{VaultID: glid.New(), VaultName: "unchunked", Segments: 1},
+	} {
 		c := newRFTestCluster(t)
 		c.node("a", system.NodeStateLive)
 		c.node("b", system.NodeStateLive)
 		c.memVault("elsewhere", 1, "b")
-		logger, _ := testLogger()
-		err := evaluateRemovalGates(context.Background(), c.store, losses, c.ids["a"].String(),
-			cluster.RemoveNodeOptions{Policy: policy}, logger)
-		if !errors.Is(err, cluster.ErrRemovalRefused) {
-			t.Fatalf("policy %v: removal of a node chunks depend on must be refused, got %v", policy, err)
+		losses := func(context.Context, string) []orchestrator.HolderLoss { return []orchestrator.HolderLoss{loss} }
+		logger, buf := testLogger()
+		if err := evaluateRemovalGates(context.Background(), c.store, losses, c.ids["a"].String(),
+			cluster.RemoveNodeOptions{Policy: cluster.RemovalPolicyOperator, Force: true}, logger); err != nil {
+			t.Fatalf("%+v: --force must bypass the holder-loss gate, got %v", loss, err)
 		}
-		if asked != c.ids["a"].String() {
-			t.Fatalf("policy %v: gate asked about %q, want the removed node", policy, asked)
-		}
-		if !strings.Contains(err.Error(), "handed-off") {
-			t.Fatalf("policy %v: refusal must name the vault: %v", policy, err)
+		if !strings.Contains(buf.String(), "holder-loss gate") {
+			t.Fatalf("%+v: a forced bypass must be logged: %s", loss, buf.String())
 		}
 	}
 }
 
-func TestRemovalGates_ForceBypassesChunkHolderGate(t *testing.T) {
+func TestRemovalGates_NoHolderLossAllowsRemoval(t *testing.T) {
 	t.Parallel()
 	c := newRFTestCluster(t)
 	c.node("a", system.NodeStateLive)
 	c.node("b", system.NodeStateLive)
 	c.memVault("elsewhere", 1, "b")
-	losses := func(context.Context, string) []orchestrator.ChunkHolderLoss {
-		return []orchestrator.ChunkHolderLoss{{VaultID: glid.New(), VaultName: "handed-off", Chunks: 1}}
-	}
-	logger, buf := testLogger()
-	if err := evaluateRemovalGates(context.Background(), c.store, losses, c.ids["a"].String(),
-		cluster.RemoveNodeOptions{Policy: cluster.RemovalPolicyOperator, Force: true}, logger); err != nil {
-		t.Fatalf("--force must bypass the chunk-holder gate, got %v", err)
-	}
-	if !strings.Contains(buf.String(), "chunk-holder gate") {
-		t.Fatalf("a forced bypass must be logged: %s", buf.String())
-	}
-}
-
-func TestRemovalGates_NoChunkLossAllowsRemoval(t *testing.T) {
-	t.Parallel()
-	c := newRFTestCluster(t)
-	c.node("a", system.NodeStateLive)
-	c.node("b", system.NodeStateLive)
-	c.memVault("elsewhere", 1, "b")
-	none := func(context.Context, string) []orchestrator.ChunkHolderLoss { return nil }
+	none := func(context.Context, string) []orchestrator.HolderLoss { return nil }
 	logger, _ := testLogger()
 	if err := evaluateRemovalGates(context.Background(), c.store, none, c.ids["a"].String(),
 		cluster.RemoveNodeOptions{Policy: cluster.RemovalPolicyOperator}, logger); err != nil {
-		t.Fatalf("removal with no dependent chunks must pass, got %v", err)
+		t.Fatalf("removal with nothing depending on the node must pass, got %v", err)
 	}
 }

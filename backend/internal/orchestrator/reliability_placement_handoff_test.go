@@ -96,7 +96,7 @@ func TestOrchPipeline_PlacementChangeHandsSealedChunksToNewHomes(t *testing.T) {
 					})
 				for _, idx := range tc.oldHomes {
 					former := h.nodeIDs[idx]
-					losses := h.nodes[leader].orch.ChunkHolderLossWithout(ctx, former)
+					losses := h.nodes[leader].orch.HolderLossWithout(ctx, former)
 					if len(losses) != 1 || losses[0].VaultID != v.id || losses[0].Chunks != len(entries) {
 						t.Fatalf("while the new homes lack the chunks, removing former home %s must lose all %d: got %+v",
 							h.nodes[former].label, len(entries), losses)
@@ -138,7 +138,7 @@ func TestOrchPipeline_PlacementChangeHandsSealedChunksToNewHomes(t *testing.T) {
 				return fmt.Sprintf("settled=%d/%d %v", settled, len(entries), state), settled == len(entries)
 			}, func() { h.dumpPipelineState(v) })
 			for _, idx := range tc.oldHomes {
-				if losses := h.nodes[leader].orch.ChunkHolderLossWithout(ctx, h.nodeIDs[idx]); len(losses) != 0 {
+				if losses := h.nodes[leader].orch.HolderLossWithout(ctx, h.nodeIDs[idx]); len(losses) != 0 {
 					t.Fatalf("after the handoff no chunk depends on former home %s: %+v", h.nodes[h.nodeIDs[idx]].label, losses)
 				}
 			}
@@ -277,7 +277,7 @@ func TestOrchPipeline_DepartedHomeDownDuringTheMoveIsWaitedFor(t *testing.T) {
 					return fmt.Sprintf("chunk %s holders=%v", e.ID, e.Holders), false
 				}
 			}
-			losses := h.nodes[newHome].orch.ChunkHolderLossWithout(ctx, oldHome)
+			losses := h.nodes[newHome].orch.HolderLossWithout(ctx, oldHome)
 			if len(losses) != 1 || losses[0].VaultID != v.id || losses[0].Chunks != len(entries) {
 				return fmt.Sprintf("removing the former home must lose all %d chunks: got %+v", len(entries), losses), false
 			}
@@ -481,7 +481,7 @@ func (h *orchRelHarness) waitFormerHomesPruned(v vaultSpec, observer string, ent
 		return fmt.Sprintf("claimed=%v", claimed), len(claimed) == 0
 	}, func() { h.dumpPipelineState(v) })
 	for _, f := range former {
-		if losses := h.nodes[observer].orch.ChunkHolderLossWithout(ctx, f); len(losses) != 0 {
+		if losses := h.nodes[observer].orch.HolderLossWithout(ctx, f); len(losses) != 0 {
 			h.t.Fatalf("after the hand-off no chunk depends on former home %s: %+v", h.nodes[f].label, losses)
 		}
 	}

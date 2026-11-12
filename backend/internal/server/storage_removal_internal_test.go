@@ -22,7 +22,7 @@ func TestStorageRemovalRefusal_FormerHomeCopiesStillNeeded(t *testing.T) {
 	elsewhere := []system.VaultPlacement{{StorageID: glid.New().String(), Leader: true}}
 	vaults := []system.VaultConfig{moved}
 	placements := map[glid.GLID][]system.VaultPlacement{moved.ID: elsewhere}
-	losses := []orchestrator.ChunkHolderLoss{{VaultID: moved.ID, VaultName: moved.Name, Chunks: 3}}
+	losses := []orchestrator.HolderLoss{{VaultID: moved.ID, VaultName: moved.Name, Chunks: 3}}
 
 	err := storageRemovalRefusal(prev, next, vaults, placements, losses)
 	if err == nil || !strings.Contains(err.Error(), "moved-away") {
@@ -33,6 +33,28 @@ func TestStorageRemovalRefusal_FormerHomeCopiesStillNeeded(t *testing.T) {
 	}
 	if err := storageRemovalRefusal(prev, *prev, vaults, placements, losses); err != nil {
 		t.Fatalf("a config that drops nothing must pass whatever depends on the node, got %v", err)
+	}
+}
+
+// The same holds while unreleased segments of a vault no longer placed on the
+// node depend on its copies: a former home's head/ copy, or an origin's
+// completed/ copy, the homes have not collected yet.
+func TestStorageRemovalRefusal_UncollectedSegmentsStillNeeded(t *testing.T) {
+	keep := system.FileStorage{ID: glid.New(), Name: "keep", Path: "storage/keep", StorageClass: 1}
+	drop := system.FileStorage{ID: glid.New(), Name: "drop", Path: "storage/drop", StorageClass: 1}
+	prev := &system.NodeStorageConfig{NodeID: "n1", FileStorages: []system.FileStorage{keep, drop}}
+	next := system.NodeStorageConfig{NodeID: "n1", FileStorages: []system.FileStorage{keep}}
+	moved := system.VaultConfig{ID: glid.New(), Name: "moved-away"}
+	vaults := []system.VaultConfig{moved}
+	placements := map[glid.GLID][]system.VaultPlacement{moved.ID: {{StorageID: glid.New().String(), Leader: true}}}
+	losses := []orchestrator.HolderLoss{{VaultID: moved.ID, VaultName: moved.Name, Segments: 2}}
+
+	err := storageRemovalRefusal(prev, next, vaults, placements, losses)
+	if err == nil || !strings.Contains(err.Error(), "moved-away") || !strings.Contains(err.Error(), "2 unreleased segment(s)") {
+		t.Fatalf("dropping a storage while uncollected segments depend on the node must be refused naming the vault and the segments, got %v", err)
+	}
+	if err := storageRemovalRefusal(prev, next, vaults, placements, nil); err != nil {
+		t.Fatalf("once the homes hold them the removal must pass, got %v", err)
 	}
 }
 
@@ -63,7 +85,7 @@ func TestStorageRemovalRefusal_PlacedStorage(t *testing.T) {
 
 	// The vault is still placed on this node: its losses are the placement
 	// check's concern, not a reason to refuse dropping the spare storage.
-	losses := []orchestrator.ChunkHolderLoss{{VaultID: v.ID, VaultName: v.Name, Chunks: 1}}
+	losses := []orchestrator.HolderLoss{{VaultID: v.ID, VaultName: v.Name, Chunks: 1}}
 	if err := storageRemovalRefusal(prev, dropSpare, vaults, placements, losses); err != nil {
 		t.Fatalf("a vault still placed on the node does not block dropping another storage, got %v", err)
 	}

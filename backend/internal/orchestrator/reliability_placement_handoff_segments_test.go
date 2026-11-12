@@ -1,6 +1,7 @@
 package orchestrator_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"slices"
@@ -15,9 +16,9 @@ import (
 // when the vault moves to another node, and the node that originated them is
 // down. The segments are unreleased and the former home's head/ copies are the
 // only reachable ones. The former home, held out of reach across three of the
-// new leader's sweeps, stays their holder; once reachable it hands them to the
-// new home, which seals the chunk they belong to, and every acked record is
-// searchable there.
+// new leader's sweeps, stays their holder, and neither it nor the origin may be
+// removed; once reachable it hands them to the new home, which seals the chunk
+// they belong to, every acked record is searchable there, and both may go.
 func TestOrchPipeline_FormerHomeHandsOffUnchunkedSegmentsWhileTheOriginIsDown(t *testing.T) {
 	if testing.Short() {
 		t.Skip("multi-node pipeline durability test with a node down")
@@ -30,6 +31,7 @@ func TestOrchPipeline_FormerHomeHandsOffUnchunkedSegmentsWhileTheOriginIsDown(t 
 	v := h.vaults[1]
 	oldHome, newHome, ingestAfter, origin := h.nodeIDs[0], h.nodeIDs[1], h.nodeIDs[2], h.nodeIDs[3]
 	const half = pipelineChunkMaxRecords / 2
+	ctx := context.Background()
 
 	before := h.submitIngestRecords(origin, half, "unchunked")
 	segments := h.waitCollectedUnchunked(v, oldHome, half)
@@ -64,6 +66,12 @@ func TestOrchPipeline_FormerHomeHandsOffUnchunkedSegmentsWhileTheOriginIsDown(t 
 					return fmt.Sprintf("segment %s holders=%v", want.SegmentID, registered[i].Holders), false
 				}
 			}
+			for _, node := range []string{oldHome, origin} {
+				losses := h.nodes[newHome].orch.HolderLossWithout(ctx, node)
+				if len(losses) != 1 || losses[0].VaultID != v.id || losses[0].Segments != len(segments) {
+					return fmt.Sprintf("removing %s must lose all %d segments: got %+v", h.nodes[node].label, len(segments), losses), false
+				}
+			}
 			return "", true
 		})
 	h.servePulls(oldHome)
@@ -72,9 +80,14 @@ func TestOrchPipeline_FormerHomeHandsOffUnchunkedSegmentsWhileTheOriginIsDown(t 
 	h.waitGLCBsOnHomes(v, []int{1}, entries)
 	h.waitSearchable(v, newHome, len(bodies))
 	h.assertSearchBodiesExactly(v, newHome, bodies)
-	// The chunk supersedes the segments, so they are released and the former
-	// home is no longer needed as their holder.
+	// The chunk supersedes the segments, so they are released and neither the
+	// former home nor the origin is needed any more.
 	h.waitRegistryDrained(v, []int{0, 1, 2})
+	for _, node := range []string{oldHome, origin} {
+		if losses := h.nodes[newHome].orch.HolderLossWithout(ctx, node); len(losses) != 0 {
+			t.Fatalf("after the hand-off nothing depends on %s: %+v", h.nodes[node].label, losses)
+		}
+	}
 }
 
 // waitCollectedUnchunked waits until home holds every completed segment of the

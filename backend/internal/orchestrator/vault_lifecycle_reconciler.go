@@ -1703,20 +1703,14 @@ func chunkHandoffPending(v *reconcileView, nodeID string, placement []string) (c
 }
 
 // segmentHandoffPending reports an unreleased segment that still needs nodeID
-// as a holder: the homes still collect it (it is not superseded, the same test
-// collection skips by) and the current placement holds fewer than
-// HolderQuorum copies of it. The new homes collect it from the node's copy,
-// which is the only reachable one when its origin is down or gone.
+// as a holder (segmentAwaitsPlacement). The new homes collect it from the
+// node's copy, which is the only reachable one when its origin is down or
+// gone.
 func segmentHandoffPending(fsm *vaultctlfsm.FSM, segments []vaultctlfsm.CompletedSegmentEntry, nodeID string, placement []string) (glid.GLID, bool) {
-	quorum := vaultctlfsm.HolderQuorum(placement)
 	for _, seg := range segments {
-		if !slices.Contains(seg.Holders, nodeID) || vaultctlfsm.PlacedHolderCount(seg.Holders, placement) >= quorum {
-			continue
+		if slices.Contains(seg.Holders, nodeID) && segmentAwaitsPlacement(fsm, seg, placement) {
+			return seg.SegmentID, true
 		}
-		if fsm.SegmentSuperseded(seg.SegmentID, placement) {
-			continue
-		}
-		return seg.SegmentID, true
 	}
 	return glid.GLID{}, false
 }

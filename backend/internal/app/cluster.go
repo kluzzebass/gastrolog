@@ -609,9 +609,10 @@ type nodeRemover struct {
 	mu       sync.Mutex
 	cfgStore system.Store
 	logger   *slog.Logger
-	// chunkHolderLoss reports the vaults whose sealed chunks still depend on
-	// the target node's copies; nil when no orchestrator is wired.
-	chunkHolderLoss func(ctx context.Context, nodeID string) []orchestrator.ChunkHolderLoss
+	// holderLoss reports the vaults whose sealed chunks or unreleased
+	// segments still depend on the target node's copies; nil when no
+	// orchestrator is wired.
+	holderLoss func(ctx context.Context, nodeID string) []orchestrator.HolderLoss
 	// execute performs the removal proper once the gates pass: Raft
 	// membership change, FSM node-config cleanup, eviction notification.
 	execute func(ctx context.Context, targetNodeID string, opts cluster.RemoveNodeOptions) error
@@ -626,7 +627,7 @@ func (r *nodeRemover) remove(ctx context.Context, targetNodeID string, opts clus
 	// Gates run on the leader, inside the serializer, so the placement
 	// state they read is the cluster's authoritative view AND reflects
 	// every removal already committed by this node.
-	if err := evaluateRemovalGates(ctx, r.cfgStore, r.chunkHolderLoss, targetNodeID, opts, r.logger); err != nil {
+	if err := evaluateRemovalGates(ctx, r.cfgStore, r.holderLoss, targetNodeID, opts, r.logger); err != nil {
 		return err
 	}
 	return r.execute(ctx, targetNodeID, opts)
@@ -730,7 +731,7 @@ func executeNodeRemoval(
 func makeRemoveNodeFunc(
 	clusterSrv *cluster.Server,
 	cfgStore system.Store,
-	chunkHolderLoss func(ctx context.Context, nodeID string) []orchestrator.ChunkHolderLoss,
+	holderLoss func(ctx context.Context, nodeID string) []orchestrator.HolderLoss,
 	gate *membershipGate,
 	nodeID string,
 	logger *slog.Logger,
@@ -741,7 +742,7 @@ func makeRemoveNodeFunc(
 		return executeNodeRemoval(ctx, clusterSrv, cfgStore, logger, targetNodeID, opts)
 	}
 
-	remover := &nodeRemover{cfgStore: cfgStore, chunkHolderLoss: chunkHolderLoss, logger: logger, execute: execute}
+	remover := &nodeRemover{cfgStore: cfgStore, holderLoss: holderLoss, logger: logger, execute: execute}
 	clusterSrv.SetRemoveNodeFn(remover.remove)
 
 	return func(ctx context.Context, targetNodeID string, opts cluster.RemoveNodeOptions) error {
@@ -780,7 +781,7 @@ func makeRemoveNodeFunc(
 func evaluateRemovalGates(
 	ctx context.Context,
 	cfgStore system.Store,
-	chunkHolderLoss func(ctx context.Context, nodeID string) []orchestrator.ChunkHolderLoss,
+	holderLoss func(ctx context.Context, nodeID string) []orchestrator.HolderLoss,
 	targetNodeID string,
 	opts cluster.RemoveNodeOptions,
 	logger *slog.Logger,
@@ -797,16 +798,17 @@ func evaluateRemovalGates(
 			"orphaned_vaults", orphans)
 	}
 
-	// Chunk-holder gate: the node holds copies that sealed chunks still
-	// depend on — a former home can hold a chunk's only copy until the new
-	// homes have pulled it. Same severity as an orphaned vault, so the same
-	// stance for every policy.
-	if chunkHolderLoss != nil {
-		if losses := chunkHolderLoss(ctx, targetNodeID); len(losses) > 0 {
+	// Holder-loss gate: the node holds copies that sealed chunks or unreleased
+	// segments still depend on — a former home can hold a chunk's or a
+	// segment's only copy until the new homes have pulled it, and an origin
+	// the only copy of what it accepted until the homes collect it. Same
+	// severity as an orphaned vault, so the same stance for every policy.
+	if holderLoss != nil {
+		if losses := holderLoss(ctx, targetNodeID); len(losses) > 0 {
 			if !opts.Force {
-				return chunkHolderRefusalError(targetNodeID, losses)
+				return holderRefusalError(targetNodeID, losses)
 			}
-			logger.Warn("FORCE REMOVE: bypassing chunk-holder gate — data loss",
+			logger.Warn("FORCE REMOVE: bypassing holder-loss gate — data loss",
 				"node_id", targetNodeID,
 				"vaults", losses)
 		}
@@ -910,16 +912,18 @@ func orphanRefusalError(targetNodeID string, orphans []orphanedVault) error {
 		targetNodeID, cluster.ErrWouldOrphanVaults, len(orphans), strings.Join(names, ", "))
 }
 
-// chunkHolderRefusalError names each vault whose sealed chunks still depend
-// on the node's copies, so the operator knows what to wait for.
-func chunkHolderRefusalError(targetNodeID string, losses []orchestrator.ChunkHolderLoss) error {
+// holderRefusalError names each vault whose sealed chunks or unreleased
+// segments still depend on the node's copies, with their counts, so the
+// operator knows what to wait for.
+func holderRefusalError(targetNodeID string, losses []orchestrator.HolderLoss) error {
 	names := make([]string, 0, len(losses))
 	for _, l := range losses {
-		names = append(names, fmt.Sprintf("%q (%s): %d chunk(s)", l.VaultName, l.VaultID, l.Chunks))
+		names = append(names, fmt.Sprintf("%q (%s): %s", l.VaultName, l.VaultID, l.Holdings()))
 	}
 	return fmt.Errorf(
-		"refusing to remove node %s: %w: sealed chunks of %d vault(s) still depend on its copies: %s — "+
-			"wait for the vaults' homes to pull those chunks, or re-run with --force to acknowledge data loss",
+		"refusing to remove node %s: %w: %d vault(s) still depend on its copies: %s — "+
+			"keep the node running until the vaults' homes have pulled those chunks and segments "+
+			"(the refusal lifts on its own once they hold them), or re-run with --force to acknowledge data loss",
 		targetNodeID, cluster.ErrRemovalRefused, len(losses), strings.Join(names, ", "))
 }
 

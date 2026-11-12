@@ -699,11 +699,14 @@ one segmented file set, one batch-writer goroutine.
   commits, refusing removals that would cost data or redundancy. Three gates
   exist, evaluated in severity order and bypassed together by `--force`:
   the **orphan-refusal gate** (removal would leave a vault with zero
-  placements — data loss), the **chunk-holder gate** (the node holds copies
-  of sealed chunks, not cloud-backed, that the vault's remaining placement
-  holds fewer than the holder quorum of — a former home can hold a chunk's
-  only copy until the new homes have pulled it; data loss, refused for every
-  removal policy) and the **RF-preservation gate** (removal would leave a
+  placements — data loss), the **holder-loss gate** (the node holds copies the
+  vault's remaining placement holds fewer than the holder quorum of: sealed
+  chunks, not cloud-backed, and unreleased segments not yet superseded that
+  the node holds or originated — a former home can hold a chunk's or a
+  segment's only copy until the new homes have pulled it, and an origin the
+  only copy of what it accepted until the homes collect it; data loss,
+  refused for every removal policy, and the same query refuses dropping a
+  file storage of such a node) and the **RF-preservation gate** (removal would leave a
   vault below its replication factor with too few eligible Live nodes to
   re-place onto — reduced redundancy). Refusals name the affected vaults;
   the RF gate wraps the `ErrWouldDropBelowRF` sentinel.
