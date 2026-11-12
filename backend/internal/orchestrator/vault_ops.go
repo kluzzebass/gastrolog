@@ -485,9 +485,9 @@ func (o *Orchestrator) FindLocalVaultInstance(vaultID glid.GLID) *VaultInstance 
 // nil if the vault has no local instance.
 func (o *Orchestrator) findLocalVaultInstance(vaultID glid.GLID) *VaultInstance {
 	o.mu.RLock()
+	defer o.mu.RUnlock()
 	vault := o.vaults[vaultID]
-	o.mu.RUnlock()
-	if vault == nil || vault.Instance == nil {
+	if vault == nil {
 		return nil
 	}
 	return vault.Instance
