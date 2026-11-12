@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"time"
 
 	"gastrolog/internal/cluster"
@@ -14,6 +15,7 @@ import (
 	"gastrolog/internal/home"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/raftlevel"
 	"gastrolog/internal/raftwal"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/raftfsm"
@@ -294,7 +296,9 @@ func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 		tp = opts.ClusterSrv.Transport()
 	}
 
-	fsm := raftfsm.New(opts.FSMOpts...)
+	clusterCtlLogger := logging.NewRaftGroupSlog(compRaft.Apply(opts.Logger), raftgroup.ClusterControlPlaneGroupID)
+	fsmOpts := append(slices.Clone(opts.FSMOpts), raftfsm.WithOnUnapplicable(raftlevel.FailStop(clusterCtlLogger)))
+	fsm := raftfsm.New(fsmOpts...)
 	conf := newRaftConfig(opts.NodeID, opts.Logger)
 
 	r, err := hraft.NewRaft(conf, fsm, gs, gs, snapStore, tp)
@@ -304,7 +308,6 @@ func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 	}
 
 	ctlStore := &raftClusterCtlStore{raft: r, wal: wal}
-	clusterCtlLogger := logging.NewRaftGroupSlog(compRaft.Apply(opts.Logger), raftgroup.ClusterControlPlaneGroupID)
 	raftgroup.ObserveRaftDiagnostics(r, clusterCtlLogger, conf.LeaderLeaseTimeout, &ctlStore.liveness)
 
 	if err := bootstrapAndWaitForLeader(r, wal, tp, opts, clusterCtlLogger); err != nil {

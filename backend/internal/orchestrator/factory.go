@@ -13,6 +13,7 @@ import (
 	"gastrolog/internal/home"
 	"gastrolog/internal/index"
 	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/raftlevel"
 	"gastrolog/internal/system"
 )
 
@@ -89,6 +90,11 @@ type Factories struct {
 	// Nil in single-node mode.
 	PeerConns *cluster.PeerConnManager
 
+	// VaultCtlGate is the protocol-level gate every vault-ctl proposal from
+	// this node passes before it is applied or forwarded. Nil gates at the
+	// base level.
+	VaultCtlGate *raftlevel.Gate
+
 	// Note: No QueryEngineFactory is needed because QueryEngine construction
 	// is trivial and uniform (query.New(cm, im, logger)). If QueryEngine ever
 	// requires configuration, add a factory here.
@@ -112,6 +118,7 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 	// chunking is gated cluster-wide for want of second holders.
 	o.groupMgr = factories.GroupManager
 	o.peerConns = factories.PeerConns
+	o.vaultCtlGate = factories.VaultCtlGate
 	o.vaultCtlReplicated = factories.GroupManager != nil && factories.NodeAddressResolver != nil
 	if factories.PeerConns != nil && o.segmentPuller == nil {
 		o.segmentPuller = cluster.NewSegmentPuller(factories.PeerConns)

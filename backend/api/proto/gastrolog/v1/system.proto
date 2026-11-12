@@ -1127,6 +1127,10 @@ message NodeConfig {
   // (e.g., legacy record that has never had a state transition since
   // the field was introduced).
   google.protobuf.Timestamp state_since = 4;
+  // Protocol level of the binary the node last started with: the highest
+  // Raft command level that binary can apply. Zero when the node has not
+  // reported one.
+  uint32 protocol_level = 5;
 }
 
 // NodeState is the lifecycle stage of a cluster node.

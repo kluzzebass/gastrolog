@@ -784,3 +784,21 @@ func (p *StoreProxy) SetSetupWizardDismissed(ctx context.Context, dismissed bool
 	}
 	return p.inner.SetSetupWizardDismissed(ctx, dismissed)
 }
+
+func (p *StoreProxy) GetProtocolLevel(ctx context.Context) (uint32, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return 0, err
+	}
+	return p.inner.GetProtocolLevel(ctx)
+}
+
+func (p *StoreProxy) SetProtocolLevel(ctx context.Context, level uint32) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return err
+	}
+	return p.inner.SetProtocolLevel(ctx, level)
+}

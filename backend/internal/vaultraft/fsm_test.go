@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -28,14 +29,14 @@ func (s *bufSink) Close() error  { return nil }
 func (s *bufSink) ID() string    { return "test" }
 func (s *bufSink) Cancel() error { return nil }
 
-func TestFSM_ApplyNoopAndUnknown(t *testing.T) {
+func TestFSM_ApplyNoop(t *testing.T) {
 	t.Parallel()
 	f := NewFSM()
-	if got := f.Apply(&hraft.Log{Data: MarshalNoop()}); got != nil {
+	if got := f.Apply(&hraft.Log{Index: 1, Data: MarshalNoop()}); got != nil {
 		t.Fatalf("noop: %v", got)
 	}
-	if got := f.Apply(&hraft.Log{Data: []byte{0xFF}}); got == nil {
-		t.Fatal("expected error for unknown opcode")
+	if got := f.ApplyWait().Applied(); got != 1 {
+		t.Fatalf("applied index = %d after a noop, want 1", got)
 	}
 }
 
@@ -192,9 +193,14 @@ func TestFSM_ApplyAdvancesApplyWait(t *testing.T) {
 		t.Fatalf("Applied() after empty at 4 = %d, want 4", got)
 	}
 
-	// Failing entry (garbage payload) still advances.
-	if r := f.Apply(&hraft.Log{Index: 5, Data: []byte{0xFF}}); r == nil {
-		t.Fatal("expected error for garbage payload")
+	// A refused entry (vault-scoped without a vault ID) still advances.
+	refused := mustMarshal(&gastrologv1.VaultRaftCommand{Command: &gastrologv1.VaultRaftCommand_VaultScoped{
+		VaultScoped: &gastrologv1.VaultScopedCommand{Command: &gastrologv1.VaultCtlCommand{
+			Command: &gastrologv1.VaultCtlCommand_SealChunk{SealChunk: &gastrologv1.SealChunkCommand{}},
+		}},
+	}})
+	if r := f.Apply(&hraft.Log{Index: 5, Data: refused}); r == nil {
+		t.Fatal("expected error for a vault-scoped command without a vault ID")
 	}
 	if got := f.ApplyWait().Applied(); got != 5 {
 		t.Fatalf("Applied() after failing at 5 = %d, want 5", got)

@@ -14,6 +14,7 @@ import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/applywait"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/raftlevel"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 
 	hraft "github.com/hashicorp/raft"
@@ -47,14 +48,37 @@ type FSM struct {
 	// next local read sees post-mutation state — the read-after-write
 	// barrier, event-driven rather than polled.
 	applyWait *applywait.Tracker
+
+	group          string
+	onUnapplicable raftlevel.Unapplicable
+}
+
+// Option configures an FSM at construction time.
+type Option func(*FSM)
+
+// WithGroup names the Raft group the FSM serves, for the unapplicable hook.
+func WithGroup(group string) Option {
+	return func(f *FSM) { f.group = group }
+}
+
+// WithOnUnapplicable sets what the FSM calls on an entry it cannot apply, in
+// place of raftlevel.FailStop logging to standard error.
+func WithOnUnapplicable(fn raftlevel.Unapplicable) Option {
+	return func(f *FSM) { f.onUnapplicable = fn }
 }
 
 // NewFSM returns a new vault control-plane FSM instance.
-func NewFSM() *FSM {
-	return &FSM{
-		vaults:    make(map[glid.GLID]*vaultctlfsm.FSM),
-		applyWait: applywait.New(),
+func NewFSM(opts ...Option) *FSM {
+	f := &FSM{
+		vaults:         make(map[glid.GLID]*vaultctlfsm.FSM),
+		applyWait:      applywait.New(),
+		group:          "vault-ctl",
+		onUnapplicable: raftlevel.FailStop(nil),
 	}
+	for _, o := range opts {
+		o(f)
+	}
+	return f
 }
 
 // ApplyWait returns the tracker that follows this FSM's applied index.
@@ -106,35 +130,54 @@ func (f *FSM) StoreConfiguration(index uint64, _ hraft.Configuration) {
 
 // Apply executes vault control-plane commands. Empty payloads are ignored.
 // The log data is a marshaled gastrologv1.VaultRaftCommand; see cmd.go.
+//
+// An entry this binary cannot apply — undecodable, or of a command type it
+// does not know, at either the envelope or the vault-scoped inner command —
+// goes to the unapplicable hook, and the FSM does not advance past it.
 func (f *FSM) Apply(l *hraft.Log) any {
 	if l == nil {
 		return nil
 	}
-	// The entry is consumed regardless of dispatch outcome — advance the
-	// apply tracker on every return path, after the sub-FSM mutation (if
-	// any) is visible. Mirrors raft's own applied-index semantics, which
-	// count entries whose FSM application returned an error.
-	defer f.advance(l.Index)
 	if len(l.Data) == 0 {
+		f.advance(l.Index)
 		return nil
 	}
 	var cmd gastrologv1.VaultRaftCommand
 	if err := proto.Unmarshal(l.Data, &cmd); err != nil {
-		return fmt.Errorf("vaultraft: decode command: %w", err)
+		return f.unapplicable(l.Index, fmt.Errorf("vaultraft: %w: %w", raftlevel.ErrUndecodableCommand, err))
 	}
+	result, err := f.dispatch(&cmd)
+	if err != nil {
+		return f.unapplicable(l.Index, err)
+	}
+	// Advance after the sub-FSM mutation (if any) is visible, whether or not
+	// the command succeeded: raft counts an entry whose apply returned an
+	// error as applied.
+	f.advance(l.Index)
+	return result
+}
+
+func (f *FSM) unapplicable(index uint64, reason error) error {
+	f.onUnapplicable(f.group, index, reason)
+	return reason
+}
+
+// dispatch applies a decoded entry. Its error is for an entry this binary
+// cannot apply; the command's own outcome is the result.
+func (f *FSM) dispatch(cmd *gastrologv1.VaultRaftCommand) (any, error) {
 	switch c := cmd.GetCommand().(type) {
 	case *gastrologv1.VaultRaftCommand_Noop:
-		return nil
+		return nil, nil
 	case *gastrologv1.VaultRaftCommand_VaultScoped:
 		vsc := c.VaultScoped
 		if len(vsc.GetVaultId()) < glid.Size {
-			return fmt.Errorf("vaultraft: vault-scoped command missing vault id (%d bytes)", len(vsc.GetVaultId()))
+			return fmt.Errorf("vaultraft: vault-scoped command missing vault id (%d bytes)", len(vsc.GetVaultId())), nil
 		}
 		var vaultID glid.GLID
 		copy(vaultID[:], vsc.GetVaultId())
 		inner := vsc.GetCommand()
-		if inner == nil || inner.GetCommand() == nil {
-			return errors.New("vaultraft: vault-scoped command missing instance command body")
+		if inner.GetCommand() == nil {
+			return nil, fmt.Errorf("vaultraft: vault-scoped command: %w", raftlevel.UnknownCommand(inner))
 		}
 		f.mu.Lock()
 		t := f.vaults[vaultID]
@@ -144,9 +187,13 @@ func (f *FSM) Apply(l *hraft.Log) any {
 		}
 		subFSM := t
 		f.mu.Unlock()
-		return subFSM.ApplyCommand(inner)
+		result := subFSM.ApplyCommand(inner)
+		if err, ok := result.(error); ok && errors.Is(err, raftlevel.ErrUnknownCommand) {
+			return nil, err
+		}
+		return result, nil
 	default:
-		return fmt.Errorf("vaultraft: unknown command %T", cmd.GetCommand())
+		return nil, fmt.Errorf("vaultraft: %w", raftlevel.UnknownCommand(cmd))
 	}
 }
 

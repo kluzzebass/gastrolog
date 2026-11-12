@@ -8,6 +8,7 @@ import (
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/raftlevel"
 	"gastrolog/internal/vaultraft"
 
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -23,6 +24,9 @@ var ErrVaultCtlRaftUnavailable = errors.New("vault control-plane raft: group man
 func (o *Orchestrator) ApplyVaultControlPlane(vaultID glid.GLID, data []byte) error {
 	if o.groupMgr == nil {
 		return ErrVaultCtlRaftUnavailable
+	}
+	if err := o.vaultCtlGate.CheckVaultRaftCommand(data); err != nil {
+		return fmt.Errorf("refused vault-ctl proposal: %w", err)
 	}
 	gid := raftgroup.VaultControlPlaneGroupID(vaultID)
 	g := o.groupMgr.GetGroup(gid)
@@ -59,3 +63,18 @@ func (a *vaultCtlApplier) Apply(data []byte) error {
 }
 
 var _ vaultctlfsm.Applier = (*vaultCtlApplier)(nil)
+
+// gatedChunkApplier passes every vault chunk FSM command through the
+// protocol-level gate before handing it to the applier that proposes or
+// forwards it.
+type gatedChunkApplier struct {
+	gate *raftlevel.Gate
+	next vaultctlfsm.Applier
+}
+
+func (a gatedChunkApplier) Apply(data []byte) error {
+	if err := a.gate.CheckVaultCtlCommand(data); err != nil {
+		return fmt.Errorf("refused vault-ctl proposal: %w", err)
+	}
+	return a.next.Apply(data)
+}

@@ -31,6 +31,7 @@ import (
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/raftlevel"
 	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -316,6 +317,10 @@ type Orchestrator struct {
 	// peerConns is the shared gRPC pool for cluster peers. Set from factories
 	// during ApplyConfig; used by ApplyVaultControlPlane forwarding.
 	peerConns *cluster.PeerConnManager
+
+	// vaultCtlGate gates every vault-ctl proposal from this node. Set from
+	// factories during ApplyConfig.
+	vaultCtlGate *raftlevel.Gate
 
 	// vaultCtlReplicated is true when vault metadata replicates through
 	// per-vault vault-ctl Raft groups on this node (a GroupManager and a node

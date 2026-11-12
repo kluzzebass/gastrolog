@@ -26,6 +26,7 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/raftlevel"
 	"gastrolog/internal/raftwal"
 	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
@@ -141,6 +142,9 @@ type orchRelHarness struct {
 	// nodeCloudStore, when non-nil, gives each node its own view of one
 	// bucket (withNodeCloudStores), so a test can see which node did what.
 	nodeCloudStore func(nodeID string) blobstore.Store
+	// levels, when non-nil, replaces the protocol-level table every node's
+	// vault-ctl gate checks against (withProtocolLevels).
+	levels raftlevel.Table
 }
 
 // pipelineClusterOpts carries the pipeline tuning for withPipelineCluster.
@@ -291,6 +295,12 @@ func withPipelineCluster(completePolicy segmentation.CompletePolicy, chunkMaxRec
 			chunkMaxRecords: chunkMaxRecords,
 		}
 	}
+}
+
+// withProtocolLevels gates every node's vault-ctl proposals against table in
+// place of this binary's level table.
+func withProtocolLevels(table raftlevel.Table) orchRelOption {
+	return func(h *orchRelHarness) { h.levels = table }
 }
 
 // withSharedCloudStore makes every node's "memory" cloud service one shared
@@ -890,6 +900,18 @@ func (h *orchRelHarness) startNode(id string) {
 	// node happened to win the election — the coin-flip behind this family's
 	// intermittency. Production always has PeerConns in a real cluster.
 	factories.PeerConns = n.peerConns
+	// The vault-ctl gate reads the active level from the shared config store,
+	// the cluster-ctl state of this harness, as production reads it from the
+	// node's cluster-ctl store.
+	gate := raftlevel.NewGate(func() uint32 {
+		level, _ := h.cfgStore.GetProtocolLevel(context.Background())
+		return level
+	})
+	if h.levels != nil {
+		gate = gate.WithTable(h.levels)
+	}
+	factories.VaultCtlGate = gate
+	n.clusterSrv.SetVaultCtlGate(gate)
 	// ForwardVaultApply receiver: applies forwarded vault-ctl commands to
 	// the local Raft group, mirroring wireClusterRaftApplies in app.go.
 	// Without it, forwarded applies (and origin publishes from non-leader
