@@ -2,8 +2,8 @@ import type { NodeConfig } from "../../api/gen/gastrolog/v1/system_pb";
 import type { FileStorage, NodeStorageConfig } from "../../api/gen/gastrolog/v1/storage_pb";
 import { encode } from "../../api/glid";
 
-// The class `gastrolog config node add-storage` assigns when none is given,
-// so a storage the wizard makes pools with one made from the CLI.
+// The class `gastrolog config node add-storage` assigns when none is given;
+// the wizard's storage takes it whenever no other storage holds it.
 export const DEFAULT_STORAGE_CLASS = 1;
 
 /** The path a storage gets when the operator leaves it empty, as in Settings. */
@@ -44,12 +44,36 @@ function toInput(fs: FileStorage): FileStorageInput {
 }
 
 /**
+ * The class that confines a vault to `path`. Storages sharing a class form a
+ * pool placement may pick any member of, so the class must hold no storage
+ * at another path: an existing path keeps its class when that holds, and a
+ * new path takes the lowest class no storage uses.
+ */
+function classForPath(storages: FileStorage[], path: string): number {
+  const classesAtPath = new Set(storages.filter((fs) => fs.path === path).map((fs) => fs.storageClass));
+  if (classesAtPath.size === 0) {
+    const used = new Set(storages.map((fs) => fs.storageClass));
+    let cls = DEFAULT_STORAGE_CLASS;
+    while (used.has(cls)) cls++;
+    return cls;
+  }
+  const [cls] = classesAtPath;
+  const sharedElsewhere = storages.some((fs) => fs.storageClass === cls && fs.path !== path);
+  if (classesAtPath.size > 1 || sharedElsewhere) {
+    throw new Error(
+      `The existing storage at ${path} shares its storage class with other directories, so a vault in that class could be placed elsewhere. Set up this vault's storage in Settings instead.`,
+    );
+  }
+  return cls!;
+}
+
+/**
  * Plans the file storage the setup wizard's file vault lives on: one storage
  * at `path` on every node, so placement finds an eligible node wherever the
- * vault lands. A relative path resolves on each node against its own
- * directory. Each update carries the node's full storage list, because
- * SetNodeStorageConfig replaces it. A node that already has a storage at
- * the path keeps it, and the vault takes that storage's class.
+ * vault lands, in a class no other directory uses. A relative path resolves
+ * on each node against its own directory. Each update carries the node's
+ * full storage list, because SetNodeStorageConfig replaces it. A node that
+ * already has a storage at the path keeps it.
  */
 export function planWizardStorage(
   nodeConfigs: NodeConfig[],
@@ -61,8 +85,7 @@ export function planWizardStorage(
   if (nodeConfigs.length === 0) throw new Error("No cluster nodes are known yet");
 
   const storagesByNode = new Map(nodeStorageConfigs.map((nsc) => [encode(nsc.nodeId), nsc.fileStorages]));
-  const existingAtPath = nodeStorageConfigs.flatMap((nsc) => nsc.fileStorages).find((fs) => fs.path === path);
-  const storageClass = existingAtPath?.storageClass ?? DEFAULT_STORAGE_CLASS;
+  const storageClass = classForPath(nodeStorageConfigs.flatMap((nsc) => nsc.fileStorages), path);
 
   const updates: NodeStorageUpdate[] = [];
   for (const nc of nodeConfigs) {

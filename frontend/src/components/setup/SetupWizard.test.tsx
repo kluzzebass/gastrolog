@@ -139,6 +139,49 @@ describe("SetupWizard on a cluster that already has storage", () => {
   });
 });
 
+describe("SetupWizard on a cluster whose storage class pools other directories", () => {
+  test("a new directory gets its own class, so the vault lands in it", async () => {
+    const [a] = NODE_IDS as [string];
+    const pooled = new NodeStorageConfig({
+      nodeId: encodeString(a),
+      fileStorages: [new FileStorage({ id: crypto.getRandomValues(new Uint8Array(16)), name: "cli", path: "storage/disk-1", storageClass: 1 })],
+    });
+    await runWizard(emptyCluster([pooled]), { dir: "storage/typed-dir" });
+
+    const cls = vaultCalls()[0]!.config.storageClass;
+    expect(cls).not.toBe(1);
+    expect(storageCalls()).toHaveLength(NODE_IDS.length);
+    for (const c of storageCalls()) {
+      const added = c.config.fileStorages.at(-1)!;
+      expect(added.path).toBe("storage/typed-dir");
+      expect(added.storageClass).toBe(cls);
+    }
+  });
+
+  test("an existing directory whose class is shared is refused before anything is written", async () => {
+    const [a, b] = NODE_IDS as [string, string];
+    const shared = [a, b].map((id, i) =>
+      new NodeStorageConfig({
+        nodeId: encodeString(id),
+        fileStorages: [new FileStorage({ id: crypto.getRandomValues(new Uint8Array(16)), name: `s${i}`, path: i === 0 ? "/data/logs" : "/data/other", storageClass: 1 })],
+      }),
+    );
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], emptyCluster(shared));
+    const ui = render(<SetupWizard />, { wrapper: settingsWrapper(qc) });
+    fireEvent.click(ui.getByText("Get Started"));
+    fireEvent.change(await ui.findByPlaceholderText(`storage/${GENERATED}`), { target: { value: "/data/logs" } });
+    for (let i = 0; i < 3; i++) fireEvent.click(ui.getByText("Next"));
+    fireEvent.click(ui.getByText("Chatterbox"));
+    fireEvent.click(ui.getByText("Next"));
+    fireEvent.click(ui.getByText("Create"));
+
+    await waitFor(() => expect(ui.getByText(/shares its storage class/)).toBeTruthy());
+    expect(storageCalls()).toHaveLength(0);
+    expect(vaultCalls()).toHaveLength(0);
+  });
+});
+
 describe("SetupWizard failure", () => {
   test("a failed storage write creates no vault", async () => {
     m(mocks.systemClient, "setNodeStorageConfig").mockRejectedValue(new Error("not leader"));

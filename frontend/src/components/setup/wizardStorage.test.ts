@@ -73,6 +73,50 @@ describe("planWizardStorage", () => {
     expect(plan.updates[0]!.fileStorages[0]!.storageClass).toBe(2);
   });
 
+  test("a new path gets a class no existing storage uses, so the vault cannot land in another directory of a shared pool", () => {
+    const [a, b] = NODE_IDS as [string, string];
+    const plan = planWizardStorage(
+      nodes([a, b]),
+      [
+        storageOn(a, { path: "storage/other", storageClass: DEFAULT_STORAGE_CLASS }),
+        storageOn(b, { path: "/mnt/slow", storageClass: DEFAULT_STORAGE_CLASS + 1 }),
+      ],
+      { name: "typed", path: "storage/typed-dir" },
+    );
+
+    expect(plan.storageClass).toBe(DEFAULT_STORAGE_CLASS + 2);
+    expect(plan.updates).toHaveLength(2);
+    for (const u of plan.updates) {
+      expect(u.fileStorages.at(-1)!.path).toBe("storage/typed-dir");
+      expect(u.fileStorages.at(-1)!.storageClass).toBe(plan.storageClass);
+    }
+  });
+
+  test("an existing path whose class is shared with another directory is refused", () => {
+    const [a, b] = NODE_IDS as [string, string];
+    expect(() =>
+      planWizardStorage(
+        nodes([a, b]),
+        [
+          storageOn(a, { path: "/data/logs", storageClass: 1 }),
+          storageOn(b, { path: "/data/elsewhere", storageClass: 1 }),
+        ],
+        { name: "x", path: "/data/logs" },
+      ),
+    ).toThrow(/\/data\/logs/);
+  });
+
+  test("an existing path held in different classes on different nodes is refused", () => {
+    const [a, b] = NODE_IDS as [string, string];
+    expect(() =>
+      planWizardStorage(
+        nodes([a, b]),
+        [storageOn(a, { path: "/data/logs", storageClass: 1 }), storageOn(b, { path: "/data/logs", storageClass: 2 })],
+        { name: "x", path: "/data/logs" },
+      ),
+    ).toThrow(/\/data\/logs/);
+  });
+
   test("path comparison ignores surrounding whitespace the operator typed", () => {
     const [a] = NODE_IDS as [string];
     const plan = planWizardStorage(nodes([a]), [storageOn(a, { path: "/data/logs", storageClass: 1 })], {
