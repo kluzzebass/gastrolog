@@ -23,8 +23,14 @@ import (
 // vault's files while it was a home.
 type formerHome struct {
 	o     *Orchestrator
+	store *sysmem.Store
 	vault glid.GLID
 	root  string
+	// self is the former home's node ID; home is the node the vault is
+	// placed on now.
+	self, home string
+	// storages maps each node ID to its file storage ID.
+	storages map[string]string
 }
 
 func newFormerHome(t *testing.T) formerHome {
@@ -63,7 +69,14 @@ func newFormerHome(t *testing.T) formerHome {
 	if o.isPipelineIngestVault(vault) {
 		t.Fatal("premise: the former home is registered with the pipeline for the vault")
 	}
-	return formerHome{o: o, vault: vault, root: storagePipelineRoot(storageDir, vault)}
+	byNode := make(map[string]string, len(storages))
+	for node, id := range storages {
+		byNode[node.String()] = id.String()
+	}
+	return formerHome{
+		o: o, store: store, vault: vault, root: storagePipelineRoot(storageDir, vault),
+		self: self.String(), home: newHome.String(), storages: byNode,
+	}
 }
 
 func writeFormerHomeFile(t *testing.T, path string, body []byte) {

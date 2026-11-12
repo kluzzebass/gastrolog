@@ -354,8 +354,18 @@ holder quorum of that chunk — after a placement change that replaced every
 home, the former homes are the only source. The same holds for an unreleased
 segment no durable chunk supersedes yet: the former home stays its holder
 while the placement holds fewer than the holder quorum of it, and the new
-homes collect it from the former home's copy when its origin is down or gone. A home missing a sealed chunk
-that no source can supply raises `glcb-unrecoverable`.
+homes collect it from the former home's copy when its origin is down or gone.
+A home missing a sealed chunk that no source can supply raises
+`glcb-unrecoverable`.
+
+A former home deletes its copy of a sealed chunk, `chunks/<chunk-id>/` under
+any root it could hold the vault's files under, on the chunk tombstone sweep
+once the copy is no longer needed (`purgeFormerHomeChunkCopies`): the node is
+outside the vault's placement, the FSM no longer records it as a holder, no
+delete is pending for the chunk, and the placement holds the chunk at its
+holder quorum or the chunk is cloud-backed. A role change alone deletes
+nothing. The pass judges only chunks in the vault chunk manifest; tombstoned
+chunks are the tombstone purge's, unknown ones the local-orphan pass's.
 
 ### Seal and the sealed digest
 
@@ -490,7 +500,11 @@ gathers the vault's files from every other candidate root into the new one
 across filesystems it is copied, synced and renamed into place before the old
 copy is removed, so an interrupted gather leaves every file whole somewhere
 and the next registration finishes it. A gather that cannot finish still
-registers the vault on its new root and retries on the next reload.
+registers the vault on its new root and retries on the next reload. A node
+that stops being a home leaves its `head/` and `chunks/` where they are: it
+serves them to the new homes from there, the released-segment purge removes a
+`head/` copy once its segment is released, and the former-home chunk purge
+removes a `chunks/` copy once the placement holds the chunk.
 
 ## Segment file format
 

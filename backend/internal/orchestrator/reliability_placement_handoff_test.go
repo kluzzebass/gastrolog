@@ -58,6 +58,10 @@ func TestOrchPipeline_PlacementChangeHandsSealedChunksToNewHomes(t *testing.T) {
 			// No segment is left to rebuild a chunk from: the former homes'
 			// GLCBs are the only copies of these records.
 			h.waitSegmentsReleased(v, h.nodeIDs[tc.oldHomes[0]])
+			// The hand-off is observed on the new leader home's vault-ctl FSM;
+			// it must already see every former home's holder receipt.
+			h.waitHeldByHomes(v, h.nodeIDs[tc.newHomes[0]], entries, tc.oldHomes)
+			copies := h.formerHomeCopies(v, tc.oldHomes, entries)
 
 			if tc.sweepsBeforePull > 0 {
 				for _, idx := range tc.oldHomes {
@@ -65,6 +69,7 @@ func TestOrchPipeline_PlacementChangeHandsSealedChunksToNewHomes(t *testing.T) {
 				}
 			}
 			h.setVaultPlacements(v, tc.newHomes)
+			v.nodeIdxs = tc.newHomes
 			for i, id := range h.nodeIDs {
 				n := h.nodes[id]
 				switch {
@@ -85,6 +90,7 @@ func TestOrchPipeline_PlacementChangeHandsSealedChunksToNewHomes(t *testing.T) {
 				h.waitVaultCtlLeaderOn(v, leader)
 				h.holdAcrossSweeps("former homes stay holders of every chunk the new homes lack",
 					leader, "vault-catchup-sweep", tc.sweepsBeforePull, func() (string, bool) {
+						h.checkHandoff(v, leader, entries, copies)
 						for _, e := range h.sealedPipelineChunks(v, leader) {
 							for _, idx := range tc.oldHomes {
 								if !slices.Contains(e.Holders, h.nodeIDs[idx]) {
@@ -105,8 +111,13 @@ func TestOrchPipeline_PlacementChangeHandsSealedChunksToNewHomes(t *testing.T) {
 				}
 			}
 
+			h.waitProgress("every chunk held by the new homes", 50*time.Millisecond, func() (string, bool) {
+				st := h.checkHandoff(v, leader, entries, copies)
+				return st.String(), st.held == len(entries)
+			}, func() { h.dumpPipelineState(v) })
 			h.waitGLCBsOnHomes(v, tc.newHomes, entries)
 			h.waitProgress("handed-off records searchable on the new leader home", 50*time.Millisecond, func() (string, bool) {
+				h.checkHandoff(v, leader, entries, copies)
 				found := 0
 				for _, raw := range h.searchRecords(v, leader) {
 					if bodies[string(raw)] {
@@ -123,6 +134,7 @@ func TestOrchPipeline_PlacementChangeHandsSealedChunksToNewHomes(t *testing.T) {
 				newHomeIDs = append(newHomeIDs, h.nodeIDs[idx])
 			}
 			h.waitProgress("holders settle on the new homes", 50*time.Millisecond, func() (string, bool) {
+				h.checkHandoff(v, leader, entries, copies)
 				settled := 0
 				var state []string
 				for _, e := range h.sealedPipelineChunks(v, leader) {
@@ -142,6 +154,7 @@ func TestOrchPipeline_PlacementChangeHandsSealedChunksToNewHomes(t *testing.T) {
 					t.Fatalf("after the handoff no chunk depends on former home %s: %+v", h.nodes[h.nodeIDs[idx]].label, losses)
 				}
 			}
+			h.waitFormerCopiesDeleted(v, leader, entries, copies)
 		})
 	}
 }
@@ -191,7 +204,7 @@ func TestOrchPipeline_CloudVaultMoveHandsOffChunksNotYetUploaded(t *testing.T) {
 	ledger.hold("upload", oldHome)
 	bodies := h.submitIngestRecords(ingest, 2*pipelineChunkMaxRecords, "cloud-move")
 	entries := h.waitSealedRecords(v, oldHome, int64(len(bodies)))
-	h.waitHeldByHomes(v, oldHome, entries, []int{0})
+	h.waitHeldByHomes(v, newHome, entries, []int{0})
 	h.waitRegistryDrained(v, []int{0, 1, 2, 3})
 	for _, e := range h.sealedPipelineChunks(v, oldHome) {
 		if e.CloudBacked {
@@ -220,6 +233,7 @@ func TestOrchPipeline_CloudVaultMoveHandsOffChunksNotYetUploaded(t *testing.T) {
 	h.waitSearchable(v, newHome, len(bodies))
 	h.assertSearchBodiesExactly(v, newHome, bodies)
 	h.waitFormerHomesPruned(v, newHome, entries, []string{oldHome})
+	h.waitFormerCopiesDeleted(v, newHome, entries, copies)
 }
 
 // The only home of a vault, holding the only copy of every sealed chunk, is
@@ -246,6 +260,7 @@ func TestOrchPipeline_DepartedHomeDownDuringTheMoveIsWaitedFor(t *testing.T) {
 	entries := h.waitSealedRecords(v, oldHome, int64(len(bodies)))
 	h.waitGLCBsOnHomes(v, []int{0}, entries)
 	h.waitRegistryDrained(v, []int{0, 1, 2, 3})
+	h.waitHeldByHomes(v, newHome, entries, []int{0})
 	copies := h.formerHomeCopies(v, []int{0}, entries)
 
 	h.stopNode(oldHome)
@@ -298,6 +313,7 @@ func TestOrchPipeline_DepartedHomeDownDuringTheMoveIsWaitedFor(t *testing.T) {
 	h.waitSearchable(v, newHome, len(bodies))
 	h.assertSearchBodiesExactly(v, newHome, bodies)
 	h.waitFormerHomesPruned(v, newHome, entries, []string{oldHome})
+	h.waitFormerCopiesDeleted(v, newHome, entries, copies)
 }
 
 const glcbUnrecoverableAlarm = "glcb-unrecoverable"
@@ -454,6 +470,26 @@ func (h *orchRelHarness) checkHandoff(v vaultSpec, observer string, entries []va
 		}
 	}
 	return st
+}
+
+// waitFormerCopiesDeleted waits until every former home in copies has deleted
+// its copy of every chunk, checking the hand-off (checkHandoff) on every poll
+// so a copy that goes before the new homes hold its chunk fails the test.
+func (h *orchRelHarness) waitFormerCopiesDeleted(v vaultSpec, observer string, entries []vaultctlfsm.ManifestEntry, copies map[string]map[chunk.ChunkID]string) {
+	h.t.Helper()
+	h.waitProgress("former homes delete the copies the new homes hold", 50*time.Millisecond, func() (string, bool) {
+		st := h.checkHandoff(v, observer, entries, copies)
+		var kept []string
+		for former, held := range copies {
+			for id, path := range held {
+				if _, err := os.Stat(path); err == nil {
+					kept = append(kept, fmt.Sprintf("%s@%s", id, h.nodes[former].label))
+				}
+			}
+		}
+		slices.Sort(kept)
+		return fmt.Sprintf("%s kept=%v", st, kept), len(kept) == 0
+	}, func() { h.dumpPipelineState(v) })
 }
 
 // waitFormerHomesPruned waits until no chunk names a former home as a holder
