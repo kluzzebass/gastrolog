@@ -13,6 +13,7 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
 )
@@ -416,7 +417,7 @@ func TestRemovalGates_OperatorRefusesBelowRF(t *testing.T) {
 	c.memVault("triple", 3, "a", "b", "c")
 
 	logger, _ := testLogger()
-	err := evaluateRemovalGates(context.Background(), c.store, c.ids["a"].String(),
+	err := evaluateRemovalGates(context.Background(), c.store, nil, c.ids["a"].String(),
 		cluster.RemoveNodeOptions{Policy: cluster.RemovalPolicyOperator}, logger)
 	if !errors.Is(err, ErrWouldDropBelowRF) {
 		t.Fatalf("operator removal below RF must be refused, got %v", err)
@@ -437,7 +438,7 @@ func TestRemovalGates_SelfRemovalAllowedBelowRF(t *testing.T) {
 	c.memVault("triple", 3, "a", "b", "c")
 
 	logger, logs := testLogger()
-	err := evaluateRemovalGates(context.Background(), c.store, c.ids["a"].String(),
+	err := evaluateRemovalGates(context.Background(), c.store, nil, c.ids["a"].String(),
 		cluster.RemoveNodeOptions{Policy: cluster.RemovalPolicySelf}, logger)
 	if err != nil {
 		t.Fatalf("self-removal below RF must be allowed, got %v", err)
@@ -457,7 +458,7 @@ func TestRemovalGates_ForceBypassesRFGateLoudly(t *testing.T) {
 	c.memVault("triple", 3, "a", "b", "c")
 
 	logger, logs := testLogger()
-	err := evaluateRemovalGates(context.Background(), c.store, c.ids["a"].String(),
+	err := evaluateRemovalGates(context.Background(), c.store, nil, c.ids["a"].String(),
 		cluster.RemoveNodeOptions{Force: true, Policy: cluster.RemovalPolicyOperator}, logger)
 	if err != nil {
 		t.Fatalf("--force must bypass the RF gate, got %v", err)
@@ -483,7 +484,7 @@ func TestRemovalGates_OrphanGateUnchangedByPolicy(t *testing.T) {
 
 	for _, policy := range []cluster.RemovalPolicy{cluster.RemovalPolicyOperator, cluster.RemovalPolicySelf} {
 		logger, _ := testLogger()
-		err := evaluateRemovalGates(ctx, c.store, c.ids["a"].String(),
+		err := evaluateRemovalGates(ctx, c.store, nil, c.ids["a"].String(),
 			cluster.RemoveNodeOptions{Policy: policy}, logger)
 		if err == nil {
 			t.Fatalf("policy %v: orphaning removal must be refused", policy)
@@ -497,7 +498,7 @@ func TestRemovalGates_OrphanGateUnchangedByPolicy(t *testing.T) {
 	}
 
 	logger, logs := testLogger()
-	if err := evaluateRemovalGates(ctx, c.store, c.ids["a"].String(),
+	if err := evaluateRemovalGates(ctx, c.store, nil, c.ids["a"].String(),
 		cluster.RemoveNodeOptions{Force: true, Policy: cluster.RemovalPolicyOperator}, logger); err != nil {
 		t.Fatalf("--force must bypass the orphan gate, got %v", err)
 	}
@@ -517,7 +518,7 @@ func TestRemovalGates_SafeRemovalPasses(t *testing.T) {
 	c.memVault("pair", 2, "a", "b", "c")
 
 	logger, logs := testLogger()
-	if err := evaluateRemovalGates(context.Background(), c.store, c.ids["a"].String(),
+	if err := evaluateRemovalGates(context.Background(), c.store, nil, c.ids["a"].String(),
 		cluster.RemoveNodeOptions{Policy: cluster.RemovalPolicyOperator}, logger); err != nil {
 		t.Fatalf("safe removal must pass, got %v", err)
 	}
@@ -777,5 +778,89 @@ func TestNodeRemover_ConcurrentRemovalsCannotOrphan(t *testing.T) {
 	defer mu.Unlock()
 	if len(removed) != 1 {
 		t.Fatalf("expected exactly one node actually removed, got %v", removed)
+	}
+}
+
+// A node holding copies that sealed chunks or unreleased segments still
+// depend on — a former home whose chunks or segments the new homes have not
+// pulled yet, or an origin whose segments the homes have not collected — is
+// not removed: its copy can be the only one. Refused for every policy, like an
+// orphaned vault, naming each vault with what depends on the node; --force
+// bypasses it on the record.
+func TestRemovalGates_RefusesWhileDataDependsOnTheNode(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		loss orchestrator.HolderLoss
+		want string
+	}{
+		{name: "chunks", loss: orchestrator.HolderLoss{VaultName: "handed-off", Chunks: 2}, want: `"handed-off"`},
+		{name: "segments", loss: orchestrator.HolderLoss{VaultName: "unchunked", Segments: 3}, want: "3 unreleased segment(s)"},
+		{name: "both", loss: orchestrator.HolderLoss{VaultName: "mixed", Chunks: 1, Segments: 4}, want: "1 sealed chunk(s) and 4 unreleased segment(s)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tc.loss.VaultID = glid.New()
+			var asked string
+			losses := func(_ context.Context, nodeID string) []orchestrator.HolderLoss {
+				asked = nodeID
+				return []orchestrator.HolderLoss{tc.loss}
+			}
+			for _, policy := range []cluster.RemovalPolicy{cluster.RemovalPolicyOperator, cluster.RemovalPolicySelf} {
+				c := newRFTestCluster(t)
+				c.node("a", system.NodeStateLive)
+				c.node("b", system.NodeStateLive)
+				c.memVault("elsewhere", 1, "b")
+				logger, _ := testLogger()
+				err := evaluateRemovalGates(context.Background(), c.store, losses, c.ids["a"].String(),
+					cluster.RemoveNodeOptions{Policy: policy}, logger)
+				if !errors.Is(err, cluster.ErrRemovalRefused) {
+					t.Fatalf("policy %v: removal of a node data depends on must be refused, got %v", policy, err)
+				}
+				if asked != c.ids["a"].String() {
+					t.Fatalf("policy %v: gate asked about %q, want the removed node", policy, asked)
+				}
+				if !strings.Contains(err.Error(), tc.loss.VaultName) || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("policy %v: refusal must name the vault and what depends on the node (%q): %v", policy, tc.want, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRemovalGates_ForceBypassesHolderLossGate(t *testing.T) {
+	t.Parallel()
+	for _, loss := range []orchestrator.HolderLoss{
+		{VaultID: glid.New(), VaultName: "handed-off", Chunks: 1},
+		{VaultID: glid.New(), VaultName: "unchunked", Segments: 1},
+	} {
+		c := newRFTestCluster(t)
+		c.node("a", system.NodeStateLive)
+		c.node("b", system.NodeStateLive)
+		c.memVault("elsewhere", 1, "b")
+		losses := func(context.Context, string) []orchestrator.HolderLoss { return []orchestrator.HolderLoss{loss} }
+		logger, buf := testLogger()
+		if err := evaluateRemovalGates(context.Background(), c.store, losses, c.ids["a"].String(),
+			cluster.RemoveNodeOptions{Policy: cluster.RemovalPolicyOperator, Force: true}, logger); err != nil {
+			t.Fatalf("%+v: --force must bypass the holder-loss gate, got %v", loss, err)
+		}
+		if !strings.Contains(buf.String(), "holder-loss gate") {
+			t.Fatalf("%+v: a forced bypass must be logged: %s", loss, buf.String())
+		}
+	}
+}
+
+func TestRemovalGates_NoHolderLossAllowsRemoval(t *testing.T) {
+	t.Parallel()
+	c := newRFTestCluster(t)
+	c.node("a", system.NodeStateLive)
+	c.node("b", system.NodeStateLive)
+	c.memVault("elsewhere", 1, "b")
+	none := func(context.Context, string) []orchestrator.HolderLoss { return nil }
+	logger, _ := testLogger()
+	if err := evaluateRemovalGates(context.Background(), c.store, none, c.ids["a"].String(),
+		cluster.RemoveNodeOptions{Policy: cluster.RemovalPolicyOperator}, logger); err != nil {
+		t.Fatalf("removal with nothing depending on the node must pass, got %v", err)
 	}
 }

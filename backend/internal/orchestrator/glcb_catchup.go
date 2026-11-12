@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -100,6 +101,7 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 	}
 	glcbPath := chunking.ChunkGLCBPath(root, e.ID)
 	if _, err := os.Stat(glcbPath); err == nil {
+		o.noteGLCBRecovered(vaultID, e.ID)
 		return // bytes present; registration is the sweep's other half
 	}
 	if o.retentionMootsPull(vaultID, e) {
@@ -149,27 +151,29 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 // destVaultID for ordinary same-vault replica catch-up, and the transfer's
 // source vault for a transfer-introduced entry (see pullMissingGLCB).
 //
-// When sourceVaultID differs from destVaultID (a transfer-introduced
-// entry) and the source vault's placement peers yield nothing — 0 peers,
-// or every pull attempt fails — falls back to this DESTINATION vault's
-// own confirmed holders (e.Holders), addressing the RPC at destVaultID
-// instead. Defense in depth: fireTransferEvent clears
-// TransferSourceVaultID on completion, but if that clear is ever missed
-// (crash, apply failure between receipts-met and the clear), the source
-// vault's placement peers have nothing left to give once the source
-// expires its own copies — without this fallback, replica repair for that
-// chunk would be permanently stuck addressing a vault with no bytes, even
-// though other DESTINATION homes hold a perfectly good copy right now.
+// When the placement peers yield nothing — 0 peers, or every pull attempt
+// fails — it falls back to the entry's own confirmed holders (e.Holders),
+// addressing the RPC at destVaultID. After a placement change that replaced
+// every home holding the chunk, those holders are the former homes, which
+// serve the copy they kept (ServeChunkGLCBPull). For a transfer-introduced
+// entry they are the destination's other homes: fireTransferEvent clears
+// TransferSourceVaultID on completion, but if that clear is ever missed the
+// source vault's placement has nothing left to give once the source expires
+// its own copies. A chunk no source can supply raises glcb-unrecoverable.
 func (o *Orchestrator) runGLCBPull(destVaultID, sourceVaultID glid.GLID, e vaultctlfsm.ManifestEntry, glcbPath string) {
 	sources := o.glcbPullSources(sourceVaultID)
-	// Only a transfer-introduced entry (sourceVaultID != destVaultID) is
-	// eligible for the holder-set fallback — ordinary same-vault catch-up
-	// has no OTHER set of peers to fall back to.
+	// The entry's confirmed holders back up the placement peers for every
+	// entry: after a placement change that replaced every home holding the
+	// chunk, the former homes are its only holders, and they serve it from
+	// wherever their copy still lies (ServeChunkGLCBPull).
 	var holderSources []string
-	if sourceVaultID != destVaultID {
-		holderSources = o.holderPullSources(e)
+	for _, n := range o.holderPullSources(e) {
+		if sourceVaultID != destVaultID || !slices.Contains(sources, n) {
+			holderSources = append(holderSources, n)
+		}
 	}
 	if len(sources) == 0 && len(holderSources) == 0 {
+		o.noteGLCBUnrecoverable(destVaultID, e.ID, "no peer home or holder to pull from")
 		return
 	}
 	if o.stageEvents != nil {
@@ -201,9 +205,11 @@ func (o *Orchestrator) runGLCBPull(destVaultID, sourceVaultID glid.GLID, e vault
 				"vault", destVaultID, "source_vault", sourceVaultID, "chunk", e.ID, "peers", len(sources)+len(holderSources),
 				"error", lastErr, "suppressed", n)
 		}
+		o.noteGLCBUnrecoverable(destVaultID, e.ID, fmt.Sprintf("every peer failed: %v", lastErr))
 		return
 	}
 
+	o.noteGLCBRecovered(destVaultID, e.ID)
 	o.logger.Info("GLCB replica recovered from peer",
 		"vault", destVaultID, "source_vault", fromVaultID, "chunk", e.ID, "from", fromNode)
 	// A verified copy is back on the canonical path: clear any
@@ -234,11 +240,9 @@ func (o *Orchestrator) tryPullFromPeers(ctx context.Context, addrVaultID glid.GL
 	return glid.GLID{}, "", lastErr
 }
 
-// holderPullSources lists a transfer-introduced entry's own confirmed
-// GLCB holders (e.Holders), self excluded — the replica-repair fallback
-// for when the SOURCE vault's placement peers have nothing left to give
-// (already deleted their copies, or the source vault itself is gone). See
-// runGLCBPull.
+// holderPullSources lists the entry's confirmed GLCB holders (e.Holders),
+// self excluded — the replica-repair fallback for when the placement peers
+// have nothing to give. See runGLCBPull.
 func (o *Orchestrator) holderPullSources(e vaultctlfsm.ManifestEntry) []string {
 	var out []string
 	for _, n := range e.Holders {

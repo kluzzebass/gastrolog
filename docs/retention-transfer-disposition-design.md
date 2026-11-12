@@ -169,7 +169,8 @@ its copies. Two defenses, either sufficient alone:
 2. **Holder-set fallback.** If the clear is missed (a crash or apply
    failure between receipts-met and the clear), `runGLCBPull` tries the
    source vault's placement first and, finding nothing, falls back to the
-   destination vault's own confirmed holders.
+   destination vault's own confirmed holders — the same fallback every
+   catch-up pull has.
 
 ## Transient dual-vault query visibility
 

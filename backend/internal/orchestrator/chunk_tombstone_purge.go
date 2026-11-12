@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
@@ -15,8 +16,9 @@ import (
 
 // sweepChunkTombstones runs on every node for every vault: each node purges
 // its copies of tombstoned chunks and confirms the delete sequence the purge
-// covered, and the vault-ctl leader prunes the chunk tombstones every member
-// of the group has confirmed. Every node takes part because every node is a
+// covered, deletes the copies it kept as a former home once the placement
+// holds them (purgeFormerHomeChunkCopies), and the vault-ctl leader prunes the
+// chunk tombstones every member of the group has confirmed. Every node takes part because every node is a
 // vault-ctl member, and a node outside a delete's expected-acks set can still
 // hold the chunk in its chunk store or chunk staging.
 //
@@ -59,6 +61,9 @@ func (o *Orchestrator) sweepChunkTombstonesForVault(sys *system.System, vaultID 
 			log.Warn("chunk tombstone sweep: purge confirmation failed", "delete_seq", covered, "error", err)
 		}
 	}
+	if dropped, err := o.purgeFormerHomeChunkCopies(sys, vaultID, fsm); len(dropped) > 0 || err != nil {
+		log.Info("former-home chunk purge: deleted copies the vault's homes now hold", "chunks", len(dropped), "error", err)
+	}
 	if !isLeader() {
 		return
 	}
@@ -89,6 +94,68 @@ func (o *Orchestrator) purgeTombstonedChunks(sys *system.System, vaultID glid.GL
 		errs = append(errs, err)
 	}
 	return purged, errors.Join(errs...)
+}
+
+// purgeFormerHomeChunkCopies deletes the chunk copies this node keeps of a
+// vault it is not placed on, once the vault no longer needs them here
+// (formerHomeCopyReleased). Until then the node serves them to the homes.
+// Only chunks in the vault chunk manifest are judged here, so this pass never
+// acts on a copy the tombstone or local-orphan passes own. Returns the chunks
+// deleted; an error names a copy that could not be deleted or a root that
+// could not be read.
+func (o *Orchestrator) purgeFormerHomeChunkCopies(sys *system.System, vaultID glid.GLID, fsm *vaultctlfsm.FSM) ([]chunk.ChunkID, error) {
+	if sys == nil {
+		return nil, nil
+	}
+	placement := system.PlacementNodeIDs(sys.PlacementsFor(vaultID), sys.Runtime.NodeStorageConfigs)
+	if len(placement) == 0 || slices.Contains(placement, o.localNodeID) {
+		return nil, nil
+	}
+	var (
+		dropped []chunk.ChunkID
+		errs    []error
+	)
+	for _, root := range o.vaultStagingRoots(sys, vaultID) {
+		chunkRoot := pipelineChunkRoot(root)
+		entries, err := os.ReadDir(chunkRoot)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				errs = append(errs, fmt.Errorf("list chunk staging %s: %w", chunkRoot, err))
+			}
+			continue
+		}
+		for _, ent := range entries {
+			if !ent.IsDir() {
+				continue
+			}
+			id, err := chunk.ParseChunkID(ent.Name())
+			if err != nil {
+				continue
+			}
+			e := fsm.Get(id)
+			if e == nil || !formerHomeCopyReleased(*e, fsm.PendingDelete(id), o.localNodeID, placement) {
+				continue
+			}
+			if err := os.RemoveAll(filepath.Join(chunkRoot, ent.Name())); err != nil {
+				errs = append(errs, fmt.Errorf("remove chunk %s: %w", id, err))
+				continue
+			}
+			dropped = append(dropped, id)
+		}
+	}
+	return dropped, errors.Join(errs...)
+}
+
+// formerHomeCopyReleased reports whether a node outside the vault's placement
+// may delete its copy of e: e is sealed, no delete is pending for it, the FSM
+// no longer records the node as a holder (the outside-placement prune drops
+// that claim only once the placement holds the chunk), and the placement holds
+// e without it — at HolderQuorum(placement) placed holders, or in the cloud.
+func formerHomeCopyReleased(e vaultctlfsm.ManifestEntry, pd *vaultctlfsm.PendingDelete, nodeID string, placement []string) bool {
+	if !e.IsSealed() || pd != nil || slices.Contains(e.Holders, nodeID) {
+		return false
+	}
+	return e.CloudBacked || vaultctlfsm.PlacedHolderCount(e.Holders, placement) >= vaultctlfsm.HolderQuorum(placement)
 }
 
 func (o *Orchestrator) vaultReconciler(vaultID glid.GLID) *VaultLifecycleReconciler {

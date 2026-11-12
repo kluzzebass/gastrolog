@@ -800,10 +800,12 @@ func (s *Supervisor) registerHome(spec VaultSpec) (*catchUpPass, error) {
 		}
 	}
 	// A home registered after Start misses Run's one-shot startup catch-up, so
-	// kick initial passes for whatever was registered: collect any segments
-	// already in the registry, then plan/build any manifest work already sealed
-	// or pending (e.g. this node just became a home, or restarted with a lagging
-	// applied index). runCtx cancellation on Stop aborts in-flight work.
+	// kick the chunking passes for whatever was registered: plan/build any
+	// manifest work already sealed or pending (e.g. this node just became a
+	// home, or restarted with a lagging applied index). Collection is not
+	// kicked here: its vault worker runs its own catch-up pass when it starts,
+	// and a second pass from here would contend with it for the vault's pass.
+	// runCtx cancellation on Stop aborts in-flight work.
 	if !s.running.Load() || s.runCtx == nil {
 		return nil, nil
 	}
@@ -813,9 +815,6 @@ func (s *Supervisor) registerHome(spec VaultSpec) (*catchUpPass, error) {
 	chunkCatchUp := spec.Locate != nil
 	s.wg.Go(func() {
 		defer close(pass.done)
-		if collectionRegistered {
-			_ = s.col.CollectOnce(ctx, vid)
-		}
 		if chunkCatchUp {
 			_ = s.chunk.RecoverOnce(ctx, vid)
 			_ = s.chunk.PlanOnce(ctx, vid)
@@ -990,6 +989,13 @@ func (s *Supervisor) UnregisterVault(vaultID glid.GLID) (wait func()) {
 			w()
 		}
 	}
+}
+
+// OriginHoldsRecords reports whether the vault's origin writer on this node
+// holds records not yet completed into completed/. running is false when the
+// vault has no origin writer here.
+func (s *Supervisor) OriginHoldsRecords(vaultID glid.GLID) (holds, running bool) {
+	return s.seg.HoldsRecords(vaultID)
 }
 
 func (s *Supervisor) unregisterOrigin(vaultID glid.GLID) (wait func()) {

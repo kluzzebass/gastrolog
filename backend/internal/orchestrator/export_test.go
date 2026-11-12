@@ -21,3 +21,19 @@ func (o *Orchestrator) TryLockForTest() bool {
 func (o *Orchestrator) AwaitVaultTeardownForTest(ctx context.Context, id glid.GLID) error {
 	return o.awaitVaultTeardown(ctx, id)
 }
+
+// RunsPipelineForTest reports whether this node currently runs the vault's
+// pipeline (holds a registration for it).
+func (o *Orchestrator) RunsPipelineForTest(id glid.GLID) bool {
+	return o.isPipelineIngestVault(id)
+}
+
+// RefuseGLCBServingForTest makes this node answer every GLCB pull with err
+// until called again with nil.
+func (o *Orchestrator) RefuseGLCBServingForTest(err error) {
+	if err == nil {
+		o.glcbServeRefusal.Store(nil)
+		return
+	}
+	o.glcbServeRefusal.Store(&err)
+}

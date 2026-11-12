@@ -76,8 +76,10 @@ func (o *Orchestrator) sweepReleasedSegmentsForVault(sys *system.System, vaultID
 // vault's staging copies — segments and chunks — whether or not the vault is
 // registered with the pipeline here: the node home's root, one per local file
 // storage, and the root the vault is registered with. A placement change
-// leaves a former home's head/ and chunks/ under its previous root, and the
-// purge sweeps reclaim them from there.
+// leaves a former home's head/ and chunks/ under its previous root: the
+// released-segment sweep purges a head/ copy once its segment is released,
+// and the chunk tombstone sweep deletes a chunks/ copy once its chunk is
+// tombstoned or the placement holds it (purgeFormerHomeChunkCopies).
 func (o *Orchestrator) vaultStagingRoots(sys *system.System, vaultID glid.GLID) []string {
 	roots := o.pipelineRootCandidates(sys, vaultID)
 	if reg, ok := o.lookupPipelineVault(vaultID); ok && reg.root != "" && !slices.Contains(roots, reg.root) {

@@ -205,6 +205,17 @@ var catalog = []AlarmType{
 		Response: "This normally heals itself: the chunk is rebuilt from its source segments or re-pulled from another home. Only act if it keeps standing — check disk health on this node, and whether the vault's other homes still hold good copies.",
 	},
 	{
+		IDPrefix: "glcb-unrecoverable",
+		Priority: High,
+		Source:   "chunking",
+		// A replica pull retries from every sweep; a peer that is restarting
+		// or a connection still warming up heals within a few cycles. A chunk
+		// with no source past this window is a durability incident.
+		DelayOn:  5 * time.Minute,
+		Cause:    "This home is missing sealed chunks of the vault, and no other home or holder of those chunks could supply them. Their segments are released, so those copies are the only way back to the records.",
+		Response: "Bring back the nodes that held the named chunks, including former homes of the vault: a node that left the vault's placement keeps serving the chunks it holds until the new homes have them. If no node holds a chunk any more, its records are lost.",
+	},
+	{
 		IDPrefix: "chunk-unreadable",
 		Priority: High,
 		Source:   "retention",

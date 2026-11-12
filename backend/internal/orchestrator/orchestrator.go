@@ -146,6 +146,9 @@ type Orchestrator struct {
 	backfillLogThrottle logging.Throttle
 	// registerSkipLog spaces skipped-GLCB-registration warnings per vault.
 	registerSkipLog logging.Throttle
+	// glcbUnrecoverable backs the glcb-unrecoverable alarm: sealed chunks this
+	// home is missing that no peer could supply.
+	glcbUnrecoverable glcbUnrecoverable
 	// retentionLeaderlessLog spaces "vault-ctl raft group has no leader"
 	// warnings per vault. Distinct from the vault-leaderless ALARM
 	// (leaderless_alarm.go), which tracks config PLACEMENT leader
@@ -257,6 +260,11 @@ type Orchestrator struct {
 	// test run lock-free readers of the registration inside that window. Nil
 	// in production.
 	pipelineReregisterHook func(vaultID glid.GLID)
+
+	// glcbServeRefusal, if set, makes ServeChunkGLCBPull answer with its error
+	// instead of the bytes. Test-only: it holds one node's copies out of reach
+	// without pausing the node. Nil in production.
+	glcbServeRefusal atomic.Pointer[error]
 
 	// segmentPuller streams completed segments from peer holders for
 	// collection. Set from factories during ApplyConfig (cluster mode only).

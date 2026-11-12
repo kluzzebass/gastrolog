@@ -696,13 +696,20 @@ one segmented file set, one batch-writer goroutine.
   until it recovers.
 
 - **Removal gate** — a leader-side check that runs before a node removal
-  commits, refusing removals that would cost data or redundancy. Two gates
+  commits, refusing removals that would cost data or redundancy. Three gates
   exist, evaluated in severity order and bypassed together by `--force`:
   the **orphan-refusal gate** (removal would leave a vault with zero
-  placements — data loss) and the **RF-preservation gate** (removal would
-  leave a vault below its replication factor with too few eligible Live
-  nodes to re-place onto — reduced redundancy). Refusals name the affected
-  vaults; the RF gate wraps the `ErrWouldDropBelowRF` sentinel.
+  placements — data loss), the **holder-loss gate** (the node holds copies the
+  vault's remaining placement holds fewer than the holder quorum of: sealed
+  chunks, not cloud-backed, and unreleased segments not yet superseded that
+  the node holds or originated — a former home can hold a chunk's or a
+  segment's only copy until the new homes have pulled it, and an origin the
+  only copy of what it accepted until the homes collect it; data loss,
+  refused for every removal policy, and the same query refuses dropping a
+  file storage of such a node) and the **RF-preservation gate** (removal would leave a
+  vault below its replication factor with too few eligible Live nodes to
+  re-place onto — reduced redundancy). Refusals name the affected vaults;
+  the RF gate wraps the `ErrWouldDropBelowRF` sentinel.
   [`backend/internal/app/cluster.go`](../backend/internal/app/cluster.go).
 
 - **Removal record** — the replicated set of node IDs the cluster removed
@@ -1620,7 +1627,14 @@ describes what the code does today.
   copy counts only **placed holders** (`vaultctlfsm.PlacedHolderCount`), and
   **node prune** (`CmdPruneNode`) removes the node's claims — proposed by the
   placement leader's outside-placement prune when the node leaves the
-  placement, and by the vault-ctl leader when it leaves the cluster.
+  placement, and by the vault-ctl leader when it leaves the cluster. The
+  outside-placement prune waits while the node still holds a sealed chunk
+  (not cloud-backed, not being deleted), or an unreleased segment no durable
+  chunk supersedes, that the current placement holds fewer than the holder
+  quorum of: after a placement change that replaced every home holding a
+  chunk, the former homes are its only holders, and they serve it to the new
+  homes from wherever their copy still lies — the **placement handoff**. Replica catch-up pulls from the placement first and
+  falls back to a chunk's confirmed holders.
   For a cloud-backed chunk a holder's GLCB is a **cached copy**: every
   home's cache eviction may remove it, and the home's holder receipt is
   withdrawn with it. The uploaded object, not the placed-holder count, is
