@@ -18,6 +18,7 @@ import (
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/collection"
 	"gastrolog/internal/pipeline/distribution"
+	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
@@ -573,6 +574,42 @@ func (o *Orchestrator) isVaultHome(sys *system.System, vaultID glid.GLID) bool {
 	return false
 }
 
+// holdsOriginStaging reports whether this node holds records for the vault
+// that the vault's homes have not collected and released yet: a segment in
+// completed/ under any root the node could hold the vault's files under, or
+// unfinished records in working/. The running writer's working/ always has an
+// open segment, so there its own record count decides; any other working
+// segment is left from an earlier registration or process and counts until
+// registration recovers it.
+func (o *Orchestrator) holdsOriginStaging(sys *system.System, vaultID glid.GLID) bool {
+	liveRoot := ""
+	if holds, running := o.pipeline.OriginHoldsRecords(vaultID); running {
+		if holds {
+			return true
+		}
+		liveRoot, _ = o.originRoot(vaultID)
+	}
+	for _, root := range o.pipelineRootCandidates(sys, vaultID) {
+		dirs := []string{paths.CompletedDir(root)}
+		if root != liveRoot {
+			dirs = append(dirs, paths.WorkingDir(root))
+		}
+		for _, dir := range dirs {
+			ids, err := paths.ListSegmentIDs(dir)
+			if err != nil {
+				// Unreadable staging may still hold acked records.
+				o.logger.Warn("origin staging unreadable; keeping the vault registered",
+					"vault", vaultID, "dir", dir, "error", err)
+				return true
+			}
+			if len(ids) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // originRoot returns the vault's pipeline root on this node: the root its
 // current registration was made with (pipelineRootFor), or the node home's
 // root for a vault the pipeline does not run here. Lock-free, like every
@@ -798,11 +835,13 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 	desired := destinationVaults(sys)
 	// Origin-register every vault homed on this node, even if no route targets
 	// it, so direct-to-vault submit always finds a local segmentation queue on
-	// the home node it is routed to.
+	// the home node it is routed to. Keep every vault this node still holds
+	// origin staging for: those records were acked, and only a registration
+	// publishes them and serves their pulls until the homes release them.
 	if sys != nil {
 		for i := range sys.Config.Vaults {
 			vid := sys.Config.Vaults[i].ID
-			if o.isVaultHome(sys, vid) {
+			if o.isVaultHome(sys, vid) || o.holdsOriginStaging(sys, vid) {
 				desired[vid] = struct{}{}
 			}
 		}

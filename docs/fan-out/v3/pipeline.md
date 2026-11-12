@@ -126,8 +126,17 @@ per-vault managers as placement brings vaults onto or off the node.
 Every node is an origin for every vault an enabled route targets, and for
 every vault it is a home of (`reloadPipelineFromConfig`,
 `buildPipelineVaultSpec`): a matched record always lands in a local segment,
-whichever node received it. Collection runs only where a segment puller
-exists (cluster mode); a single-node home chunks from its own `head/`.
+whichever node received it. A node also stays an origin for a vault it holds
+origin staging for — records in its open working segment, a working segment
+left from an earlier registration or process, or a segment in `completed/` —
+for as long as the vault exists (`holdsOriginStaging`). Those records were
+acked, and only the registration publishes them and serves their pulls, so
+removing, disabling or retargeting the last route to a vault leaves the
+origin registered until the vault's homes have collected and released every
+segment; the next reconcile after that unregisters it. The same rule
+registers such a vault again after a restart. Collection runs only where a
+segment puller exists (cluster mode); a single-node home chunks from its own
+`head/`.
 
 Collection and Chunking never poll vault-ctl state on a timer. Vault-ctl
 state changes only when Raft applies a command, so FSM apply callbacks

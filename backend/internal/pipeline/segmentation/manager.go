@@ -286,6 +286,24 @@ func (m *Manager) Submit(ctx context.Context, vaultID glid.GLID, in Input) error
 	}
 }
 
+// HoldsRecords reports whether the vault's writer holds records it has not yet
+// completed into completed/: queued input, or an open working segment that has
+// records. registered is false when no writer runs for the vault.
+func (m *Manager) HoldsRecords(vaultID glid.GLID) (holds, registered bool) {
+	m.mu.Lock()
+	w, ok := m.writers[vaultID]
+	m.mu.Unlock()
+	if !ok {
+		return false, false
+	}
+	if len(w.in) > 0 {
+		return true, true
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.seg != nil && w.seg.Header().RecordCount > 0, true
+}
+
 // UnregisterVault stops a vault writer and closes its input channel.
 func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 	m.mu.Lock()
