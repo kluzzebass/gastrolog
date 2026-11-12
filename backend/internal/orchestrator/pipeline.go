@@ -60,21 +60,47 @@ func translateServePullError(err error) error {
 }
 
 // ServeChunkGLCBPull streams a locally-held sealed chunk GLCB to a peer home
-// recovering a missing replica. Serves straight from the pipeline chunk root;
-// the puller verifies seal metadata before promoting, so no integrity work
-// happens here.
+// recovering a missing replica. A home serves from its pipeline chunk root; a
+// node that is no longer a home — a placement change replaced it — serves the
+// copy it kept under any root it could hold the vault's files under, since it
+// can be the chunk's only holder until the new homes have pulled it. The
+// puller verifies seal metadata before promoting, so no integrity work happens
+// here.
 func (o *Orchestrator) ServeChunkGLCBPull(vaultID glid.GLID, chunkID chunk.ChunkID, w io.Writer) error {
-	root, ok := o.pipelineVaultChunkRoot(vaultID)
-	if !ok {
-		return fmt.Errorf("vault %s is not a pipeline home on this node", vaultID)
+	if refusal := o.glcbServeRefusal.Load(); refusal != nil {
+		return *refusal
 	}
-	f, err := os.Open(filepath.Clean(chunking.ChunkGLCBPath(root, chunkID)))
+	path, err := o.localGLCBPath(vaultID, chunkID)
+	if err != nil {
+		return err
+	}
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return err
 	}
 	defer func() { _ = f.Close() }()
 	_, err = io.Copy(w, f)
 	return err
+}
+
+// localGLCBPath finds this node's copy of a sealed chunk's GLCB: in the home
+// chunk root when the node is a home, otherwise in the chunks/ of any pipeline
+// root it could hold the vault's files under.
+func (o *Orchestrator) localGLCBPath(vaultID glid.GLID, chunkID chunk.ChunkID) (string, error) {
+	if root, ok := o.pipelineVaultChunkRoot(vaultID); ok {
+		return chunking.ChunkGLCBPath(root, chunkID), nil
+	}
+	sys, err := o.loadSystem(context.Background())
+	if err != nil {
+		return "", fmt.Errorf("vault %s is not a pipeline home on this node and its config is unavailable: %w", vaultID, err)
+	}
+	for _, root := range o.pipelineRootCandidates(sys, vaultID) {
+		path := chunking.ChunkGLCBPath(pipelineChunkRoot(root), chunkID)
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("chunk %s of vault %s: %w", chunkID, vaultID, os.ErrNotExist)
 }
 
 // SubmitRetentionRecord routes a single record ejected from a vault during a

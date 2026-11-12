@@ -681,7 +681,7 @@ func runMember(ctx context.Context, end *membershipEnd, logger *slog.Logger, cfg
 	advertisedAddr := cfg.advertisedClusterAddr()
 	if cfg.ConfigType == "raft" && clusterSrv != nil {
 		joinClusterFn = makeJoinClusterFunc(proxy, clusterSrv, clusterTLS, hd, nodeID, advertisedAddr, orch, disp, logger)
-		removeNodeFn = makeRemoveNodeFunc(clusterSrv, cfgStore, &membershipChanges, nodeID, logger)
+		removeNodeFn = makeRemoveNodeFunc(clusterSrv, cfgStore, orch.ChunkHolderLossWithout, &membershipChanges, nodeID, logger)
 		setNodeSuffrageFn = makeSetNodeSuffrageFunc(clusterSrv, cfgStore, &membershipChanges, nodeID, orch.Scheduler(), logger)
 
 		// No stale-voter reaper here: the preStop hook + `cluster

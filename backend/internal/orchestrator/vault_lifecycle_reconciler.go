@@ -47,6 +47,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -81,6 +82,7 @@ type reconcilerHost interface {
 	postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID)
 	noteRegisterSkip(vaultID glid.GLID, id chunk.ChunkID, reason string)
 	pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.ManifestEntry)
+	pruneGLCBUnrecoverable(vaultID glid.GLID, inManifest func(chunk.ChunkID) bool)
 	homeHoldsGLCB(vaultID glid.GLID, id chunk.ChunkID) bool
 	landedGLCBAgrees(vaultID glid.GLID, e vaultctlfsm.ManifestEntry) bool
 	onGLCBLanded(vaultID glid.GLID, ti *VaultInstance, e vaultctlfsm.ManifestEntry)
@@ -1379,6 +1381,14 @@ func (r *VaultLifecycleReconciler) reconcileMissingReplicas(v *reconcileView) {
 // against the bytes on disk. Registration is lazy (the chunk manager's on-miss
 // resolver), so this sweep does not register per entry.
 func (r *VaultLifecycleReconciler) syncPipelineSealedGLCBs(v *reconcileView) {
+	r.orch.pruneGLCBUnrecoverable(r.vaultID, func(id chunk.ChunkID) bool {
+		for _, e := range v.entries {
+			if e.ID == id {
+				return !chunkOnItsWayOut(e, v.pendingByID[e.ID])
+			}
+		}
+		return false
+	})
 	for _, e := range v.entries {
 		// Skip chunks on their way out (retention-pending or delete protocol
 		// in flight): the sweep tick that lands inside the expunge->finalize
@@ -1628,8 +1638,14 @@ func (r *VaultLifecycleReconciler) reconcileNodesOutsidePlacement(v *reconcileVi
 		return
 	}
 
+	placed := slices.Collect(maps.Keys(placement))
 	nodes := make([]string, 0, len(outside))
 	for nodeID := range outside {
+		if chunk, ok := chunkHandoffPending(v, nodeID, placed); ok {
+			r.logger.Debug("outside-placement prune: deferred until the new homes hold the node's chunks",
+				"vault", r.vaultID, "node", nodeID, "chunk", chunk)
+			continue
+		}
 		nodes = append(nodes, nodeID)
 	}
 	sort.Strings(nodes)
@@ -1647,6 +1663,27 @@ func (r *VaultLifecycleReconciler) reconcileNodesOutsidePlacement(v *reconcileVi
 	}
 	r.logger.Info("outside-placement prune: pruned nodes outside placement",
 		"vault", r.vaultID, "pruned", pruned, "outside", len(nodes))
+}
+
+// chunkHandoffPending reports a sealed chunk that still needs nodeID as a
+// holder: its local GLCB is the chunk's durable copy (not cloud-backed, not on
+// its way out) and the current placement holds fewer than HolderQuorum copies
+// of it. Pruning such a node would erase the only record of where the chunk's
+// bytes are while the new homes are still pulling them from it.
+func chunkHandoffPending(v *reconcileView, nodeID string, placement []string) (chunk.ChunkID, bool) {
+	quorum := vaultctlfsm.HolderQuorum(placement)
+	for _, e := range v.entries {
+		if e.CloudBacked || !e.IsSealed() || chunkOnItsWayOut(e, v.pendingByID[e.ID]) {
+			continue
+		}
+		if !slices.Contains(e.Holders, nodeID) {
+			continue
+		}
+		if vaultctlfsm.PlacedHolderCount(e.Holders, placement) < quorum {
+			return e.ID, true
+		}
+	}
+	return chunk.ChunkID{}, false
 }
 
 // idleActiveThreshold is how long an FSM-Active chunk can sit without

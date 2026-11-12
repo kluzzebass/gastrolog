@@ -340,7 +340,14 @@ locally, then the seal-queue head. The FSM keeps a sealed-chunk manifest until
 one of its segments is released or the chunk is deleted, so a home that lagged
 the leader by any number of seals, or restarted, still builds each chunk while
 its segments exist. A chunk whose segments are gone reaches the home through
-the GLCB catch-up pull instead.
+the GLCB catch-up pull instead, from a peer home or, failing that, from any
+node the chunk's manifest entry names as a holder. A node that left the
+vault's placement keeps serving the chunks it holds from whichever of its
+roots still has them (`ServeChunkGLCBPull`), and the placement leader does
+not prune it from a chunk's holders while the placement holds fewer than the
+holder quorum of that chunk — after a placement change that replaced every
+home, the former homes are the only source. A home missing a sealed chunk
+that no source can supply raises `glcb-unrecoverable`.
 
 ### Seal and the sealed digest
 

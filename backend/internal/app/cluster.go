@@ -609,6 +609,9 @@ type nodeRemover struct {
 	mu       sync.Mutex
 	cfgStore system.Store
 	logger   *slog.Logger
+	// chunkHolderLoss reports the vaults whose sealed chunks still depend on
+	// the target node's copies; nil when no orchestrator is wired.
+	chunkHolderLoss func(ctx context.Context, nodeID string) []orchestrator.ChunkHolderLoss
 	// execute performs the removal proper once the gates pass: Raft
 	// membership change, FSM node-config cleanup, eviction notification.
 	execute func(ctx context.Context, targetNodeID string, opts cluster.RemoveNodeOptions) error
@@ -623,7 +626,7 @@ func (r *nodeRemover) remove(ctx context.Context, targetNodeID string, opts clus
 	// Gates run on the leader, inside the serializer, so the placement
 	// state they read is the cluster's authoritative view AND reflects
 	// every removal already committed by this node.
-	if err := evaluateRemovalGates(ctx, r.cfgStore, targetNodeID, opts, r.logger); err != nil {
+	if err := evaluateRemovalGates(ctx, r.cfgStore, r.chunkHolderLoss, targetNodeID, opts, r.logger); err != nil {
 		return err
 	}
 	return r.execute(ctx, targetNodeID, opts)
@@ -727,6 +730,7 @@ func executeNodeRemoval(
 func makeRemoveNodeFunc(
 	clusterSrv *cluster.Server,
 	cfgStore system.Store,
+	chunkHolderLoss func(ctx context.Context, nodeID string) []orchestrator.ChunkHolderLoss,
 	gate *membershipGate,
 	nodeID string,
 	logger *slog.Logger,
@@ -737,7 +741,7 @@ func makeRemoveNodeFunc(
 		return executeNodeRemoval(ctx, clusterSrv, cfgStore, logger, targetNodeID, opts)
 	}
 
-	remover := &nodeRemover{cfgStore: cfgStore, logger: logger, execute: execute}
+	remover := &nodeRemover{cfgStore: cfgStore, chunkHolderLoss: chunkHolderLoss, logger: logger, execute: execute}
 	clusterSrv.SetRemoveNodeFn(remover.remove)
 
 	return func(ctx context.Context, targetNodeID string, opts cluster.RemoveNodeOptions) error {
@@ -776,6 +780,7 @@ func makeRemoveNodeFunc(
 func evaluateRemovalGates(
 	ctx context.Context,
 	cfgStore system.Store,
+	chunkHolderLoss func(ctx context.Context, nodeID string) []orchestrator.ChunkHolderLoss,
 	targetNodeID string,
 	opts cluster.RemoveNodeOptions,
 	logger *slog.Logger,
@@ -790,6 +795,21 @@ func evaluateRemovalGates(
 		logger.Warn("FORCE REMOVE: bypassing orphan-refusal gate — data loss",
 			"node_id", targetNodeID,
 			"orphaned_vaults", orphans)
+	}
+
+	// Chunk-holder gate: the node holds copies that sealed chunks still
+	// depend on — a former home can hold a chunk's only copy until the new
+	// homes have pulled it. Same severity as an orphaned vault, so the same
+	// stance for every policy.
+	if chunkHolderLoss != nil {
+		if losses := chunkHolderLoss(ctx, targetNodeID); len(losses) > 0 {
+			if !opts.Force {
+				return chunkHolderRefusalError(targetNodeID, losses)
+			}
+			logger.Warn("FORCE REMOVE: bypassing chunk-holder gate — data loss",
+				"node_id", targetNodeID,
+				"vaults", losses)
+		}
 	}
 
 	// RF-preservation gate: removal would leave a vault with fewer
@@ -888,6 +908,19 @@ func orphanRefusalError(targetNodeID string, orphans []orphanedVault) error {
 		"refusing to remove node %s: %w: %d vault(s): %s — "+
 			"drain these vaults to other nodes first, or re-run with --force to acknowledge data loss",
 		targetNodeID, cluster.ErrWouldOrphanVaults, len(orphans), strings.Join(names, ", "))
+}
+
+// chunkHolderRefusalError names each vault whose sealed chunks still depend
+// on the node's copies, so the operator knows what to wait for.
+func chunkHolderRefusalError(targetNodeID string, losses []orchestrator.ChunkHolderLoss) error {
+	names := make([]string, 0, len(losses))
+	for _, l := range losses {
+		names = append(names, fmt.Sprintf("%q (%s): %d chunk(s)", l.VaultName, l.VaultID, l.Chunks))
+	}
+	return fmt.Errorf(
+		"refusing to remove node %s: %w: sealed chunks of %d vault(s) still depend on its copies: %s — "+
+			"wait for the vaults' homes to pull those chunks, or re-run with --force to acknowledge data loss",
+		targetNodeID, cluster.ErrRemovalRefused, len(losses), strings.Join(names, ", "))
 }
 
 // ErrWouldDropBelowRF is cluster.ErrWouldDropBelowRF, the sentinel wrapped by

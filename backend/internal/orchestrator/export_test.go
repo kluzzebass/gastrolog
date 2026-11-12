@@ -27,3 +27,13 @@ func (o *Orchestrator) AwaitVaultTeardownForTest(ctx context.Context, id glid.GL
 func (o *Orchestrator) RunsPipelineForTest(id glid.GLID) bool {
 	return o.isPipelineIngestVault(id)
 }
+
+// RefuseGLCBServingForTest makes this node answer every GLCB pull with err
+// until called again with nil.
+func (o *Orchestrator) RefuseGLCBServingForTest(err error) {
+	if err == nil {
+		o.glcbServeRefusal.Store(nil)
+		return
+	}
+	o.glcbServeRefusal.Store(&err)
+}
