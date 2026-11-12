@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/orchestrator"
 
 	"connectrpc.com/connect"
 
@@ -185,6 +186,9 @@ func (s *SystemServer) SetNodeStorageConfig(
 			return nil, connErr
 		}
 	}
+	if connErr := s.refuseStorageRemoval(ctx, cfg); connErr != nil {
+		return nil, connErr
+	}
 
 	if err := s.sysStore.SetNodeStorageConfig(ctx, cfg); err != nil {
 		return nil, errInternal(err)
@@ -196,6 +200,100 @@ func (s *SystemServer) SetNodeStorageConfig(
 		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.SetNodeStorageConfigResponse{System: fullCfg}), nil
+}
+
+// refuseStorageRemoval refuses a node storage config that drops a file
+// storage the vaults still need (storageRemovalRefusal).
+func (s *SystemServer) refuseStorageRemoval(ctx context.Context, next system.NodeStorageConfig) *connect.Error {
+	prev, err := s.sysStore.GetNodeStorageConfig(ctx, next.NodeID)
+	if err != nil {
+		return errInternal(err)
+	}
+	if prev == nil || len(removedStorages(prev, next)) == 0 {
+		return nil
+	}
+	vaults, err := s.sysStore.ListVaults(ctx)
+	if err != nil {
+		return errInternal(err)
+	}
+	placements := make(map[glid.GLID][]system.VaultPlacement, len(vaults))
+	for _, v := range vaults {
+		ps, err := s.sysStore.GetVaultPlacements(ctx, v.ID)
+		if err != nil {
+			return errInternal(err)
+		}
+		placements[v.ID] = ps
+	}
+	var losses []orchestrator.ChunkHolderLoss
+	if s.orch != nil {
+		losses = s.orch.ChunkHolderLossWithout(ctx, next.NodeID)
+	}
+	if err := storageRemovalRefusal(prev, next, vaults, placements, losses); err != nil {
+		return connect.NewError(connect.CodeFailedPrecondition, err)
+	}
+	return nil
+}
+
+// removedStorages maps the ID of every file storage prev has and next drops
+// to its name.
+func removedStorages(prev *system.NodeStorageConfig, next system.NodeStorageConfig) map[string]string {
+	kept := make(map[glid.GLID]bool, len(next.FileStorages))
+	for _, fs := range next.FileStorages {
+		kept[fs.ID] = true
+	}
+	removed := make(map[string]string)
+	for _, fs := range prev.FileStorages {
+		if !kept[fs.ID] {
+			removed[fs.ID.String()] = fs.Name
+		}
+	}
+	return removed
+}
+
+// storageRemovalRefusal decides whether replacing a node's storage config
+// prev with next drops a file storage the vaults still need: one a vault is
+// placed on, or — while sealed chunks of a vault no longer placed on the node
+// depend on the node's copies (losses) — any of its storages. A dropped
+// storage stops being a root the node serves chunks from, so either would
+// strand chunks whose only copy lies under it. Reclassifying a storage keeps
+// its path and is not refused.
+func storageRemovalRefusal(prev *system.NodeStorageConfig, next system.NodeStorageConfig, vaults []system.VaultConfig, placements map[glid.GLID][]system.VaultPlacement, losses []orchestrator.ChunkHolderLoss) error {
+	removed := removedStorages(prev, next)
+	if len(removed) == 0 {
+		return nil
+	}
+	placedHere := make(map[glid.GLID]bool)
+	for _, v := range vaults {
+		for _, p := range placements[v.ID] {
+			if name, ok := removed[p.StorageID]; ok {
+				return fmt.Errorf(
+					"file storage %q holds vault %q's placement: move the vault off it first (change the vault's storage class, or the storage's), then remove the storage once the vault's chunks have reached its new homes",
+					name, v.Name)
+			}
+			if storageOnNode(prev, p.StorageID) {
+				placedHere[v.ID] = true
+			}
+		}
+	}
+	for _, loss := range losses {
+		if placedHere[loss.VaultID] {
+			continue
+		}
+		return fmt.Errorf(
+			"vault %q has %d sealed chunk(s) whose copies on this node its new homes have not pulled yet; removing a storage now can strand them — retry once the vault's homes hold them",
+			loss.VaultName, loss.Chunks)
+	}
+	return nil
+}
+
+// storageOnNode reports whether storageID names one of the node's file storages.
+func storageOnNode(nsc *system.NodeStorageConfig, storageID string) bool {
+	for _, fs := range nsc.FileStorages {
+		if fs.ID.String() == storageID {
+			return true
+		}
+	}
+	return false
 }
 
 // validateFileStorageExpressions parse-checks a file storage's disk-guard
