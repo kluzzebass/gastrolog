@@ -101,6 +101,15 @@ type vaultWriter struct {
 	closed  bool
 	started atomic.Bool
 	done    chan struct{} // closed when run() returns
+
+	// Direct submits (submit) send on in from outside the routing stage, so
+	// stop revokes them before it closes in: submitDead refuses new ones,
+	// stopping wakes those parked on a full queue, and submitting is waited
+	// on so no send can reach the closed channel.
+	submitMu   sync.Mutex
+	submitDead bool
+	submitting sync.WaitGroup
+	stopping   chan struct{}
 }
 
 func newVaultWriter(vaultID glid.GLID, root string, cfg Config, vc VaultConfig, completed chan<- CompletedSegment, dropped *atomic.Uint64) (*vaultWriter, error) {
@@ -144,6 +153,7 @@ func newVaultWriter(vaultID glid.GLID, root string, cfg Config, vc VaultConfig, 
 		onSync:             cfg.OnSync,
 		onCompletedDropped: cfg.OnCompletedDropped,
 		done:               make(chan struct{}),
+		stopping:           make(chan struct{}),
 	}
 	if err := w.openNewSegment(); err != nil {
 		return nil, err
@@ -238,7 +248,41 @@ func (w *vaultWriter) run(ctx context.Context) {
 	w.recordLoop(ctx)
 }
 
+// submit queues a direct-to-vault input. It returns ErrUnknownVault once stop
+// has begun, including for a submit parked on a full queue when it does.
+func (w *vaultWriter) submit(ctx context.Context, in Input) error {
+	w.submitMu.Lock()
+	if w.submitDead {
+		w.submitMu.Unlock()
+		return ErrUnknownVault
+	}
+	w.submitting.Add(1)
+	w.submitMu.Unlock()
+	defer w.submitting.Done()
+	select {
+	case w.in <- in:
+		return nil
+	case <-w.stopping:
+		return ErrUnknownVault
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// revokeSubmits refuses new direct submits, wakes parked ones, and waits for
+// every one in flight to return, so closing in cannot race a send.
+func (w *vaultWriter) revokeSubmits() {
+	w.submitMu.Lock()
+	if !w.submitDead {
+		w.submitDead = true
+		close(w.stopping)
+	}
+	w.submitMu.Unlock()
+	w.submitting.Wait()
+}
+
 func (w *vaultWriter) stop() {
+	w.revokeSubmits()
 	w.mu.Lock()
 	if w.closed {
 		w.mu.Unlock()

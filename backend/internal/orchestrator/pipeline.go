@@ -183,12 +183,30 @@ func (o *Orchestrator) SubmitToVault(ctx context.Context, vaultID glid.GLID, rec
 		return errors.New("pipeline not initialized")
 	}
 	prec := convert.ChunkToRecord(rec)
-	err := pl.SubmitToVault(ctx, vaultID, &prec, ack)
+	err := submitAcrossReregistration(
+		func() error { return pl.SubmitToVault(ctx, vaultID, &prec, ack) },
+		func() { o.mu.RLock(); pl = o.pipeline; o.mu.RUnlock() },
+	)
 	if errors.Is(err, pipeline.ErrVaultNotRegistered) {
 		// The vault's origin is registered on its home node by reconcile; a
 		// miss is transient (placement not yet applied here). Surface it as a
 		// not-ready condition so callers/clients retry or re-target.
 		return ErrVaultNotReady
+	}
+	return err
+}
+
+// submitAcrossReregistration runs submit and, when it finds the vault
+// unregistered, runs it once more after barrier. A re-registration (a policy
+// edit, a root change, the vault-ctl handle arriving) replaces the vault's
+// writer inside one o.mu critical section, and a submit parked on the old
+// writer's queue is turned away when that writer stops; barrier waits that
+// critical section out, so the retry reaches the new writer.
+func submitAcrossReregistration(submit func() error, barrier func()) error {
+	err := submit()
+	if errors.Is(err, pipeline.ErrVaultNotRegistered) {
+		barrier()
+		err = submit()
 	}
 	return err
 }

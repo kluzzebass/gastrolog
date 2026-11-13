@@ -278,12 +278,7 @@ func (m *Manager) Submit(ctx context.Context, vaultID glid.GLID, in Input) error
 	if !ok {
 		return ErrUnknownVault
 	}
-	select {
-	case w.input() <- in:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return w.submit(ctx, in)
 }
 
 // HoldsRecords reports whether the vault's writer holds records it has not yet
