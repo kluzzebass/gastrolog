@@ -91,10 +91,10 @@ func (o *Orchestrator) vaultStagingRoots(sys *system.System, vaultID glid.GLID) 
 // vaultCtlMembers returns the server IDs in this node's view of the vault-ctl
 // group's Raft configuration — on the leader, the latest configuration.
 func (o *Orchestrator) vaultCtlMembers(vaultID glid.GLID) ([]string, bool) {
-	if o.groupMgr == nil {
+	if o.groupManager() == nil {
 		return nil, false
 	}
-	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	g := o.groupManager().GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
 	if g == nil || g.Raft == nil {
 		return nil, false
 	}

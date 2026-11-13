@@ -113,7 +113,7 @@ func TestCreateGroupRestoreWithInstanceDoesNotDeadlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.groupMgr = mgr
+	orch.setGroupManagerForTest(mgr)
 	s := memtest.MustNewVault(t, chunkmem.Config{})
 	orch.RegisterVault(NewVaultFromComponents(vaultID, s.CM, s.IM, s.QE))
 

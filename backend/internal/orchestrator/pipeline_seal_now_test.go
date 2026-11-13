@@ -92,7 +92,7 @@ func TestSealActiveOnNodeThatDoesNotChunkRefusesWhenManifestHoldsRecords(t *test
 		}},
 	}}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-local", SystemLoader: &staticSystemLoader{sys: sys}})
-	orch.groupMgr = singleNodeVaultCtlGroup(t, "node-local", vaultID)
+	orch.setGroupManagerForTest(singleNodeVaultCtlGroup(t, "node-local", vaultID))
 	if err := orch.ReloadFilters(context.Background()); err != nil {
 		t.Fatalf("ReloadFilters: %v", err)
 	}

@@ -18,7 +18,6 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/cluster"
 	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/locktrack"
 	"gastrolog/internal/logging"
@@ -31,7 +30,6 @@ import (
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/raftgroup"
-	"gastrolog/internal/raftlevel"
 	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -266,17 +264,10 @@ type Orchestrator struct {
 	// without pausing the node. Nil in production.
 	glcbServeRefusal atomic.Pointer[error]
 
-	// segmentPuller streams completed segments from peer holders for
-	// collection. Set from factories during ApplyConfig (cluster mode only).
-	segmentPuller *cluster.SegmentPuller
-	// chunkGLCBPuller streams sealed chunk GLCBs from peer homes for
-	// replica catch-up — a home that missed builds (wedged, down) whose
-	// source segments were already released has no other recovery path.
-	// Concurrent sweeps never pull the same GLCB twice, and the in-flight
-	// budget is never overshot, because both are claimed on the scheduler's
-	// job map (RunOnceIfAbsentUnderLimit in pullMissingGLCB) rather than in a
-	// second inflight map of the orchestrator's own.
-	chunkGLCBPuller *cluster.ChunkGLCBPuller
+	// wired holds the cluster collaborators ApplyConfig wires (wiring).
+	// Published atomically: the scheduler runs jobs from New, so a job can
+	// read them while ApplyConfig is still installing them.
+	wired atomic.Pointer[clusterWiring]
 
 	// leaderlessReported is the set of vaults reported leaderless to the
 	// alarm collector last sweep tick, so departures diff to a Clear. The
@@ -317,25 +308,6 @@ type Orchestrator struct {
 
 	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
 	transferrer RemoteTransferrer
-
-	// groupMgr is the shared multi-group Raft manager (system, vault ctl, …).
-	// Set from factories during ApplyConfig; used to tear down vault ctl groups.
-	groupMgr *raftgroup.GroupManager
-
-	// peerConns is the shared gRPC pool for cluster peers. Set from factories
-	// during ApplyConfig; used by ApplyVaultControlPlane forwarding.
-	peerConns *cluster.PeerConnManager
-
-	// vaultCtlGate gates every vault-ctl proposal from this node. Set from
-	// factories during ApplyConfig.
-	vaultCtlGate *raftlevel.Gate
-
-	// vaultCtlReplicated is true when vault metadata replicates through
-	// per-vault vault-ctl Raft groups on this node (a GroupManager and a node
-	// address resolver are both wired). A local instance whose group does not
-	// exist yet then reports not-ready; without it there is no group to wait
-	// for and the instance's own chunk manager is authoritative.
-	vaultCtlReplicated bool
 
 	// vaultCtlPipelineChunkEvents maps each vault to the vault-ctl sub-FSM
 	// that carries its pipeline manifest → chunk-bus wiring (AddOn*
@@ -626,10 +598,10 @@ func (o *Orchestrator) NotifyChunkChange() {
 // client preserves its existing cache value via mergeMeta. Empty means
 // the chunk is known with zero verified copies (no receipts yet).
 func (o *Orchestrator) ChunkResidency(vaultID glid.GLID, chunkID chunk.ChunkID) []string {
-	if o.groupMgr == nil {
+	if o.groupManager() == nil {
 		return nil
 	}
-	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	g := o.groupManager().GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
 	if g == nil {
 		return nil
 	}
@@ -1242,10 +1214,10 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 // so the value reflects the latest applied entry on
 // this node.
 func (o *Orchestrator) vaultCtlAppliedIndex(vaultID glid.GLID) uint64 {
-	if o.groupMgr == nil {
+	if o.groupManager() == nil {
 		return 0
 	}
-	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	g := o.groupManager().GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
 	if g == nil || g.Raft == nil {
 		return 0
 	}

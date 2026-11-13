@@ -97,7 +97,7 @@ func newSingleNodeVaultCtlOrch(t *testing.T, vaultID glid.GLID) (*Orchestrator, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.groupMgr = mgr
+	orch.setGroupManagerForTest(mgr)
 	return orch, g
 }
 
