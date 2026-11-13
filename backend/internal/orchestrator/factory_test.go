@@ -35,7 +35,7 @@ func TestApplyConfigNilConfigStillWires(t *testing.T) {
 		t.Fatalf("ApplyConfig(nil): %v", err)
 	}
 
-	if orch.groupMgr != gm {
+	if orch.groupManager() != gm {
 		t.Fatal("nil-config ApplyConfig did not wire the group manager; vaultCtlHandle reports no-handle for every vault on this node forever")
 	}
 	if orch.scheduler.JobSchedule(pipelineConfigReconcileJobName) == "" {

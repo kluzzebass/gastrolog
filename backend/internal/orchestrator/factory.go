@@ -112,18 +112,24 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 	// config and MUST happen even when the node boots without one — a fresh
 	// joiner's startup config arrives via Raft replication after this call,
 	// and the dispatcher replay that follows restores vaults and routes but
-	// never re-runs this wiring. Skipping it leaves o.groupMgr nil, so
+	// never re-runs this wiring. Skipping it leaves o.groupManager() nil, so
 	// vaultCtlHandle() reports no-handle for every vault forever: segment
 	// publishes stay fail-closed, peer collection never registers, and
 	// chunking is gated cluster-wide for want of second holders.
-	o.groupMgr = factories.GroupManager
-	o.peerConns = factories.PeerConns
-	o.vaultCtlGate = factories.VaultCtlGate
-	o.vaultCtlReplicated = factories.GroupManager != nil && factories.NodeAddressResolver != nil
-	if factories.PeerConns != nil && o.segmentPuller == nil {
-		o.segmentPuller = cluster.NewSegmentPuller(factories.PeerConns)
-		o.chunkGLCBPuller = cluster.NewChunkGLCBPuller(factories.PeerConns)
+	prev := o.wiring()
+	wired := &clusterWiring{
+		groupMgr:           factories.GroupManager,
+		peerConns:          factories.PeerConns,
+		vaultCtlGate:       factories.VaultCtlGate,
+		vaultCtlReplicated: factories.GroupManager != nil && factories.NodeAddressResolver != nil,
+		segmentPuller:      prev.segmentPuller,
+		chunkGLCBPuller:    prev.chunkGLCBPuller,
 	}
+	if factories.PeerConns != nil && wired.segmentPuller == nil {
+		wired.segmentPuller = cluster.NewSegmentPuller(factories.PeerConns)
+		wired.chunkGLCBPuller = cluster.NewChunkGLCBPuller(factories.PeerConns)
+	}
+	o.wired.Store(wired)
 
 	// The node home's segments directory, unless already configured. Origin
 	// vaults are registered during applyVaults→route reload, so this must be

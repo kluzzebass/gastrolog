@@ -269,10 +269,10 @@ func (o *Orchestrator) checkVaultEmptyLocked(id glid.GLID) (*Vault, error) {
 // duration). Inlined to avoid a recursive lock when reading FSM
 // chunk metadata as part of mutation guards.
 func (o *Orchestrator) listClusterChunkMetasLocked(vaultID glid.GLID) ([]chunk.ChunkMeta, error) {
-	if o.groupMgr == nil {
+	if o.groupManager() == nil {
 		return nil, nil
 	}
-	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	g := o.groupManager().GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
 	if g == nil {
 		return nil, nil
 	}
@@ -978,11 +978,11 @@ func (o *Orchestrator) destroyVaultControlPlaneRaftGroup(vaultID glid.GLID) {
 	if o.vaultCtlLeaders != nil {
 		o.vaultCtlLeaders.Stop(vaultID)
 	}
-	if o.groupMgr == nil {
+	if o.groupManager() == nil {
 		return
 	}
 	gid := raftgroup.VaultControlPlaneGroupID(vaultID)
-	if err := o.groupMgr.DestroyGroup(gid); err != nil && !errors.Is(err, raftgroup.ErrGroupNotFound) {
+	if err := o.groupManager().DestroyGroup(gid); err != nil && !errors.Is(err, raftgroup.ErrGroupNotFound) {
 		o.logger.Debug("destroy vault control-plane raft group",
 			"vault", vaultID, "error", err)
 	}
@@ -996,11 +996,11 @@ func (o *Orchestrator) decommissionVaultControlPlaneRaftGroup(vaultID glid.GLID)
 	if o.vaultCtlLeaders != nil {
 		o.vaultCtlLeaders.Stop(vaultID)
 	}
-	if o.groupMgr == nil {
+	if o.groupManager() == nil {
 		return
 	}
 	gid := raftgroup.VaultControlPlaneGroupID(vaultID)
-	if err := o.groupMgr.DecommissionGroup(gid); err != nil {
+	if err := o.groupManager().DecommissionGroup(gid); err != nil {
 		o.logger.Warn("decommission vault control-plane raft group",
 			"vault", vaultID, "error", err)
 	}
@@ -1056,11 +1056,11 @@ func (o *Orchestrator) bindVaultCtlGroup(vaultID glid.GLID, g *raftgroup.Group) 
 // Returns the live sub-FSM, or nil while the group does not exist. Caller
 // holds o.mu.
 func (o *Orchestrator) bindVaultInstanceToCtlLocked(vaultID glid.GLID, t *VaultInstance) *vaultctlfsm.FSM {
-	if t == nil || o.groupMgr == nil {
+	if t == nil || o.groupManager() == nil {
 		return nil
 	}
 	g := o.vaultCtlGroup(vaultID)
-	if t.IsFSMReady == nil && (o.vaultCtlReplicated || g != nil) {
+	if t.IsFSMReady == nil && (o.wiring().vaultCtlReplicated || g != nil) {
 		applier := instanceVaultCtlChunkApplier{o: o, t: t}
 		t.applyRaftCallbacks(instanceVaultRaftCallbacks(t, applier))
 		setVaultRaftAnnouncer(t.Chunks, applier, o.phase, o.logger, o.announceResultHook(vaultID))
@@ -1085,10 +1085,10 @@ func (o *Orchestrator) bindVaultInstanceToCtlLocked(vaultID glid.GLID, t *VaultI
 
 // vaultCtlGroup returns the vault's vault-ctl group on this node, or nil.
 func (o *Orchestrator) vaultCtlGroup(vaultID glid.GLID) *raftgroup.Group {
-	if o.groupMgr == nil {
+	if o.groupManager() == nil {
 		return nil
 	}
-	return o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	return o.groupManager().GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
 }
 
 // instanceVaultRaftCallbacks builds an instance's Raft-backed callbacks
@@ -1154,11 +1154,11 @@ func vaultCtlSubFSM(g *raftgroup.Group, vaultID glid.GLID) *vaultctlfsm.FSM {
 // are wired, applied through the local group otherwise.
 func (o *Orchestrator) vaultCtlChunkApplier(g *raftgroup.Group, vaultID glid.GLID) vaultctlfsm.Applier {
 	var next vaultctlfsm.Applier = &vaultCtlApplier{o: o, vaultID: vaultID}
-	if o.peerConns != nil {
+	if o.wiring().peerConns != nil {
 		gid := raftgroup.VaultControlPlaneGroupID(vaultID)
-		next = cluster.NewVaultCtlChunkApplyForwarder(g.Raft, gid, vaultID, groupApplyWait(g), o.peerConns, cluster.RaftApplyTimeout)
+		next = cluster.NewVaultCtlChunkApplyForwarder(g.Raft, gid, vaultID, groupApplyWait(g), o.wiring().peerConns, cluster.RaftApplyTimeout)
 	}
-	return gatedChunkApplier{gate: o.vaultCtlGate, next: next}
+	return gatedChunkApplier{gate: o.wiring().vaultCtlGate, next: next}
 }
 
 // tryStartClusterWideRaftGroup creates or returns an existing cluster-wide Raft group
@@ -1371,10 +1371,10 @@ func setVaultRaftAnnouncer(cm chunk.ChunkManager, applier vaultctlfsm.Applier, p
 // manager when the Raft group may still deliver log entries
 // (e.g. RemoveVaultInstance during placement loss).
 func (o *Orchestrator) clearVaultFSMChunkCallbacks(vaultID glid.GLID) {
-	if o.groupMgr == nil {
+	if o.groupManager() == nil {
 		return
 	}
-	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	g := o.groupManager().GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
 	if g == nil {
 		return
 	}

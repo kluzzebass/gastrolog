@@ -216,7 +216,7 @@ func newPlacedHome(t *testing.T, ctx context.Context) placedHome {
 	}
 	orch := newTestOrch(t, Config{LocalNodeID: landingHomeNode, SystemLoader: &staticSystemLoader{sys: sys}})
 	gm := singleNodeVaultCtlGroup(t, landingHomeNode, vaultID)
-	orch.groupMgr = gm
+	orch.setGroupManagerForTest(gm)
 	g := gm.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
 	for _, cmd := range sealCommands(fx.sealed) {
 		if err := g.Raft.Apply(vaultraft.MarshalVaultChunkCommand(vaultID, cmd), 10*time.Second).Error(); err != nil {

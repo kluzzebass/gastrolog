@@ -20,10 +20,12 @@ import (
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
+	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/waittest"
@@ -849,3 +851,17 @@ func (c *testClock) Now() time.Time { return time.Unix(0, c.nanos.Load()) }
 
 // Advance moves the clock forward.
 func (c *testClock) Advance(d time.Duration) { c.nanos.Add(int64(d)) }
+
+// setGroupManagerForTest publishes gm as the vault-ctl group manager.
+func (o *Orchestrator) setGroupManagerForTest(gm *raftgroup.GroupManager) {
+	w := *o.wiring()
+	w.groupMgr = gm
+	o.wired.Store(&w)
+}
+
+// setPeerConnsForTest publishes pc as the cluster peer pool.
+func (o *Orchestrator) setPeerConnsForTest(pc *cluster.PeerConnManager) {
+	w := *o.wiring()
+	w.peerConns = pc
+	o.wired.Store(&w)
+}

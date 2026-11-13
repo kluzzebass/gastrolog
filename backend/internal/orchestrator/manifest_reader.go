@@ -155,15 +155,15 @@ func (o *Orchestrator) manifestEntryByChunk(id chunk.ChunkID) (glid.GLID, vaultc
 // vault in the cluster, whether or not this node hosts an instance for it.
 // Nil when there is no GroupManager (single-node / memory mode).
 func (o *Orchestrator) vaultCtlFSMs() map[glid.GLID]*vaultctlfsm.FSM {
-	if o.groupMgr == nil {
+	if o.groupManager() == nil {
 		return nil
 	}
 	var out map[glid.GLID]*vaultctlfsm.FSM
-	for _, gid := range o.groupMgr.Groups() {
+	for _, gid := range o.groupManager().Groups() {
 		if !raftgroup.IsVaultControlPlaneGroupID(gid) {
 			continue
 		}
-		g := o.groupMgr.GetGroup(gid)
+		g := o.groupManager().GetGroup(gid)
 		if g == nil {
 			continue
 		}
@@ -184,10 +184,10 @@ func (o *Orchestrator) vaultCtlFSMs() map[glid.GLID]*vaultctlfsm.FSM {
 // vaultCtlFSMForVault returns the vault-ctl chunk FSM for vaultID when this
 // node has joined the vault control-plane Raft group.
 func (o *Orchestrator) vaultCtlFSMForVault(vaultID glid.GLID) *vaultctlfsm.FSM {
-	if o.groupMgr == nil {
+	if o.groupManager() == nil {
 		return nil
 	}
-	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	g := o.groupManager().GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
 	if g == nil {
 		return nil
 	}
